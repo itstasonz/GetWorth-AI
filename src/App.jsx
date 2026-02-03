@@ -30,7 +30,7 @@ export default function GetWorth() {
   const isRTL = lang === 'he';
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [authLoading, setAuthLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('home');
   const [currentView, setCurrentView] = useState('home');
   const [uploadedImages, setUploadedImages] = useState([]);
@@ -68,13 +68,38 @@ export default function GetWorth() {
   const showToast = (message, type = 'success') => setToast({ message, type });
 
   useEffect(() => {
+    // Check current session immediately
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) { setUser(session.user); getProfile(session.user.id).then(({ data }) => setProfile(data)); }
+      if (session?.user) { 
+        setUser(session.user); 
+        getProfile(session.user.id).then(({ data }) => setProfile(data)); 
+        // If on auth screen, redirect to profile
+        if (currentView === 'auth') {
+          setCurrentView('profile');
+        }
+      }
+      setAuthLoading(false); // Done checking
     });
+    
+    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) { setUser(session.user); const { data } = await getProfile(session.user.id); setProfile(data); } 
-      else { setUser(null); setProfile(null); }
+      console.log('Auth event:', event, session?.user?.email);
+      if (session?.user) { 
+        setUser(session.user); 
+        const { data } = await getProfile(session.user.id); 
+        setProfile(data);
+        // Redirect to profile on sign in
+        if (event === 'SIGNED_IN') {
+          setCurrentView('profile');
+          setActiveTab('profile');
+        }
+      } else { 
+        setUser(null); 
+        setProfile(null); 
+      }
+      setAuthLoading(false);
     });
+    
     return () => subscription.unsubscribe();
   }, []);
 
@@ -202,7 +227,7 @@ export default function GetWorth() {
     </Card>
   );
 
-  // App loads immediately - no blocking
+  if (authLoading) return <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0f1a' }}><Loader2 className="w-8 h-8 text-blue-400 animate-spin" /></div>;
 
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: isRTL ? "'Heebo', sans-serif" : "'Inter', sans-serif", background: 'linear-gradient(180deg, #0a0f1a 0%, #0f1629 50%, #0a0f1a 100%)' }} dir={isRTL ? 'rtl' : 'ltr'}>
