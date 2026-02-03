@@ -157,7 +157,7 @@ export default function GetWorth() {
 
   const stopCamera = () => { videoRef.current?.srcObject?.getTracks().forEach(t => t.stop()); setCurrentView('home'); };
   const resetApp = () => { setUploadedImage(null); setAnalysisResult(null); setCurrentView('home'); setError(null); };
-  const formatPrice = (p) => p === 0 ? "N/A" : p < 1 ? `$${p.toFixed(2)}` : `$${p.toLocaleString()}`;
+  const formatPrice = (p) => p === 0 ? "N/A" : p < 1 ? `₪${p.toFixed(2)}` : `₪${p.toLocaleString()}`;
   const formatDate = (d) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   // Auth Functions
@@ -710,8 +710,24 @@ export default function GetWorth() {
               {/* Tips */}
               {analysisResult.sellingTips && (
                 <Card className="p-4" style={{ background: 'rgba(59,130,246,0.05)' }}>
-                  <h3 className="font-semibold text-sm flex items-center gap-2 mb-2"><Sparkles className="w-4 h-4 text-blue-400" />Tip</h3>
+                  <h3 className="font-semibold text-sm flex items-center gap-2 mb-2"><Sparkles className="w-4 h-4 text-blue-400" />טיפ למכירה</h3>
                   <p className="text-sm text-slate-300">{analysisResult.sellingTips}</p>
+                </Card>
+              )}
+
+              {/* Where to Buy/Sell in Israel */}
+              {analysisResult.whereToBuy && (
+                <Card className="p-4">
+                  <h3 className="font-semibold text-sm flex items-center gap-2 mb-2"><Tag className="w-4 h-4 text-blue-400" />איפה לקנות/למכור</h3>
+                  <p className="text-sm text-slate-300">{analysisResult.whereToBuy}</p>
+                </Card>
+              )}
+
+              {/* Israeli Market Notes */}
+              {analysisResult.israeliMarketNotes && (
+                <Card className="p-4" style={{ background: 'rgba(16,185,129,0.05)' }}>
+                  <h3 className="font-semibold text-sm flex items-center gap-2 mb-2"><Package className="w-4 h-4 text-emerald-400" />הערות לשוק הישראלי</h3>
+                  <p className="text-sm text-slate-300">{analysisResult.israeliMarketNotes}</p>
                 </Card>
               )}
 
