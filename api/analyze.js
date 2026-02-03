@@ -23,7 +23,7 @@ export default async function handler(req) {
   }
 
   try {
-    const { imageData } = await req.json();
+    const { imageData, lang = 'he' } = await req.json();
     
     if (!imageData) {
       return new Response(JSON.stringify({ error: 'No image data provided' }), {
@@ -40,6 +40,30 @@ export default async function handler(req) {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+
+    const isHebrew = lang === 'he';
+    
+    const prompt = isHebrew 
+      ? `אתה מומחה להערכת שווי פריטים בשוק הישראלי. נתח את התמונה וזהה את הפריט.
+
+חשוב מאוד:
+- כל המחירים חייבים להיות בשקלים חדשים (₪)
+- בסס את ההערכה על מחירי השוק הישראלי (יד2, פייסבוק מרקטפלייס ישראל, מחירי קמעונאות בישראל)
+- קח בחשבון מיסי יבוא ישראליים וזמינות מקומית
+- מוצרי אלקטרוניקה בישראל יקרים ב-20-40% יותר מארה"ב
+
+ענה אך ורק ב-JSON תקין (ללא markdown, ללא backticks):
+{"name":"שם הפריט באנגלית","nameHebrew":"שם הפריט בעברית","category":"Food/Electronics/Vehicles/Watches/Clothing/Furniture/Sports/Other","confidence":0.85,"isSellable":true,"condition":"חדש/כמו חדש/מצוין/טוב/סביר/גרוע","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS"},"details":{"description":"תיאור קצר בעברית","brand":"מותג או לא ידוע","additionalInfo":"פרטים נוספים בעברית"},"priceFactors":[{"factor":"גורם המשפיע על המחיר","impact":"+₪X-Y"}],"marketTrend":"up/down/stable/not-applicable","demandLevel":"high/moderate/low/not-applicable","sellingTips":"טיפ למכירה בעברית (הזכר יד2, קבוצות פייסבוק וכו׳)","whereToBuy":"איפה לקנות/למכור בישראל (למשל: יד2, KSP, באג, זאפ, פייסבוק מרקטפלייס)","israeliMarketNotes":"הערות ספציפיות לשוק הישראלי בעברית"}`
+      : `You are an expert item appraiser specializing in the ISRAELI MARKET. Analyze this image and identify the item.
+
+IMPORTANT: 
+- All prices MUST be in Israeli New Shekel (ILS/₪)
+- Base your valuations on Israeli market prices (Yad2, Facebook Marketplace Israel, Israeli retail prices)
+- Consider Israeli import taxes and local availability
+- Electronics are typically 20-40% more expensive in Israel than US
+
+Respond ONLY with valid JSON (no markdown, no backticks):
+{"name":"Item name in English","nameHebrew":"שם הפריט בעברית","category":"Food/Electronics/Vehicles/Watches/Clothing/Furniture/Sports/Other","confidence":0.85,"isSellable":true,"condition":"New/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS"},"details":{"description":"Brief description","brand":"Brand or Unknown","additionalInfo":"Details relevant to Israeli market"},"priceFactors":[{"factor":"Factor affecting Israeli price","impact":"+₪X-Y"}],"marketTrend":"up/down/stable/not-applicable","demandLevel":"high/moderate/low/not-applicable","sellingTips":"Tip for selling in Israel (mention Yad2, Facebook groups, etc.)","whereToBuy":"Where to buy/sell in Israel (e.g., Yad2, KSP, Bug, Zap, Facebook Marketplace Israel)","israeliMarketNotes":"Any specific notes about this item in the Israeli market"}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -64,42 +88,7 @@ export default async function handler(req) {
             },
             { 
               type: 'text', 
-              text: `You are an expert item appraiser specializing in the ISRAELI MARKET. Analyze this image and identify the item.
-
-IMPORTANT: 
-- All prices MUST be in Israeli New Shekel (ILS/₪)
-- Base your valuations on Israeli market prices (Yad2, Facebook Marketplace Israel, Israeli retail prices)
-- Consider Israeli import taxes and local availability
-- Factor in that electronics are typically 20-40% more expensive in Israel than US
-
-Respond ONLY with valid JSON (no markdown, no backticks):
-{
-  "name":"Item name (in English)",
-  "nameHebrew":"שם הפריט (in Hebrew if applicable)",
-  "category":"Food/Electronics/Vehicles/Watches/Clothing/Furniture/Sports/Other",
-  "confidence":0.85,
-  "isSellable":true,
-  "condition":"New/Like New/Good/Fair/Poor",
-  "marketValue":{
-    "low":0,
-    "mid":0,
-    "high":0,
-    "currency":"ILS"
-  },
-  "details":{
-    "description":"Brief description",
-    "brand":"Brand or Unknown",
-    "additionalInfo":"Details relevant to Israeli market"
-  },
-  "priceFactors":[
-    {"factor":"Factor affecting Israeli price","impact":"+₪X-Y"}
-  ],
-  "marketTrend":"up/down/stable/not-applicable",
-  "demandLevel":"high/moderate/low/not-applicable",
-  "sellingTips":"Tip for selling in Israel (mention Yad2, Facebook groups, etc.)",
-  "whereToBuy":"Where to buy/sell in Israel (e.g., Yad2, KSP, Ivory, Bug, Facebook Marketplace Israel)",
-  "israeliMarketNotes":"Any specific notes about this item in the Israeli market"
-}`
+              text: prompt
             }
           ]
         }]
