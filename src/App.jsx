@@ -27,9 +27,22 @@ export default function GetWorth() {
 
   const analyzeImage = async (imageData) => {
     try {
+      // Get API key from environment variable (for production) or use proxy
+      const apiKey = import.meta.env?.VITE_ANTHROPIC_API_KEY;
+      
+      const headers = {
+        "Content-Type": "application/json",
+        "anthropic-version": "2023-06-01"
+      };
+      
+      // Add API key header if available (production deployment)
+      if (apiKey) {
+        headers["x-api-key"] = apiKey;
+      }
+      
       const response = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           model: "claude-sonnet-4-20250514",
           max_tokens: 1500,
@@ -43,12 +56,22 @@ export default function GetWorth() {
           }]
         })
       });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.error("API Error:", response.status, errorData);
+        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+      }
+      
       const data = await response.json();
       if (data.content?.[0]?.text) {
         return JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
       }
-      throw new Error("Invalid response");
-    } catch (err) { throw err; }
+      throw new Error("Invalid response format");
+    } catch (err) { 
+      console.error("Analysis error:", err);
+      throw err; 
+    }
   };
 
   const handleFile = async (file) => {
