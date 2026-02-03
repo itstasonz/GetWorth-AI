@@ -80,14 +80,4 @@ export const unsaveItem = async (userId, listingId) => {
   return { error };
 };
 
-export const addSearchHistory = async (userId, searchData) => {
-  const { data, error } = await supabase.from('search_history').insert({ user_id: userId, ...searchData }).select().single();
-  return { data, error };
-};
-
-export const getSearchHistory = async (userId) => {
-  const { data, error } = await supabase.from('search_history').select('*').eq('user_id', userId).order('created_at', { ascending: false }).limit(20);
-  return { data, error };
-};
-
 export default supabase;
