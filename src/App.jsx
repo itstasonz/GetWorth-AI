@@ -27,46 +27,30 @@ export default function GetWorth() {
 
   const analyzeImage = async (imageData) => {
     try {
-      // Get API key from environment variable (for production) or use proxy
-      const apiKey = import.meta.env?.VITE_ANTHROPIC_API_KEY;
-      
-      const headers = {
-        "Content-Type": "application/json",
-        "anthropic-version": "2023-06-01"
-      };
-      
-      // Add API key header if available (production deployment)
-      if (apiKey) {
-        headers["x-api-key"] = apiKey;
-      }
-      
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers,
+      // Use our serverless API endpoint to avoid CORS issues
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
         body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1500,
-          messages: [{
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageData.split(',')[1] }},
-              { type: "text", text: `Analyze this image and identify the item. Respond ONLY with JSON:
-{"name":"Item name","category":"Food/Electronics/Vehicles/Watches/Clothing/Furniture/Sports/Other","confidence":0.85,"isSellable":true,"condition":"New/Like New/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0},"details":{"description":"Brief description","brand":"Brand or Unknown","additionalInfo":"Details"},"priceFactors":[{"factor":"Factor","impact":"+$X"}],"marketTrend":"up/down/stable/not-applicable","demandLevel":"high/moderate/low/not-applicable","sellingTips":"Tip"}` }
-            ]
-          }]
+          imageData: imageData.split(',')[1] // Send only base64 data without prefix
         })
       });
       
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         console.error("API Error:", response.status, errorData);
-        throw new Error(errorData.error?.message || `API error: ${response.status}`);
+        throw new Error(errorData.error || `API error: ${response.status}`);
       }
       
       const data = await response.json();
+      
       if (data.content?.[0]?.text) {
-        return JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
+        const text = data.content[0].text.replace(/```json\n?|\n?```/g, '').trim();
+        return JSON.parse(text);
       }
+      
       throw new Error("Invalid response format");
     } catch (err) { 
       console.error("Analysis error:", err);
