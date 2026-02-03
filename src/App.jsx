@@ -30,7 +30,7 @@ export default function GetWorth() {
   const isRTL = lang === 'he';
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('home');
   const [currentView, setCurrentView] = useState('home');
   const [uploadedImages, setUploadedImages] = useState([]);
@@ -68,10 +68,12 @@ export default function GetWorth() {
   const showToast = (message, type = 'success') => setToast({ message, type });
 
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) { setUser(session.user); getProfile(session.user.id).then(({ data }) => setProfile(data)); }
+    });
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) { setUser(session.user); const { data } = await getProfile(session.user.id); setProfile(data); } 
       else { setUser(null); setProfile(null); }
-      setAuthLoading(false);
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -200,7 +202,7 @@ export default function GetWorth() {
     </Card>
   );
 
-  if (authLoading) return <div className="min-h-screen flex items-center justify-center" style={{ background: '#0a0f1a' }}><div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-xl shadow-blue-500/30 animate-pulse"><DollarSign className="w-7 h-7" /></div></div>;
+  // App loads immediately - no blocking
 
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: isRTL ? "'Heebo', sans-serif" : "'Inter', sans-serif", background: 'linear-gradient(180deg, #0a0f1a 0%, #0f1629 50%, #0a0f1a 100%)' }} dir={isRTL ? 'rtl' : 'ltr'}>
