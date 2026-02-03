@@ -64,8 +64,42 @@ export default async function handler(req) {
             },
             { 
               type: 'text', 
-              text: `Analyze this image and identify the item. Respond ONLY with valid JSON (no markdown, no backticks):
-{"name":"Item name","category":"Food/Electronics/Vehicles/Watches/Clothing/Furniture/Sports/Other","confidence":0.85,"isSellable":true,"condition":"New/Like New/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0},"details":{"description":"Brief description","brand":"Brand or Unknown","additionalInfo":"Details"},"priceFactors":[{"factor":"Factor","impact":"+$X"}],"marketTrend":"up/down/stable/not-applicable","demandLevel":"high/moderate/low/not-applicable","sellingTips":"Tip"}`
+              text: `You are an expert item appraiser specializing in the ISRAELI MARKET. Analyze this image and identify the item.
+
+IMPORTANT: 
+- All prices MUST be in Israeli New Shekel (ILS/₪)
+- Base your valuations on Israeli market prices (Yad2, Facebook Marketplace Israel, Israeli retail prices)
+- Consider Israeli import taxes and local availability
+- Factor in that electronics are typically 20-40% more expensive in Israel than US
+
+Respond ONLY with valid JSON (no markdown, no backticks):
+{
+  "name":"Item name (in English)",
+  "nameHebrew":"שם הפריט (in Hebrew if applicable)",
+  "category":"Food/Electronics/Vehicles/Watches/Clothing/Furniture/Sports/Other",
+  "confidence":0.85,
+  "isSellable":true,
+  "condition":"New/Like New/Good/Fair/Poor",
+  "marketValue":{
+    "low":0,
+    "mid":0,
+    "high":0,
+    "currency":"ILS"
+  },
+  "details":{
+    "description":"Brief description",
+    "brand":"Brand or Unknown",
+    "additionalInfo":"Details relevant to Israeli market"
+  },
+  "priceFactors":[
+    {"factor":"Factor affecting Israeli price","impact":"+₪X-Y"}
+  ],
+  "marketTrend":"up/down/stable/not-applicable",
+  "demandLevel":"high/moderate/low/not-applicable",
+  "sellingTips":"Tip for selling in Israel (mention Yad2, Facebook groups, etc.)",
+  "whereToBuy":"Where to buy/sell in Israel (e.g., Yad2, KSP, Ivory, Bug, Facebook Marketplace Israel)",
+  "israeliMarketNotes":"Any specific notes about this item in the Israeli market"
+}`
             }
           ]
         }]
