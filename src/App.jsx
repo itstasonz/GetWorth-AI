@@ -77,6 +77,22 @@ const Badge = ({ children, color = 'blue' }) => (
   </span>
 );
 
+// Sample items for home page showcase (demo purposes)
+const SAMPLE_ITEMS = [
+  { id: 's1', title: 'PlayStation 5', title_hebrew: 'פלייסטיישן 5', price: 1800, condition: 'likeNew', location: 'Tel Aviv', seller: { full_name: 'David Cohen' }, images: ['https://images.unsplash.com/photo-1606813907291-d86efa9b94db?w=400&q=80'] },
+  { id: 's2', title: 'Rolex Submariner', title_hebrew: 'רולקס סאבמרינר', price: 45000, condition: 'used', location: 'Herzliya', seller: { full_name: 'Michael Levy' }, images: ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&q=80'] },
+  { id: 's3', title: 'Dior Sauvage Perfume', title_hebrew: 'בושם דיור סוואג׳', price: 350, condition: 'newSealed', location: 'Ramat Gan', seller: { full_name: 'Sarah Israeli' }, images: ['https://images.unsplash.com/photo-1541643600914-78b084683601?w=400&q=80'] },
+  { id: 's4', title: 'Electric Bicycle', title_hebrew: 'אופניים חשמליים', price: 4500, condition: 'used', location: 'Haifa', seller: { full_name: 'Yossi Mizrahi' }, images: ['https://images.unsplash.com/photo-1571068316344-75bc76f77890?w=400&q=80'] },
+  { id: 's5', title: 'MacBook Pro M3', title_hebrew: 'מקבוק פרו M3', price: 8500, condition: 'likeNew', location: 'Tel Aviv', seller: { full_name: 'Noa Shapira' }, images: ['https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&q=80'] },
+  { id: 's6', title: 'Dining Table Oak', title_hebrew: 'שולחן אוכל אלון', price: 2800, condition: 'used', location: 'Netanya', seller: { full_name: 'Amit Goldstein' }, images: ['https://images.unsplash.com/photo-1617806118233-18e1de247200?w=400&q=80'] },
+  { id: 's7', title: 'iPhone 15 Pro Max', title_hebrew: 'אייפון 15 פרו מקס', price: 4200, condition: 'newSealed', location: 'Jerusalem', seller: { full_name: 'Oren Azulay' }, images: ['https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&q=80'] },
+  { id: 's8', title: 'Nike Air Jordan 1', title_hebrew: 'נייק אייר ג׳ורדן 1', price: 890, condition: 'newSealed', location: 'Rishon', seller: { full_name: 'Maya Peretz' }, images: ['https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80'] },
+  { id: 's9', title: 'Sony 65" 4K TV', title_hebrew: 'טלוויזיה סוני 65 אינץ׳', price: 3200, condition: 'likeNew', location: 'Ashdod', seller: { full_name: 'Eli Biton' }, images: ['https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=400&q=80'] },
+  { id: 's10', title: 'DJI Mavic 3 Drone', title_hebrew: 'רחפן DJI מאוויק 3', price: 5500, condition: 'used', location: 'Beer Sheva', seller: { full_name: 'Tal Amir' }, images: ['https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=400&q=80'] },
+  { id: 's11', title: 'Leather Sofa', title_hebrew: 'ספה עור', price: 4800, condition: 'used', location: 'Petah Tikva', seller: { full_name: 'Dana Katz' }, images: ['https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&q=80'] },
+  { id: 's12', title: 'Canon EOS R5', title_hebrew: 'מצלמת קנון R5', price: 12000, condition: 'likeNew', location: 'Tel Aviv', seller: { full_name: 'Ran Levi' }, images: ['https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&q=80'] },
+];
+
 export default function GetWorth() {
   const [lang, setLang] = useState('he');
   const [user, setUser] = useState(null);
@@ -536,102 +552,117 @@ export default function GetWorth() {
                 </Btn>
               </FadeIn>
 
-              {/* Marquee Listings Section */}
-              {listings.length > 0 && (
-                <FadeIn delay={200} className="space-y-4 -mx-5">
-                  {/* Section Header */}
-                  <div className="px-5 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-                      <h3 className="font-bold text-lg">{lang === 'he' ? 'פריטים חמים' : 'Hot Items'}</h3>
-                      <span className="text-xs text-slate-500">•</span>
-                      <span className="text-xs text-slate-400">{listings.length} {lang === 'he' ? 'פריטים' : 'items'}</span>
-                    </div>
-                    <button onClick={() => goTab('browse')} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
-                      {lang === 'he' ? 'הכל' : 'See All'}
-                      {rtl ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
-                    </button>
+              {/* Marquee Listings Section - Always visible with sample + real items */}
+              <FadeIn delay={200} className="space-y-4 -mx-5">
+                {/* Section Header */}
+                <div className="px-5 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                    <h3 className="font-bold text-lg">{lang === 'he' ? 'פריטים חמים' : 'Hot Items'}</h3>
+                    <span className="text-xs text-slate-500">•</span>
+                    <span className="text-xs text-slate-400">{lang === 'he' ? 'בזמן אמת' : 'Live'}</span>
                   </div>
+                  <button onClick={() => goTab('browse')} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                    {lang === 'he' ? 'הכל' : 'See All'}
+                    {rtl ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                  </button>
+                </div>
 
-                  {/* Marquee Row 1 - Scrolls Left */}
-                  <div className="relative overflow-hidden">
-                    <div className="flex gap-3 animate-marquee-left">
-                      {[...listings, ...listings].map((item, i) => (
-                        <div 
-                          key={`row1-${i}`} 
-                          onClick={() => viewItem(item)}
-                          className="flex-shrink-0 w-36 cursor-pointer group"
-                        >
-                          <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-blue-500/50">
-                            <div className="aspect-square overflow-hidden">
-                              <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                {/* Marquee Row 1 - Scrolls Left */}
+                <div className="relative overflow-hidden">
+                  <div className="flex gap-3 animate-marquee-left">
+                    {[...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4), ...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)].map((item, i) => (
+                      <div 
+                        key={`row1-${item.id}-${i}`} 
+                        onClick={() => !item.id.startsWith('s') && viewItem(item)}
+                        className="flex-shrink-0 w-40 cursor-pointer group"
+                      >
+                        <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-blue-500/50 shadow-lg shadow-black/20">
+                          <div className="aspect-square overflow-hidden">
+                            <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                          </div>
+                          <div className="absolute bottom-0 left-0 right-0 p-3">
+                            <p className="text-xs font-semibold truncate text-white">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
+                            <p className="text-base font-bold text-green-400 mt-0.5">{formatPrice(item.price)}</p>
+                            <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />{item.location}
+                            </p>
+                          </div>
+                          {/* Condition badge */}
+                          {item.condition && (
+                            <div className={`absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase ${
+                              item.condition === 'newSealed' ? 'bg-emerald-500' : 
+                              item.condition === 'likeNew' ? 'bg-blue-500' : 
+                              item.condition === 'used' ? 'bg-amber-500' : 'bg-red-500'
+                            }`}>
+                              {item.condition === 'newSealed' ? (lang === 'he' ? 'חדש' : 'New') : 
+                               item.condition === 'likeNew' ? (lang === 'he' ? 'כחדש' : 'Like New') : 
+                               item.condition === 'used' ? (lang === 'he' ? 'משומש' : 'Used') : (lang === 'he' ? 'גרוע' : 'Poor')}
                             </div>
-                            <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                              <p className="text-[11px] font-medium truncate text-white/90">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
-                              <p className="text-sm font-bold text-green-400">{formatPrice(item.price)}</p>
-                            </div>
-                            {/* Seller avatar */}
-                            <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] font-bold border-2 border-white/20">
-                              {item.seller?.full_name?.charAt(0) || 'S'}
-                            </div>
+                          )}
+                          {/* Seller avatar */}
+                          <div className="absolute top-2 right-2 w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-[11px] font-bold border-2 border-white/30 shadow-lg">
+                            {item.seller?.full_name?.charAt(0) || 'S'}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
+                </div>
 
-                  {/* Marquee Row 2 - Scrolls Right */}
-                  <div className="relative overflow-hidden">
-                    <div className="flex gap-3 animate-marquee-right">
-                      {[...listings.slice().reverse(), ...listings.slice().reverse()].map((item, i) => (
-                        <div 
-                          key={`row2-${i}`} 
-                          onClick={() => viewItem(item)}
-                          className="flex-shrink-0 w-36 cursor-pointer group"
-                        >
-                          <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-blue-500/50">
-                            <div className="aspect-square overflow-hidden">
-                              <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
-                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                {/* Marquee Row 2 - Scrolls Right (reverse order) */}
+                <div className="relative overflow-hidden">
+                  <div className="flex gap-3 animate-marquee-right">
+                    {[...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8), ...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)].map((item, i) => (
+                      <div 
+                        key={`row2-${item.id}-${i}`} 
+                        onClick={() => !item.id.startsWith('s') && viewItem(item)}
+                        className="flex-shrink-0 w-40 cursor-pointer group"
+                      >
+                        <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-green-500/50 shadow-lg shadow-black/20">
+                          <div className="aspect-square overflow-hidden">
+                            <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                          </div>
+                          <div className="absolute bottom-0 left-0 right-0 p-3">
+                            <p className="text-xs font-semibold truncate text-white">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
+                            <p className="text-base font-bold text-green-400 mt-0.5">{formatPrice(item.price)}</p>
+                            <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
+                              <MapPin className="w-3 h-3" />{item.location}
+                            </p>
+                          </div>
+                          {/* Condition badge */}
+                          {item.condition && (
+                            <div className={`absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase ${
+                              item.condition === 'newSealed' ? 'bg-emerald-500' : 
+                              item.condition === 'likeNew' ? 'bg-blue-500' : 
+                              item.condition === 'used' ? 'bg-amber-500' : 'bg-red-500'
+                            }`}>
+                              {item.condition === 'newSealed' ? (lang === 'he' ? 'חדש' : 'New') : 
+                               item.condition === 'likeNew' ? (lang === 'he' ? 'כחדש' : 'Like New') : 
+                               item.condition === 'used' ? (lang === 'he' ? 'משומש' : 'Used') : (lang === 'he' ? 'גרוע' : 'Poor')}
                             </div>
-                            <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                              <p className="text-[11px] font-medium truncate text-white/90">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
-                              <p className="text-sm font-bold text-green-400">{formatPrice(item.price)}</p>
-                            </div>
-                            {/* Seller avatar */}
-                            <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-[10px] font-bold border-2 border-white/20">
-                              {item.seller?.full_name?.charAt(0) || 'S'}
-                            </div>
+                          )}
+                          {/* Seller avatar */}
+                          <div className="absolute top-2 right-2 w-8 h-8 rounded-full bg-gradient-to-br from-green-500 to-emerald-600 flex items-center justify-center text-[11px] font-bold border-2 border-white/30 shadow-lg">
+                            {item.seller?.full_name?.charAt(0) || 'S'}
                           </div>
                         </div>
-                      ))}
-                    </div>
+                      </div>
+                    ))}
                   </div>
+                </div>
 
-                  {/* Browse All Button */}
-                  <div className="px-5">
-                    <Btn onClick={() => goTab('browse')} className="w-full py-3">
-                      <ShoppingBag className="w-4 h-4" />
-                      {lang === 'he' ? 'עיין בכל הפריטים' : 'Browse All Items'}
-                      <span className="ml-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-xs">{listings.length}</span>
-                    </Btn>
-                  </div>
-                </FadeIn>
-              )}
-
-              {/* Empty State - No Listings Yet */}
-              {listings.length === 0 && (
-                <FadeIn delay={200}>
-                  <Card className="p-8 text-center">
-                    <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-                      <ShoppingBag className="w-8 h-8 text-slate-500" />
-                    </div>
-                    <p className="text-slate-400 text-sm">{lang === 'he' ? 'אין פריטים עדיין' : 'No items yet'}</p>
-                    <p className="text-slate-500 text-xs mt-1">{lang === 'he' ? 'היה הראשון לפרסם!' : 'Be the first to list!'}</p>
+                {/* Start Selling CTA */}
+                <div className="px-5 pt-2">
+                  <Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1))">
+                    <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'יש לך משהו למכור?' : 'Have something to sell?'}</p>
+                    <p className="text-xs text-slate-500 mt-1">{lang === 'he' ? 'סרוק את הפריט וקבל הערכת מחיר מיידית' : 'Scan your item and get instant valuation'}</p>
                   </Card>
-                </FadeIn>
-              )}
+                </div>
+              </FadeIn>
+
 
               {/* Quick Stats */}
               <FadeIn delay={300}>
