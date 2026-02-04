@@ -40,6 +40,43 @@ const Skeleton = ({ className }) => (
   </div>
 );
 
+// UI Components - defined outside to prevent re-renders
+const Card = ({ children, className = '', onClick, glow, gradient }) => (
+  <div 
+    onClick={onClick} 
+    className={`relative rounded-3xl backdrop-blur-xl transition-all duration-500 ${onClick ? 'cursor-pointer hover:scale-[1.02] hover:-translate-y-1 active:scale-[0.98]' : ''} ${className}`}
+    style={{ 
+      background: gradient || 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+      border: '1px solid rgba(255,255,255,0.08)',
+      boxShadow: glow ? '0 8px 32px rgba(59,130,246,0.15), inset 0 1px 0 rgba(255,255,255,0.1)' : '0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)'
+    }}
+  >
+    {children}
+  </div>
+);
+
+const Btn = ({ children, primary, secondary, disabled, className = '', ...p }) => (
+  <button 
+    disabled={disabled} 
+    className={`relative px-6 py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all duration-300 active:scale-95 disabled:opacity-50 overflow-hidden group ${className}`}
+    style={{
+      background: primary ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%)' : secondary ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
+      border: primary || secondary ? 'none' : '1px solid rgba(255,255,255,0.1)',
+      boxShadow: primary ? '0 8px 24px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.2)' : secondary ? '0 8px 24px rgba(16,185,129,0.4)' : 'none'
+    }}
+    {...p}
+  >
+    <span className="relative z-10 flex items-center gap-2">{children}</span>
+    {(primary || secondary) && <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />}
+  </button>
+);
+
+const Badge = ({ children, color = 'blue' }) => (
+  <span className={`px-3 py-1 rounded-full text-xs font-semibold bg-${color}-500/20 text-${color}-400 border border-${color}-500/30`}>
+    {children}
+  </span>
+);
+
 export default function GetWorth() {
   const [lang, setLang] = useState('he');
   const [user, setUser] = useState(null);
@@ -65,8 +102,10 @@ export default function GetWorth() {
   const [listingData, setListingData] = useState({ title: '', desc: '', price: 0, phone: '', location: '' });
   const [publishing, setPublishing] = useState(false);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
+  const [debouncedPriceRange, setDebouncedPriceRange] = useState({ min: '', max: '' });
   const [sort, setSort] = useState('newest');
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState(null);
@@ -108,15 +147,27 @@ export default function GetWorth() {
     return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
-  useEffect(() => { loadListings(); }, [category, priceRange.min, priceRange.max, search]);
+  // Debounce search input
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 500);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // Debounce price range
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedPriceRange(priceRange), 500);
+    return () => clearTimeout(timer);
+  }, [priceRange]);
+
+  useEffect(() => { loadListings(); }, [category, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
   useEffect(() => { if (user) loadUserData(); else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); } }, [user]);
 
   const loadListings = async () => {
     let query = supabase.from('listings').select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)').eq('status', 'active').order('created_at', { ascending: false });
     if (category !== 'all') query = query.eq('category', category);
-    if (priceRange.min) query = query.gte('price', parseInt(priceRange.min));
-    if (priceRange.max) query = query.lte('price', parseInt(priceRange.max));
-    if (search) query = query.or(`title.ilike.%${search}%,title_hebrew.ilike.%${search}%`);
+    if (debouncedPriceRange.min) query = query.gte('price', parseInt(debouncedPriceRange.min));
+    if (debouncedPriceRange.max) query = query.lte('price', parseInt(debouncedPriceRange.max));
+    if (debouncedSearch) query = query.or(`title.ilike.%${debouncedSearch}%,title_hebrew.ilike.%${debouncedSearch}%`);
     const { data } = await query;
     if (data) setListings(data);
   };
@@ -235,44 +286,14 @@ export default function GetWorth() {
   const viewItem = (item) => { setSelected(item); setView('detail'); };
   const contactSeller = () => { if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; } setShowContact(true); };
 
-  // UI Components
-  const Card = ({ children, className = '', onClick, glow, gradient }) => (
-    <div 
-      onClick={onClick} 
-      className={`relative rounded-3xl backdrop-blur-xl transition-all duration-500 ${onClick ? 'cursor-pointer hover:scale-[1.02] hover:-translate-y-1 active:scale-[0.98]' : ''} ${className}`}
-      style={{ 
-        background: gradient || 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: glow ? '0 8px 32px rgba(59,130,246,0.15), inset 0 1px 0 rgba(255,255,255,0.1)' : '0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)'
-      }}
-    >
-      {children}
-    </div>
-  );
-
-  const Btn = ({ children, primary, secondary, disabled, className = '', ...p }) => (
-    <button 
-      disabled={disabled} 
-      className={`relative px-6 py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all duration-300 active:scale-95 disabled:opacity-50 overflow-hidden group ${className}`}
-      style={{
-        background: primary ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%)' : secondary ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
-        border: primary || secondary ? 'none' : '1px solid rgba(255,255,255,0.1)',
-        boxShadow: primary ? '0 8px 24px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.2)' : secondary ? '0 8px 24px rgba(16,185,129,0.4)' : 'none'
-      }}
-      {...p}
-    >
-      <span className="relative z-10 flex items-center gap-2">{children}</span>
-      {(primary || secondary) && <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />}
-    </button>
-  );
-
-  const Inp = ({ label, icon: Icon, ...p }) => (
+  // Input component - kept inside for rtl access but simplified
+  const InputField = ({ label, icon: Icon, ...p }) => (
     <div className="space-y-2">
       {label && <label className="text-sm text-slate-400 font-medium">{label}</label>}
       <div className="relative">
         {Icon && <Icon className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />}
         <input 
-          className={`w-full px-4 py-4 ${Icon ? (rtl ? 'pr-12' : 'pl-12') : ''} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 focus:shadow-lg focus:shadow-blue-500/10 transition-all duration-300`}
+          className={`w-full px-4 py-4 ${Icon ? (rtl ? 'pr-12' : 'pl-12') : ''} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all`}
           dir={rtl ? 'rtl' : 'ltr'} 
           {...p} 
         />
@@ -287,12 +308,6 @@ export default function GetWorth() {
       </div>
       <span className="text-sm font-medium">{t.back}</span>
     </button>
-  );
-
-  const Badge = ({ children, color = 'blue' }) => (
-    <span className={`px-3 py-1 rounded-full text-xs font-semibold bg-${color}-500/20 text-${color}-400 border border-${color}-500/30`}>
-      {children}
-    </span>
   );
 
   const ListingCard = ({ item, index = 0 }) => (
@@ -494,41 +509,25 @@ export default function GetWorth() {
           
           {/* HOME */}
           {view === 'home' && (
-            <div className="space-y-8">
-              <FadeIn className="text-center space-y-5 pt-4">
+            <div className="space-y-6">
+              {/* Hidden file input */}
+              <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
+              
+              {/* Hero Section */}
+              <FadeIn className="text-center space-y-4 pt-2">
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20">
                   <Sparkles className="w-4 h-4 text-blue-400" />
                   <span className="text-xs font-semibold text-blue-300 tracking-wide">{t.aiPowered}</span>
                 </div>
-                <h2 className="text-4xl font-bold leading-tight">
+                <h2 className="text-3xl font-bold leading-tight">
                   {t.heroTitle1}<br/>
                   <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">{t.heroTitle2}</span>
                 </h2>
-                <p className="text-slate-400 text-sm max-w-xs mx-auto leading-relaxed">{t.heroSub}</p>
+                <p className="text-slate-400 text-sm max-w-xs mx-auto">{t.heroSub}</p>
               </FadeIn>
 
-              <FadeIn delay={100}>
-                <div 
-                  className={`relative rounded-3xl border-2 border-dashed transition-all duration-300 ${dragActive ? 'border-blue-500 bg-blue-500/10 scale-[1.02]' : 'border-white/10 hover:border-white/20'}`}
-                  onDragEnter={(e) => { e.preventDefault(); setDragActive(true); }}
-                  onDragLeave={(e) => { e.preventDefault(); setDragActive(false); }}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => { e.preventDefault(); setDragActive(false); handleFile(e.dataTransfer.files[0]); }}
-                >
-                  <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-                  <div className="p-12 text-center space-y-4">
-                    <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-br from-white/5 to-white/10 flex items-center justify-center border border-white/10">
-                      <ImagePlus className="w-8 h-8 text-slate-400" />
-                    </div>
-                    <div>
-                      <p className="text-slate-200 font-medium">{t.drop}</p>
-                      <p className="text-slate-500 text-xs mt-1">{t.orButtons}</p>
-                    </div>
-                  </div>
-                </div>
-              </FadeIn>
-
-              <FadeIn delay={200} className="grid grid-cols-2 gap-4">
+              {/* Action Buttons */}
+              <FadeIn delay={100} className="grid grid-cols-2 gap-4">
                 <Btn primary onClick={startCamera} className="py-4">
                   <Scan className="w-5 h-5" />{t.scan}
                 </Btn>
@@ -537,18 +536,115 @@ export default function GetWorth() {
                 </Btn>
               </FadeIn>
 
-              {/* Quick stats */}
+              {/* Marquee Listings Section */}
+              {listings.length > 0 && (
+                <FadeIn delay={200} className="space-y-4 -mx-5">
+                  {/* Section Header */}
+                  <div className="px-5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                      <h3 className="font-bold text-lg">{lang === 'he' ? 'פריטים חמים' : 'Hot Items'}</h3>
+                      <span className="text-xs text-slate-500">•</span>
+                      <span className="text-xs text-slate-400">{listings.length} {lang === 'he' ? 'פריטים' : 'items'}</span>
+                    </div>
+                    <button onClick={() => goTab('browse')} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+                      {lang === 'he' ? 'הכל' : 'See All'}
+                      {rtl ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* Marquee Row 1 - Scrolls Left */}
+                  <div className="relative overflow-hidden">
+                    <div className="flex gap-3 animate-marquee-left">
+                      {[...listings, ...listings].map((item, i) => (
+                        <div 
+                          key={`row1-${i}`} 
+                          onClick={() => viewItem(item)}
+                          className="flex-shrink-0 w-36 cursor-pointer group"
+                        >
+                          <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-blue-500/50">
+                            <div className="aspect-square overflow-hidden">
+                              <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                              <p className="text-[11px] font-medium truncate text-white/90">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
+                              <p className="text-sm font-bold text-green-400">{formatPrice(item.price)}</p>
+                            </div>
+                            {/* Seller avatar */}
+                            <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] font-bold border-2 border-white/20">
+                              {item.seller?.full_name?.charAt(0) || 'S'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Marquee Row 2 - Scrolls Right */}
+                  <div className="relative overflow-hidden">
+                    <div className="flex gap-3 animate-marquee-right">
+                      {[...listings.slice().reverse(), ...listings.slice().reverse()].map((item, i) => (
+                        <div 
+                          key={`row2-${i}`} 
+                          onClick={() => viewItem(item)}
+                          className="flex-shrink-0 w-36 cursor-pointer group"
+                        >
+                          <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-blue-500/50">
+                            <div className="aspect-square overflow-hidden">
+                              <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent" />
+                            </div>
+                            <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                              <p className="text-[11px] font-medium truncate text-white/90">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
+                              <p className="text-sm font-bold text-green-400">{formatPrice(item.price)}</p>
+                            </div>
+                            {/* Seller avatar */}
+                            <div className="absolute top-2 right-2 w-7 h-7 rounded-full bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center text-[10px] font-bold border-2 border-white/20">
+                              {item.seller?.full_name?.charAt(0) || 'S'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Browse All Button */}
+                  <div className="px-5">
+                    <Btn onClick={() => goTab('browse')} className="w-full py-3">
+                      <ShoppingBag className="w-4 h-4" />
+                      {lang === 'he' ? 'עיין בכל הפריטים' : 'Browse All Items'}
+                      <span className="ml-1 px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 text-xs">{listings.length}</span>
+                    </Btn>
+                  </div>
+                </FadeIn>
+              )}
+
+              {/* Empty State - No Listings Yet */}
+              {listings.length === 0 && (
+                <FadeIn delay={200}>
+                  <Card className="p-8 text-center">
+                    <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+                      <ShoppingBag className="w-8 h-8 text-slate-500" />
+                    </div>
+                    <p className="text-slate-400 text-sm">{lang === 'he' ? 'אין פריטים עדיין' : 'No items yet'}</p>
+                    <p className="text-slate-500 text-xs mt-1">{lang === 'he' ? 'היה הראשון לפרסם!' : 'Be the first to list!'}</p>
+                  </Card>
+                </FadeIn>
+              )}
+
+              {/* Quick Stats */}
               <FadeIn delay={300}>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { icon: Zap, label: 'Fast AI', value: '< 3s' },
-                    { icon: TrendingUp, label: 'Accuracy', value: '95%' },
-                    { icon: ShoppingBag, label: 'Listings', value: `${listings.length}+` }
+                    { icon: Zap, label: lang === 'he' ? 'מהיר' : 'Fast', value: '< 3s' },
+                    { icon: TrendingUp, label: lang === 'he' ? 'דיוק' : 'Accuracy', value: '95%' },
+                    { icon: ShoppingBag, label: lang === 'he' ? 'פריטים' : 'Items', value: `${listings.length}+` }
                   ].map((stat, i) => (
-                    <Card key={i} className="p-4 text-center">
-                      <stat.icon className="w-5 h-5 text-blue-400 mx-auto mb-2" />
-                      <p className="text-lg font-bold">{stat.value}</p>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-wider">{stat.label}</p>
+                    <Card key={i} className="p-3 text-center">
+                      <stat.icon className="w-4 h-4 text-blue-400 mx-auto mb-1" />
+                      <p className="text-base font-bold">{stat.value}</p>
+                      <p className="text-[9px] text-slate-500 uppercase tracking-wider">{stat.label}</p>
                     </Card>
                   ))}
                 </div>
@@ -886,9 +982,9 @@ export default function GetWorth() {
 
               <FadeIn delay={200}>
                 <form onSubmit={signInEmail} className="space-y-4">
-                  {authMode === 'signup' && <Inp label={t.name} icon={User} value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} />}
-                  <Inp label={t.email} type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required />
-                  <Inp label={t.password} type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required />
+                  {authMode === 'signup' && <InputField label={t.name} icon={User} value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} />}
+                  <InputField label={t.email} type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required />
+                  <InputField label={t.password} type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required />
                   <Btn primary className="w-full py-4">{authMode === 'login' ? t.signIn : t.signUp}</Btn>
                 </form>
               </FadeIn>
@@ -1091,7 +1187,7 @@ export default function GetWorth() {
                     <h2 className="text-2xl font-bold">{t.review}</h2>
                   </FadeIn>
                   <FadeIn delay={50}>
-                    <Inp label={t.title} value={listingData.title} onChange={(e) => setListingData({ ...listingData, title: e.target.value })} />
+                    <InputField label={t.title} value={listingData.title} onChange={(e) => setListingData({ ...listingData, title: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={100}>
                     <div className="space-y-2">
@@ -1118,10 +1214,10 @@ export default function GetWorth() {
                     </Card>
                   </FadeIn>
                   <FadeIn delay={200}>
-                    <Inp label={t.phone} icon={Phone} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} />
+                    <InputField label={t.phone} icon={Phone} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={250}>
-                    <Inp label={t.location} icon={MapPin} value={listingData.location} onChange={(e) => setListingData({ ...listingData, location: e.target.value })} />
+                    <InputField label={t.location} icon={MapPin} value={listingData.location} onChange={(e) => setListingData({ ...listingData, location: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={300}>
                     <Btn primary className="w-full py-4" onClick={publishListing} disabled={publishing}>
@@ -1225,6 +1321,14 @@ export default function GetWorth() {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+        @keyframes marquee-left {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-50%); }
+        }
+        @keyframes marquee-right {
+          0% { transform: translateX(-50%); }
+          100% { transform: translateX(0); }
+        }
         .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; opacity: 0; }
         .animate-slideUp { animation: slideUp 0.4s ease-out forwards; }
         .animate-slideDown { animation: slideDown 0.3s ease-out forwards; }
@@ -1233,6 +1337,9 @@ export default function GetWorth() {
         .animate-heartPop { animation: heartPop 0.6s ease-in-out; }
         .animate-shimmer { animation: shimmer 2s infinite; }
         .animate-spin-slow { animation: spin-slow 4s linear infinite; }
+        .animate-marquee-left { animation: marquee-left 25s linear infinite; }
+        .animate-marquee-right { animation: marquee-right 30s linear infinite; }
+        .animate-marquee-left:hover, .animate-marquee-right:hover { animation-play-state: paused; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
