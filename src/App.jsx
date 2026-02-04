@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { Camera, Upload, X, Sparkles, DollarSign, Package, Smartphone, Watch, ChevronRight, ChevronLeft, Loader2, ImagePlus, Share2, AlertCircle, Shirt, Dumbbell, Scan, User, LogOut, Plus, Trash2, Clock, Globe, Home, ShoppingBag, CheckCircle, Circle, Box, Shield, AlertTriangle, Eye, MessageCircle, Phone, Check, MapPin, Search, SlidersHorizontal, Heart, Grid, RefreshCw, Star, Zap, TrendingUp } from 'lucide-react';
+import { Camera, Upload, X, Sparkles, DollarSign, Package, Smartphone, Watch, ChevronRight, ChevronLeft, Loader2, ImagePlus, Share2, AlertCircle, Shirt, Dumbbell, Scan, User, LogOut, Plus, Trash2, Clock, Globe, Home, ShoppingBag, CheckCircle, Circle, Box, Shield, AlertTriangle, Eye, MessageCircle, Phone, Check, MapPin, Search, SlidersHorizontal, Heart, Grid, RefreshCw, Star, Zap, TrendingUp, Send } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const T = {
@@ -132,6 +132,15 @@ export default function GetWorth() {
   const [signInAction, setSignInAction] = useState(null);
   const [showContact, setShowContact] = useState(false);
   const [heartAnim, setHeartAnim] = useState(null);
+  
+  // Chat state
+  const [conversations, setConversations] = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const messagesEndRef = useRef(null);
 
   const t = T[lang];
   const rtl = lang === 'he';
@@ -215,6 +224,126 @@ export default function GetWorth() {
     ]);
     if (myData) setMyListings(myData);
     if (savedData) { setSavedItems(savedData.map(s => s.listing).filter(Boolean)); setSavedIds(new Set(savedData.map(s => s.listing_id))); }
+    // Load conversations
+    loadConversations();
+  };
+
+  // Chat functions
+  const loadConversations = async () => {
+    if (!user) return;
+    const { data } = await supabase
+      .from('conversations')
+      .select(`
+        *,
+        listing:listings(id, title, title_hebrew, price, images),
+        buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url),
+        seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url),
+        messages(id, content, created_at, sender_id, is_read)
+      `)
+      .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+      .order('updated_at', { ascending: false });
+    
+    if (data) {
+      setConversations(data);
+      // Count unread messages
+      const unread = data.reduce((count, conv) => {
+        const unreadMsgs = conv.messages?.filter(m => !m.is_read && m.sender_id !== user.id) || [];
+        return count + unreadMsgs.length;
+      }, 0);
+      setUnreadCount(unread);
+    }
+  };
+
+  const loadMessages = async (conversationId) => {
+    const { data } = await supabase
+      .from('messages')
+      .select('*')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+    
+    if (data) {
+      setMessages(data);
+      // Mark messages as read
+      const unreadIds = data.filter(m => !m.is_read && m.sender_id !== user.id).map(m => m.id);
+      if (unreadIds.length > 0) {
+        await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
+        loadConversations(); // Refresh to update unread count
+      }
+    }
+  };
+
+  const startConversation = async (item) => {
+    if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
+    if (item.id?.startsWith('s')) { showToastMsg(lang === 'he' ? 'זו דוגמה בלבד' : 'This is a demo item'); return; }
+    
+    // Check if conversation already exists
+    const { data: existing } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('listing_id', item.id)
+      .eq('buyer_id', user.id)
+      .single();
+    
+    if (existing) {
+      setActiveChat({ ...existing, listing: item, seller: item.seller });
+      loadMessages(existing.id);
+      setView('chat');
+      return;
+    }
+    
+    // Create new conversation
+    const { data: newConv, error } = await supabase
+      .from('conversations')
+      .insert({
+        listing_id: item.id,
+        buyer_id: user.id,
+        seller_id: item.seller_id || item.seller?.id
+      })
+      .select()
+      .single();
+    
+    if (newConv) {
+      setActiveChat({ ...newConv, listing: item, seller: item.seller });
+      setMessages([]);
+      setView('chat');
+      loadConversations();
+    }
+  };
+
+  const sendMessage = async (content, isOffer = false, offerAmount = null) => {
+    if (!content.trim() || !activeChat || sendingMessage) return;
+    
+    setSendingMessage(true);
+    const { data, error } = await supabase
+      .from('messages')
+      .insert({
+        conversation_id: activeChat.id,
+        sender_id: user.id,
+        content: content.trim(),
+        is_offer: isOffer,
+        offer_amount: offerAmount
+      })
+      .select()
+      .single();
+    
+    if (data) {
+      setMessages(prev => [...prev, data]);
+      setNewMessage('');
+      // Update conversation timestamp
+      await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
+      // Scroll to bottom
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+    }
+    setSendingMessage(false);
+  };
+
+  const formatMessageTime = (date) => {
+    const d = new Date(date);
+    const now = new Date();
+    const diffDays = Math.floor((now - d) / 86400000);
+    if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (diffDays === 1) return lang === 'he' ? 'אתמול' : 'Yesterday';
+    return d.toLocaleDateString();
   };
 
   const showToastMsg = (msg) => { setToast(msg); };
@@ -316,10 +445,23 @@ export default function GetWorth() {
     setPublishing(false);
   };
 
-  const reset = () => { setImages([]); setResult(null); setView('home'); setError(null); setCondition(null); setListingStep(0); setSelected(null); };
-  const goTab = (newTab) => { setTab(newTab); setSelected(null); if (newTab === 'home') setView('home'); else if (newTab === 'browse') setView('browse'); else if (newTab === 'sell') setView('myListings'); else if (newTab === 'saved') setView('saved'); else if (newTab === 'profile') setView(user ? 'profile' : 'auth'); };
+  const reset = () => { setImages([]); setResult(null); setView('home'); setError(null); setCondition(null); setListingStep(0); setSelected(null); setActiveChat(null); };
+  const goTab = (newTab) => { 
+    setTab(newTab); 
+    setSelected(null); 
+    setActiveChat(null);
+    if (newTab === 'home') setView('home'); 
+    else if (newTab === 'browse') setView('browse'); 
+    else if (newTab === 'sell') setView('myListings'); 
+    else if (newTab === 'saved') setView('saved'); 
+    else if (newTab === 'messages') { setView('inbox'); loadConversations(); }
+    else if (newTab === 'profile') setView(user ? 'profile' : 'auth'); 
+  };
   const viewItem = (item) => { setSelected(item); setView('detail'); };
-  const contactSeller = () => { if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; } setShowContact(true); };
+  const contactSeller = () => { 
+    if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; } 
+    if (selected) startConversation(selected);
+  };
 
   // Input component - kept inside for rtl access but simplified
   const InputField = ({ label, icon: Icon, ...p }) => (
@@ -1062,6 +1204,196 @@ export default function GetWorth() {
             </div>
           )}
 
+          {/* INBOX - Messages List */}
+          {view === 'inbox' && (
+            <div className="space-y-4">
+              <FadeIn>
+                <h2 className="text-2xl font-bold">{lang === 'he' ? 'הודעות' : 'Messages'}</h2>
+              </FadeIn>
+              
+              {!user ? (
+                <FadeIn className="text-center py-16">
+                  <div className="w-20 h-20 rounded-3xl bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+                    <MessageCircle className="w-10 h-10 text-blue-400" />
+                  </div>
+                  <p className="text-slate-400 mb-5">{lang === 'he' ? 'התחבר כדי לראות הודעות' : 'Sign in to see messages'}</p>
+                  <Btn primary onClick={() => goTab('profile')}>{t.signIn}</Btn>
+                </FadeIn>
+              ) : conversations.length === 0 ? (
+                <FadeIn className="text-center py-16">
+                  <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+                    <MessageCircle className="w-10 h-10 text-slate-600" />
+                  </div>
+                  <p className="text-slate-400 mb-2">{lang === 'he' ? 'אין הודעות עדיין' : 'No messages yet'}</p>
+                  <p className="text-slate-500 text-sm mb-5">{lang === 'he' ? 'התחל שיחה עם מוכר' : 'Start a conversation with a seller'}</p>
+                  <Btn primary onClick={() => goTab('browse')}>{lang === 'he' ? 'חפש פריטים' : 'Browse Items'}</Btn>
+                </FadeIn>
+              ) : (
+                <div className="space-y-3">
+                  {conversations.map((conv, i) => {
+                    const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
+                    const lastMessage = conv.messages?.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+                    const unreadCount = conv.messages?.filter(m => !m.is_read && m.sender_id !== user.id).length || 0;
+                    
+                    return (
+                      <FadeIn key={conv.id} delay={i * 50}>
+                        <Card 
+                          className="p-4 cursor-pointer" 
+                          onClick={() => {
+                            setActiveChat({ ...conv, otherUser });
+                            loadMessages(conv.id);
+                            setView('chat');
+                          }}
+                        >
+                          <div className="flex items-center gap-4">
+                            {/* Item Image */}
+                            <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
+                              <img src={conv.listing?.images?.[0]} alt="" className="w-full h-full object-cover" />
+                              {unreadCount > 0 && (
+                                <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-[10px] font-bold flex items-center justify-center">
+                                  {unreadCount}
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Conversation Info */}
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold truncate">{otherUser?.full_name || 'User'}</span>
+                                <span className="text-[10px] text-slate-500">{lastMessage ? formatMessageTime(lastMessage.created_at) : ''}</span>
+                              </div>
+                              <p className="text-sm text-slate-400 truncate">{conv.listing?.title}</p>
+                              <p className={`text-xs truncate mt-1 ${unreadCount > 0 ? 'text-white font-medium' : 'text-slate-500'}`}>
+                                {lastMessage?.is_offer ? `💰 ${lang === 'he' ? 'הצעת מחיר' : 'Price offer'}: ₪${lastMessage.offer_amount}` : lastMessage?.content || (lang === 'he' ? 'שיחה חדשה' : 'New conversation')}
+                              </p>
+                            </div>
+                            
+                            <ChevronRight className="w-5 h-5 text-slate-500" />
+                          </div>
+                        </Card>
+                      </FadeIn>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* CHAT - Single Conversation */}
+          {view === 'chat' && activeChat && (
+            <div className="flex flex-col h-[calc(100vh-180px)] -mx-5">
+              {/* Chat Header */}
+              <div className="px-5 py-3 border-b border-white/10 flex items-center gap-3">
+                <button 
+                  onClick={() => { setActiveChat(null); setView('inbox'); }}
+                  className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center"
+                >
+                  {rtl ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+                </button>
+                
+                <div className="w-10 h-10 rounded-xl overflow-hidden">
+                  <img src={activeChat.listing?.images?.[0]} alt="" className="w-full h-full object-cover" />
+                </div>
+                
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold truncate">{activeChat.otherUser?.full_name || activeChat.seller?.full_name || 'User'}</p>
+                  <p className="text-xs text-slate-400 truncate">{activeChat.listing?.title}</p>
+                </div>
+                
+                <div className="text-right">
+                  <p className="text-lg font-bold text-green-400">{formatPrice(activeChat.listing?.price)}</p>
+                </div>
+              </div>
+
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+                {messages.length === 0 && (
+                  <div className="text-center py-8">
+                    <p className="text-slate-500 text-sm">{lang === 'he' ? 'התחל את השיחה' : 'Start the conversation'}</p>
+                  </div>
+                )}
+                
+                {messages.map((msg, i) => {
+                  const isMe = msg.sender_id === user.id;
+                  return (
+                    <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                        isMe 
+                          ? 'bg-blue-600 rounded-br-sm' 
+                          : 'bg-white/10 rounded-bl-sm'
+                      }`}>
+                        {msg.is_offer && (
+                          <div className={`text-xs mb-1 ${isMe ? 'text-blue-200' : 'text-slate-400'}`}>
+                            💰 {lang === 'he' ? 'הצעת מחיר' : 'Price Offer'}
+                          </div>
+                        )}
+                        {msg.is_offer && msg.offer_amount && (
+                          <p className="text-xl font-bold text-green-400 mb-1">₪{msg.offer_amount.toLocaleString()}</p>
+                        )}
+                        <p className="text-sm">{msg.content}</p>
+                        <p className={`text-[10px] mt-1 ${isMe ? 'text-blue-200' : 'text-slate-500'}`}>
+                          {formatMessageTime(msg.created_at)}
+                          {isMe && msg.is_read && ' ✓✓'}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Quick Actions */}
+              <div className="px-5 py-2 flex gap-2 overflow-x-auto scrollbar-hide">
+                {[
+                  { text: lang === 'he' ? 'עדיין זמין?' : 'Still available?', icon: '❓' },
+                  { text: lang === 'he' ? 'מחיר סופי?' : 'Best price?', icon: '💰' },
+                  { text: lang === 'he' ? 'איפה למסור?' : 'Where to meet?', icon: '📍' },
+                ].map((quick, i) => (
+                  <button 
+                    key={i}
+                    onClick={() => sendMessage(quick.text)}
+                    className="flex-shrink-0 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs hover:bg-white/10 transition-all"
+                  >
+                    {quick.icon} {quick.text}
+                  </button>
+                ))}
+              </div>
+
+              {/* Message Input */}
+              <div className="px-5 py-3 border-t border-white/10">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => {
+                      const amount = prompt(lang === 'he' ? 'הכנס הצעת מחיר:' : 'Enter your offer:');
+                      if (amount && !isNaN(amount)) {
+                        sendMessage(`${lang === 'he' ? 'אני מציע' : 'I offer'} ₪${amount}`, true, parseInt(amount));
+                      }
+                    }}
+                    className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 hover:bg-green-500/30 transition-all"
+                  >
+                    <DollarSign className="w-5 h-5" />
+                  </button>
+                  <input
+                    type="text"
+                    value={newMessage}
+                    onChange={(e) => setNewMessage(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && sendMessage(newMessage)}
+                    placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Type a message...'}
+                    className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-blue-500/50"
+                    dir={rtl ? 'rtl' : 'ltr'}
+                  />
+                  <button 
+                    onClick={() => sendMessage(newMessage)}
+                    disabled={!newMessage.trim() || sendingMessage}
+                    className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center disabled:opacity-50 hover:bg-blue-500 transition-all"
+                  >
+                    {sendingMessage ? <Loader2 className="w-5 h-5 animate-spin" /> : <ChevronRight className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* AUTH */}
           {view === 'auth' && (
             <div className="space-y-6 pt-4">
@@ -1373,7 +1705,7 @@ export default function GetWorth() {
               { id: 'home', icon: Home },
               { id: 'browse', icon: Search },
               { id: 'sell', icon: ShoppingBag },
-              { id: 'saved', icon: Heart },
+              { id: 'messages', icon: MessageCircle },
               { id: 'profile', icon: User }
             ].map(n => (
               <button 
@@ -1385,15 +1717,15 @@ export default function GetWorth() {
                   <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" />
                 )}
                 <div className={`relative transition-transform ${tab === n.id ? 'scale-110' : ''}`}>
-                  <n.icon className={`w-6 h-6 ${n.id === 'saved' && savedItems.length > 0 && tab !== 'saved' ? 'text-red-400' : ''}`} />
+                  <n.icon className={`w-6 h-6 ${n.id === 'messages' && unreadCount > 0 && tab !== 'messages' ? 'text-blue-400' : ''}`} />
                   {n.id === 'sell' && myListings.length > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-blue-400 text-[9px] flex items-center justify-center font-bold">{myListings.length}</span>
                   )}
-                  {n.id === 'saved' && savedItems.length > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold">{savedItems.length}</span>
+                  {n.id === 'messages' && unreadCount > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold">{unreadCount}</span>
                   )}
                 </div>
-                <span className="text-[10px] font-medium">{t[n.id]}</span>
+                <span className="text-[10px] font-medium">{n.id === 'messages' ? (lang === 'he' ? 'הודעות' : 'Chat') : t[n.id]}</span>
               </button>
             ))}
           </div>
