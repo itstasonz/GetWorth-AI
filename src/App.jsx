@@ -79,18 +79,18 @@ const Badge = ({ children, color = 'blue' }) => (
 
 // Sample items for home page showcase (demo purposes)
 const SAMPLE_ITEMS = [
-  { id: 's1', title: 'PlayStation 5', title_hebrew: 'פלייסטיישן 5', price: 1800, condition: 'likeNew', location: 'Tel Aviv', seller: { full_name: 'David Cohen' }, images: ['https://images.unsplash.com/photo-1606813907291-d86efa9b94db?w=400&q=80'] },
-  { id: 's2', title: 'Rolex Submariner', title_hebrew: 'רולקס סאבמרינר', price: 45000, condition: 'used', location: 'Herzliya', seller: { full_name: 'Michael Levy' }, images: ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&q=80'] },
-  { id: 's3', title: 'Dior Sauvage Perfume', title_hebrew: 'בושם דיור סוואג׳', price: 350, condition: 'newSealed', location: 'Ramat Gan', seller: { full_name: 'Sarah Israeli' }, images: ['https://images.unsplash.com/photo-1541643600914-78b084683601?w=400&q=80'] },
-  { id: 's4', title: 'Electric Bicycle', title_hebrew: 'אופניים חשמליים', price: 4500, condition: 'used', location: 'Haifa', seller: { full_name: 'Yossi Mizrahi' }, images: ['https://images.unsplash.com/photo-1571068316344-75bc76f77890?w=400&q=80'] },
-  { id: 's5', title: 'MacBook Pro M3', title_hebrew: 'מקבוק פרו M3', price: 8500, condition: 'likeNew', location: 'Tel Aviv', seller: { full_name: 'Noa Shapira' }, images: ['https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&q=80'] },
-  { id: 's6', title: 'Dining Table Oak', title_hebrew: 'שולחן אוכל אלון', price: 2800, condition: 'used', location: 'Netanya', seller: { full_name: 'Amit Goldstein' }, images: ['https://images.unsplash.com/photo-1617806118233-18e1de247200?w=400&q=80'] },
-  { id: 's7', title: 'iPhone 15 Pro Max', title_hebrew: 'אייפון 15 פרו מקס', price: 4200, condition: 'newSealed', location: 'Jerusalem', seller: { full_name: 'Oren Azulay' }, images: ['https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&q=80'] },
-  { id: 's8', title: 'Nike Air Jordan 1', title_hebrew: 'נייק אייר ג׳ורדן 1', price: 890, condition: 'newSealed', location: 'Rishon', seller: { full_name: 'Maya Peretz' }, images: ['https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80'] },
-  { id: 's9', title: 'Sony 65" 4K TV', title_hebrew: 'טלוויזיה סוני 65 אינץ׳', price: 3200, condition: 'likeNew', location: 'Ashdod', seller: { full_name: 'Eli Biton' }, images: ['https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=400&q=80'] },
-  { id: 's10', title: 'DJI Mavic 3 Drone', title_hebrew: 'רחפן DJI מאוויק 3', price: 5500, condition: 'used', location: 'Beer Sheva', seller: { full_name: 'Tal Amir' }, images: ['https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=400&q=80'] },
-  { id: 's11', title: 'Leather Sofa', title_hebrew: 'ספה עור', price: 4800, condition: 'used', location: 'Petah Tikva', seller: { full_name: 'Dana Katz' }, images: ['https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&q=80'] },
-  { id: 's12', title: 'Canon EOS R5', title_hebrew: 'מצלמת קנון R5', price: 12000, condition: 'likeNew', location: 'Tel Aviv', seller: { full_name: 'Ran Levi' }, images: ['https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&q=80'] },
+  { id: 's1', title: 'PlayStation 5', title_hebrew: 'פלייסטיישן 5', price: 1800, condition: 'likeNew', location: 'Tel Aviv', description: 'PS5 Digital Edition, barely used. Comes with 2 controllers and 3 games. Perfect condition, selling because upgrading to Pro.', description_hebrew: 'PS5 דיגיטלי, כמעט לא בשימוש. מגיע עם 2 שלטים ו-3 משחקים. מצב מושלם.', views: 245, created_at: new Date(Date.now() - 2*24*60*60*1000).toISOString(), seller: { full_name: 'David Cohen', badge: 'trustedSeller', rating: 4.8, is_verified: true, total_sales: 23 }, images: ['https://images.unsplash.com/photo-1606813907291-d86efa9b94db?w=400&q=80'], contact_phone: '050-1234567' },
+  { id: 's2', title: 'Rolex Submariner', title_hebrew: 'רולקס סאבמרינר', price: 45000, condition: 'used', location: 'Herzliya', description: 'Authentic Rolex Submariner Date, 2019 model. Full set with box and papers. Recently serviced.', description_hebrew: 'רולקס סאבמרינר מקורי, דגם 2019. סט מלא עם קופסה ותעודות.', views: 892, created_at: new Date(Date.now() - 5*24*60*60*1000).toISOString(), seller: { full_name: 'Michael Levy', badge: 'eliteSeller', rating: 4.9, is_verified: true, total_sales: 156 }, images: ['https://images.unsplash.com/photo-1523275335684-37898b6baf30?w=400&q=80'], contact_phone: '052-9876543' },
+  { id: 's3', title: 'Dior Sauvage Perfume', title_hebrew: 'בושם דיור סוואג׳', price: 350, condition: 'newSealed', location: 'Ramat Gan', description: 'Brand new sealed Dior Sauvage EDP 100ml. Got as gift, already have one.', description_hebrew: 'דיור סוואג׳ חדש באריזה סגורה 100 מ״ל. קיבלתי במתנה, כבר יש לי.', views: 67, created_at: new Date(Date.now() - 1*24*60*60*1000).toISOString(), seller: { full_name: 'Sarah Israeli', badge: 'newSeller', rating: 5.0, is_verified: false, total_sales: 2 }, images: ['https://images.unsplash.com/photo-1541643600914-78b084683601?w=400&q=80'], contact_phone: '054-5551234' },
+  { id: 's4', title: 'Electric Bicycle', title_hebrew: 'אופניים חשמליים', price: 4500, condition: 'used', location: 'Haifa', description: 'Xiaomi Mi Electric Scooter Pro 2. 45km range, top speed 25km/h. Minor scratches but works perfectly.', description_hebrew: 'קורקינט חשמלי שיאומי פרו 2. טווח 45 ק״מ. שריטות קלות אבל עובד מצוין.', views: 312, created_at: new Date(Date.now() - 3*24*60*60*1000).toISOString(), seller: { full_name: 'Yossi Mizrahi', badge: 'trustedSeller', rating: 4.6, is_verified: true, total_sales: 18 }, images: ['https://images.unsplash.com/photo-1571068316344-75bc76f77890?w=400&q=80'], contact_phone: '050-7778899' },
+  { id: 's5', title: 'MacBook Pro M3', title_hebrew: 'מקבוק פרו M3', price: 8500, condition: 'likeNew', location: 'Tel Aviv', description: 'MacBook Pro 14" M3 Pro, 18GB RAM, 512GB SSD. AppleCare+ until 2026. Like new condition.', description_hebrew: 'מקבוק פרו 14 אינץ׳ M3 פרו. AppleCare עד 2026. מצב כמו חדש.', views: 534, created_at: new Date(Date.now() - 4*24*60*60*1000).toISOString(), seller: { full_name: 'Noa Shapira', badge: 'topSeller', rating: 4.9, is_verified: true, total_sales: 67 }, images: ['https://images.unsplash.com/photo-1517336714731-489689fd1ca8?w=400&q=80'], contact_phone: '053-1112233' },
+  { id: 's6', title: 'Dining Table Oak', title_hebrew: 'שולחן אוכל אלון', price: 2800, condition: 'used', location: 'Netanya', description: 'Solid oak dining table, seats 6-8 people. Some minor wear but very sturdy. Moving sale!', description_hebrew: 'שולחן אוכל אלון מלא, 6-8 סועדים. בלאי קל אבל יציב מאוד. מכירת מעבר דירה!', views: 156, created_at: new Date(Date.now() - 7*24*60*60*1000).toISOString(), seller: { full_name: 'Amit Goldstein', badge: 'newSeller', rating: 4.5, is_verified: false, total_sales: 5 }, images: ['https://images.unsplash.com/photo-1617806118233-18e1de247200?w=400&q=80'], contact_phone: '058-4445566' },
+  { id: 's7', title: 'iPhone 15 Pro Max', title_hebrew: 'אייפון 15 פרו מקס', price: 4200, condition: 'newSealed', location: 'Jerusalem', description: 'iPhone 15 Pro Max 256GB Natural Titanium. New sealed in box. Israeli warranty.', description_hebrew: 'אייפון 15 פרו מקס 256GB טיטניום. חדש באריזה סגורה. אחריות ישראלית.', views: 723, created_at: new Date(Date.now() - 1*24*60*60*1000).toISOString(), seller: { full_name: 'Oren Azulay', badge: 'eliteSeller', rating: 5.0, is_verified: true, total_sales: 234 }, images: ['https://images.unsplash.com/photo-1695048133142-1a20484d2569?w=400&q=80'], contact_phone: '052-8889900' },
+  { id: 's8', title: 'Nike Air Jordan 1', title_hebrew: 'נייק אייר ג׳ורדן 1', price: 890, condition: 'newSealed', location: 'Rishon LeZion', description: 'Air Jordan 1 Retro High OG "Chicago" Size 42. Deadstock, never worn. Receipt available.', description_hebrew: 'אייר ג׳ורדן 1 רטרו שיקגו מידה 42. חדש לגמרי, מעולם לא נלבש.', views: 445, created_at: new Date(Date.now() - 2*24*60*60*1000).toISOString(), seller: { full_name: 'Maya Peretz', badge: 'trustedSeller', rating: 4.7, is_verified: true, total_sales: 31 }, images: ['https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80'], contact_phone: '054-2223344' },
+  { id: 's9', title: 'Sony 65" 4K TV', title_hebrew: 'טלוויזיה סוני 65 אינץ׳', price: 3200, condition: 'likeNew', location: 'Ashdod', description: 'Sony Bravia XR 65" 4K OLED TV. Stunning picture quality. 1 year old, selling due to relocation.', description_hebrew: 'טלוויזיית סוני בראביה 65 אינץ׳ OLED 4K. איכות תמונה מדהימה. בת שנה.', views: 287, created_at: new Date(Date.now() - 6*24*60*60*1000).toISOString(), seller: { full_name: 'Eli Biton', badge: 'trustedSeller', rating: 4.8, is_verified: true, total_sales: 42 }, images: ['https://images.unsplash.com/photo-1593359677879-a4bb92f829d1?w=400&q=80'], contact_phone: '050-6667788' },
+  { id: 's10', title: 'DJI Mavic 3 Drone', title_hebrew: 'רחפן DJI מאוויק 3', price: 5500, condition: 'used', location: 'Beer Sheva', description: 'DJI Mavic 3 Fly More Combo. 15 flight hours. Includes extra batteries and ND filters.', description_hebrew: 'DJI מאוויק 3 קומבו. 15 שעות טיסה. כולל סוללות נוספות ופילטרים.', views: 198, created_at: new Date(Date.now() - 4*24*60*60*1000).toISOString(), seller: { full_name: 'Tal Amir', badge: 'topSeller', rating: 4.9, is_verified: true, total_sales: 89 }, images: ['https://images.unsplash.com/photo-1473968512647-3e447244af8f?w=400&q=80'], contact_phone: '053-9990011' },
+  { id: 's11', title: 'Leather Sofa', title_hebrew: 'ספה עור', price: 4800, condition: 'used', location: 'Petah Tikva', description: 'Italian leather 3-seater sofa in cognac brown. Very comfortable. Some patina adds character.', description_hebrew: 'ספת עור איטלקי 3 מושבים בצבע קוניאק. נוחה מאוד. פטינה מוסיפה אופי.', views: 134, created_at: new Date(Date.now() - 8*24*60*60*1000).toISOString(), seller: { full_name: 'Dana Katz', badge: 'newSeller', rating: 4.3, is_verified: false, total_sales: 3 }, images: ['https://images.unsplash.com/photo-1555041469-a586c61ea9bc?w=400&q=80'], contact_phone: '058-1234567' },
+  { id: 's12', title: 'Canon EOS R5', title_hebrew: 'מצלמת קנון R5', price: 12000, condition: 'likeNew', location: 'Tel Aviv', description: 'Canon EOS R5 body with 24-105mm f/4L lens. Low shutter count (5k). Perfect for professionals.', description_hebrew: 'Canon EOS R5 גוף עם עדשה 24-105. ספירת שאטר נמוכה. מושלם לצלמים מקצועיים.', views: 412, created_at: new Date(Date.now() - 3*24*60*60*1000).toISOString(), seller: { full_name: 'Ran Levi', badge: 'eliteSeller', rating: 5.0, is_verified: true, total_sales: 178 }, images: ['https://images.unsplash.com/photo-1516035069371-29a1b244cc32?w=400&q=80'], contact_phone: '052-3334455' },
 ];
 
 export default function GetWorth() {
@@ -593,7 +593,7 @@ export default function GetWorth() {
                     {[...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4), ...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)].map((item, i) => (
                       <div 
                         key={`row1-${item.id}-${i}`} 
-                        onClick={() => !item.id.startsWith('s') && viewItem(item)}
+                        onClick={() => viewItem(item)}
                         className="flex-shrink-0 w-40 cursor-pointer group"
                       >
                         <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-blue-500/50 shadow-lg shadow-black/20">
@@ -636,7 +636,7 @@ export default function GetWorth() {
                     {[...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8), ...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)].map((item, i) => (
                       <div 
                         key={`row2-${item.id}-${i}`} 
-                        onClick={() => !item.id.startsWith('s') && viewItem(item)}
+                        onClick={() => viewItem(item)}
                         className="flex-shrink-0 w-40 cursor-pointer group"
                       >
                         <div className="relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 group-hover:border-green-500/50 shadow-lg shadow-black/20">
@@ -878,6 +878,7 @@ export default function GetWorth() {
           {/* DETAIL */}
           {view === 'detail' && selected && (
             <div className="space-y-5 -mx-5 -mt-4">
+              {/* Image */}
               <div className="relative">
                 <div className="aspect-square">
                   <img src={selected.images?.[0]} className="w-full h-full object-cover" />
@@ -885,31 +886,117 @@ export default function GetWorth() {
                 <div className="absolute inset-0 bg-gradient-to-t from-[#060a14] via-transparent to-[#060a14]/50" />
                 
                 <button 
-                  onClick={() => { setSelected(null); setView('browse'); }} 
+                  onClick={() => { setSelected(null); setView(tab === 'home' ? 'home' : 'browse'); }} 
                   className={`absolute top-4 ${rtl ? 'right-4' : 'left-4'} w-12 h-12 rounded-2xl bg-black/30 backdrop-blur-md flex items-center justify-center hover:bg-black/50 transition-all`}
                 >
                   {rtl ? <ChevronRight className="w-6 h-6" /> : <ChevronLeft className="w-6 h-6" />}
                 </button>
                 
                 <button 
-                  onClick={() => toggleSave(selected)} 
+                  onClick={() => !selected.id?.startsWith('s') && toggleSave(selected)} 
                   className={`absolute top-4 ${rtl ? 'left-4' : 'right-4'} w-12 h-12 rounded-2xl flex items-center justify-center transition-all backdrop-blur-md ${savedIds.has(selected.id) ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'}`}
                 >
                   <Heart className={`w-6 h-6 ${savedIds.has(selected.id) ? 'fill-current' : ''}`} />
                 </button>
+
+                {/* Condition badge on image */}
+                {selected.condition && (
+                  <div className={`absolute bottom-4 ${rtl ? 'right-4' : 'left-4'} px-3 py-1.5 rounded-xl text-xs font-bold uppercase backdrop-blur-md ${
+                    selected.condition === 'newSealed' ? 'bg-emerald-500/90' : 
+                    selected.condition === 'likeNew' ? 'bg-blue-500/90' : 
+                    selected.condition === 'used' ? 'bg-amber-500/90' : 'bg-red-500/90'
+                  }`}>
+                    {selected.condition === 'newSealed' ? (lang === 'he' ? '✨ חדש' : '✨ New') : 
+                     selected.condition === 'likeNew' ? (lang === 'he' ? 'כמו חדש' : 'Like New') : 
+                     selected.condition === 'used' ? (lang === 'he' ? 'משומש' : 'Used') : (lang === 'he' ? 'משומש מאוד' : 'Fair')}
+                  </div>
+                )}
               </div>
 
-              <div className="px-5 space-y-5">
-                <FadeIn>
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Badge>{selected.category}</Badge>
-                        <span className="text-xs text-slate-500 flex items-center gap-1">
-                          <Eye className="w-3.5 h-3.5" />{selected.views || 0} {t.views}
-                        </span>
+              <div className="px-5 space-y-4">
+                {/* Seller Profile Card - At Top */}
+                {selected.seller && (
+                  <FadeIn>
+                    <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.05))">
+                      <div className="flex items-center gap-4">
+                        {/* Seller Avatar */}
+                        <div className="relative">
+                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-lg ${
+                            selected.seller.badge === 'eliteSeller' ? 'bg-gradient-to-br from-yellow-500 to-amber-600 shadow-yellow-500/30' :
+                            selected.seller.badge === 'topSeller' ? 'bg-gradient-to-br from-purple-500 to-pink-600 shadow-purple-500/30' :
+                            selected.seller.badge === 'trustedSeller' ? 'bg-gradient-to-br from-blue-500 to-blue-600 shadow-blue-500/30' :
+                            'bg-gradient-to-br from-slate-500 to-slate-600 shadow-slate-500/30'
+                          }`}>
+                            {selected.seller.full_name?.charAt(0) || 'S'}
+                          </div>
+                          {selected.seller.is_verified && (
+                            <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center border-2 border-[#060a14]">
+                              <Check className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* Seller Info */}
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-lg">{selected.seller.full_name || 'Seller'}</span>
+                            {selected.seller.is_verified && <Shield className="w-4 h-4 text-blue-400" />}
+                          </div>
+                          
+                          {/* Seller Badge */}
+                          <div className="flex items-center gap-2 mt-1">
+                            {selected.seller.badge && (
+                              <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase ${
+                                selected.seller.badge === 'eliteSeller' ? 'bg-yellow-500/20 text-yellow-400' :
+                                selected.seller.badge === 'topSeller' ? 'bg-purple-500/20 text-purple-400' :
+                                selected.seller.badge === 'trustedSeller' ? 'bg-blue-500/20 text-blue-400' :
+                                'bg-slate-500/20 text-slate-400'
+                              }`}>
+                                {selected.seller.badge === 'eliteSeller' ? (lang === 'he' ? '⭐ מוכר עילית' : '⭐ Elite Seller') :
+                                 selected.seller.badge === 'topSeller' ? (lang === 'he' ? '🏆 מוכר מוביל' : '🏆 Top Seller') :
+                                 selected.seller.badge === 'trustedSeller' ? (lang === 'he' ? '✓ מוכר מאומת' : '✓ Trusted') :
+                                 (lang === 'he' ? '🆕 מוכר חדש' : '🆕 New Seller')}
+                              </span>
+                            )}
+                          </div>
+                          
+                          {/* Rating & Sales */}
+                          <div className="flex items-center gap-3 mt-2">
+                            {selected.seller.rating && (
+                              <div className="flex items-center gap-1">
+                                <Star className="w-4 h-4 text-yellow-400 fill-current" />
+                                <span className="text-sm font-semibold">{selected.seller.rating}</span>
+                              </div>
+                            )}
+                            {selected.seller.total_sales > 0 && (
+                              <div className="flex items-center gap-1 text-slate-400">
+                                <ShoppingBag className="w-3.5 h-3.5" />
+                                <span className="text-xs">{selected.seller.total_sales} {lang === 'he' ? 'מכירות' : 'sales'}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <h1 className="text-2xl font-bold">{lang === 'he' && selected.title_hebrew ? selected.title_hebrew : selected.title}</h1>
+                    </Card>
+                  </FadeIn>
+                )}
+
+                {/* Item Title & Price */}
+                <FadeIn delay={50}>
+                  <div>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {selected.category && <Badge>{selected.category}</Badge>}
+                      <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <Eye className="w-3.5 h-3.5" />{selected.views || 0} {lang === 'he' ? 'צפיות' : 'views'}
+                      </span>
+                      <span className="text-xs text-slate-500 flex items-center gap-1">
+                        <Clock className="w-3.5 h-3.5" />{timeAgo(selected.created_at)}
+                      </span>
+                    </div>
+                    <h1 className="text-2xl font-bold">{lang === 'he' && selected.title_hebrew ? selected.title_hebrew : selected.title}</h1>
+                    <div className="flex items-center gap-2 mt-1">
+                      <MapPin className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm text-slate-400">{selected.location}</span>
                     </div>
                   </div>
                   <p className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent mt-3">
@@ -917,49 +1004,26 @@ export default function GetWorth() {
                   </p>
                 </FadeIn>
 
-                {selected.description && (
+                {/* Description */}
+                {(selected.description || selected.description_hebrew) && (
                   <FadeIn delay={100}>
                     <Card className="p-5">
                       <h3 className="font-semibold mb-3 flex items-center gap-2">
-                        <Package className="w-5 h-5 text-blue-400" />{t.desc}
+                        <Package className="w-5 h-5 text-blue-400" />{lang === 'he' ? 'תיאור' : 'Description'}
                       </h3>
-                      <p className="text-sm text-slate-300 leading-relaxed">{selected.description}</p>
+                      <p className="text-sm text-slate-300 leading-relaxed">
+                        {lang === 'he' && selected.description_hebrew ? selected.description_hebrew : selected.description}
+                      </p>
                     </Card>
                   </FadeIn>
                 )}
 
-                {selected.seller && (
-                  <FadeIn delay={150}>
-                    <Card className="p-5">
-                      <h3 className="font-semibold mb-4 flex items-center gap-2">
-                        <User className="w-5 h-5 text-blue-400" />{t.seller}
-                      </h3>
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-2xl font-bold shadow-lg shadow-blue-500/30">
-                          {selected.seller.full_name?.charAt(0) || 'S'}
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-lg">{selected.seller.full_name || 'Seller'}</span>
-                            {selected.seller.is_verified && <Shield className="w-5 h-5 text-blue-400" />}
-                          </div>
-                          {selected.seller.rating && (
-                            <div className="flex items-center gap-1 text-sm text-slate-400 mt-1">
-                              <Star className="w-4 h-4 text-yellow-400 fill-current" />
-                              <span>{selected.seller.rating}</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </Card>
-                  </FadeIn>
-                )}
-
-                <FadeIn delay={200} className="flex gap-3 pb-6">
+                {/* Contact Buttons */}
+                <FadeIn delay={150} className="flex gap-3 pb-6">
                   <Btn primary className="flex-1 py-4" onClick={contactSeller}>
-                    <MessageCircle className="w-5 h-5" />{t.contact}
+                    <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
                   </Btn>
-                  <Btn onClick={() => toggleSave(selected)} className="px-5">
+                  <Btn onClick={() => !selected.id?.startsWith('s') && toggleSave(selected)} className="px-5">
                     <Heart className={`w-5 h-5 ${savedIds.has(selected.id) ? 'fill-current text-red-400' : ''}`} />
                   </Btn>
                 </FadeIn>
