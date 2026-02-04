@@ -136,31 +136,50 @@ export default function GetWorth() {
   const t = T[lang];
   const rtl = lang === 'he';
 
-  // Auth
+  // Auth - with timeout to prevent infinite loading
   useEffect(() => {
     let mounted = true;
+    
+    // Force loading to false after 3 seconds max
+    const timeout = setTimeout(() => {
+      if (mounted) setLoading(false);
+    }, 3000);
+    
     const init = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (mounted && session?.user) {
           setUser(session.user);
-          const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-          if (mounted && data) setProfile(data);
+          try {
+            const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+            if (mounted && data) setProfile(data);
+          } catch (e) { console.log('Profile fetch error:', e); }
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { 
+        console.log('Auth init error:', e); 
+      }
       if (mounted) setLoading(false);
     };
+    
     init();
+    
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
       if (session?.user) {
         setUser(session.user);
-        const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-        if (data) setProfile(data);
+        try {
+          const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+          if (data) setProfile(data);
+        } catch (e) { console.log('Profile fetch error:', e); }
         if (event === 'SIGNED_IN' && view === 'auth') { setView('profile'); setTab('profile'); }
       } else { setUser(null); setProfile(null); }
     });
-    return () => { mounted = false; subscription.unsubscribe(); };
+    
+    return () => { 
+      mounted = false; 
+      clearTimeout(timeout);
+      subscription.unsubscribe(); 
+    };
   }, []);
 
   // Debounce search input
