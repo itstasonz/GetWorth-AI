@@ -77,6 +77,21 @@ const Badge = ({ children, color = 'blue' }) => (
   </span>
 );
 
+// InputField moved outside component to prevent re-creation on every render
+const InputField = ({ label, icon: Icon, rtl, ...p }) => (
+  <div className="space-y-2">
+    {label && <label className="text-sm text-slate-400 font-medium">{label}</label>}
+    <div className="relative">
+      {Icon && <Icon className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />}
+      <input 
+        className={`w-full px-4 py-4 ${Icon ? (rtl ? 'pr-12' : 'pl-12') : ''} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all`}
+        dir={rtl ? 'rtl' : 'ltr'} 
+        {...p} 
+      />
+    </div>
+  </div>
+);
+
 // Sample items for home page showcase (demo purposes)
 const SAMPLE_ITEMS = [
   { id: 's1', title: 'PlayStation 5', title_hebrew: 'פלייסטיישן 5', price: 1800, condition: 'likeNew', location: 'Tel Aviv', description: 'PS5 Digital Edition, barely used. Comes with 2 controllers and 3 games. Perfect condition, selling because upgrading to Pro.', description_hebrew: 'PS5 דיגיטלי, כמעט לא בשימוש. מגיע עם 2 שלטים ו-3 משחקים. מצב מושלם.', views: 245, created_at: new Date(Date.now() - 2*24*60*60*1000).toISOString(), seller: { full_name: 'David Cohen', badge: 'trustedSeller', rating: 4.8, is_verified: true, total_sales: 23 }, images: ['https://images.unsplash.com/photo-1606813907291-d86efa9b94db?w=400&q=80'], contact_phone: '050-1234567' },
@@ -510,19 +525,7 @@ export default function GetWorth() {
   };
 
   // Input component - kept inside for rtl access but simplified
-  const InputField = ({ label, icon: Icon, ...p }) => (
-    <div className="space-y-2">
-      {label && <label className="text-sm text-slate-400 font-medium">{label}</label>}
-      <div className="relative">
-        {Icon && <Icon className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />}
-        <input 
-          className={`w-full px-4 py-4 ${Icon ? (rtl ? 'pr-12' : 'pl-12') : ''} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all`}
-          dir={rtl ? 'rtl' : 'ltr'} 
-          {...p} 
-        />
-      </div>
-    </div>
-  );
+
 
   const Back = ({ onClick }) => (
     <button onClick={onClick} className="flex items-center gap-2 text-slate-400 hover:text-white mb-6 transition-all group">
@@ -1510,9 +1513,9 @@ export default function GetWorth() {
 
               <FadeIn delay={200}>
                 <form onSubmit={signInEmail} className="space-y-4">
-                  {authMode === 'signup' && <InputField label={t.name} icon={User} value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} />}
-                  <InputField label={t.email} type="email" value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required />
-                  <InputField label={t.password} type="password" value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required />
+                  {authMode === 'signup' && <InputField label={t.name} icon={User} rtl={rtl} value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} />}
+                  <InputField label={t.email} type="email" rtl={rtl} value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required />
+                  <InputField label={t.password} type="password" rtl={rtl} value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required />
                   <Btn primary className="w-full py-4">{authMode === 'login' ? t.signIn : t.signUp}</Btn>
                 </form>
               </FadeIn>
@@ -1715,7 +1718,7 @@ export default function GetWorth() {
                     <h2 className="text-2xl font-bold">{t.review}</h2>
                   </FadeIn>
                   <FadeIn delay={50}>
-                    <InputField label={t.title} value={listingData.title} onChange={(e) => setListingData({ ...listingData, title: e.target.value })} />
+                    <InputField label={t.title} rtl={rtl} value={listingData.title} onChange={(e) => setListingData({ ...listingData, title: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={100}>
                     <div className="space-y-2">
@@ -1742,10 +1745,10 @@ export default function GetWorth() {
                     </Card>
                   </FadeIn>
                   <FadeIn delay={200}>
-                    <InputField label={t.phone} icon={Phone} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} />
+                    <InputField label={t.phone} icon={Phone} rtl={rtl} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={250}>
-                    <InputField label={t.location} icon={MapPin} value={listingData.location} onChange={(e) => setListingData({ ...listingData, location: e.target.value })} />
+                    <InputField label={t.location} icon={MapPin} rtl={rtl} value={listingData.location} onChange={(e) => setListingData({ ...listingData, location: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={300}>
                     <Btn primary className="w-full py-4" onClick={publishListing} disabled={publishing}>
