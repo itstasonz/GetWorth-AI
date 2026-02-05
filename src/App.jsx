@@ -801,11 +801,18 @@ export default function GetWorth() {
     } catch { setError(t.cameraDenied); }
   };
 
+  // Ref to store captured image immediately (avoids React state batching delay)
+  const capturedImageRef = useRef(null);
+  const [showFlash, setShowFlash] = useState(false);
+
   const capture = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
     
     // Play shutter sound immediately
     playSound('shutter');
+    
+    // Show flash effect
+    setShowFlash(true);
     
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -817,28 +824,35 @@ export default function GetWorth() {
     ctx.drawImage(video, 0, 0);
     const img = canvas.toDataURL('image/jpeg', 0.85);
     
-    // Set image and view FIRST (this prevents black screen)
-    setImages([img]);
-    setView('analyzing');
+    // Store in ref immediately (sync) - this prevents black screen
+    capturedImageRef.current = img;
     
-    // Stop camera tracks AFTER state update (non-blocking)
-    requestAnimationFrame(() => {
-      video.srcObject?.getTracks().forEach(track => track.stop());
-    });
+    // Small delay for flash effect, then transition
+    setTimeout(() => {
+      setShowFlash(false);
+      setImages([img]);
+      setView('analyzing');
+      
+      // Stop camera tracks AFTER view change
+      setTimeout(() => {
+        video.srcObject?.getTracks().forEach(track => track.stop());
+      }, 100);
+      
+      // Start analysis
+      analyzeImage(img)
+        .then(r => { 
+          setResult(r); 
+          setView('results');
+          playSound('success');
+        })
+        .catch(() => { 
+          setError(t.failed); 
+          setView('home');
+          playSound('error');
+        });
+    }, 150); // Short delay for flash effect
     
-    // Start analysis
-    analyzeImage(img)
-      .then(r => { 
-        setResult(r); 
-        setView('results');
-        playSound('success'); // Play success sound when analysis completes
-      })
-      .catch(() => { 
-        setError(t.failed); 
-        setView('home');
-        playSound('error'); // Play error sound on failure
-      });
-  }, [lang, t.failed]);
+  }, [lang, t.failed, playSound]);
 
   const stopCamera = () => { videoRef.current?.srcObject?.getTracks().forEach(t => t.stop()); setView('home'); };
 
@@ -934,7 +948,17 @@ export default function GetWorth() {
     }
   };
 
-  const reset = () => { setImages([]); setResult(null); setView('home'); setError(null); setCondition(null); setListingStep(0); setSelected(null); setActiveChat(null); };
+  const reset = () => { 
+    setImages([]); 
+    setResult(null); 
+    setView('home'); 
+    setError(null); 
+    setCondition(null); 
+    setListingStep(0); 
+    setSelected(null); 
+    setActiveChat(null); 
+    capturedImageRef.current = null; 
+  };
   const goTab = (newTab) => { 
     setTab(newTab); 
     setSelected(null); 
@@ -1375,6 +1399,12 @@ export default function GetWorth() {
             <div className="fixed inset-0 z-50 bg-black">
               <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
               <canvas ref={canvasRef} className="hidden" />
+              
+              {/* Flash effect overlay */}
+              {showFlash && (
+                <div className="absolute inset-0 bg-white animate-flash z-50" />
+              )}
+              
               <div className="absolute inset-0 pointer-events-none">
                 <div className="absolute inset-8 rounded-3xl border-2 border-white/30" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' }} />
                 <div className="absolute top-10 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm text-sm">
@@ -1393,25 +1423,111 @@ export default function GetWorth() {
             </div>
           )}
 
-          {/* ANALYZING */}
+          {/* ANALYZING - Premium Animation */}
           {view === 'analyzing' && (
-            <div className="flex-1 flex flex-col items-center justify-center py-20">
+            <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
+              {/* Main container with image */}
               <div className="relative">
-                <div className="absolute -inset-8 bg-blue-500/20 rounded-full blur-3xl animate-pulse" />
-                <div className="absolute -inset-4 bg-gradient-to-r from-blue-500 to-purple-500 rounded-3xl animate-spin-slow opacity-30" style={{ animationDuration: '4s' }} />
-                <div className="relative w-48 h-48 rounded-3xl overflow-hidden border-2 border-blue-500/50 shadow-2xl shadow-blue-500/30">
-                  {images[0] && <img src={images[0]} className="w-full h-full object-cover" />}
+                {/* Outer glow rings */}
+                <div className="absolute -inset-12 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-cyan-500/20 rounded-full blur-3xl animate-pulse" />
+                <div className="absolute -inset-8 bg-blue-500/10 rounded-full blur-2xl animate-ping" style={{ animationDuration: '2s' }} />
+                
+                {/* Rotating border ring */}
+                <div className="absolute -inset-3 rounded-[2rem] bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 animate-spin-slow opacity-70" style={{ animationDuration: '3s' }} />
+                <div className="absolute -inset-2.5 rounded-[1.8rem] bg-[#0a1020]" />
+                
+                {/* Image container */}
+                <div className="relative w-56 h-56 rounded-3xl overflow-hidden shadow-2xl shadow-blue-500/40">
+                  {/* Show captured image from ref or state */}
+                  {(capturedImageRef.current || images[0]) && (
+                    <img 
+                      src={capturedImageRef.current || images[0]} 
+                      className="w-full h-full object-cover" 
+                      alt="Captured item"
+                    />
+                  )}
+                  
+                  {/* Scanning line effect */}
+                  <div className="absolute inset-0 overflow-hidden">
+                    <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent animate-scan" />
+                  </div>
+                  
+                  {/* Corner brackets */}
+                  <div className="absolute inset-0 pointer-events-none">
+                    <svg className="absolute top-2 left-2 w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 8V4h4M4 16v4h4" />
+                    </svg>
+                    <svg className="absolute top-2 right-2 w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 8V4h-4M20 16v4h-4" />
+                    </svg>
+                    <svg className="absolute bottom-2 left-2 w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M4 8V4h4M4 16v4h4" />
+                    </svg>
+                    <svg className="absolute bottom-2 right-2 w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M20 8V4h-4M20 16v4h-4" />
+                    </svg>
+                  </div>
+                  
+                  {/* Overlay shimmer */}
+                  <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer-fast" />
+                </div>
+                
+                {/* Floating particles */}
+                <div className="absolute -inset-8 pointer-events-none">
+                  {[...Array(6)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="absolute w-2 h-2 rounded-full bg-blue-400 animate-float"
+                      style={{
+                        left: `${20 + (i * 15)}%`,
+                        top: `${10 + (i % 3) * 30}%`,
+                        animationDelay: `${i * 0.3}s`,
+                        animationDuration: `${2 + (i % 2)}s`
+                      }}
+                    />
+                  ))}
                 </div>
               </div>
-              <div className="mt-10 text-center space-y-4">
-                <div className="flex items-center gap-3 justify-center">
-                  <Loader2 className="w-6 h-6 text-blue-400 animate-spin" />
-                  <span className="text-lg font-medium">{t.analyzing}</span>
+              
+              {/* Status text and progress */}
+              <div className="mt-10 text-center space-y-5">
+                {/* AI Badge */}
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/30">
+                  <Sparkles className="w-4 h-4 text-blue-400 animate-pulse" />
+                  <span className="text-sm font-semibold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                    {lang === 'he' ? 'AI מנתח' : 'AI Analyzing'}
+                  </span>
                 </div>
-                <div className="flex gap-1.5 justify-center">
-                  {[0, 1, 2].map(i => (
-                    <div key={i} className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: `${i * 150}ms` }} />
-                  ))}
+                
+                {/* Main text */}
+                <div>
+                  <h3 className="text-xl font-bold text-white mb-1">{t.analyzing}</h3>
+                  <p className="text-sm text-slate-400">
+                    {lang === 'he' ? 'מזהה פריט וחוקר שוק...' : 'Identifying item & researching market...'}
+                  </p>
+                </div>
+                
+                {/* Progress bar */}
+                <div className="w-48 mx-auto">
+                  <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 rounded-full animate-progress" />
+                  </div>
+                </div>
+                
+                {/* Animated steps */}
+                <div className="flex items-center justify-center gap-6 text-xs text-slate-500">
+                  <div className="flex items-center gap-1.5 animate-pulse">
+                    <Scan className="w-3.5 h-3.5 text-blue-400" />
+                    <span>{lang === 'he' ? 'סריקה' : 'Scanning'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 animate-pulse" style={{ animationDelay: '0.5s' }}>
+                    <Search className="w-3.5 h-3.5 text-purple-400" />
+                    <span>{lang === 'he' ? 'חיפוש' : 'Matching'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 animate-pulse" style={{ animationDelay: '1s' }}>
+                    <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>{lang === 'he' ? 'הערכה' : 'Pricing'}</span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2295,9 +2411,31 @@ export default function GetWorth() {
         @keyframes shimmer {
           100% { transform: translateX(100%); }
         }
+        @keyframes shimmer-fast {
+          0% { transform: translateX(-100%); }
+          100% { transform: translateX(100%); }
+        }
         @keyframes spin-slow {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
+        }
+        @keyframes scan {
+          0% { top: 0%; opacity: 1; }
+          50% { opacity: 0.5; }
+          100% { top: 100%; opacity: 1; }
+        }
+        @keyframes progress {
+          0% { width: 0%; }
+          50% { width: 70%; }
+          100% { width: 100%; }
+        }
+        @keyframes float {
+          0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; }
+          50% { transform: translateY(-15px) scale(1.2); opacity: 1; }
+        }
+        @keyframes flash {
+          0% { opacity: 0.9; }
+          100% { opacity: 0; }
         }
         @keyframes marquee-left {
           0% { transform: translateX(0); }
@@ -2314,7 +2452,12 @@ export default function GetWorth() {
         .animate-toastIn { animation: toastIn 0.3s ease-out forwards; }
         .animate-heartPop { animation: heartPop 0.6s ease-in-out; }
         .animate-shimmer { animation: shimmer 2s infinite; }
+        .animate-shimmer-fast { animation: shimmer-fast 1.5s infinite; }
         .animate-spin-slow { animation: spin-slow 4s linear infinite; }
+        .animate-scan { animation: scan 2s ease-in-out infinite; }
+        .animate-progress { animation: progress 3s ease-in-out infinite; }
+        .animate-float { animation: float 2s ease-in-out infinite; }
+        .animate-flash { animation: flash 0.15s ease-out forwards; }
         .animate-marquee-left { animation: marquee-left 25s linear infinite; }
         .animate-marquee-right { animation: marquee-right 30s linear infinite; }
         .animate-marquee-left:hover, .animate-marquee-right:hover { animation-play-state: paused; }
