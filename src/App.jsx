@@ -1,6 +1,167 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { Camera, Upload, X, Sparkles, DollarSign, Package, Smartphone, Watch, ChevronRight, ChevronLeft, Loader2, ImagePlus, Share2, AlertCircle, Shirt, Dumbbell, Scan, User, LogOut, Plus, Trash2, Clock, Globe, Home, ShoppingBag, CheckCircle, Circle, Box, Shield, AlertTriangle, Eye, MessageCircle, Phone, Check, MapPin, Search, SlidersHorizontal, Heart, Grid, RefreshCw, Star, Zap, TrendingUp, Send, Navigation, LocateFixed } from 'lucide-react';
+import { Camera, Upload, X, Sparkles, DollarSign, Package, Smartphone, Watch, ChevronRight, ChevronLeft, Loader2, ImagePlus, Share2, AlertCircle, Shirt, Dumbbell, Scan, User, LogOut, Plus, Trash2, Clock, Globe, Home, ShoppingBag, CheckCircle, Circle, Box, Shield, AlertTriangle, Eye, MessageCircle, Phone, Check, MapPin, Search, SlidersHorizontal, Heart, Grid, RefreshCw, Star, Zap, TrendingUp, Send, Navigation, LocateFixed, Volume2, VolumeX } from 'lucide-react';
 import { supabase } from './lib/supabase';
+
+// Sound Effects using Web Audio API (no external files needed)
+const SoundEffects = {
+  audioContext: null,
+  
+  getContext() {
+    if (!this.audioContext) {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return this.audioContext;
+  },
+  
+  // Camera shutter sound
+  shutter() {
+    try {
+      const ctx = this.getContext();
+      const now = ctx.currentTime;
+      
+      // First click (mechanical sound)
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'square';
+      osc1.frequency.setValueAtTime(1800, now);
+      osc1.frequency.exponentialRampToValueAtTime(400, now + 0.03);
+      gain1.gain.setValueAtTime(0.3, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.03);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.03);
+      
+      // Second click (shutter close)
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'square';
+      osc2.frequency.setValueAtTime(1200, now + 0.05);
+      osc2.frequency.exponentialRampToValueAtTime(300, now + 0.08);
+      gain2.gain.setValueAtTime(0.2, now + 0.05);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now + 0.05);
+      osc2.stop(now + 0.1);
+      
+      // White noise burst for realism
+      const bufferSize = ctx.sampleRate * 0.02;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.1;
+      }
+      const noise = ctx.createBufferSource();
+      const noiseGain = ctx.createGain();
+      noise.buffer = buffer;
+      noiseGain.gain.setValueAtTime(0.15, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.01, now + 0.02);
+      noise.connect(noiseGain);
+      noiseGain.connect(ctx.destination);
+      noise.start(now);
+    } catch (e) { console.log('Sound error:', e); }
+  },
+  
+  // Success chime (for completed analysis & published)
+  success() {
+    try {
+      const ctx = this.getContext();
+      const now = ctx.currentTime;
+      
+      // Three ascending notes
+      const notes = [523.25, 659.25, 783.99]; // C5, E5, G5
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.1);
+        gain.gain.setValueAtTime(0, now + i * 0.1);
+        gain.gain.linearRampToValueAtTime(0.2, now + i * 0.1 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.2);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + i * 0.1);
+        osc.stop(now + i * 0.1 + 0.25);
+      });
+    } catch (e) { console.log('Sound error:', e); }
+  },
+  
+  // Coin/cha-ching sound (for listing published)
+  coin() {
+    try {
+      const ctx = this.getContext();
+      const now = ctx.currentTime;
+      
+      // High metallic ding
+      const osc1 = ctx.createOscillator();
+      const gain1 = ctx.createGain();
+      osc1.type = 'sine';
+      osc1.frequency.setValueAtTime(2637, now); // E7
+      osc1.frequency.setValueAtTime(3136, now + 0.08); // G7
+      gain1.gain.setValueAtTime(0.25, now);
+      gain1.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+      osc1.connect(gain1);
+      gain1.connect(ctx.destination);
+      osc1.start(now);
+      osc1.stop(now + 0.4);
+      
+      // Harmonic
+      const osc2 = ctx.createOscillator();
+      const gain2 = ctx.createGain();
+      osc2.type = 'sine';
+      osc2.frequency.setValueAtTime(5274, now); // E8
+      gain2.gain.setValueAtTime(0.1, now);
+      gain2.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+      osc2.connect(gain2);
+      gain2.connect(ctx.destination);
+      osc2.start(now);
+      osc2.stop(now + 0.2);
+    } catch (e) { console.log('Sound error:', e); }
+  },
+  
+  // Tap/click sound (for buttons)
+  tap() {
+    try {
+      const ctx = this.getContext();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, now);
+      osc.frequency.exponentialRampToValueAtTime(400, now + 0.05);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.05);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.05);
+    } catch (e) { console.log('Sound error:', e); }
+  },
+
+  // Error/fail sound
+  error() {
+    try {
+      const ctx = this.getContext();
+      const now = ctx.currentTime;
+      
+      // Two descending notes
+      const notes = [349.23, 261.63]; // F4, C4
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + i * 0.15);
+        gain.gain.setValueAtTime(0.2, now + i * 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.01, now + i * 0.15 + 0.2);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + i * 0.15);
+        osc.stop(now + i * 0.15 + 0.25);
+      });
+    } catch (e) { console.log('Sound error:', e); }
+  }
+};
 
 const T = {
   en: { appName: "GetWorth", tagline: "AI Valuation", aiPowered: "AI-Powered", heroTitle1: "Know Your", heroTitle2: "Item's Value", heroSub: "Snap or upload any item for instant AI valuation.", drop: "Drop image here", orButtons: "or use buttons below", scan: "Scan", upload: "Upload", analyzing: "Analyzing...", marketValue: "Market Value", range: "Range", listItem: "List This Item", scanAnother: "Scan Another", welcome: "Welcome back", createAcc: "Create account", signInAccess: "Sign in to access", join: "Join GetWorth", google: "Continue with Google", or: "or", name: "Full Name", email: "Email", password: "Password", signIn: "Sign In", signUp: "Sign Up", noAcc: "No account?", haveAcc: "Have account?", back: "Back", myListings: "My Listings", noListings: "No listings yet", home: "Home", browse: "Browse", sell: "Sell", saved: "Saved", profile: "Profile", condition: "Select Condition", newSealed: "New", likeNew: "Like New", used: "Used", poor: "Poor", yourPrice: "Your Price", more: "Tell Us More", scratches: "Scratches?", battery: "Battery?", issues: "Issues?", yes: "Yes", no: "No", good: "Good", degraded: "Degraded", continue: "Continue", review: "Review Listing", title: "Title", desc: "Description", phone: "Phone", location: "Location", publish: "Publish", publishing: "Publishing...", published: "Listed!", live: "Your item is live", view: "View", share: "Share", seller: "Seller", contact: "Contact", call: "Call", whatsapp: "WhatsApp", today: "today", yesterday: "yesterday", daysAgo: "d ago", noSaved: "No saved items", signInReq: "Sign In Required", signInSave: "Sign in to save", signInContact: "Sign in to contact", signInList: "Sign in to list", cancel: "Cancel", all: "All", phones: "Phones", watches: "Watches", clothing: "Clothing", furniture: "Furniture", sports: "Sports", filters: "Filters", clear: "Clear", min: "Min", max: "Max", results: "results", newest: "Newest", lowHigh: "Low-High", highLow: "High-Low", noResults: "No items found", failed: "Analysis failed", cameraDenied: "Camera access denied", verified: "Verified", views: "views", sales: "Sales" },
@@ -247,6 +408,16 @@ export default function GetWorth() {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef(null);
+  
+  // Sound settings
+  const [soundEnabled, setSoundEnabled] = useState(true);
+  
+  // Helper to play sounds (respects soundEnabled setting)
+  const playSound = useCallback((soundName) => {
+    if (soundEnabled && SoundEffects[soundName]) {
+      SoundEffects[soundName]();
+    }
+  }, [soundEnabled]);
 
   const t = T[lang];
   const rtl = lang === 'he';
@@ -591,6 +762,9 @@ export default function GetWorth() {
   const handleFile = useCallback((file) => {
     if (!file?.type.startsWith('image/')) return;
     
+    // Play tap sound for feedback
+    playSound('tap');
+    
     // Show analyzing state immediately with placeholder
     setView('analyzing');
     
@@ -602,10 +776,12 @@ export default function GetWorth() {
       try { 
         const r = await analyzeImage(imageData); 
         setResult(r); 
-        setView('results'); 
+        setView('results');
+        playSound('success'); // Success sound
       } catch { 
         setError(t.failed); 
-        setView('home'); 
+        setView('home');
+        playSound('error'); // Error sound
       }
     };
     reader.readAsDataURL(file);
@@ -628,6 +804,9 @@ export default function GetWorth() {
   const capture = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
     
+    // Play shutter sound immediately
+    playSound('shutter');
+    
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
@@ -649,8 +828,16 @@ export default function GetWorth() {
     
     // Start analysis
     analyzeImage(img)
-      .then(r => { setResult(r); setView('results'); })
-      .catch(() => { setError(t.failed); setView('home'); });
+      .then(r => { 
+        setResult(r); 
+        setView('results');
+        playSound('success'); // Play success sound when analysis completes
+      })
+      .catch(() => { 
+        setError(t.failed); 
+        setView('home');
+        playSound('error'); // Play error sound on failure
+      });
   }, [lang, t.failed]);
 
   const stopCamera = () => { videoRef.current?.srcObject?.getTracks().forEach(t => t.stop()); setView('home'); };
@@ -736,10 +923,12 @@ export default function GetWorth() {
       await loadListings();
       setListingStep(3);
       showToastMsg(t.published);
+      playSound('coin'); // Play cha-ching sound!
       
     } catch (e) { 
       console.error('Publish error:', e);
       setError(lang === 'he' ? 'שגיאה בפרסום, נסה שוב' : 'Failed to publish. Please try again.');
+      playSound('error'); // Play error sound
     } finally {
       setPublishing(false);
     }
@@ -996,13 +1185,26 @@ export default function GetWorth() {
               <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-medium">{t.tagline}</p>
             </div>
           </div>
-          <button 
-            onClick={() => setLang(lang === 'en' ? 'he' : 'en')} 
-            className="px-4 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
-          >
-            <Globe className="w-4 h-4 text-blue-400" />
-            {lang === 'en' ? 'עב' : 'EN'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setSoundEnabled(!soundEnabled)} 
+              className={`p-2.5 rounded-2xl border border-white/10 transition-all hover:scale-105 active:scale-95 ${soundEnabled ? 'bg-blue-500/20 hover:bg-blue-500/30' : 'bg-white/5 hover:bg-white/10'}`}
+              title={soundEnabled ? (lang === 'he' ? 'השתק צלילים' : 'Mute sounds') : (lang === 'he' ? 'הפעל צלילים' : 'Enable sounds')}
+            >
+              {soundEnabled ? (
+                <Volume2 className="w-4 h-4 text-blue-400" />
+              ) : (
+                <VolumeX className="w-4 h-4 text-slate-500" />
+              )}
+            </button>
+            <button 
+              onClick={() => setLang(lang === 'en' ? 'he' : 'en')} 
+              className="px-4 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium flex items-center gap-2 transition-all hover:scale-105 active:scale-95"
+            >
+              <Globe className="w-4 h-4 text-blue-400" />
+              {lang === 'en' ? 'עב' : 'EN'}
+            </button>
+          </div>
         </header>
 
         {/* Content */}
