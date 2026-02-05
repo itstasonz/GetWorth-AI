@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
-import { Camera, Upload, X, Sparkles, DollarSign, Package, Smartphone, Watch, ChevronRight, ChevronLeft, Loader2, ImagePlus, Share2, AlertCircle, Shirt, Dumbbell, Scan, User, LogOut, Plus, Trash2, Clock, Globe, Home, ShoppingBag, CheckCircle, Circle, Box, Shield, AlertTriangle, Eye, MessageCircle, Phone, Check, MapPin, Search, SlidersHorizontal, Heart, Grid, RefreshCw, Star, Zap, TrendingUp, Send } from 'lucide-react';
+import { Camera, Upload, X, Sparkles, DollarSign, Package, Smartphone, Watch, ChevronRight, ChevronLeft, Loader2, ImagePlus, Share2, AlertCircle, Shirt, Dumbbell, Scan, User, LogOut, Plus, Trash2, Clock, Globe, Home, ShoppingBag, CheckCircle, Circle, Box, Shield, AlertTriangle, Eye, MessageCircle, Phone, Check, MapPin, Search, SlidersHorizontal, Heart, Grid, RefreshCw, Star, Zap, TrendingUp, Send, Navigation, LocateFixed } from 'lucide-react';
 import { supabase } from './lib/supabase';
 
 const T = {
@@ -92,6 +92,97 @@ const InputField = ({ label, icon: Icon, rtl, ...p }) => (
   </div>
 );
 
+// LocationInput with GPS support
+const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const getLocation = async () => {
+    if (!navigator.geolocation) {
+      setError(rtl ? 'הדפדפן לא תומך במיקום' : 'Geolocation not supported');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          // Reverse geocode using free OpenStreetMap Nominatim API
+          const response = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=14&addressdetails=1`,
+            { headers: { 'Accept-Language': rtl ? 'he' : 'en' } }
+          );
+          const data = await response.json();
+          
+          // Extract city/town name
+          const city = data.address?.city || data.address?.town || data.address?.village || data.address?.suburb || data.address?.municipality || '';
+          const area = data.address?.state || data.address?.county || '';
+          const locationName = city || area || (rtl ? 'מיקום נמצא' : 'Location found');
+          
+          onChange({ target: { value: locationName } });
+        } catch (e) {
+          setError(rtl ? 'שגיאה בזיהוי מיקום' : 'Failed to get location');
+        }
+        setLoading(false);
+      },
+      (err) => {
+        setLoading(false);
+        switch (err.code) {
+          case err.PERMISSION_DENIED:
+            setError(rtl ? 'הגישה למיקום נדחתה' : 'Location access denied');
+            break;
+          case err.POSITION_UNAVAILABLE:
+            setError(rtl ? 'מיקום לא זמין' : 'Location unavailable');
+            break;
+          case err.TIMEOUT:
+            setError(rtl ? 'הזמן הקצוב פג' : 'Request timeout');
+            break;
+          default:
+            setError(rtl ? 'שגיאה בזיהוי מיקום' : 'Failed to get location');
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  };
+
+  return (
+    <div className="space-y-2">
+      {label && <label className="text-sm text-slate-400 font-medium">{label}</label>}
+      <div className="relative">
+        <MapPin className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />
+        <input 
+          className={`w-full px-4 py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all`}
+          dir={rtl ? 'rtl' : 'ltr'}
+          value={value}
+          onChange={onChange}
+          placeholder={placeholder || (rtl ? 'הכנס מיקום' : 'Enter location')}
+        />
+        <button
+          type="button"
+          onClick={getLocation}
+          disabled={loading}
+          className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-3' : 'right-3'} w-9 h-9 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 flex items-center justify-center transition-all active:scale-95 disabled:opacity-50`}
+          title={rtl ? 'השתמש במיקום נוכחי' : 'Use current location'}
+        >
+          {loading ? (
+            <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+          ) : (
+            <LocateFixed className="w-4 h-4 text-blue-400" />
+          )}
+        </button>
+      </div>
+      {error && (
+        <p className="text-xs text-red-400 flex items-center gap-1">
+          <AlertCircle className="w-3 h-3" />{error}
+        </p>
+      )}
+    </div>
+  );
+};
+
 // Sample items for home page showcase (demo purposes)
 const SAMPLE_ITEMS = [
   { id: 's1', title: 'PlayStation 5', title_hebrew: 'פלייסטיישן 5', price: 1800, condition: 'likeNew', location: 'Tel Aviv', description: 'PS5 Digital Edition, barely used. Comes with 2 controllers and 3 games. Perfect condition, selling because upgrading to Pro.', description_hebrew: 'PS5 דיגיטלי, כמעט לא בשימוש. מגיע עם 2 שלטים ו-3 משחקים. מצב מושלם.', views: 245, created_at: new Date(Date.now() - 2*24*60*60*1000).toISOString(), seller: { full_name: 'David Cohen', badge: 'trustedSeller', rating: 4.8, is_verified: true, total_sales: 23 }, images: ['https://images.unsplash.com/photo-1606813907291-d86efa9b94db?w=400&q=80'], contact_phone: '050-1234567' },
@@ -164,23 +255,37 @@ export default function GetWorth() {
   useEffect(() => {
     let mounted = true;
     
-    // Force loading to false after 3 seconds max
+    // Force loading to false after 1.5 seconds max (reduced from 3s)
     const timeout = setTimeout(() => {
       if (mounted) setLoading(false);
-    }, 3000);
+    }, 1500);
     
     const init = async () => {
       try {
+        // Start loading listings immediately in parallel
+        const listingsPromise = supabase
+          .from('listings')
+          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
+          .eq('status', 'active')
+          .order('created_at', { ascending: false })
+          .limit(20);
+        
         const { data: { session } } = await supabase.auth.getSession();
+        
         if (mounted && session?.user) {
           setUser(session.user);
-          try {
-            const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-            if (mounted && data) setProfile(data);
-          } catch (e) { console.log('Profile fetch error:', e); }
+          // Don't wait for profile - load in background
+          supabase.from('profiles').select('*').eq('id', session.user.id).single()
+            .then(({ data }) => { if (mounted && data) setProfile(data); })
+            .catch(() => {});
         }
+        
+        // Apply listings data
+        const { data: listingsData } = await listingsPromise;
+        if (mounted && listingsData) setListings(listingsData);
+        
       } catch (e) { 
-        console.log('Auth init error:', e); 
+        console.log('Init error:', e); 
       }
       if (mounted) setLoading(false);
     };
@@ -191,10 +296,10 @@ export default function GetWorth() {
       if (!mounted) return;
       if (session?.user) {
         setUser(session.user);
-        try {
-          const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-          if (data) setProfile(data);
-        } catch (e) { console.log('Profile fetch error:', e); }
+        // Load profile in background
+        supabase.from('profiles').select('*').eq('id', session.user.id).single()
+          .then(({ data }) => { if (data) setProfile(data); })
+          .catch(() => {});
         if (event === 'SIGNED_IN' && view === 'auth') { setView('profile'); setTab('profile'); }
       } else { setUser(null); setProfile(null); }
     });
@@ -206,20 +311,28 @@ export default function GetWorth() {
     };
   }, []);
 
-  // Debounce search input
+  // Debounce search input - reduced for snappier feel
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search), 500);
+    const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
   }, [search]);
 
   // Debounce price range
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedPriceRange(priceRange), 500);
+    const timer = setTimeout(() => setDebouncedPriceRange(priceRange), 300);
     return () => clearTimeout(timer);
   }, [priceRange]);
 
   useEffect(() => { loadListings(); }, [category, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
   useEffect(() => { if (user) loadUserData(); else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); } }, [user]);
+  
+  // Auto-dismiss errors after 5 seconds
+  useEffect(() => {
+    if (error) {
+      const timer = setTimeout(() => setError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
 
   const loadListings = async () => {
     let query = supabase.from('listings').select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)').eq('status', 'active').order('created_at', { ascending: false });
@@ -445,43 +558,100 @@ export default function GetWorth() {
 
   const deleteListing = async (id) => { await supabase.from('listings').update({ status: 'deleted' }).eq('id', id); loadUserData(); showToastMsg('Deleted'); };
 
-  const analyzeImage = async (imgData) => {
-    const res = await fetch('/api/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageData: imgData.split(',')[1], lang }) });
-    const data = await res.json();
-    if (data.content?.[0]?.text) return JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
-    throw new Error('Failed');
-  };
+  const analyzeImage = useCallback(async (imgData) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    
+    try {
+      const res = await fetch('/api/analyze', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ imageData: imgData.split(',')[1], lang }),
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!res.ok) throw new Error('Analysis failed');
+      
+      const data = await res.json();
+      if (data.content?.[0]?.text) {
+        return JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
+      }
+      throw new Error('Invalid response');
+    } catch (e) {
+      clearTimeout(timeoutId);
+      if (e.name === 'AbortError') {
+        throw new Error(lang === 'he' ? 'הזמן הקצוב פג, נסה שוב' : 'Request timed out, please try again');
+      }
+      throw e;
+    }
+  }, [lang]);
 
-  const handleFile = (file) => {
+  const handleFile = useCallback((file) => {
     if (!file?.type.startsWith('image/')) return;
+    
+    // Show analyzing state immediately with placeholder
+    setView('analyzing');
+    
     const reader = new FileReader();
     reader.onload = async (e) => {
-      setImages([e.target.result]); setView('analyzing');
-      try { const r = await analyzeImage(e.target.result); setResult(r); setView('results'); }
-      catch { setError(t.failed); setView('home'); }
+      const imageData = e.target.result;
+      setImages([imageData]); // Set image immediately for preview
+      
+      try { 
+        const r = await analyzeImage(imageData); 
+        setResult(r); 
+        setView('results'); 
+      } catch { 
+        setError(t.failed); 
+        setView('home'); 
+      }
     };
     reader.readAsDataURL(file);
-  };
+  }, [t.failed]);
 
   const startCamera = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } });
       setView('camera');
-      setTimeout(() => { if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play(); } }, 100);
+      // Small delay to ensure DOM is ready
+      requestAnimationFrame(() => { 
+        if (videoRef.current) { 
+          videoRef.current.srcObject = stream; 
+          videoRef.current.play().catch(() => {}); 
+        } 
+      });
     } catch { setError(t.cameraDenied); }
   };
 
-  const capture = () => {
+  const capture = useCallback(() => {
     if (!videoRef.current || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d');
-    canvasRef.current.width = videoRef.current.videoWidth;
-    canvasRef.current.height = videoRef.current.videoHeight;
-    ctx.drawImage(videoRef.current, 0, 0);
-    const img = canvasRef.current.toDataURL('image/jpeg');
-    videoRef.current.srcObject?.getTracks().forEach(t => t.stop());
-    setImages([img]); setView('analyzing');
-    analyzeImage(img).then(r => { setResult(r); setView('results'); }).catch(() => { setError(t.failed); setView('home'); });
-  };
+    
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    
+    // Capture frame immediately
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    const img = canvas.toDataURL('image/jpeg', 0.85);
+    
+    // Set image and view FIRST (this prevents black screen)
+    setImages([img]);
+    setView('analyzing');
+    
+    // Stop camera tracks AFTER state update (non-blocking)
+    requestAnimationFrame(() => {
+      video.srcObject?.getTracks().forEach(track => track.stop());
+    });
+    
+    // Start analysis
+    analyzeImage(img)
+      .then(r => { setResult(r); setView('results'); })
+      .catch(() => { setError(t.failed); setView('home'); });
+  }, [lang, t.failed]);
 
   const stopCamera = () => { videoRef.current?.srcObject?.getTracks().forEach(t => t.stop()); setView('home'); };
 
@@ -498,12 +668,81 @@ export default function GetWorth() {
   };
 
   const publishListing = async () => {
+    if (!user) {
+      setError(lang === 'he' ? 'יש להתחבר תחילה' : 'Please sign in first');
+      return;
+    }
+    
+    if (!listingData.title || !listingData.price || !listingData.phone || !listingData.location) {
+      setError(lang === 'he' ? 'נא למלא את כל השדות' : 'Please fill all fields');
+      return;
+    }
+
     setPublishing(true);
+    setError(null);
+    
     try {
-      await supabase.from('listings').insert({ seller_id: user.id, title: listingData.title, title_hebrew: result?.nameHebrew || '', description: listingData.desc, category: result?.category || 'Other', condition, price: listingData.price, images: images, location: listingData.location, contact_phone: listingData.phone });
-      loadUserData(); loadListings(); setListingStep(3); showToastMsg(t.published);
-    } catch (e) { setError(e.message); }
-    setPublishing(false);
+      let imageUrls = [];
+      
+      // Upload base64 images to Supabase Storage
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        if (img.startsWith('data:')) {
+          // Convert base64 to blob
+          const response = await fetch(img);
+          const blob = await response.blob();
+          const fileName = `${user.id}/${Date.now()}-${i}.jpg`;
+          
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('listings')
+            .upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
+          
+          if (uploadError) {
+            console.error('Upload error:', uploadError);
+            // Fallback: store base64 directly (not ideal but works)
+            imageUrls.push(img);
+          } else {
+            // Get public URL
+            const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
+            imageUrls.push(publicUrl);
+          }
+        } else {
+          // Already a URL
+          imageUrls.push(img);
+        }
+      }
+      
+      // If no images uploaded, use the original array
+      if (imageUrls.length === 0) imageUrls = images;
+      
+      const { data, error: insertError } = await supabase.from('listings').insert({ 
+        seller_id: user.id, 
+        title: listingData.title, 
+        title_hebrew: result?.nameHebrew || '', 
+        description: listingData.desc || '', 
+        category: result?.category || 'Other', 
+        condition, 
+        price: listingData.price, 
+        images: imageUrls, 
+        location: listingData.location, 
+        contact_phone: listingData.phone,
+        status: 'active'
+      }).select();
+      
+      if (insertError) throw insertError;
+      
+      // Success!
+      await loadUserData();
+      await loadListings();
+      setListingStep(3);
+      showToastMsg(t.published);
+      
+    } catch (e) { 
+      console.error('Publish error:', e);
+      setError(lang === 'he' ? 'שגיאה בפרסום, נסה שוב' : 'Failed to publish. Please try again.');
+    } finally {
+      setPublishing(false);
+    }
   };
 
   const reset = () => { setImages([]); setResult(null); setView('home'); setError(null); setCondition(null); setListingStep(0); setSelected(null); setActiveChat(null); };
@@ -1748,7 +1987,13 @@ export default function GetWorth() {
                     <InputField label={t.phone} icon={Phone} rtl={rtl} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} />
                   </FadeIn>
                   <FadeIn delay={250}>
-                    <InputField label={t.location} icon={MapPin} rtl={rtl} value={listingData.location} onChange={(e) => setListingData({ ...listingData, location: e.target.value })} />
+                    <LocationInput 
+                      label={t.location} 
+                      rtl={rtl} 
+                      value={listingData.location} 
+                      onChange={(e) => setListingData({ ...listingData, location: e.target.value })}
+                      placeholder={rtl ? 'תל אביב, ירושלים...' : 'Tel Aviv, Jerusalem...'}
+                    />
                   </FadeIn>
                   <FadeIn delay={300}>
                     <Btn primary className="w-full py-4" onClick={publishListing} disabled={publishing}>
