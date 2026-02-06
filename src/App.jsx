@@ -8,7 +8,7 @@ import { formatPrice, getSellerBadgeStyle } from './lib/utils';
 // Views
 import HomeView from './views/HomeView';
 import { CameraView, AnalyzingView, ResultsView } from './views/CameraResultsView';
-import { BrowseView, DetailView } from './views/BrowseDetailView';
+import { BrowseView, DetailView, SellerProfileView } from './views/BrowseDetailView';
 import { InboxView, ChatView } from './views/ChatViews';
 import { AuthView, ProfileView } from './views/AuthProfileView';
 import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
@@ -96,7 +96,7 @@ function AppShell() {
             <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-5">
               <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
               <h3 className="text-2xl font-bold text-center">{lang === 'he' ? 'יצירת קשר' : 'Contact Seller'}</h3>
-              
+
               <Card className="p-4">
                 <div className="flex items-center gap-4">
                   <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-xl font-bold shadow-lg shadow-blue-500/30">
@@ -126,19 +126,20 @@ function AppShell() {
 
                 <div className="grid grid-cols-2 gap-3">
                   <a href={`https://wa.me/972${(selected.contact_phone || '').replace(/^0/, '').replace(/-/g, '')}?text=${encodeURIComponent(lang === 'he' ? `היי, ראיתי את המודעה שלך ב-GetWorth: ${selected.title}` : `Hi, I saw your listing on GetWorth: ${selected.title}`)}`}
-                    target="_blank" className="py-4 rounded-2xl bg-gradient-to-r from-[#25D366] to-[#128C7E] text-center font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 active:scale-95 transition-transform">
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                    WhatsApp
+                    target="_blank" rel="noopener noreferrer"
+                    className="py-4 rounded-2xl bg-gradient-to-r from-[#25D366] to-[#128C7E] text-center font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 active:scale-95 transition-transform">
+                    💬 WhatsApp
                   </a>
-                  <a href={`tel:${selected.contact_phone}`} className="py-4 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-500 text-center font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 active:scale-95 transition-transform">
-                    <Phone className="w-5 h-5" />{lang === 'he' ? 'התקשר' : 'Call'}
-                  </a>
+                  {selected.contact_phone && (
+                    <a href={`tel:${selected.contact_phone}`}
+                      className="py-4 rounded-2xl bg-white/10 text-center font-semibold flex items-center justify-center gap-2 hover:bg-white/20 transition-all active:scale-95">
+                      <Phone className="w-5 h-5" />{lang === 'he' ? 'התקשר' : 'Call'}
+                    </a>
+                  )}
                 </div>
-
-                {selected.contact_phone && <p className="text-center text-sm text-slate-500">📞 {selected.contact_phone}</p>}
               </div>
-              
-              <Btn className="w-full" onClick={() => setShowContact(false)}>{t.cancel}</Btn>
+
+              <button onClick={() => setShowContact(false)} className="w-full py-3 text-slate-400 text-sm">{lang === 'he' ? 'סגור' : 'Close'}</button>
             </div>
           </SlideUp>
         </div>
@@ -174,15 +175,15 @@ function AppShell() {
 
         {/* Content - View Router */}
         <main className="flex-1 px-5 pb-4 overflow-y-auto">
-          {/* Hidden file input for upload */}
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-          
+
           {view === 'home' && <HomeView />}
           {view === 'camera' && <CameraView />}
           {view === 'analyzing' && <AnalyzingView />}
           {view === 'results' && <ResultsView />}
           {view === 'browse' && !selected && <BrowseView />}
           {view === 'detail' && selected && <DetailView />}
+          {view === 'sellerProfile' && <SellerProfileView />}
           {view === 'saved' && <SavedView />}
           {view === 'inbox' && <InboxView />}
           {view === 'chat' && <ChatView />}
@@ -237,8 +238,6 @@ function AppShell() {
         @keyframes progress { 0% { width: 0%; } 50% { width: 70%; } 100% { width: 100%; } }
         @keyframes float { 0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; } 50% { transform: translateY(-15px) scale(1.2); opacity: 1; } }
         @keyframes flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
-        @keyframes marquee-left { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-        @keyframes marquee-right { 0% { transform: translateX(-50%); } 100% { transform: translateX(0); } }
         .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; opacity: 0; }
         .animate-slideUp { animation: slideUp 0.4s ease-out forwards; }
         .animate-slideDown { animation: slideDown 0.3s ease-out forwards; }
@@ -252,9 +251,6 @@ function AppShell() {
         .animate-progress { animation: progress 3s ease-in-out infinite; }
         .animate-float { animation: float 2s ease-in-out infinite; }
         .animate-flash { animation: flash 0.15s ease-out forwards; }
-        .animate-marquee-left { animation: marquee-left 25s linear infinite; }
-        .animate-marquee-right { animation: marquee-right 30s linear infinite; }
-        .animate-marquee-left:hover, .animate-marquee-right:hover { animation-play-state: paused; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
@@ -262,7 +258,6 @@ function AppShell() {
   );
 }
 
-// [IMPORTANT FIX #5] Root export wraps in ErrorBoundary + AppProvider
 export default function GetWorth() {
   return (
     <ErrorBoundary>

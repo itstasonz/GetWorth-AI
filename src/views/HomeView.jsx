@@ -1,15 +1,71 @@
-import React from 'react';
+import React, { useRef, useEffect, useCallback } from 'react';
 import { Sparkles, Upload, Scan, MapPin, ChevronRight, ChevronLeft, Zap, TrendingUp, ShoppingBag } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, FadeIn } from '../components/ui';
 import { SAMPLE_ITEMS } from '../lib/constants';
 import { formatPrice, getConditionLabel, getConditionColor } from '../lib/utils';
 
+// ─── FIX #1: JS auto-scroll that pauses on touch, resumes after release ───
+function useAutoScroll(speed = 0.5, direction = 'left') {
+  const scrollRef = useRef(null);
+  const animRef = useRef(null);
+  const isPaused = useRef(false);
+  const resumeTimer = useRef(null);
+
+  const tick = useCallback(() => {
+    const el = scrollRef.current;
+    if (el && !isPaused.current) {
+      const delta = direction === 'left' ? speed : -speed;
+      el.scrollLeft += delta;
+      // Seamless loop: reset when reaching duplicate boundary
+      const half = el.scrollWidth / 2;
+      if (direction === 'left' && el.scrollLeft >= half) {
+        el.scrollLeft -= half;
+      } else if (direction === 'right' && el.scrollLeft <= 0) {
+        el.scrollLeft += half;
+      }
+    }
+    animRef.current = requestAnimationFrame(tick);
+  }, [speed, direction]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const el = scrollRef.current;
+      if (el && direction === 'right') {
+        el.scrollLeft = el.scrollWidth / 2;
+      }
+      animRef.current = requestAnimationFrame(tick);
+    }, 300);
+    return () => {
+      clearTimeout(t);
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+      if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    };
+  }, [tick, direction]);
+
+  const pause = useCallback(() => {
+    isPaused.current = true;
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+  }, []);
+
+  const resume = useCallback(() => {
+    if (resumeTimer.current) clearTimeout(resumeTimer.current);
+    resumeTimer.current = setTimeout(() => { isPaused.current = false; }, 3000);
+  }, []);
+
+  return { scrollRef, pause, resume };
+}
+
 export default function HomeView() {
   const { t, lang, rtl, listings, goTab, startCamera, fileRef, viewItem } = useApp();
 
-  const allItems = [...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4), ...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)];
-  const allItems2 = [...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8), ...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)];
+  const baseItems1 = [...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)];
+  const baseItems2 = [...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)];
+  const allItems = [...baseItems1, ...baseItems1, ...baseItems1];
+  const allItems2 = [...baseItems2, ...baseItems2, ...baseItems2];
+
+  const row1 = useAutoScroll(0.5, 'left');
+  const row2 = useAutoScroll(0.5, 'right');
 
   return (
     <div className="space-y-6">
@@ -34,7 +90,7 @@ export default function HomeView() {
         <Btn onClick={() => fileRef.current?.click()} className="py-4"><Upload className="w-5 h-5" />{t.upload}</Btn>
       </FadeIn>
 
-      {/* Marquee Section */}
+      {/* Hot Items — auto-scrolls + touch/swipe to browse */}
       <FadeIn delay={200} className="space-y-4 -mx-5">
         <div className="px-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -50,24 +106,31 @@ export default function HomeView() {
         </div>
 
         {/* Row 1 */}
-        <div className="relative overflow-hidden">
-          <div className="flex gap-3 animate-marquee-left">
-            {allItems.map((item, i) => (
-              <MarqueeItem key={`row1-${item.id}-${i}`} item={item} lang={lang} onClick={() => viewItem(item)} accent="blue" />
-            ))}
-          </div>
+        <div
+          ref={row1.scrollRef}
+          className="flex gap-3 overflow-x-auto scrollbar-hide px-3"
+          onTouchStart={row1.pause} onTouchEnd={row1.resume}
+          onMouseDown={row1.pause} onMouseUp={row1.resume} onMouseLeave={row1.resume}
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
+          {allItems.map((item, i) => (
+            <MarqueeItem key={`row1-${item.id}-${i}`} item={item} lang={lang} onClick={() => viewItem(item)} accent="blue" />
+          ))}
         </div>
 
         {/* Row 2 */}
-        <div className="relative overflow-hidden">
-          <div className="flex gap-3 animate-marquee-right">
-            {allItems2.map((item, i) => (
-              <MarqueeItem key={`row2-${item.id}-${i}`} item={item} lang={lang} onClick={() => viewItem(item)} accent="green" />
-            ))}
-          </div>
+        <div
+          ref={row2.scrollRef}
+          className="flex gap-3 overflow-x-auto scrollbar-hide px-3"
+          onTouchStart={row2.pause} onTouchEnd={row2.resume}
+          onMouseDown={row2.pause} onMouseUp={row2.resume} onMouseLeave={row2.resume}
+          style={{ WebkitOverflowScrolling: 'touch' }}
+        >
+          {allItems2.map((item, i) => (
+            <MarqueeItem key={`row2-${item.id}-${i}`} item={item} lang={lang} onClick={() => viewItem(item)} accent="green" />
+          ))}
         </div>
 
-        {/* CTA */}
         <div className="px-5 pt-2">
           <Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1))">
             <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'יש לך משהו למכור?' : 'Have something to sell?'}</p>
@@ -96,7 +159,6 @@ export default function HomeView() {
   );
 }
 
-// Marquee item sub-component
 function MarqueeItem({ item, lang, onClick, accent }) {
   const borderHover = accent === 'blue' ? 'group-hover:border-blue-500/50' : 'group-hover:border-green-500/50';
   const avatarGradient = accent === 'blue' ? 'from-blue-500 to-purple-600' : 'from-green-500 to-emerald-600';
@@ -105,7 +167,7 @@ function MarqueeItem({ item, lang, onClick, accent }) {
     <div onClick={onClick} className="flex-shrink-0 w-40 cursor-pointer group">
       <div className={`relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 ${borderHover} shadow-lg shadow-black/20`}>
         <div className="aspect-square overflow-hidden">
-          <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+          <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" loading="lazy" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
         </div>
         <div className="absolute bottom-0 left-0 right-0 p-3">
