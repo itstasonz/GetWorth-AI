@@ -105,9 +105,3 @@ export const BackButton = ({ onClick, rtl, label }) => {
   );
 };
 
-// Lazy import helper (avoids circular deps)
-function require_lucide() {
-  // These are re-exported here to avoid circular dependency with parent
-  const lucide = require('lucide-react');
-  return { ChevronRight: lucide.ChevronRight, ChevronLeft: lucide.ChevronLeft };
-}
