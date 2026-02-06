@@ -1,14 +1,13 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, ShieldCheck, AlertTriangle, Info, Tag, Store, ArrowDown, ArrowUp, Minus } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 
-// [IMPORTANT FIX #4] Camera view with proper cleanup on unmount
+// Camera view with proper cleanup on unmount
 export function CameraView() {
   const { videoRef, canvasRef, capture, stopCamera, showFlash } = useApp();
 
-  // Clean up camera stream if component unmounts (e.g. tab switch)
   useEffect(() => {
     return () => {
       if (videoRef.current?.srcObject) {
@@ -21,9 +20,9 @@ export function CameraView() {
     <div className="fixed inset-0 z-50 bg-black">
       <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
       <canvas ref={canvasRef} className="hidden" />
-      
+
       {showFlash && <div className="absolute inset-0 bg-white animate-flash z-50" />}
-      
+
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute inset-8 rounded-3xl border-2 border-white/30" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' }} />
         <div className="absolute top-10 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm text-sm">
@@ -53,7 +52,7 @@ export function AnalyzingView() {
         <div className="absolute -inset-8 bg-blue-500/10 rounded-full blur-2xl animate-ping" style={{ animationDuration: '2s' }} />
         <div className="absolute -inset-3 rounded-[2rem] bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 animate-spin-slow opacity-70" style={{ animationDuration: '3s' }} />
         <div className="absolute -inset-2.5 rounded-[1.8rem] bg-[#0a1020]" />
-        
+
         <div className="relative w-56 h-56 rounded-3xl overflow-hidden shadow-2xl shadow-blue-500/40">
           {(capturedImageRef.current || images[0]) && (
             <img src={capturedImageRef.current || images[0]} className="w-full h-full object-cover" alt="Captured item" />
@@ -70,7 +69,7 @@ export function AnalyzingView() {
           </div>
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer-fast" />
         </div>
-        
+
         <div className="absolute -inset-8 pointer-events-none">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="absolute w-2 h-2 rounded-full bg-blue-400 animate-float"
@@ -78,7 +77,7 @@ export function AnalyzingView() {
           ))}
         </div>
       </div>
-      
+
       <div className="mt-10 text-center space-y-5">
         <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/30">
           <Sparkles className="w-4 h-4 text-blue-400 animate-pulse" />
@@ -105,13 +104,47 @@ export function AnalyzingView() {
   );
 }
 
+// ─── Confidence badge helper ───
+function ConfidenceBadge({ confidence, lang }) {
+  const pct = Math.round((confidence || 0) * 100);
+  let color, label;
+  if (pct >= 80) {
+    color = 'from-green-500/20 to-emerald-500/20 border-green-500/30 text-green-400';
+    label = lang === 'he' ? 'זיהוי גבוה' : 'High Confidence';
+  } else if (pct >= 50) {
+    color = 'from-yellow-500/20 to-amber-500/20 border-yellow-500/30 text-yellow-400';
+    label = lang === 'he' ? 'זיהוי בינוני' : 'Medium Confidence';
+  } else {
+    color = 'from-red-500/20 to-pink-500/20 border-red-500/30 text-red-400';
+    label = lang === 'he' ? 'זיהוי נמוך' : 'Low Confidence';
+  }
+  return (
+    <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r ${color} border text-xs font-semibold`}>
+      <ShieldCheck className="w-3.5 h-3.5" />
+      {label} ({pct}%)
+    </div>
+  );
+}
+
+// ─── Market trend icon ───
+function TrendIcon({ trend }) {
+  if (trend === 'up') return <ArrowUp className="w-4 h-4 text-green-400" />;
+  if (trend === 'down') return <ArrowDown className="w-4 h-4 text-red-400" />;
+  return <Minus className="w-4 h-4 text-slate-400" />;
+}
+
 export function ResultsView() {
   const { lang, t, images, result, startListing, reset } = useApp();
 
   if (!result) return null;
 
+  const confidence = result.confidence || 0;
+  const newRetail = result.marketValue?.newRetailPrice;
+  const savings = newRetail && result.marketValue?.mid ? Math.round((1 - result.marketValue.mid / newRetail) * 100) : null;
+
   return (
     <div className="space-y-5 pb-4">
+      {/* Image + Category */}
       <FadeIn>
         <div className="relative rounded-3xl overflow-hidden shadow-2xl">
           <div className="aspect-[4/3]">
@@ -119,12 +152,22 @@ export function ResultsView() {
           </div>
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 p-5">
-            <Badge color="blue">{result.category}</Badge>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge color="blue">{result.category}</Badge>
+              <ConfidenceBadge confidence={confidence} lang={lang} />
+            </div>
             <h2 className="text-2xl font-bold mt-2">{lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}</h2>
+            {result.details?.brand && result.details.brand !== 'Unknown' && result.details.brand !== 'לא ידוע' && (
+              <p className="text-sm text-slate-300 mt-1 flex items-center gap-1.5">
+                <Tag className="w-3.5 h-3.5" />
+                {result.details.brand}{result.details.model && result.details.model !== 'Unknown' && result.details.model !== 'לא ידוע' ? ` — ${result.details.model}` : ''}
+              </p>
+            )}
           </div>
         </div>
       </FadeIn>
 
+      {/* Main Price Card */}
       <FadeIn delay={100}>
         <Card className="p-6 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.15), rgba(139,92,246,0.1))" glow>
           <p className="text-sm text-blue-300 font-medium mb-2">{t.marketValue}</p>
@@ -134,15 +177,123 @@ export function ResultsView() {
           {result.marketValue?.low > 0 && (
             <p className="text-sm text-slate-400 mt-3">{t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}</p>
           )}
+
+          {/* New retail comparison */}
+          {newRetail > 0 && (
+            <div className="mt-4 pt-4 border-t border-white/10">
+              <div className="flex items-center justify-center gap-3">
+                <div className="text-center">
+                  <p className="text-[10px] text-slate-500 uppercase tracking-wider">{lang === 'he' ? 'מחיר חדש' : 'New Price'}</p>
+                  <p className="text-lg font-semibold text-slate-400 line-through">{formatPrice(newRetail)}</p>
+                </div>
+                {savings > 0 && (
+                  <div className="px-3 py-1.5 rounded-xl bg-green-500/20 border border-green-500/30">
+                    <p className="text-sm font-bold text-green-400">{lang === 'he' ? `חסכון ${savings}%` : `Save ${savings}%`}</p>
+                  </div>
+                )}
+              </div>
+              {result.marketValue?.priceSource && (
+                <p className="text-[10px] text-slate-500 mt-2 flex items-center justify-center gap-1">
+                  <Store className="w-3 h-3" />
+                  {lang === 'he' ? 'מקור:' : 'Source:'} {result.marketValue.priceSource}
+                </p>
+              )}
+            </div>
+          )}
         </Card>
       </FadeIn>
 
-      <FadeIn delay={200} className="flex gap-3">
+      {/* Market Insights */}
+      <FadeIn delay={150}>
+        <div className="grid grid-cols-3 gap-3">
+          <Card className="p-3 text-center">
+            <TrendIcon trend={result.marketTrend} />
+            <p className="text-[10px] text-slate-500 mt-1">{lang === 'he' ? 'מגמה' : 'Trend'}</p>
+            <p className="text-xs font-semibold mt-0.5">
+              {result.marketTrend === 'up' ? (lang === 'he' ? 'עולה' : 'Rising')
+                : result.marketTrend === 'down' ? (lang === 'he' ? 'יורד' : 'Falling')
+                : (lang === 'he' ? 'יציב' : 'Stable')}
+            </p>
+          </Card>
+          <Card className="p-3 text-center">
+            <div className={`w-4 h-4 mx-auto rounded-full ${result.demandLevel === 'high' ? 'bg-green-500' : result.demandLevel === 'moderate' ? 'bg-yellow-500' : 'bg-slate-500'}`} />
+            <p className="text-[10px] text-slate-500 mt-1">{lang === 'he' ? 'ביקוש' : 'Demand'}</p>
+            <p className="text-xs font-semibold mt-0.5">
+              {result.demandLevel === 'high' ? (lang === 'he' ? 'גבוה' : 'High')
+                : result.demandLevel === 'moderate' ? (lang === 'he' ? 'בינוני' : 'Medium')
+                : (lang === 'he' ? 'נמוך' : 'Low')}
+            </p>
+          </Card>
+          <Card className="p-3 text-center">
+            <ShieldCheck className="w-4 h-4 mx-auto text-blue-400" />
+            <p className="text-[10px] text-slate-500 mt-1">{lang === 'he' ? 'דיוק' : 'Accuracy'}</p>
+            <p className="text-xs font-semibold mt-0.5">{Math.round(confidence * 100)}%</p>
+          </Card>
+        </div>
+      </FadeIn>
+
+      {/* Price Factors */}
+      {result.priceFactors && result.priceFactors.length > 0 && (
+        <FadeIn delay={200}>
+          <Card className="p-4">
+            <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+              <Info className="w-4 h-4 text-blue-400" />
+              {lang === 'he' ? 'גורמים המשפיעים על המחיר' : 'Price Factors'}
+            </h3>
+            <div className="space-y-2">
+              {result.priceFactors.map((pf, i) => (
+                <div key={i} className="flex items-center justify-between text-sm">
+                  <span className="text-slate-300">{pf.factor}</span>
+                  <span className={`font-semibold ${pf.direction === 'up' ? 'text-green-400' : pf.direction === 'down' ? 'text-red-400' : 'text-slate-400'}`}>
+                    {pf.impact}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Identification & Tips */}
+      {(result.details?.identificationNotes || result.sellingTips) && (
+        <FadeIn delay={250}>
+          <Card className="p-4 space-y-3">
+            {result.details?.identificationNotes && (
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">{lang === 'he' ? 'איך זיהינו' : 'How We Identified'}</p>
+                <p className="text-sm text-slate-300">{result.details.identificationNotes}</p>
+              </div>
+            )}
+            {result.sellingTips && (
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">{lang === 'he' ? 'טיפ למכירה' : 'Selling Tip'}</p>
+                <p className="text-sm text-slate-300">{result.sellingTips}</p>
+              </div>
+            )}
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Low confidence warning */}
+      {confidence < 0.5 && (
+        <FadeIn delay={260}>
+          <Card className="p-4 flex items-start gap-3" gradient="linear-gradient(135deg, rgba(234,179,8,0.15), rgba(234,179,8,0.05))">
+            <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'זיהוי לא ודאי' : 'Uncertain Identification'}</p>
+              <p className="text-xs text-slate-400 mt-1">{lang === 'he' ? 'לא הצלחנו לזהות את הפריט בוודאות. נסה לצלם מקרוב יותר או מזווית אחרת.' : "We couldn't identify this item with certainty. Try a closer photo or different angle."}</p>
+            </div>
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Actions */}
+      <FadeIn delay={300} className="flex gap-3">
         <Btn primary className="flex-1 py-4" onClick={startListing}><Plus className="w-5 h-5" />{t.listItem}</Btn>
         <Btn className="px-5"><Share2 className="w-5 h-5" /></Btn>
       </FadeIn>
 
-      <FadeIn delay={300}>
+      <FadeIn delay={350}>
         <button onClick={reset} className="w-full py-3 text-slate-400 text-sm flex items-center justify-center gap-2 hover:text-white transition-colors">
           <RefreshCw className="w-4 h-4" />{t.scanAnother}
         </button>
