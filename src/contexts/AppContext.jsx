@@ -756,6 +756,20 @@ export function AppProvider({ children }) {
     setShowContact(true);
   };
 
+  // ─── LISTING FLOW HELPERS ──────────────────────────
+
+  const startListing = () => {
+    if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
+    setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
+    setCondition(null); setAnswers({}); setListingStep(0); setView('listing');
+  };
+
+  const selectCondition = (c) => {
+    setCondition(c);
+    setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, c, answers) }));
+    setListingStep(c === 'used' ? 1 : 2);
+  };
+
   const value = {
     lang, setLang, t, rtl,
     user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError,
@@ -786,24 +800,6 @@ export function AppProvider({ children }) {
     soundEnabled, setSoundEnabled, playSound,
     fileRef, videoRef, canvasRef,
   };
-
-  // ─── LISTING FLOW HELPERS ──────────────────────────
-
-  const startListing = () => {
-    if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
-    setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
-    setCondition(null); setAnswers({}); setListingStep(0); setView('listing');
-  };
-
-  const selectCondition = (c) => {
-    setCondition(c);
-    setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, c, answers) }));
-    setListingStep(c === 'used' ? 1 : 2);
-  };
-
-  // Re-assign to value after defining
-  value.startListing = startListing;
-  value.selectCondition = selectCondition;
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
