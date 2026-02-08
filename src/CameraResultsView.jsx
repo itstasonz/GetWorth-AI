@@ -1,6 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, ShieldCheck, AlertTriangle, Info, Tag, Store, ArrowDown, ArrowUp, Minus } from 'lucide-react';
-import { useApp } from '../contexts/AppContext';
+import { X, Zap, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw } from 'lucide-react';import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 
