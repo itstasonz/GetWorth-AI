@@ -69,7 +69,7 @@ const { t, lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewIte
 
   return (
     <div className="space-y-6">
-     <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; }} />
+<input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; }} />
 
       {/* Hero */}
       <FadeIn className="text-center space-y-4 pt-2">
