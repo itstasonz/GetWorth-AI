@@ -94,7 +94,7 @@ export const InputField = ({ label, icon: Icon, rtl, ...p }) => (
 
 // Back button
 export const BackButton = ({ onClick, rtl, label }) => {
-  const { ChevronRight, ChevronLeft } = require_lucide();
+
   return (
     <button onClick={onClick} className="flex items-center gap-2 text-slate-400 hover:text-white mb-6 transition-all group">
       <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:bg-white/10 transition-all">
