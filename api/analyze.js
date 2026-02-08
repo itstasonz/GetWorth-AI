@@ -1,6 +1,4 @@
 export const config = {
-  runtime: 'edge',
-  // Allow up to 60 seconds for the 2-step pipeline
   maxDuration: 60,
 };
 
