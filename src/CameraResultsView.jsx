@@ -8,6 +8,20 @@ export function CameraView() {
   const { videoRef, canvasRef, capture, stopCamera, showFlash } = useApp();
 
   useEffect(() => {
+    const [torchOn, setTorchOn] = useState(false);
+
+const toggleTorch = async () => {
+  try {
+    const stream = videoRef.current?.srcObject;
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    const newState = !torchOn;
+    await track.applyConstraints({ advanced: [{ torch: newState }] });
+    setTorchOn(newState);
+  } catch (e) {
+    console.warn('Torch not supported on this device');
+  }
+};
     return () => {
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
