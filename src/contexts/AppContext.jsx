@@ -509,7 +509,7 @@ export function AppProvider({ children }) {
 
   const analyzeImage = useCallback(async (imgData) => {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+const timeoutId = setTimeout(() => controller.abort(), 60000);
     try {
       const res = await fetch('/api/analyze', {
         method: 'POST',
