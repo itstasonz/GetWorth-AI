@@ -57,7 +57,7 @@ function useAutoScroll(speed = 0.5, direction = 'left') {
 }
 
 export default function HomeView() {
-  const { t, lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
+const { t, lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
 
   const baseItems1 = [...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)];
   const baseItems2 = [...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)];
