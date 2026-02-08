@@ -1,7 +1,6 @@
 export const config = {
-  maxDuration: 30,
+  runtime: 'edge',
 };
-
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
