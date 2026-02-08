@@ -1,27 +1,28 @@
-import React, { useEffect } from 'react';
-import { X, Zap, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw } from 'lucide-react';import { useApp } from '../contexts/AppContext';
+import React, { useEffect, useState } from 'react';
+import { X, Zap, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, ShieldCheck, AlertTriangle, Info, Tag, Store, ArrowDown, ArrowUp, Minus } from 'lucide-react';
+import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 
-// Camera view with proper cleanup on unmount
+// ─── Camera View with Flash/Torch ───
 export function CameraView() {
   const { videoRef, canvasRef, capture, stopCamera, showFlash } = useApp();
+  const [torchOn, setTorchOn] = useState(false);
+
+  const toggleTorch = async () => {
+    try {
+      const stream = videoRef.current?.srcObject;
+      if (!stream) return;
+      const track = stream.getVideoTracks()[0];
+      const newState = !torchOn;
+      await track.applyConstraints({ advanced: [{ torch: newState }] });
+      setTorchOn(newState);
+    } catch (e) {
+      console.warn('Torch not supported on this device');
+    }
+  };
 
   useEffect(() => {
-    const [torchOn, setTorchOn] = useState(false);
-
-const toggleTorch = async () => {
-  try {
-    const stream = videoRef.current?.srcObject;
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    const newState = !torchOn;
-    await track.applyConstraints({ advanced: [{ torch: newState }] });
-    setTorchOn(newState);
-  } catch (e) {
-    console.warn('Torch not supported on this device');
-  }
-};
     return () => {
       if (videoRef.current?.srcObject) {
         videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
@@ -49,12 +50,15 @@ const toggleTorch = async () => {
         <button onClick={capture} className="w-20 h-20 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center shadow-xl shadow-blue-500/50 active:scale-95 transition-transform">
           <div className="w-16 h-16 rounded-full border-4 border-white/30" />
         </button>
-        <div className="w-14" />
+        <button onClick={toggleTorch} className={`w-14 h-14 rounded-2xl backdrop-blur flex items-center justify-center transition-all ${torchOn ? 'bg-yellow-500/80' : 'bg-white/10 hover:bg-white/20'}`}>
+          <Zap className={`w-6 h-6 ${torchOn ? 'text-black' : 'text-white'}`} />
+        </button>
       </div>
     </div>
   );
 }
 
+// ─── Analyzing View ───
 export function AnalyzingView() {
   const { lang, t, images, capturedImageRef } = useApp();
 
@@ -117,7 +121,7 @@ export function AnalyzingView() {
   );
 }
 
-// ─── Confidence badge helper ───
+// ─── Confidence Badge ───
 function ConfidenceBadge({ confidence, lang }) {
   const pct = Math.round((confidence || 0) * 100);
   let color, label;
@@ -139,13 +143,14 @@ function ConfidenceBadge({ confidence, lang }) {
   );
 }
 
-// ─── Market trend icon ───
+// ─── Market Trend Icon ───
 function TrendIcon({ trend }) {
   if (trend === 'up') return <ArrowUp className="w-4 h-4 text-green-400" />;
   if (trend === 'down') return <ArrowDown className="w-4 h-4 text-red-400" />;
   return <Minus className="w-4 h-4 text-slate-400" />;
 }
 
+// ─── Results View ───
 export function ResultsView() {
   const { lang, t, images, result, startListing, reset } = useApp();
 
@@ -191,7 +196,6 @@ export function ResultsView() {
             <p className="text-sm text-slate-400 mt-3">{t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}</p>
           )}
 
-          {/* New retail comparison */}
           {newRetail > 0 && (
             <div className="mt-4 pt-4 border-t border-white/10">
               <div className="flex items-center justify-center gap-3">
