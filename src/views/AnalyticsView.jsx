@@ -1,373 +1,226 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart3, Users, ShoppingBag, MessageCircle, TrendingUp, Heart, ArrowUp, Activity, Zap, DollarSign, Package, Eye, RefreshCw } from 'lucide-react';
+import { BarChart3, Users, ShoppingBag, MessageCircle, Heart, DollarSign, Activity, Zap, Package, Eye, RefreshCw } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { Card, FadeIn } from '../components/ui';
+import { Card } from '../components/ui';
 import { supabase } from '../lib/supabase';
 
-// ─── Animated Counter ───
-function AnimatedNumber({ value, prefix = '', suffix = '' }) {
-  const [display, setDisplay] = useState(0);
-  useEffect(() => {
-    if (value === 0) { setDisplay(0); return; }
-    const startTime = Date.now();
-    const tick = () => {
-      const progress = Math.min((Date.now() - startTime) / 800, 1);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      setDisplay(Math.round(value * eased));
-      if (progress < 1) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, [value]);
-  return <span>{prefix}{display.toLocaleString()}{suffix}</span>;
-}
-
-// ─── Stat Card ───
-function StatCard({ icon: Icon, label, value, prefix, suffix, color, delay = 0 }) {
-  const styles = {
-    blue: 'from-blue-500/20 to-blue-600/20 border-blue-500/30 text-blue-400',
-    green: 'from-green-500/20 to-emerald-500/20 border-green-500/30 text-green-400',
-    purple: 'from-purple-500/20 to-violet-500/20 border-purple-500/30 text-purple-400',
-    pink: 'from-pink-500/20 to-rose-500/20 border-pink-500/30 text-pink-400',
-    orange: 'from-orange-500/20 to-amber-500/20 border-orange-500/30 text-orange-400',
-    cyan: 'from-cyan-500/20 to-teal-500/20 border-cyan-500/30 text-cyan-400',
-  };
-  const s = styles[color] || styles.blue;
-  const [bg, border, text] = [
-    s.split(' ')[0] + ' ' + s.split(' ')[1],
-    s.split(' ')[2],
-    s.split(' ')[3],
-  ];
-
-  return (
-    <FadeIn delay={delay}>
-      <Card className="p-4">
-        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} border ${border} flex items-center justify-center mb-3`}>
-          <Icon className={`w-5 h-5 ${text}`} />
-        </div>
-        <p className="text-2xl font-bold text-white">
-          <AnimatedNumber value={value || 0} prefix={prefix || ''} suffix={suffix || ''} />
-        </p>
-        <p className="text-xs text-slate-400 mt-0.5">{label}</p>
-      </Card>
-    </FadeIn>
-  );
-}
-
-// ─── Category Bar ───
-function CategoryChart({ categories, lang }) {
-  const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-cyan-500', 'bg-pink-500'];
-  const total = categories.reduce((s, c) => s + c.count, 0) || 1;
-
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">
-        {lang === 'he' ? 'קטגוריות פופולריות' : 'Popular Categories'}
-      </p>
-      {categories.length === 0 && <p className="text-xs text-slate-500 text-center py-2">{lang === 'he' ? 'אין נתונים' : 'No data yet'}</p>}
-      <div className="space-y-2.5">
-        {categories.slice(0, 5).map((cat, i) => {
-          const pct = Math.round((cat.count / total) * 100);
-          return (
-            <div key={i}>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-slate-300">{cat.name}</span>
-                <span className="text-slate-500">{cat.count} ({pct}%)</span>
-              </div>
-              <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-                <div className={`h-full rounded-full ${colors[i % colors.length]} transition-all duration-1000`} style={{ width: `${pct}%` }} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </Card>
-  );
-}
-
-// ─── Activity Feed ───
-function ActivityFeed({ activities, lang }) {
-  const icons = {
-    listing: <ShoppingBag className="w-3.5 h-3.5 text-blue-400" />,
-    user: <Users className="w-3.5 h-3.5 text-green-400" />,
-    message: <MessageCircle className="w-3.5 h-3.5 text-purple-400" />,
-  };
-
-  return (
-    <Card className="p-4">
-      <div className="flex items-center gap-2 mb-3">
-        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-        <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
-          {lang === 'he' ? 'פעילות אחרונה' : 'Recent Activity'}
-        </p>
-      </div>
-      {activities.length === 0 && <p className="text-xs text-slate-500 text-center py-4">{lang === 'he' ? 'אין פעילות עדיין' : 'No activity yet'}</p>}
-      <div className="space-y-3">
-        {activities.map((a, i) => (
-          <div key={i} className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-              {icons[a.type] || icons.listing}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-slate-300 truncate">{a.text}</p>
-              <p className="text-[10px] text-slate-500">{a.time}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-// ─── Time Ago Helper ───
-function timeAgo(dateStr, lang) {
-  if (!dateStr) return '';
-  const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
-  if (seconds < 60) return lang === 'he' ? 'עכשיו' : 'Just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return lang === 'he' ? `לפני ${minutes} דק'` : `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return lang === 'he' ? `לפני ${hours} שע'` : `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return lang === 'he' ? `לפני ${days} ימים` : `${days}d ago`;
-}
-
-// ─── Safe query helper ───
-async function safeCount(table) {
-  try {
-    const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });
-    if (error) { console.warn(`Count ${table} error:`, error.message); return 0; }
-    return count || 0;
-  } catch (e) { console.warn(`Count ${table} failed:`, e); return 0; }
-}
-
-async function safeQuery(table, select, options = {}) {
-  try {
-    let q = supabase.from(table).select(select);
-    if (options.eq) q = q.eq(options.eq[0], options.eq[1]);
-    if (options.order) q = q.order(options.order, { ascending: false });
-    if (options.limit) q = q.limit(options.limit);
-    const { data, error } = await q;
-    if (error) { console.warn(`Query ${table} error:`, error.message); return []; }
-    return data || [];
-  } catch (e) { console.warn(`Query ${table} failed:`, e); return []; }
-}
-
-// ─── Main Analytics Dashboard ───
 export default function AnalyticsView() {
-  const { lang, rtl, setView } = useApp();
+  const { lang, setView } = useApp();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [err, setErr] = useState(null);
 
-  const loadStats = async () => {
+  const load = async () => {
     setLoading(true);
-    setError(null);
+    setErr(null);
     try {
-      // Individual queries — each one can fail without breaking the rest
-      const totalUsers = await safeCount('profiles');
-      const totalListings = await safeCount('listings');
-      const totalConversations = await safeCount('conversations');
-      const totalMessages = await safeCount('messages');
-      const totalSaved = await safeCount('saved_items');
-
-      const listings = await safeQuery('listings', 'category, price, created_at, title, status');
-      const recentListings = await safeQuery('listings', 'title, title_hebrew, created_at, category', { order: 'created_at', limit: 5 });
-      const recentUsers = await safeQuery('profiles', 'full_name, created_at', { order: 'created_at', limit: 5 });
-
-      // Calculate from listings data
-      const activeListings = listings.filter(l => l.status === 'active').length;
-      let totalValue = 0;
-      const catMap = {};
-
-      listings.forEach(l => {
-        totalValue += (l.price || 0);
-        const cat = l.category || 'Other';
-        catMap[cat] = (catMap[cat] || 0) + 1;
-      });
-
-      const categories = Object.entries(catMap)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count);
-
-      const avgPrice = activeListings > 0 ? Math.round(totalValue / activeListings) : 0;
-
-      // Build activity feed
+      let totalUsers = 0, totalListings = 0, activeListings = 0, totalConvos = 0, totalMsgs = 0, totalSaved = 0, totalValue = 0;
+      const categories = {};
       const activities = [];
-      recentListings.forEach(l => {
-        activities.push({
-          type: 'listing',
-          text: lang === 'he' ? `פריט חדש: ${l.title_hebrew || l.title}` : `New listing: ${l.title}`,
-          time: timeAgo(l.created_at, lang),
-          date: new Date(l.created_at),
-        });
-      });
-      recentUsers.forEach(u => {
-        activities.push({
-          type: 'user',
-          text: lang === 'he' ? `משתמש חדש: ${u.full_name || 'אנונימי'}` : `New user: ${u.full_name || 'Anonymous'}`,
-          time: timeAgo(u.created_at, lang),
-          date: new Date(u.created_at),
-        });
-      });
-      activities.sort((a, b) => b.date - a.date);
 
-      setStats({
-        totalUsers,
-        totalListings,
-        activeListings,
-        totalConversations,
-        totalMessages,
-        totalSaved,
-        totalValue,
-        avgPrice,
-        categories,
-        activities: activities.slice(0, 8),
-      });
+      try {
+        const r = await supabase.from('profiles').select('full_name, created_at');
+        totalUsers = r.data?.length || 0;
+        (r.data || []).slice(-5).reverse().forEach(u => {
+          activities.push({ type: 'user', text: (lang === 'he' ? 'משתמש: ' : 'User: ') + (u.full_name || 'Anonymous'), time: ago(u.created_at) });
+        });
+      } catch(e) { console.warn('profiles failed', e); }
+
+      try {
+        const r = await supabase.from('listings').select('title, title_hebrew, category, price, status, created_at');
+        totalListings = r.data?.length || 0;
+        (r.data || []).forEach(l => {
+          if (l.status === 'active') activeListings++;
+          totalValue += (l.price || 0);
+          categories[l.category || 'Other'] = (categories[l.category || 'Other'] || 0) + 1;
+        });
+        (r.data || []).slice(-5).reverse().forEach(l => {
+          activities.push({ type: 'listing', text: (lang === 'he' ? 'פריט: ' : 'Item: ') + ((lang === 'he' ? l.title_hebrew : l.title) || l.title), time: ago(l.created_at) });
+        });
+      } catch(e) { console.warn('listings failed', e); }
+
+      try {
+        const r = await supabase.from('conversations').select('id', { count: 'exact', head: true });
+        totalConvos = r.count || 0;
+      } catch(e) {}
+
+      try {
+        const r = await supabase.from('messages').select('id', { count: 'exact', head: true });
+        totalMsgs = r.count || 0;
+      } catch(e) {}
+
+      try {
+        const r = await supabase.from('saved_items').select('id', { count: 'exact', head: true });
+        totalSaved = r.count || 0;
+      } catch(e) {}
+
+      const catList = Object.entries(categories).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
+
+      setStats({ totalUsers, totalListings, activeListings, totalConvos, totalMsgs, totalSaved, totalValue, avgPrice: activeListings > 0 ? Math.round(totalValue / activeListings) : 0, categories: catList, activities: activities.slice(0, 8) });
     } catch (e) {
-      console.error('Analytics load error:', e);
-      setError(lang === 'he' ? 'שגיאה בטעינת נתונים' : 'Failed to load analytics');
+      console.error('Analytics error:', e);
+      setErr(e.message);
     }
     setLoading(false);
   };
 
-  useEffect(() => { loadStats(); }, []);
+  useEffect(() => { load(); }, []);
+
+  function ago(d) {
+    if (!d) return '';
+    const s = Math.floor((Date.now() - new Date(d).getTime()) / 1000);
+    if (s < 60) return 'now';
+    if (s < 3600) return Math.floor(s/60) + 'm';
+    if (s < 86400) return Math.floor(s/3600) + 'h';
+    return Math.floor(s/86400) + 'd';
+  }
+
+  var barColors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-cyan-500'];
 
   return (
-    <div className="space-y-5 pb-4">
-      {/* Header */}
-      <FadeIn>
-        <button onClick={() => setView('profile')} className="flex items-center gap-2 text-slate-400 hover:text-white mb-4 transition-all">
-          <span className="text-sm">← {lang === 'he' ? 'חזרה' : 'Back'}</span>
+    <div className="space-y-4 pb-4">
+      <div>
+        <button onClick={function() { setView('profile'); }} className="text-slate-400 hover:text-white text-sm mb-3 flex items-center gap-1">
+          {'← '}{lang === 'he' ? 'חזרה' : 'Back'}
         </button>
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-bold flex items-center gap-2">
-              <BarChart3 className="w-6 h-6 text-blue-400" />
-              {lang === 'he' ? 'דשבורד אנליטיקס' : 'Analytics Dashboard'}
-            </h2>
-            <p className="text-xs text-slate-400 mt-1">
-              {lang === 'he' ? 'נתוני הפלטפורמה בזמן אמת' : 'Real-time platform metrics'}
-            </p>
-          </div>
-          <button onClick={loadStats} disabled={loading}
-            className={`p-2.5 rounded-xl bg-white/5 border border-white/10 transition-all hover:bg-white/10 ${loading ? 'animate-spin' : ''}`}>
-            <RefreshCw className="w-4 h-4 text-slate-400" />
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <BarChart3 className="w-5 h-5 text-blue-400" />
+            {lang === 'he' ? 'אנליטיקס' : 'Analytics'}
+          </h2>
+          <button onClick={load} className="p-2 rounded-xl bg-white/5 border border-white/10">
+            <RefreshCw className={'w-4 h-4 text-slate-400' + (loading ? ' animate-spin' : '')} />
           </button>
         </div>
-      </FadeIn>
+      </div>
 
-      {/* Error */}
-      {error && (
-        <Card className="p-4" gradient="linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))">
-          <p className="text-sm text-red-300">{error}</p>
-        </Card>
-      )}
+      {err && <div className="p-3 rounded-xl bg-red-500/20 border border-red-500/30 text-sm text-red-300">{err}</div>}
 
-      {/* Loading */}
       {loading && !stats && (
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center space-y-3">
-            <Activity className="w-8 h-8 text-blue-400 animate-pulse mx-auto" />
-            <p className="text-sm text-slate-400">{lang === 'he' ? 'טוען נתונים...' : 'Loading analytics...'}</p>
-          </div>
+        <div className="text-center py-16">
+          <Activity className="w-8 h-8 text-blue-400 animate-pulse mx-auto mb-2" />
+          <p className="text-sm text-slate-400">{lang === 'he' ? 'טוען...' : 'Loading...'}</p>
         </div>
       )}
 
-      {/* Dashboard Content */}
       {stats && (
-        <>
-          {/* Key Metrics */}
+        <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <StatCard icon={Users} label={lang === 'he' ? 'משתמשים' : 'Total Users'} value={stats.totalUsers} color="blue" delay={50} />
-            <StatCard icon={ShoppingBag} label={lang === 'he' ? 'מודעות פעילות' : 'Active Listings'} value={stats.activeListings} color="green" delay={100} />
-            <StatCard icon={MessageCircle} label={lang === 'he' ? 'שיחות' : 'Conversations'} value={stats.totalConversations} color="purple" delay={150} />
-            <StatCard icon={Heart} label={lang === 'he' ? 'שמירות' : 'Items Saved'} value={stats.totalSaved} color="pink" delay={200} />
+            <Card className="p-4">
+              <Users className="w-5 h-5 text-blue-400 mb-2" />
+              <p className="text-2xl font-bold">{stats.totalUsers}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'משתמשים' : 'Users'}</p>
+            </Card>
+            <Card className="p-4">
+              <ShoppingBag className="w-5 h-5 text-green-400 mb-2" />
+              <p className="text-2xl font-bold">{stats.activeListings}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'מודעות פעילות' : 'Active Listings'}</p>
+            </Card>
+            <Card className="p-4">
+              <MessageCircle className="w-5 h-5 text-purple-400 mb-2" />
+              <p className="text-2xl font-bold">{stats.totalConvos}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'שיחות' : 'Conversations'}</p>
+            </Card>
+            <Card className="p-4">
+              <Heart className="w-5 h-5 text-pink-400 mb-2" />
+              <p className="text-2xl font-bold">{stats.totalSaved}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'שמירות' : 'Saved'}</p>
+            </Card>
           </div>
 
-          {/* Market Value Card */}
-          <FadeIn delay={250}>
-            <Card className="p-5" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.08))" glow>
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/30 to-purple-500/30 border border-blue-500/30 flex items-center justify-center">
-                  <DollarSign className="w-6 h-6 text-blue-400" />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400 uppercase tracking-wider">{lang === 'he' ? 'סך ערך שוק' : 'Total Market Value'}</p>
-                  <p className="text-2xl font-bold text-white">
-                    <AnimatedNumber value={stats.totalValue} prefix="₪" />
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-3 pt-3 border-t border-white/10">
-                <div className="text-center">
-                  <p className="text-lg font-bold text-white"><AnimatedNumber value={stats.totalListings} /></p>
-                  <p className="text-[10px] text-slate-500">{lang === 'he' ? 'סה"כ מודעות' : 'Total Listed'}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-white">₪<AnimatedNumber value={stats.avgPrice} /></p>
-                  <p className="text-[10px] text-slate-500">{lang === 'he' ? 'מחיר ממוצע' : 'Avg. Price'}</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-white"><AnimatedNumber value={stats.totalMessages} /></p>
-                  <p className="text-[10px] text-slate-500">{lang === 'he' ? 'הודעות' : 'Messages'}</p>
-                </div>
-              </div>
-            </Card>
-          </FadeIn>
-
-          {/* Categories */}
-          <FadeIn delay={300}>
-            <CategoryChart categories={stats.categories} lang={lang} />
-          </FadeIn>
-
-          {/* Activity Feed */}
-          <FadeIn delay={350}>
-            <ActivityFeed activities={stats.activities} lang={lang} />
-          </FadeIn>
-
-          {/* Platform Health */}
-          <FadeIn delay={400}>
-            <Card className="p-4">
-              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">
-                {lang === 'he' ? 'בריאות הפלטפורמה' : 'Platform Health'}
-              </p>
-              <div className="space-y-3">
-                {[
-                  { icon: Zap, label: lang === 'he' ? 'AI סריקה' : 'AI Scanner' },
-                  { icon: MessageCircle, label: lang === 'he' ? "צ'אט בזמן אמת" : 'Real-time Chat' },
-                  { icon: Package, label: lang === 'he' ? 'מסד נתונים' : 'Database' },
-                  { icon: Eye, label: lang === 'he' ? 'זמן עליה' : 'Uptime', value: '99.9%' },
-                ].map((item, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <item.icon className="w-4 h-4 text-slate-400" />
-                      <span className="text-sm text-slate-300">{item.label}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-2 h-2 rounded-full bg-green-500" />
-                      <span className="text-xs font-medium text-green-400">
-                        {item.value || (lang === 'he' ? 'פעיל' : 'Operational')}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </Card>
-          </FadeIn>
-
-          {/* Footer */}
-          <FadeIn delay={450}>
-            <div className="text-center py-4 space-y-2">
-              <p className="text-xs text-slate-500">{lang === 'he' ? 'GetWorth AI — שוק חכם מונע בינה מלאכותית' : 'GetWorth AI — AI-Powered Smart Marketplace'}</p>
-              <div className="flex items-center justify-center gap-4 text-[10px] text-slate-600">
-                <span>React + Vite</span><span>•</span>
-                <span>Supabase</span><span>•</span>
-                <span>Claude AI</span><span>•</span>
-                <span>Vercel</span>
+          <Card className="p-5" glow>
+            <div className="flex items-center gap-3 mb-3">
+              <DollarSign className="w-6 h-6 text-blue-400" />
+              <div>
+                <p className="text-xs text-slate-400">{lang === 'he' ? 'סך ערך שוק' : 'Total Market Value'}</p>
+                <p className="text-2xl font-bold">{'₪'}{stats.totalValue.toLocaleString()}</p>
               </div>
             </div>
-          </FadeIn>
-        </>
+            <div className="grid grid-cols-3 gap-2 pt-3 border-t border-white/10 text-center">
+              <div>
+                <p className="text-lg font-bold">{stats.totalListings}</p>
+                <p className="text-[10px] text-slate-500">{lang === 'he' ? 'סה"כ' : 'Total'}</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold">{'₪'}{stats.avgPrice.toLocaleString()}</p>
+                <p className="text-[10px] text-slate-500">{lang === 'he' ? 'ממוצע' : 'Avg'}</p>
+              </div>
+              <div>
+                <p className="text-lg font-bold">{stats.totalMsgs}</p>
+                <p className="text-[10px] text-slate-500">{lang === 'he' ? 'הודעות' : 'Messages'}</p>
+              </div>
+            </div>
+          </Card>
+
+          {stats.categories.length > 0 && (
+            <Card className="p-4">
+              <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">
+                {lang === 'he' ? 'קטגוריות' : 'Categories'}
+              </p>
+              {stats.categories.slice(0, 5).map(function(cat, i) {
+                var total = stats.categories.reduce(function(s, c) { return s + c.count; }, 0);
+                var pct = Math.round((cat.count / total) * 100);
+                return (
+                  <div key={i} className="mb-2">
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-300">{cat.name}</span>
+                      <span className="text-slate-500">{cat.count} ({pct}%)</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-white/5">
+                      <div className={'h-full rounded-full ' + barColors[i % barColors.length]} style={{ width: pct + '%' }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          )}
+
+          {stats.activities.length > 0 && (
+            <Card className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                  {lang === 'he' ? 'פעילות אחרונה' : 'Recent Activity'}
+                </p>
+              </div>
+              {stats.activities.map(function(a, i) {
+                return (
+                  <div key={i} className="flex items-center gap-3 py-1.5">
+                    {a.type === 'user'
+                      ? <Users className="w-3 h-3 text-green-400 flex-shrink-0" />
+                      : <ShoppingBag className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+                    <p className="text-xs text-slate-300 flex-1 truncate">{a.text}</p>
+                    <p className="text-[10px] text-slate-500 flex-shrink-0">{a.time}</p>
+                  </div>
+                );
+              })}
+            </Card>
+          )}
+
+          <Card className="p-4">
+            <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">
+              {lang === 'he' ? 'סטטוס מערכת' : 'System Status'}
+            </p>
+            <div className="flex items-center justify-between py-1.5">
+              <div className="flex items-center gap-2"><Zap className="w-4 h-4 text-slate-400" /><span className="text-sm text-slate-300">AI Scanner</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500" /><span className="text-xs text-green-400">OK</span></div>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <div className="flex items-center gap-2"><MessageCircle className="w-4 h-4 text-slate-400" /><span className="text-sm text-slate-300">Real-time Chat</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500" /><span className="text-xs text-green-400">OK</span></div>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <div className="flex items-center gap-2"><Package className="w-4 h-4 text-slate-400" /><span className="text-sm text-slate-300">Database</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500" /><span className="text-xs text-green-400">OK</span></div>
+            </div>
+            <div className="flex items-center justify-between py-1.5">
+              <div className="flex items-center gap-2"><Eye className="w-4 h-4 text-slate-400" /><span className="text-sm text-slate-300">Uptime</span></div>
+              <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-green-500" /><span className="text-xs text-green-400">99.9%</span></div>
+            </div>
+          </Card>
+
+          <p className="text-center text-[10px] text-slate-600 py-2">GetWorth AI — React + Supabase + Claude AI + Vercel</p>
+        </div>
       )}
     </div>
   );
