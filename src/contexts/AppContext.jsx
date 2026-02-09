@@ -104,7 +104,7 @@ export function AppProvider({ children }) {
   // ─── AUTH ────────────────────────────────────────────
   useEffect(() => {
     let mounted = true;
-    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 1500);
+    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 500);
 
     const init = async () => {
       try {
