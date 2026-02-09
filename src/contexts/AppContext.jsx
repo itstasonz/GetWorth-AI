@@ -284,16 +284,12 @@ export function AppProvider({ children }) {
 
   const loadUserData = async () => {
     if (!user) return;
-    const [{ data: myData }, { data: savedData }] = await Promise.all([
-      supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false }),
-      supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id)
-    ]);
-    if (myData) setMyListings(myData);
+    // Only load essentials on startup — saved IDs for heart icons
+    const { data: savedData } = await supabase
+      .from('saved_items').select('listing_id').eq('user_id', user.id);
     if (savedData) {
-      setSavedItems(savedData.map((s) => s.listing).filter(Boolean));
       setSavedIds(new Set(savedData.map((s) => s.listing_id)));
     }
-    loadConversations();
   };
 
   // ─── [FIX #3] SELLER PROFILE ──────────────────────────
