@@ -1,99 +1,61 @@
 import React, { useEffect, useState } from 'react';
-import { BarChart3, Users, ShoppingBag, Scan, MessageCircle, TrendingUp, Eye, Heart, ArrowUp, ArrowDown, Activity, Zap, Target, Clock, DollarSign, Package, Star, ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { BarChart3, Users, ShoppingBag, MessageCircle, TrendingUp, Heart, ArrowUp, Activity, Zap, DollarSign, Package, Eye, RefreshCw } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { Card, FadeIn, BackButton } from '../components/ui';
+import { Card, FadeIn } from '../components/ui';
 import { supabase } from '../lib/supabase';
 
 // ─── Animated Counter ───
-function AnimatedNumber({ value, prefix = '', suffix = '', duration = 1000 }) {
+function AnimatedNumber({ value, prefix = '', suffix = '' }) {
   const [display, setDisplay] = useState(0);
-
   useEffect(() => {
     if (value === 0) { setDisplay(0); return; }
-    const start = 0;
     const startTime = Date.now();
     const tick = () => {
-      const elapsed = Date.now() - startTime;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
-      setDisplay(Math.round(start + (value - start) * eased));
+      const progress = Math.min((Date.now() - startTime) / 800, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setDisplay(Math.round(value * eased));
       if (progress < 1) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
-  }, [value, duration]);
-
+  }, [value]);
   return <span>{prefix}{display.toLocaleString()}{suffix}</span>;
 }
 
 // ─── Stat Card ───
-function StatCard({ icon: Icon, label, value, prefix, suffix, color, subtext, delay = 0 }) {
-  const colors = {
-    blue: { bg: 'from-blue-500/20 to-blue-600/20', border: 'border-blue-500/30', icon: 'text-blue-400', glow: 'shadow-blue-500/20' },
-    green: { bg: 'from-green-500/20 to-emerald-500/20', border: 'border-green-500/30', icon: 'text-green-400', glow: 'shadow-green-500/20' },
-    purple: { bg: 'from-purple-500/20 to-violet-500/20', border: 'border-purple-500/30', icon: 'text-purple-400', glow: 'shadow-purple-500/20' },
-    orange: { bg: 'from-orange-500/20 to-amber-500/20', border: 'border-orange-500/30', icon: 'text-orange-400', glow: 'shadow-orange-500/20' },
-    cyan: { bg: 'from-cyan-500/20 to-teal-500/20', border: 'border-cyan-500/30', icon: 'text-cyan-400', glow: 'shadow-cyan-500/20' },
-    pink: { bg: 'from-pink-500/20 to-rose-500/20', border: 'border-pink-500/30', icon: 'text-pink-400', glow: 'shadow-pink-500/20' },
+function StatCard({ icon: Icon, label, value, prefix, suffix, color, delay = 0 }) {
+  const styles = {
+    blue: 'from-blue-500/20 to-blue-600/20 border-blue-500/30 text-blue-400',
+    green: 'from-green-500/20 to-emerald-500/20 border-green-500/30 text-green-400',
+    purple: 'from-purple-500/20 to-violet-500/20 border-purple-500/30 text-purple-400',
+    pink: 'from-pink-500/20 to-rose-500/20 border-pink-500/30 text-pink-400',
+    orange: 'from-orange-500/20 to-amber-500/20 border-orange-500/30 text-orange-400',
+    cyan: 'from-cyan-500/20 to-teal-500/20 border-cyan-500/30 text-cyan-400',
   };
-  const c = colors[color] || colors.blue;
+  const s = styles[color] || styles.blue;
+  const [bg, border, text] = [
+    s.split(' ')[0] + ' ' + s.split(' ')[1],
+    s.split(' ')[2],
+    s.split(' ')[3],
+  ];
 
   return (
     <FadeIn delay={delay}>
-      <Card className={`p-4 shadow-lg ${c.glow}`} gradient={`linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))`}>
-        <div className="flex items-start justify-between">
-          <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${c.bg} border ${c.border} flex items-center justify-center`}>
-            <Icon className={`w-5 h-5 ${c.icon}`} />
-          </div>
-          {subtext && (
-            <span className="text-[10px] px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 font-semibold flex items-center gap-0.5">
-              <ArrowUp className="w-2.5 h-2.5" />{subtext}
-            </span>
-          )}
+      <Card className="p-4">
+        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${bg} border ${border} flex items-center justify-center mb-3`}>
+          <Icon className={`w-5 h-5 ${text}`} />
         </div>
-        <div className="mt-3">
-          <p className="text-2xl font-bold text-white">
-            <AnimatedNumber value={value} prefix={prefix || ''} suffix={suffix || ''} />
-          </p>
-          <p className="text-xs text-slate-400 mt-0.5">{label}</p>
-        </div>
+        <p className="text-2xl font-bold text-white">
+          <AnimatedNumber value={value || 0} prefix={prefix || ''} suffix={suffix || ''} />
+        </p>
+        <p className="text-xs text-slate-400 mt-0.5">{label}</p>
       </Card>
     </FadeIn>
   );
 }
 
-// ─── Mini Bar Chart ───
-function MiniChart({ data, label, color = 'blue' }) {
-  const max = Math.max(...data.map(d => d.value), 1);
-  const barColor = {
-    blue: 'from-blue-500 to-blue-400',
-    green: 'from-green-500 to-emerald-400',
-    purple: 'from-purple-500 to-violet-400',
-  }[color] || 'from-blue-500 to-blue-400';
-
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">{label}</p>
-      <div className="flex items-end gap-1.5 h-24">
-        {data.map((d, i) => (
-          <div key={i} className="flex-1 flex flex-col items-center gap-1">
-            <div className="w-full rounded-t-md relative overflow-hidden" 
-              style={{ height: `${Math.max((d.value / max) * 100, 4)}%`, minHeight: '3px' }}>
-              <div className={`absolute inset-0 bg-gradient-to-t ${barColor} opacity-80`} />
-            </div>
-            <span className="text-[9px] text-slate-500">{d.label}</span>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-// ─── Category Distribution ───
+// ─── Category Bar ───
 function CategoryChart({ categories, lang }) {
-  const colors = [
-    'bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500',
-    'bg-cyan-500', 'bg-pink-500', 'bg-yellow-500', 'bg-red-500'
-  ];
+  const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-cyan-500', 'bg-pink-500'];
   const total = categories.reduce((s, c) => s + c.count, 0) || 1;
 
   return (
@@ -101,6 +63,7 @@ function CategoryChart({ categories, lang }) {
       <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">
         {lang === 'he' ? 'קטגוריות פופולריות' : 'Popular Categories'}
       </p>
+      {categories.length === 0 && <p className="text-xs text-slate-500 text-center py-2">{lang === 'he' ? 'אין נתונים' : 'No data yet'}</p>}
       <div className="space-y-2.5">
         {categories.slice(0, 5).map((cat, i) => {
           const pct = Math.round((cat.count / total) * 100);
@@ -111,8 +74,7 @@ function CategoryChart({ categories, lang }) {
                 <span className="text-slate-500">{cat.count} ({pct}%)</span>
               </div>
               <div className="h-2 rounded-full bg-white/5 overflow-hidden">
-                <div className={`h-full rounded-full ${colors[i % colors.length]} transition-all duration-1000`}
-                  style={{ width: `${pct}%` }} />
+                <div className={`h-full rounded-full ${colors[i % colors.length]} transition-all duration-1000`} style={{ width: `${pct}%` }} />
               </div>
             </div>
           );
@@ -122,13 +84,12 @@ function CategoryChart({ categories, lang }) {
   );
 }
 
-// ─── Live Activity Feed ───
+// ─── Activity Feed ───
 function ActivityFeed({ activities, lang }) {
   const icons = {
     listing: <ShoppingBag className="w-3.5 h-3.5 text-blue-400" />,
     user: <Users className="w-3.5 h-3.5 text-green-400" />,
     message: <MessageCircle className="w-3.5 h-3.5 text-purple-400" />,
-    save: <Heart className="w-3.5 h-3.5 text-pink-400" />,
   };
 
   return (
@@ -139,10 +100,8 @@ function ActivityFeed({ activities, lang }) {
           {lang === 'he' ? 'פעילות אחרונה' : 'Recent Activity'}
         </p>
       </div>
+      {activities.length === 0 && <p className="text-xs text-slate-500 text-center py-4">{lang === 'he' ? 'אין פעילות עדיין' : 'No activity yet'}</p>}
       <div className="space-y-3">
-        {activities.length === 0 && (
-          <p className="text-xs text-slate-500 text-center py-4">{lang === 'he' ? 'אין פעילות עדיין' : 'No activity yet'}</p>
-        )}
         {activities.map((a, i) => (
           <div key={i} className="flex items-center gap-3">
             <div className="w-7 h-7 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
@@ -159,81 +118,82 @@ function ActivityFeed({ activities, lang }) {
   );
 }
 
+// ─── Time Ago Helper ───
+function timeAgo(dateStr, lang) {
+  if (!dateStr) return '';
+  const seconds = Math.floor((new Date() - new Date(dateStr)) / 1000);
+  if (seconds < 60) return lang === 'he' ? 'עכשיו' : 'Just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return lang === 'he' ? `לפני ${minutes} דק'` : `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return lang === 'he' ? `לפני ${hours} שע'` : `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return lang === 'he' ? `לפני ${days} ימים` : `${days}d ago`;
+}
+
+// ─── Safe query helper ───
+async function safeCount(table) {
+  try {
+    const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true });
+    if (error) { console.warn(`Count ${table} error:`, error.message); return 0; }
+    return count || 0;
+  } catch (e) { console.warn(`Count ${table} failed:`, e); return 0; }
+}
+
+async function safeQuery(table, select, options = {}) {
+  try {
+    let q = supabase.from(table).select(select);
+    if (options.eq) q = q.eq(options.eq[0], options.eq[1]);
+    if (options.order) q = q.order(options.order, { ascending: false });
+    if (options.limit) q = q.limit(options.limit);
+    const { data, error } = await q;
+    if (error) { console.warn(`Query ${table} error:`, error.message); return []; }
+    return data || [];
+  } catch (e) { console.warn(`Query ${table} failed:`, e); return []; }
+}
+
 // ─── Main Analytics Dashboard ───
 export default function AnalyticsView() {
   const { lang, rtl, setView } = useApp();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [lastRefresh, setLastRefresh] = useState(null);
+  const [error, setError] = useState(null);
 
   const loadStats = async () => {
     setLoading(true);
+    setError(null);
     try {
-      // Parallel queries for speed
-      const [
-        { count: totalUsers },
-        { count: totalListings },
-        { count: activeListings },
-        { count: totalConversations },
-        { count: totalMessages },
-        { count: totalSaved },
-        { data: listings },
-        { data: recentListings },
-        { data: recentUsers },
-        { data: recentMessages },
-      ] = await Promise.all([
-        supabase.from('profiles').select('*', { count: 'exact', head: true }),
-        supabase.from('listings').select('*', { count: 'exact', head: true }),
-        supabase.from('listings').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('conversations').select('*', { count: 'exact', head: true }),
-        supabase.from('messages').select('*', { count: 'exact', head: true }),
-        supabase.from('saved_items').select('*', { count: 'exact', head: true }),
-        supabase.from('listings').select('category, price, created_at, title').eq('status', 'active'),
-        supabase.from('listings').select('title, title_hebrew, created_at, category').order('created_at', { ascending: false }).limit(5),
-        supabase.from('profiles').select('full_name, created_at').order('created_at', { ascending: false }).limit(5),
-        supabase.from('messages').select('content, created_at').order('created_at', { ascending: false }).limit(5),
-      ]);
+      // Individual queries — each one can fail without breaking the rest
+      const totalUsers = await safeCount('profiles');
+      const totalListings = await safeCount('listings');
+      const totalConversations = await safeCount('conversations');
+      const totalMessages = await safeCount('messages');
+      const totalSaved = await safeCount('saved_items');
 
-      // Calculate category distribution
-      const catMap = {};
+      const listings = await safeQuery('listings', 'category, price, created_at, title, status');
+      const recentListings = await safeQuery('listings', 'title, title_hebrew, created_at, category', { order: 'created_at', limit: 5 });
+      const recentUsers = await safeQuery('profiles', 'full_name, created_at', { order: 'created_at', limit: 5 });
+
+      // Calculate from listings data
+      const activeListings = listings.filter(l => l.status === 'active').length;
       let totalValue = 0;
-      const dailyCounts = {};
+      const catMap = {};
 
-      (listings || []).forEach(l => {
+      listings.forEach(l => {
+        totalValue += (l.price || 0);
         const cat = l.category || 'Other';
         catMap[cat] = (catMap[cat] || 0) + 1;
-        totalValue += (l.price || 0);
-
-        // Daily listing counts for chart
-        const day = new Date(l.created_at).toLocaleDateString('en-US', { weekday: 'short' });
-        dailyCounts[day] = (dailyCounts[day] || 0) + 1;
       });
 
       const categories = Object.entries(catMap)
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count);
 
-      // Average price
       const avgPrice = activeListings > 0 ? Math.round(totalValue / activeListings) : 0;
-
-      // Weekly chart data (last 7 days)
-      const weekDays = [];
-      for (let i = 6; i >= 0; i--) {
-        const d = new Date();
-        d.setDate(d.getDate() - i);
-        const dayLabel = d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { weekday: 'short' });
-        const dateStr = d.toISOString().split('T')[0];
-        
-        const dayListings = (listings || []).filter(l => 
-          l.created_at && l.created_at.startsWith(dateStr)
-        ).length;
-        
-        weekDays.push({ label: dayLabel, value: dayListings });
-      }
 
       // Build activity feed
       const activities = [];
-      (recentListings || []).forEach(l => {
+      recentListings.forEach(l => {
         activities.push({
           type: 'listing',
           text: lang === 'he' ? `פריט חדש: ${l.title_hebrew || l.title}` : `New listing: ${l.title}`,
@@ -241,7 +201,7 @@ export default function AnalyticsView() {
           date: new Date(l.created_at),
         });
       });
-      (recentUsers || []).forEach(u => {
+      recentUsers.forEach(u => {
         activities.push({
           type: 'user',
           text: lang === 'he' ? `משתמש חדש: ${u.full_name || 'אנונימי'}` : `New user: ${u.full_name || 'Anonymous'}`,
@@ -249,34 +209,23 @@ export default function AnalyticsView() {
           date: new Date(u.created_at),
         });
       });
-      (recentMessages || []).forEach(m => {
-        activities.push({
-          type: 'message',
-          text: lang === 'he' ? `הודעה חדשה: "${(m.content || '').slice(0, 30)}..."` : `New message: "${(m.content || '').slice(0, 30)}..."`,
-          time: timeAgo(m.created_at, lang),
-          date: new Date(m.created_at),
-        });
-      });
-
       activities.sort((a, b) => b.date - a.date);
 
       setStats({
-        totalUsers: totalUsers || 0,
-        totalListings: totalListings || 0,
-        activeListings: activeListings || 0,
-        totalConversations: totalConversations || 0,
-        totalMessages: totalMessages || 0,
-        totalSaved: totalSaved || 0,
+        totalUsers,
+        totalListings,
+        activeListings,
+        totalConversations,
+        totalMessages,
+        totalSaved,
         totalValue,
         avgPrice,
         categories,
-        weekDays,
         activities: activities.slice(0, 8),
       });
-
-      setLastRefresh(new Date());
     } catch (e) {
-      console.error('Analytics error:', e);
+      console.error('Analytics load error:', e);
+      setError(lang === 'he' ? 'שגיאה בטעינת נתונים' : 'Failed to load analytics');
     }
     setLoading(false);
   };
@@ -287,7 +236,9 @@ export default function AnalyticsView() {
     <div className="space-y-5 pb-4">
       {/* Header */}
       <FadeIn>
-        <BackButton onClick={() => setView('profile')} rtl={rtl} label={lang === 'he' ? 'חזרה' : 'Back'} />
+        <button onClick={() => setView('profile')} className="flex items-center gap-2 text-slate-400 hover:text-white mb-4 transition-all">
+          <span className="text-sm">← {lang === 'he' ? 'חזרה' : 'Back'}</span>
+        </button>
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-bold flex items-center gap-2">
@@ -295,9 +246,7 @@ export default function AnalyticsView() {
               {lang === 'he' ? 'דשבורד אנליטיקס' : 'Analytics Dashboard'}
             </h2>
             <p className="text-xs text-slate-400 mt-1">
-              {lastRefresh 
-                ? `${lang === 'he' ? 'עודכן' : 'Updated'} ${lastRefresh.toLocaleTimeString()}`
-                : (lang === 'he' ? 'טוען...' : 'Loading...')}
+              {lang === 'he' ? 'נתוני הפלטפורמה בזמן אמת' : 'Real-time platform metrics'}
             </p>
           </div>
           <button onClick={loadStats} disabled={loading}
@@ -307,16 +256,27 @@ export default function AnalyticsView() {
         </div>
       </FadeIn>
 
-      {loading && !stats ? (
+      {/* Error */}
+      {error && (
+        <Card className="p-4" gradient="linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))">
+          <p className="text-sm text-red-300">{error}</p>
+        </Card>
+      )}
+
+      {/* Loading */}
+      {loading && !stats && (
         <div className="flex items-center justify-center py-20">
           <div className="text-center space-y-3">
             <Activity className="w-8 h-8 text-blue-400 animate-pulse mx-auto" />
             <p className="text-sm text-slate-400">{lang === 'he' ? 'טוען נתונים...' : 'Loading analytics...'}</p>
           </div>
         </div>
-      ) : stats && (
+      )}
+
+      {/* Dashboard Content */}
+      {stats && (
         <>
-          {/* Key Metrics Grid */}
+          {/* Key Metrics */}
           <div className="grid grid-cols-2 gap-3">
             <StatCard icon={Users} label={lang === 'he' ? 'משתמשים' : 'Total Users'} value={stats.totalUsers} color="blue" delay={50} />
             <StatCard icon={ShoppingBag} label={lang === 'he' ? 'מודעות פעילות' : 'Active Listings'} value={stats.activeListings} color="green" delay={100} />
@@ -324,7 +284,7 @@ export default function AnalyticsView() {
             <StatCard icon={Heart} label={lang === 'he' ? 'שמירות' : 'Items Saved'} value={stats.totalSaved} color="pink" delay={200} />
           </div>
 
-          {/* Revenue/Value Stats */}
+          {/* Market Value Card */}
           <FadeIn delay={250}>
             <Card className="p-5" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.08))" glow>
               <div className="flex items-center gap-3 mb-4">
@@ -355,68 +315,55 @@ export default function AnalyticsView() {
             </Card>
           </FadeIn>
 
-          {/* Weekly Listings Chart */}
+          {/* Categories */}
           <FadeIn delay={300}>
-            <MiniChart data={stats.weekDays} label={lang === 'he' ? 'מודעות חדשות (7 ימים אחרונים)' : 'New Listings (Last 7 Days)'} color="blue" />
-          </FadeIn>
-
-          {/* Category Distribution */}
-          <FadeIn delay={350}>
             <CategoryChart categories={stats.categories} lang={lang} />
           </FadeIn>
 
           {/* Activity Feed */}
-          <FadeIn delay={400}>
+          <FadeIn delay={350}>
             <ActivityFeed activities={stats.activities} lang={lang} />
           </FadeIn>
 
           {/* Platform Health */}
-          <FadeIn delay={450}>
+          <FadeIn delay={400}>
             <Card className="p-4">
               <p className="text-xs text-slate-400 font-semibold uppercase tracking-wider mb-3">
                 {lang === 'he' ? 'בריאות הפלטפורמה' : 'Platform Health'}
               </p>
               <div className="space-y-3">
-                <HealthRow 
-                  icon={Zap} 
-                  label={lang === 'he' ? 'AI סריקה' : 'AI Scanner'} 
-                  status="operational" 
-                  lang={lang} 
-                />
-                <HealthRow 
-                  icon={MessageCircle} 
-                  label={lang === 'he' ? 'צ\'אט בזמן אמת' : 'Real-time Chat'} 
-                  status="operational" 
-                  lang={lang} 
-                />
-                <HealthRow 
-                  icon={Package} 
-                  label={lang === 'he' ? 'מסד נתונים' : 'Database'} 
-                  status="operational" 
-                  lang={lang} 
-                />
-                <HealthRow 
-                  icon={Eye} 
-                  label={lang === 'he' ? 'זמן עליה' : 'Uptime'} 
-                  status="99.9%" 
-                  lang={lang} 
-                />
+                {[
+                  { icon: Zap, label: lang === 'he' ? 'AI סריקה' : 'AI Scanner' },
+                  { icon: MessageCircle, label: lang === 'he' ? "צ'אט בזמן אמת" : 'Real-time Chat' },
+                  { icon: Package, label: lang === 'he' ? 'מסד נתונים' : 'Database' },
+                  { icon: Eye, label: lang === 'he' ? 'זמן עליה' : 'Uptime', value: '99.9%' },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <item.icon className="w-4 h-4 text-slate-400" />
+                      <span className="text-sm text-slate-300">{item.label}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-2 h-2 rounded-full bg-green-500" />
+                      <span className="text-xs font-medium text-green-400">
+                        {item.value || (lang === 'he' ? 'פעיל' : 'Operational')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </Card>
           </FadeIn>
 
-          {/* Investor Footer */}
-          <FadeIn delay={500}>
+          {/* Footer */}
+          <FadeIn delay={450}>
             <div className="text-center py-4 space-y-2">
               <p className="text-xs text-slate-500">{lang === 'he' ? 'GetWorth AI — שוק חכם מונע בינה מלאכותית' : 'GetWorth AI — AI-Powered Smart Marketplace'}</p>
               <div className="flex items-center justify-center gap-4 text-[10px] text-slate-600">
-                <span>React + Vite</span>
-                <span>•</span>
-                <span>Supabase</span>
-                <span>•</span>
-                <span>Claude AI</span>
-                <span>•</span>
-                <span>Vercel Edge</span>
+                <span>React + Vite</span><span>•</span>
+                <span>Supabase</span><span>•</span>
+                <span>Claude AI</span><span>•</span>
+                <span>Vercel</span>
               </div>
             </div>
           </FadeIn>
@@ -424,39 +371,4 @@ export default function AnalyticsView() {
       )}
     </div>
   );
-}
-
-// ─── Health Row ───
-function HealthRow({ icon: Icon, label, status, lang }) {
-  const isOp = status === 'operational';
-  return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2.5">
-        <Icon className="w-4 h-4 text-slate-400" />
-        <span className="text-sm text-slate-300">{label}</span>
-      </div>
-      <div className="flex items-center gap-1.5">
-        <div className={`w-2 h-2 rounded-full ${isOp ? 'bg-green-500' : 'bg-yellow-500'}`} />
-        <span className={`text-xs font-medium ${isOp ? 'text-green-400' : 'text-yellow-400'}`}>
-          {isOp ? (lang === 'he' ? 'פעיל' : 'Operational') : status}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ─── Time ago helper ───
-function timeAgo(dateStr, lang) {
-  if (!dateStr) return '';
-  const now = new Date();
-  const date = new Date(dateStr);
-  const seconds = Math.floor((now - date) / 1000);
-
-  if (seconds < 60) return lang === 'he' ? 'עכשיו' : 'Just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return lang === 'he' ? `לפני ${minutes} דק'` : `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return lang === 'he' ? `לפני ${hours} שע'` : `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return lang === 'he' ? `לפני ${days} ימים` : `${days}d ago`;
 }
