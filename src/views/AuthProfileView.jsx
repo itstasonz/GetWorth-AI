@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, LogOut, Heart, ShoppingBag, TrendingUp } from 'lucide-react';
+import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, InputField } from '../components/ui';
 import { STAT_COLORS } from '../lib/utils';
@@ -57,7 +57,7 @@ export function AuthView() {
 }
 
 export function ProfileView() {
-  const { t, user, profile, signOut, myListings, savedItems } = useApp();
+  const { t, lang, user, profile, signOut, myListings, savedItems, setView } = useApp();
 
   if (!user) return null;
 
@@ -84,7 +84,7 @@ export function ProfileView() {
         </Card>
       </FadeIn>
 
-      {/* [IMPORTANT FIX #3] Profile stats use explicit color classes, not dynamic */}
+      {/* Profile stats */}
       <FadeIn delay={100} className="grid grid-cols-3 gap-3">
         {[
           { value: myListings.length, label: t.myListings, color: 'blue', icon: ShoppingBag },
@@ -101,6 +101,21 @@ export function ProfileView() {
           );
         })}
       </FadeIn>
+
+      {/* Admin-only Analytics Dashboard Button */}
+      {profile?.is_admin && (
+        <FadeIn delay={200}>
+          <button onClick={() => setView('analytics')} className="w-full p-4 rounded-3xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 flex items-center gap-4 hover:bg-blue-500/20 transition-all active:scale-[0.98]">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/30 to-purple-500/30 flex items-center justify-center">
+              <BarChart3 className="w-6 h-6 text-blue-400" />
+            </div>
+            <div className="flex-1 text-left">
+              <p className="font-bold text-white">{lang === 'he' ? 'דשבורד אנליטיקס' : 'Analytics Dashboard'}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'צפה בנתוני הפלטפורמה' : 'View platform metrics'}</p>
+            </div>
+          </button>
+        </FadeIn>
+      )}
     </div>
   );
 }
