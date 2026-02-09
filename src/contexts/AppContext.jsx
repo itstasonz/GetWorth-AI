@@ -284,11 +284,23 @@ export function AppProvider({ children }) {
 
   const loadUserData = async () => {
     if (!user) return;
-    // Only load essentials on startup — saved IDs for heart icons
     const { data: savedData } = await supabase
       .from('saved_items').select('listing_id').eq('user_id', user.id);
-    if (savedData) {
-      setSavedIds(new Set(savedData.map((s) => s.listing_id)));
+    if (savedData) setSavedIds(new Set(savedData.map((s) => s.listing_id)));
+  };
+
+  const loadMyListings = async () => {
+    if (!user) return;
+    const { data } = await supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false });
+    if (data) setMyListings(data);
+  };
+
+  const loadSavedItems = async () => {
+    if (!user) return;
+    const { data } = await supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id);
+    if (data) {
+      setSavedItems(data.map((s) => s.listing).filter(Boolean));
+      setSavedIds(new Set(data.map((s) => s.listing_id)));
     }
   };
 
@@ -739,8 +751,8 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
     setActiveChat(null);
     if (newTab === 'home') setView('home');
     else if (newTab === 'browse') setView('browse');
-    else if (newTab === 'sell') setView('myListings');
-    else if (newTab === 'saved') setView('saved');
+    else if (newTab === 'sell') { setView('myListings'); loadMyListings(); }
+    else if (newTab === 'saved') { setView('saved'); loadSavedItems(); }
     else if (newTab === 'messages') { setView('inbox'); loadConversations(); }
     else if (newTab === 'profile') setView(user ? 'profile' : 'auth');
   };
