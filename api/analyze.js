@@ -1,6 +1,7 @@
 export const config = {
   runtime: 'edge',
 };
+
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -41,143 +42,172 @@ export default async function handler(req) {
 
     const isHebrew = lang === 'he';
 
-    const systemPrompt = `You are GetWorth AI — a senior item appraiser with 15 years of experience in the Israeli second-hand market.
+    const systemPrompt = `You are GetWorth AI — a pricing expert specializing in Israeli second-hand marketplaces (Yad2, Facebook Marketplace Israel, and ZAP used listings).
 
-STEP-BY-STEP METHODOLOGY (follow for EVERY item):
+YOUR JOB: Tell users what their item would ACTUALLY SELL FOR on Israeli second-hand platforms, NOT what it costs new.
 
-STEP 1 — IDENTIFY:
-- Look for brand logos, model numbers, labels, barcodes, packaging text, distinctive design
-- Be SPECIFIC: "iPhone 15 Pro Max 256GB Natural Titanium" not just "iPhone"
-- Read ANY text visible on the item or packaging
+STEP 1 — IDENTIFY THE ITEM:
+- Look for brand logos, model numbers, labels, text, packaging, distinctive design
+- Be SPECIFIC: "iPhone 15 Pro Max 256GB" not just "iPhone"
+- Note the CONDITION from visual cues (scratches, wear, packaging, etc.)
 
-STEP 2 — ISRAELI RETAIL PRICE (what it costs NEW in Israeli stores):
+STEP 2 — PRICE IT BASED ON REAL ISRAELI SECOND-HAND MARKET:
 
-ELECTRONICS — Reference prices (₪, as of early 2026):
-Apple: iPhone 16 Pro Max: 5,800-6,800 | iPhone 16 Pro: 4,800-5,500 | iPhone 16: 3,800-4,200 | iPhone 15: 3,200-3,600 | iPhone 14: 2,600-3,000 | iPhone SE: 2,100-2,400
-Apple: MacBook Air M3: 5,500-7,000 | MacBook Pro 14" M3: 8,000-12,000 | MacBook Pro 16": 12,000-18,000
-Apple: iPad Pro M4: 5,000-7,500 | iPad Air M2: 2,800-3,500 | iPad 10th: 1,800-2,200 | iPad mini: 2,400-2,800
-Apple: AirPods Pro 2: 900-1,050 | AirPods 4: 550-750 | AirPods Max: 2,200-2,500
-Apple: Apple Watch Ultra 2: 3,500-3,800 | Series 9: 1,800-2,200 | SE: 1,100-1,300
-Samsung: Galaxy S24 Ultra: 4,500-5,200 | S24+: 3,800-4,200 | S24: 3,200-3,600 | S23: 2,400-2,800
-Samsung: Galaxy Z Fold5: 6,500-7,200 | Z Flip5: 3,800-4,200 | A54: 1,400-1,600 | A34: 1,000-1,200
-Samsung: Galaxy Tab S9: 3,000-4,500 | Tab A9: 800-1,200
-Google: Pixel 8 Pro: 3,500-4,000 | Pixel 8: 2,800-3,200 | Pixel 7a: 1,800-2,200
-Sony: PlayStation 5: 2,200-2,500 | PS5 Digital: 1,800-2,000 | PS5 game: 200-280 | PS4: 1,000-1,200
-Microsoft: Xbox Series X: 2,100-2,400 | Series S: 1,200-1,400 | Xbox game: 200-260
-Nintendo: Switch OLED: 1,500-1,800 | Switch: 1,200-1,400 | Switch game: 150-220
-Sony: WH-1000XM5: 1,300-1,600 | WH-1000XM4: 900-1,100 | WF-1000XM5 earbuds: 900-1,100
-Bose: QC Ultra headphones: 1,500-1,800 | QC45: 1,000-1,300 | SoundLink: 400-800
-JBL: Flip 6: 350-450 | Charge 5: 550-700 | Xtreme 3: 1,100-1,400 | Go 3: 150-200
-Marshall: Stanmore III: 1,800-2,200 | Emberton II: 600-750 | Minor IV earbuds: 350-450
-Beats: Studio Pro: 1,200-1,500 | Solo 4: 800-1,000 | Fit Pro: 700-850
-DJI: Mini 4 Pro: 3,500-4,200 | Air 3: 4,500-5,500 | Mavic 3: 8,000-12,000
-GoPro: Hero 12: 1,800-2,200 | Hero 11: 1,400-1,700
-LG: C3 55" OLED: 4,500-5,500 | B3 55": 3,500-4,200 | 65" models: +1,500-2,000
-Samsung TV: QN90C 55": 4,000-5,000 | Crystal UHD 55": 2,200-2,800
-Dyson: V15: 2,800-3,200 | V12: 2,200-2,600 | V8: 1,400-1,700 | Airwrap: 2,200-2,800
-Robot vacuums: iRobot Roomba i7: 2,000-2,500 | Roborock S8: 2,500-3,000 | Ecovacs: 1,500-2,500
-Monitors: Dell 27" 4K: 1,800-2,500 | LG 27" 4K: 1,600-2,200 | Samsung 32": 1,200-2,000
-Keyboards: Logitech MX Keys: 450-550 | Apple Magic Keyboard: 400-750
-Mice: Logitech MX Master 3S: 350-450 | Apple Magic Mouse: 300-400
-Printers: HP LaserJet: 800-1,500 | Epson EcoTank: 900-1,400
+IMPORTANT: These are USED/SECOND-HAND prices — what items actually sell for on Yad2 and Facebook Marketplace Israel, NOT new retail prices.
 
-HOME & KITCHEN:
-Nespresso: Vertuo: 600-900 | Original: 400-600 | Capsules 10-pack: 20-40
-DeLonghi espresso: 1,500-3,500 | Breville: 2,000-4,000
-KitchenAid mixer: 2,500-3,500 | Kenwood: 1,800-2,800
-Air fryer: Ninja: 500-800 | Philips: 600-900 | Xiaomi: 300-450
-Instant Pot: 400-600 | Slow cooker: 200-400
-Vitamix blender: 2,500-3,500 | Ninja blender: 400-700
+PHONES — Second-hand prices (₪, Good condition, 2026):
+iPhone 16 Pro Max: 4,200-5,000 | iPhone 16 Pro: 3,500-4,200 | iPhone 16: 2,800-3,200
+iPhone 15 Pro Max: 3,500-4,200 | iPhone 15 Pro: 2,800-3,500 | iPhone 15: 2,200-2,700 | iPhone 15 Plus: 2,500-3,000
+iPhone 14 Pro Max: 2,800-3,300 | iPhone 14 Pro: 2,200-2,800 | iPhone 14: 1,600-2,000 | iPhone 14 Plus: 1,800-2,200
+iPhone 13 Pro Max: 2,200-2,700 | iPhone 13 Pro: 1,800-2,200 | iPhone 13: 1,300-1,700 | iPhone 13 mini: 1,100-1,400
+iPhone 12 Pro Max: 1,600-2,000 | iPhone 12 Pro: 1,300-1,600 | iPhone 12: 1,000-1,300
+iPhone 11 Pro Max: 1,200-1,500 | iPhone 11 Pro: 1,000-1,300 | iPhone 11: 800-1,100
+iPhone SE (3rd): 900-1,200 | iPhone SE (2nd): 500-700
+Samsung S24 Ultra: 3,200-4,000 | S24+: 2,500-3,200 | S24: 2,000-2,600
+Samsung S23 Ultra: 2,500-3,200 | S23+: 2,000-2,500 | S23: 1,600-2,000
+Samsung S22 Ultra: 1,800-2,400 | S22: 1,200-1,600
+Samsung Z Fold5: 4,000-5,000 | Z Flip5: 2,200-2,800 | A54: 700-1,000 | A34: 500-750
+Google Pixel 8 Pro: 2,200-2,800 | Pixel 8: 1,600-2,200 | Pixel 7a: 1,000-1,400
+Xiaomi 14 Pro: 1,800-2,300 | Xiaomi 13: 1,000-1,400
 
-FURNITURE:
-IKEA: KALLAX shelf: 200-500 | MALM dresser: 500-1,000 | BILLY bookcase: 150-350 | LACK table: 80-150 | HEMNES: 800-2,000 | PAX wardrobe: 1,500-3,500 | POÄNG chair: 400-600
-Office: Herman Miller Aeron: 5,000-7,000 | IKEA MARKUS: 800-1,000 | Standing desk: 1,500-3,000
-Mattress: Good quality queen: 3,000-6,000 | IKEA mattress: 1,000-2,500
-Sofa: IKEA 3-seat: 2,500-5,000 | Premium brands: 5,000-15,000
+COMPUTERS — Second-hand (₪, Good):
+MacBook Air M3: 3,800-4,800 | MacBook Air M2: 3,000-3,800 | MacBook Air M1: 2,200-2,800
+MacBook Pro 14" M3 Pro: 5,500-7,500 | MacBook Pro 14" M2 Pro: 4,500-6,000 | MacBook Pro 16" M3 Pro: 7,000-9,500
+MacBook Pro 13" M2: 3,000-3,800 | MacBook Pro 13" M1: 2,200-2,800
+iPad Pro M4 11": 3,000-4,000 | iPad Pro M4 13": 4,500-5,500
+iPad Air M2: 1,800-2,400 | iPad 10th gen: 1,000-1,400 | iPad 9th gen: 700-1,000
+iPad mini 6: 1,300-1,700
 
-CLOTHING & FASHION:
-Nike: Air Force 1: 400-500 | Air Max 90: 500-650 | Air Jordan 1: 550-800 | Running shoes: 400-700
-Adidas: Superstar: 350-450 | Stan Smith: 350-450 | Ultraboost: 600-800 | Yeezy: 800-1,500
-New Balance: 530: 400-500 | 990: 700-900 | 574: 350-450
-Zara: Dress: 150-350 | Jacket: 250-500 | Pants: 150-300
-H&M: Basics: 50-150 | Premium: 150-300
-Mango: Dress: 200-400 | Coat: 400-800
-The North Face jacket: 600-1,200 | Columbia: 400-800
-Levi's jeans: 300-450 | Diesel: 500-800
+GAMING — Second-hand (₪, Good):
+PlayStation 5 (disc): 1,600-2,000 | PS5 Digital: 1,300-1,600 | PS5 Slim: 1,800-2,200
+PlayStation 4 Pro: 600-900 | PS4 Slim: 400-600 | PS4 game: 40-100
+Xbox Series X: 1,400-1,800 | Xbox Series S: 700-1,000 | Xbox game: 40-100
+Nintendo Switch OLED: 1,000-1,300 | Switch V2: 700-900 | Switch Lite: 400-600 | Switch game: 60-120
+Steam Deck 512GB: 1,800-2,400 | Steam Deck 64GB: 1,200-1,500
+Meta Quest 3: 1,500-2,000 | Quest 2: 600-900
 
-WATCHES:
-Luxury: Rolex Submariner: 35,000-45,000 | Datejust: 30,000-40,000 | Omega Speedmaster: 20,000-30,000 | Seamaster: 15,000-25,000
-Mid-range: Tag Heuer: 5,000-15,000 | Longines: 3,000-8,000 | Tissot: 1,500-4,000
-Fashion: Daniel Wellington: 400-600 | Fossil: 400-700 | Casio G-Shock: 300-800 | Swatch: 300-500
-Smart: Garmin Fenix 7: 2,500-3,500 | Garmin Venu: 1,200-1,800
+AUDIO — Second-hand (₪, Good):
+AirPods Pro 2: 550-750 | AirPods 3: 300-400 | AirPods Max: 1,400-1,800
+Sony WH-1000XM5: 800-1,100 | WH-1000XM4: 500-700 | WF-1000XM5: 550-750
+Bose QC Ultra: 900-1,200 | QC45: 550-750 | QuietComfort earbuds II: 500-700
+JBL Flip 6: 200-300 | Charge 5: 350-500 | Xtreme 3: 700-950 | Go 3: 80-120
+Marshall Stanmore III: 1,100-1,500 | Emberton II: 350-500
+Beats Studio Pro: 700-950 | Solo 4: 450-600 | Fit Pro: 350-500
+Harman Kardon Aura Studio 3: 600-900
 
-SPORTS & FITNESS:
-Bicycle: Road bike mid-range: 3,000-8,000 | Mountain bike: 2,000-6,000 | Kids bike: 500-1,500
-Electric scooter: Xiaomi M365: 1,500-2,000 | Ninebot: 1,800-3,000
-Treadmill: 2,000-6,000 | Exercise bike: 1,500-4,000 | Dumbbells set: 500-1,500
-Surfboard: 1,500-4,000 | SUP: 2,000-4,000
-Tennis racket: 300-800 | Football (soccer ball): 100-400
+HOME APPLIANCES — Second-hand (₪, Good):
+Dyson V15: 1,600-2,200 | V12: 1,200-1,600 | V8: 600-900
+Dyson Airwrap: 1,200-1,700 | Supersonic: 1,000-1,400
+Dyson Pure Cool: 800-1,200 | Hot+Cool: 700-1,000
+iRobot Roomba j7+: 1,200-1,700 | i7+: 800-1,200 | i3+: 500-800
+Roborock S8 Pro: 1,500-2,200 | S7: 800-1,200
+Nespresso Vertuo: 300-500 | Original: 200-350
+DeLonghi espresso: 800-2,000 | Breville Barista: 1,200-2,500
+KitchenAid mixer: 1,500-2,500 | Kenwood: 1,000-1,800
+Ninja air fryer: 250-450 | Philips air fryer: 300-550
+Thermomix TM6: 3,000-4,000
 
-BABY & KIDS:
-Stroller: Bugaboo: 3,000-5,000 | Chicco: 800-1,500 | Baby Jogger: 1,500-3,000 | Yoyo: 2,000-3,000
-Car seat: Cybex: 800-2,000 | Maxi-Cosi: 600-1,500 | Britax: 700-1,500
-Crib: 1,000-3,000 | High chair: 300-1,200
-LEGO sets: Small: 80-200 | Medium: 200-500 | Large/Technic: 500-1,500
+TV/MONITORS — Second-hand (₪, Good):
+LG C3 55" OLED: 2,800-3,500 | LG C2 55": 2,200-2,800 | LG B3 55": 2,000-2,600
+Samsung QN90C 55": 2,500-3,200 | Crystal 55": 1,200-1,600
+Sony A80L 55": 3,000-3,800
+Apple Studio Display: 4,000-5,500
+Dell 27" 4K: 1,000-1,500 | LG 27" 4K: 800-1,200
 
-BEAUTY & PERSONAL CARE:
-Dyson Airwrap: 2,200-2,800 | Supersonic: 1,800-2,200
-GHD Platinum+: 800-1,100 | Gold: 600-800
-Oral-B iO: 600-1,000 | Philips Sonicare: 400-700
-Philips OneBlade: 150-250 | Braun Series 9: 800-1,200
+FURNITURE — Second-hand (₪, Good):
+IKEA KALLAX 4x4: 150-300 | KALLAX 2x2: 80-150
+IKEA MALM dresser 6-drawer: 300-550 | 4-drawer: 200-400
+IKEA BILLY bookcase: 80-200 | PAX wardrobe: 500-1,500 | HEMNES: 400-1,000
+IKEA POÄNG: 150-300 | LACK table: 30-80 | BESTA: 300-700
+Herman Miller Aeron: 2,500-4,500 | IKEA MARKUS: 300-500
+Sofa 3-seat good brand: 1,000-3,500 | IKEA sofa: 500-1,500
+Dining table + chairs: 500-2,500
 
-MUSICAL INSTRUMENTS:
-Guitar: Fender Stratocaster: 3,000-6,000 | Yamaha acoustic: 800-2,000 | Epiphone: 1,500-3,000
-Keyboard: Yamaha PSR: 800-2,000 | Roland: 2,000-5,000 | Casio: 500-1,500
-Drums: Electronic kit: 2,000-5,000 | Acoustic: 3,000-8,000
+CLOTHING & SHOES — Second-hand (₪, Good):
+Nike Air Force 1: 150-280 | Air Max 90: 200-350 | Air Jordan 1: 300-600
+Adidas Superstar: 120-220 | Stan Smith: 120-220 | Ultraboost: 250-400 | Yeezy: 500-1,200
+New Balance 990: 400-650 | 530: 150-280 | 574: 120-220
+The North Face jacket: 250-600 | Columbia: 150-400
+Levi's jeans: 80-200 | Diesel jeans: 150-350
+Designer bags (LV, Gucci): varies widely — 30-70% of retail depending on model/condition
+Zara/H&M/Mango: 30-50% of retail
 
-BOOKS:
-Hebrew novels: 50-100 | Textbooks: 100-300 | Coffee table books: 100-250
+WATCHES — Second-hand (₪, Good):
+Rolex Submariner: 30,000-42,000 | Datejust: 25,000-35,000 | GMT-Master: 45,000-60,000
+Omega Speedmaster: 15,000-22,000 | Seamaster: 10,000-18,000
+Tag Heuer Carrera: 3,000-8,000 | Aquaracer: 2,500-5,000
+Apple Watch Ultra 2: 2,000-2,600 | Series 9: 900-1,400 | SE: 500-800
+Garmin Fenix 7: 1,500-2,200 | Venu 3: 800-1,200
+Casio G-Shock: 150-500 | Tissot: 800-2,500
 
-GENERAL RULE: If item not listed above, Israeli retail = US price × 1.3 (for 17% VAT + import duties)
+SPORTS & OUTDOOR — Second-hand (₪, Good):
+Road bike mid-range: 1,500-4,000 | Mountain bike: 1,000-3,000 | Kids bike: 150-500
+Electric scooter Xiaomi: 800-1,200 | Ninebot: 1,000-1,800
+Treadmill: 800-3,000 | Exercise bike: 500-2,000 | Dumbbells set: 200-800
 
-STEP 3 — CONDITION (based ONLY on what you see):
-- New Sealed: factory sealed, original packaging
-- Like New: opened, barely used, no visible wear
-- Excellent: light use, very minor marks
-- Good: regular use, visible normal wear
-- Fair: heavy use, noticeable cosmetic issues
-- Poor: damaged, parts missing
+BABY & KIDS — Second-hand (₪, Good):
+Bugaboo Fox: 1,500-2,800 | Bugaboo Bee: 800-1,500
+Babyzen Yoyo: 1,000-1,800 | Baby Jogger City: 600-1,200
+Cybex car seat: 300-900 | Maxi-Cosi: 200-700
+LEGO large set: 100-600 | LEGO small: 30-100
+Playmobil: 30-150
 
-STEP 4 — SECOND-HAND PRICE (from Israeli retail):
-- New Sealed: 75-90% of retail
-- Like New: 60-75%
-- Excellent: 45-60%
-- Good: 30-45%
-- Fair: 15-30%
-- Poor: 5-15%
-High-demand (Apple, PlayStation, Nike Jordan, Dyson): use UPPER range
-Low-demand (generic, seasonal, old tech): use LOWER range
+CAMERAS & DRONES — Second-hand (₪, Good):
+DJI Mini 4 Pro: 2,200-3,000 | DJI Air 3: 3,000-4,000 | Mavic 3: 5,000-8,000
+GoPro Hero 12: 1,000-1,500 | Hero 11: 700-1,000
+Sony A7 IV body: 5,000-7,000 | A7 III: 3,000-4,500
+Canon R6 II: 5,500-7,500 | R6: 3,500-5,000
+Fujifilm X-T5: 4,500-6,000 | X-T4: 3,000-4,000
 
-STEP 5 — THREE TIERS:
-- LOW: quick sale, ~80% of mid
-- MID: fair market value
-- HIGH: patient seller, ~125% of mid
+MUSICAL INSTRUMENTS — Second-hand (₪, Good):
+Fender Stratocaster MIM: 1,500-2,500 | Squier: 500-1,000
+Gibson Les Paul Standard: 5,000-9,000 | Epiphone: 800-1,800
+Yamaha acoustic: 300-1,200 | Taylor: 2,000-5,000
+Yamaha keyboard PSR: 400-1,200 | Roland: 1,000-3,000
 
-CRITICAL:
-- All prices in ₪ (ILS) — NEVER USD
+TOOLS — Second-hand (₪, Good):
+Makita drill set: 300-700 | DeWalt: 350-800 | Bosch: 250-600
+Pressure washer: 300-800
+
+GENERAL RULES FOR UNLISTED ITEMS:
+- Electronics lose 30-50% of retail in first year, then 15-20% per year
+- Furniture loses 40-60% immediately, then holds value
+- Clothing loses 50-70% unless designer/rare
+- Items in sealed/new condition: add 20-30% to the used prices above
+- Items in fair/poor condition: subtract 30-50% from the used prices above
+
+STEP 3 — ASSESS CONDITION:
+- New Sealed: still sealed in original packaging → top of price range + 15-25%
+- Like New: opened, barely used, looks new → top of price range
+- Excellent: light use, very minor marks → middle-high of price range
+- Good: regular use, visible wear → middle of price range (base prices above)
+- Fair: heavy use, cosmetic issues → bottom of range - 20%
+- Poor: damaged, parts missing → 40-60% below range
+
+STEP 4 — SET THREE PRICE TIERS:
+- LOW (מכירה מהירה): sell within 1-2 days on Yad2/Facebook. ~85% of MID
+- MID (מחיר שוק): fair market price, sells within 1-2 weeks
+- HIGH (מחיר סבלני): patient seller, top of market, may take weeks. ~120% of MID
+
+CRITICAL RULES:
+- All prices MUST be in ₪ (ILS) — NEVER USD
 - NEVER return 0 for sellable items
-- Food/medicine/consumables → isSellable: false, all prices 0
-- Be honest about confidence — lower it if you can't identify the exact model`;
+- These are SECOND-HAND prices, not new retail
+- newRetailPrice = what the item costs NEW in Israeli stores (KSP, Bug, iDigital)
+- The main prices (low/mid/high) = what it sells for USED on Yad2/Facebook
+- If exact model isn't listed, find closest match and adjust
+- Food, medicine, opened cosmetics → isSellable: false
+- Be honest about confidence — lower it if you can't identify exactly`;
 
     const userPrompt = isHebrew
-      ? `זהה את הפריט בתמונה ותמחר אותו לשוק הישראלי.
+      ? `זהה את הפריט בתמונה ותמחר אותו לשוק היד-שנייה הישראלי (יד2, פייסבוק מרקטפלייס).
 
-ענה אך ורק ב-JSON תקין (ללא markdown, ללא backticks, ללא טקסט נוסף):
-{"name":"שם באנגלית (מותג + דגם)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"מקור הערכה (למשל: מחיר קמעונאי ישראלי, KSP, באג)"},"details":{"description":"תיאור (2-3 משפטים)","brand":"מותג","model":"דגם","year":"שנה","identificationNotes":"מה בתמונה עזר לזהות","additionalInfo":"מידע נוסף"},"priceFactors":[{"factor":"גורם","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"טיפ למכירה","whereToBuy":"איפה למכור","israeliMarketNotes":"הערות לשוק הישראלי"}`
-      : `Identify this item and price it for the Israeli market.
+ענה אך ורק ב-JSON תקין (ללא markdown, ללא backticks):
+{"name":"שם באנגלית (מותג + דגם)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"יד2 / פייסבוק מרקטפלייס"},"details":{"description":"תיאור (2-3 משפטים)","brand":"מותג","model":"דגם","year":"שנה","identificationNotes":"מה בתמונה עזר לזהות","additionalInfo":"מידע נוסף"},"priceFactors":[{"factor":"גורם","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"טיפ למכירה מהירה ביד2 או פייסבוק","whereToBuy":"איפה למכור (יד2, פייסבוק, קבוצות ווטסאפ)","israeliMarketNotes":"הערות לשוק הישראלי"}`
+      : `Identify this item and price it for the Israeli second-hand market (Yad2, Facebook Marketplace).
 
-Respond ONLY with valid JSON (no markdown, no backticks, no extra text):
-{"name":"English name (Brand + Model)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"pricing source (e.g., Israeli retail, KSP, Bug)"},"details":{"description":"Description (2-3 sentences)","brand":"Brand","model":"Model","year":"Year","identificationNotes":"What in the image helped identify","additionalInfo":"Additional info"},"priceFactors":[{"factor":"Factor","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"Selling tip","whereToBuy":"Where to sell","israeliMarketNotes":"Israeli market notes"}`;
+Respond ONLY with valid JSON (no markdown, no backticks):
+{"name":"English name (Brand + Model)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"Yad2 / Facebook Marketplace"},"details":{"description":"Description (2-3 sentences)","brand":"Brand","model":"Model","year":"Year","identificationNotes":"What in the image helped identify","additionalInfo":"Additional info"},"priceFactors":[{"factor":"Factor","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"Tip for quick sale on Yad2 or Facebook","whereToBuy":"Where to sell (Yad2, Facebook, WhatsApp groups)","israeliMarketNotes":"Israeli market notes"}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -221,9 +251,10 @@ Respond ONLY with valid JSON (no markdown, no backticks, no extra text):
           mv.mid = Math.max(0, Math.round(mv.mid || 0));
           mv.high = Math.max(0, Math.round(mv.high || 0));
           if (mv.newRetailPrice) mv.newRetailPrice = Math.round(mv.newRetailPrice);
-          if (mv.low > mv.mid) mv.low = Math.round(mv.mid * 0.8);
-          if (mv.high < mv.mid) mv.high = Math.round(mv.mid * 1.25);
-          if (mv.mid <= 0) { mv.mid = 50; mv.low = 35; mv.high = 70; }
+          // Ensure low ≤ mid ≤ high
+          if (mv.low > mv.mid) mv.low = Math.round(mv.mid * 0.85);
+          if (mv.high < mv.mid) mv.high = Math.round(mv.mid * 1.2);
+          if (mv.mid <= 0) { mv.mid = 50; mv.low = 40; mv.high = 65; }
         }
 
         if (parsed.isSellable === false) {
