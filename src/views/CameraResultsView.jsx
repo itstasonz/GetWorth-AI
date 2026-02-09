@@ -32,19 +32,19 @@ export function CameraView() {
     return () => clearTimeout(timer);
   }, [videoRef]);
 
-  // Clean up camera + torch on unmount
+  // Clean up on unmount: turn off torch only — do NOT stop tracks
+  // Stream lifecycle is owned by AppContext (cameraStreamRef), not this component
   useEffect(() => {
     return () => {
-      if (videoRef.current?.srcObject) {
-        const tracks = videoRef.current.srcObject.getTracks();
-        // Turn off torch before stopping
-        tracks.forEach((track) => {
-          try { track.applyConstraints({ advanced: [{ torch: false }] }); } catch(e) {}
-          track.stop();
-        });
+      // Only turn off torch, don't kill the stream
+      if (torchOn && videoRef.current?.srcObject) {
+        const track = videoRef.current.srcObject.getVideoTracks()[0];
+        try { track?.applyConstraints({ advanced: [{ torch: false }] }); } catch(e) {}
       }
+      setTorchOn(false);
+      setScreenLight(false);
     };
-  }, [videoRef]);
+  }, [videoRef, torchOn]);
 
   const toggleTorch = useCallback(async () => {
     try {
