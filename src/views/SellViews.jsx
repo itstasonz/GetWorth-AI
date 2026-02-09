@@ -7,13 +7,14 @@ import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
 
 export function MyListingsView() {
-  const { t, lang, rtl, user, myListings, deleteListing, goTab, reset } = useApp();
+  // [FIX] Added viewItem to open listing details when tapped
+  const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset } = useApp();
 
   return (
     <div className="space-y-5">
       <FadeIn className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">{t.myListings}</h2>
-        {myListings.length > 0 && <Badge>{myListings.length} active</Badge>}
+        {myListings.length > 0 && <Badge>{myListings.length} {lang === 'he' ? 'פעילים' : 'active'}</Badge>}
       </FadeIn>
 
       {!user ? (
@@ -34,15 +35,17 @@ export function MyListingsView() {
         <div className="space-y-4">
           {myListings.map((item, i) => (
             <FadeIn key={item.id} delay={i * 50}>
-              <Card className="p-4 group">
+              {/* [FIX] Added onClick + cursor-pointer so tapping opens the detail view */}
+              <Card className="p-4 group cursor-pointer active:scale-[0.98] transition-transform" onClick={() => viewItem(item)}>
                 <div className="flex gap-4">
                   <div className="w-24 h-24 rounded-2xl overflow-hidden flex-shrink-0">
                     <img src={item.images?.[0]} className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-start">
-                      <h3 className="font-semibold truncate">{item.title}</h3>
-                      <button onClick={() => deleteListing(item.id)} className="p-2 rounded-xl opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all">
+                      <h3 className="font-semibold truncate">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</h3>
+                      {/* [FIX] stopPropagation so delete doesn't trigger card click */}
+                      <button onClick={(e) => { e.stopPropagation(); deleteListing(item.id); }} className="p-2 rounded-xl opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all">
                         <Trash2 className="w-4 h-4 text-red-400" />
                       </button>
                     </div>
@@ -50,6 +53,9 @@ export function MyListingsView() {
                     <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                       <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{item.views || 0}</span>
                       <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{timeAgo(item.created_at, t)}</span>
+                      {item.condition && (
+                        <Badge color="blue" className="text-[9px]">{item.condition}</Badge>
+                      )}
                     </div>
                   </div>
                 </div>
