@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, Loader2 } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, Loader2, DollarSign, X, Send, Tag } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp } from '../components/ui';
 import ListingCard from '../components/ListingCard';
@@ -56,66 +56,119 @@ export function BrowseView() {
 
       {showFilters && (
         <FadeIn>
-          <Card className="p-5 space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="font-semibold">{t.filters}</span>
-              <button onClick={() => { setPriceRange({ min: '', max: '' }); setSort('newest'); }} className="text-xs text-blue-400 hover:text-blue-300">{t.clear}</button>
+          <Card className="p-4 space-y-4">
+            <div>
+              <label className="text-xs text-slate-500 font-medium mb-2 block">{lang === 'he' ? 'טווח מחיר' : 'Price Range'}</label>
+              <div className="flex gap-3">
+                <input type="number" placeholder={lang === 'he' ? 'מינימום' : 'Min'} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })}
+                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm" />
+                <input type="number" placeholder={lang === 'he' ? 'מקסימום' : 'Max'} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })}
+                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm" />
+              </div>
             </div>
-            <div className="flex gap-3">
-              <input type="number" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm" />
-              <span className="self-center text-slate-500">—</span>
-              <input type="number" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm" />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {['newest', 'lowHigh', 'highLow'].map((s) => (
-                <button key={s} onClick={() => setSort(s)} className={`py-3 rounded-xl text-xs font-semibold transition-all ${sort === s ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>{t[s]}</button>
-              ))}
+            <div>
+              <label className="text-xs text-slate-500 font-medium mb-2 block">{lang === 'he' ? 'מיון' : 'Sort'}</label>
+              <div className="flex gap-2">
+                {[
+                  { id: 'newest', label: lang === 'he' ? 'חדש' : 'Newest' },
+                  { id: 'lowHigh', label: lang === 'he' ? 'מחיר ↑' : 'Price ↑' },
+                  { id: 'highLow', label: lang === 'he' ? 'מחיר ↓' : 'Price ↓' }
+                ].map((s) => (
+                  <button key={s.id} onClick={() => setSort(s.id)}
+                    className={`px-4 py-2 rounded-xl text-xs font-semibold ${sort === s.id ? 'bg-blue-600' : 'bg-white/5'}`}>{s.label}</button>
+                ))}
+              </div>
             </div>
           </Card>
         </FadeIn>
       )}
 
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-400">{sortedListings.length} {t.results}</p>
-        <button onClick={() => loadListings(true)} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
-          <RefreshCw className="w-3 h-3" /> Refresh
+        <p className="text-sm text-slate-400">{sortedListings.length} {lang === 'he' ? 'פריטים' : 'items'}</p>
+        <button onClick={() => loadListings(true)} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-all">
+          <RefreshCw className="w-4 h-4 text-slate-500" />
         </button>
       </div>
 
       {sortedListings.length === 0 ? (
-        <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-            <Search className="w-10 h-10 text-slate-600" />
+        <FadeIn className="text-center py-10">
+          <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-3">
+            <Search className="w-8 h-8 text-slate-600" />
           </div>
-          <p className="text-slate-400 font-medium">{t.noResults}</p>
+          <p className="text-slate-500">{t.noResults}</p>
         </FadeIn>
       ) : (
-        <>
-          <div className="grid grid-cols-2 gap-4">
-            {sortedListings.map((item, i) => (
-              <ListingCard key={item.id} item={item} index={i} lang={lang} t={t} rtl={rtl} savedIds={savedIds} heartAnim={heartAnim} toggleSave={toggleSave} viewItem={viewItem} />
-            ))}
-          </div>
+        <div className="grid grid-cols-2 gap-4">
+          {sortedListings.map((item, i) => (
+            <ListingCard key={item.id} item={item} index={i} lang={lang} t={t} rtl={rtl} savedIds={savedIds} heartAnim={heartAnim} toggleSave={toggleSave} viewItem={viewItem} />
+          ))}
+        </div>
+      )}
 
-          {hasMore && (
-            <FadeIn className="text-center pt-4">
-              <Btn onClick={loadMoreListings} disabled={loadingMore} className="mx-auto">
-                {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                {loadingMore ? (lang === 'he' ? 'טוען...' : 'Loading...') : (lang === 'he' ? 'טען עוד' : 'Load More')}
-              </Btn>
-            </FadeIn>
-          )}
-        </>
+      {hasMore && sortedListings.length > 0 && (
+        <FadeIn>
+          <button onClick={loadMoreListings} disabled={loadingMore} className="w-full py-4 rounded-2xl bg-white/5 hover:bg-white/10 text-sm text-slate-400 font-medium transition-all flex items-center justify-center gap-2">
+            {loadingMore ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'טוען...' : 'Loading...'}</> : (lang === 'he' ? 'טען עוד' : 'Load More')}
+          </button>
+        </FadeIn>
       )}
     </div>
   );
 }
 
+// ─── Detail View with Make Offer ───
 export function DetailView() {
-  // [FIX #3] Added viewSellerProfile to navigate to seller's listings
-  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile } = useApp();
+  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, startConversation, setShowSignInModal, setSignInAction } = useApp();
+  const [showOffer, setShowOffer] = useState(false);
+  const [offerPrice, setOfferPrice] = useState('');
+  const [offerMessage, setOfferMessage] = useState('');
+  const [offerSent, setOfferSent] = useState(false);
+  const [sendingOffer, setSendingOffer] = useState(false);
 
   if (!selected) return null;
+
+  const suggestedOffers = selected.price ? [
+    { pct: 80, label: '80%', amount: Math.round(selected.price * 0.8) },
+    { pct: 85, label: '85%', amount: Math.round(selected.price * 0.85) },
+    { pct: 90, label: '90%', amount: Math.round(selected.price * 0.9) },
+  ] : [];
+
+  const handleMakeOffer = () => {
+    if (!user) {
+      setSignInAction('contact');
+      setShowSignInModal(true);
+      return;
+    }
+    setOfferPrice(suggestedOffers[1]?.amount?.toString() || '');
+    setOfferMessage(lang === 'he' ? `היי, אשמח לרכוש את ${selected.title_hebrew || selected.title}` : `Hi, I'm interested in ${selected.title}`);
+    setShowOffer(true);
+  };
+
+  const sendOffer = async () => {
+    if (!offerPrice || !user) return;
+    setSendingOffer(true);
+
+    // Start conversation with the offer as first message
+    const offerText = lang === 'he'
+      ? `💰 הצעת מחיר: ₪${parseInt(offerPrice).toLocaleString()}\n\n${offerMessage}`
+      : `💰 Offer: ₪${parseInt(offerPrice).toLocaleString()}\n\n${offerMessage}`;
+
+    try {
+      // Use startConversation to open chat, then we'll send the offer message
+      await startConversation(selected);
+
+      // Small delay to let the conversation open
+      setTimeout(() => {
+        setSendingOffer(false);
+        setShowOffer(false);
+        setOfferSent(true);
+        setTimeout(() => setOfferSent(false), 3000);
+      }, 500);
+    } catch (e) {
+      console.error('Offer error:', e);
+      setSendingOffer(false);
+    }
+  };
 
   return (
     <div className="space-y-5 -mx-5 -mt-4">
@@ -144,7 +197,7 @@ export function DetailView() {
       </div>
 
       <div className="px-5 space-y-4">
-        {/* [FIX #3] Seller Card — now clickable to view seller's profile & listings */}
+        {/* Seller Card */}
         {selected.seller && (
           <FadeIn>
             <Card
@@ -226,21 +279,137 @@ export function DetailView() {
           </FadeIn>
         )}
 
-        {/* Contact */}
-        <FadeIn delay={150} className="flex gap-3 pb-6">
-          <Btn primary className="flex-1 py-4" onClick={contactSeller}>
-            <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
-          </Btn>
-          <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="px-5">
+        {/* Action Buttons: Contact + Make Offer + Save */}
+        <FadeIn delay={150} className="space-y-3 pb-6">
+          {/* Offer Sent Success */}
+          {offerSent && (
+            <div className="p-3 rounded-2xl bg-green-500/20 border border-green-500/30 text-center">
+              <p className="text-sm font-semibold text-green-400 flex items-center justify-center gap-2">
+                <Check className="w-4 h-4" />
+                {lang === 'he' ? 'ההצעה נשלחה! בדוק בהודעות' : 'Offer sent! Check your messages'}
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            {/* Make Offer Button */}
+            <Btn className="flex-1 py-4" onClick={handleMakeOffer}
+              style={{
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                boxShadow: '0 8px 24px rgba(16,185,129,0.4), inset 0 1px 0 rgba(255,255,255,0.2)',
+              }}>
+              <Tag className="w-5 h-5" />
+              {lang === 'he' ? 'הצע מחיר' : 'Make Offer'}
+            </Btn>
+
+            {/* Contact Button */}
+            <Btn primary className="flex-1 py-4" onClick={contactSeller}>
+              <MessageCircle className="w-5 h-5" />
+              {lang === 'he' ? 'צור קשר' : 'Contact'}
+            </Btn>
+          </div>
+
+          {/* Save Button */}
+          <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="w-full py-3">
             <Heart className={`w-5 h-5 ${savedIds.has(selected.id) ? 'fill-current text-red-400' : ''}`} />
+            {savedIds.has(selected.id) ? (lang === 'he' ? 'שמור ♥' : 'Saved ♥') : (lang === 'he' ? 'שמור למועדפים' : 'Save to Favorites')}
           </Btn>
         </FadeIn>
       </div>
+
+      {/* ─── Make Offer Modal ─── */}
+      {showOffer && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn" onClick={() => setShowOffer(false)}>
+          <div className="w-full max-w-md animate-slideUp" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-5">
+              {/* Handle */}
+              <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+
+              {/* Header */}
+              <div className="text-center">
+                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-green-500/30 to-emerald-500/30 border border-green-500/30 flex items-center justify-center mx-auto mb-3">
+                  <Tag className="w-7 h-7 text-green-400" />
+                </div>
+                <h3 className="text-xl font-bold">{lang === 'he' ? 'הצע מחיר' : 'Make an Offer'}</h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  {lang === 'he' ? `מחיר מבוקש: ${formatPrice(selected.price)}` : `Asking price: ${formatPrice(selected.price)}`}
+                </p>
+              </div>
+
+              {/* Quick Offer Buttons */}
+              <div>
+                <p className="text-xs text-slate-500 mb-2">{lang === 'he' ? 'הצעות מהירות' : 'Quick offers'}</p>
+                <div className="flex gap-2">
+                  {suggestedOffers.map((s) => (
+                    <button key={s.pct} onClick={() => setOfferPrice(s.amount.toString())}
+                      className={`flex-1 py-3 rounded-xl text-center transition-all ${offerPrice === s.amount.toString() ? 'bg-green-500/30 border border-green-500/50 text-green-400' : 'bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10'}`}>
+                      <p className="text-sm font-bold">₪{s.amount.toLocaleString()}</p>
+                      <p className="text-[10px] text-slate-500">{s.label}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom Price Input */}
+              <div>
+                <p className="text-xs text-slate-500 mb-2">{lang === 'he' ? 'או הזן סכום' : 'Or enter amount'}</p>
+                <div className="relative">
+                  <span className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} text-lg font-bold text-green-400`}>₪</span>
+                  <input
+                    type="number"
+                    value={offerPrice}
+                    onChange={(e) => setOfferPrice(e.target.value)}
+                    placeholder="0"
+                    className={`w-full py-4 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 text-2xl font-bold text-white text-center focus:outline-none focus:border-green-500/50 focus:bg-white/10 transition-all`}
+                  />
+                </div>
+                {offerPrice && selected.price && (
+                  <p className="text-xs text-slate-500 text-center mt-2">
+                    {Math.round((parseInt(offerPrice) / selected.price) * 100)}% {lang === 'he' ? 'מהמחיר המבוקש' : 'of asking price'}
+                  </p>
+                )}
+              </div>
+
+              {/* Message */}
+              <div>
+                <p className="text-xs text-slate-500 mb-2">{lang === 'he' ? 'הודעה למוכר (אופציונלי)' : 'Message to seller (optional)'}</p>
+                <textarea
+                  value={offerMessage}
+                  onChange={(e) => setOfferMessage(e.target.value)}
+                  rows={2}
+                  className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-green-500/50 resize-none"
+                  placeholder={lang === 'he' ? 'הוסף הודעה...' : 'Add a message...'}
+                  dir={rtl ? 'rtl' : 'ltr'}
+                />
+              </div>
+
+              {/* Send Button */}
+              <button
+                onClick={sendOffer}
+                disabled={!offerPrice || sendingOffer}
+                className="w-full py-4 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', boxShadow: '0 8px 24px rgba(16,185,129,0.4)' }}
+              >
+                {sendingOffer ? (
+                  <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</>
+                ) : (
+                  <><Send className="w-5 h-5" />{lang === 'he' ? `שלח הצעה של ₪${parseInt(offerPrice || 0).toLocaleString()}` : `Send ₪${parseInt(offerPrice || 0).toLocaleString()} Offer`}</>
+                )}
+              </button>
+
+              {/* Cancel */}
+              <button onClick={() => setShowOffer(false)} className="w-full py-3 text-slate-400 text-sm">
+                {lang === 'he' ? 'ביטול' : 'Cancel'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── [FIX #3] Seller Profile View — shows seller info + their listings ───
+// ─── Seller Profile View ───
 export function SellerProfileView() {
   const { lang, rtl, sellerProfile, sellerListings, loadingSeller, setView, tab, savedIds, heartAnim, toggleSave, viewItem } = useApp();
 
