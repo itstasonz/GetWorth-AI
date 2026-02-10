@@ -74,7 +74,7 @@ export function AppProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef(null);
 
-  // [FIX #3] Seller profile state
+  // Seller profile state
   const [sellerProfile, setSellerProfile] = useState(null);
   const [sellerListings, setSellerListings] = useState([]);
   const [loadingSeller, setLoadingSeller] = useState(false);
@@ -82,7 +82,7 @@ export function AppProvider({ children }) {
   // Sound
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // [FIX #5] Camera permission — remember if granted so we don't re-prompt
+  // Camera permission — remember if granted so we don't re-prompt
   const cameraStreamRef = useRef(null);
   const cameraPermissionGranted = useRef(false);
 
@@ -102,10 +102,10 @@ export function AppProvider({ children }) {
 
   const showToastMsg = (msg) => setToast(msg);
 
-  // ─── AUTH ────────────────────────────────────────────
+  // ─── INIT + AUTH LISTENER ────────────────────────────
   useEffect(() => {
     let mounted = true;
-    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 500);
+    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 1500);
 
     const init = async () => {
       try {
@@ -143,7 +143,7 @@ export function AppProvider({ children }) {
         supabase.from('profiles').select('*').eq('id', session.user.id).single()
           .then(({ data }) => { if (data) setProfile(data); })
           .catch(() => {});
-        if (event === 'SIGNED_IN' && view === 'auth') { setView('profile'); setTab('profile'); }
+        // Note: redirect on login is handled in signInEmail directly
       } else { setUser(null); setProfile(null); }
     });
 
@@ -183,27 +183,34 @@ export function AppProvider({ children }) {
     }
   }, [error]);
 
-  // ─── [FIX #2] REAL-TIME CHAT — Both parties see messages instantly ───
+  // ─── REAL-TIME CHAT — Both parties see messages instantly ───
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
-      .channel(`user-messages-${user.id}`)
+      .channel(`user-messages-${user.id}-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
         (payload) => {
           const newMsg = payload.new;
-          // Append if this message belongs to the active chat and is from the other person
-          if (activeChat && newMsg.conversation_id === activeChat.id && newMsg.sender_id !== user.id) {
-            setMessages((prev) => {
-              if (prev.some((m) => m.id === newMsg.id)) return prev;
-              return [...prev, newMsg];
-            });
-            setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-            // Mark as read immediately
-            supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {});
-          }
+          // Only process messages from OTHER people (we add our own optimistically)
+          if (newMsg.sender_id === user.id) return;
+
+          // Use setActiveChat to read fresh state (avoids stale closure)
+          setActiveChat((current) => {
+            if (current && newMsg.conversation_id === current.id) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+              });
+              setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+              // Mark as read
+              supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {});
+            }
+            return current; // Don't modify activeChat state
+          });
+
           // Always refresh conversations list so unread badges update
           loadConversations();
         }
@@ -212,15 +219,16 @@ export function AppProvider({ children }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
-          // Update read receipts in real-time
           const updated = payload.new;
           setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log('Realtime status:', status);
+      });
 
     return () => { supabase.removeChannel(channel); };
-  }, [user, activeChat?.id]);
+  }, [user?.id]);
 
   // ─── DATA LOADING ───────────────────────────────────
 
@@ -285,27 +293,19 @@ export function AppProvider({ children }) {
 
   const loadUserData = async () => {
     if (!user) return;
-    const { data: savedData } = await supabase
-      .from('saved_items').select('listing_id').eq('user_id', user.id);
-    if (savedData) setSavedIds(new Set(savedData.map((s) => s.listing_id)));
-  };
-
-  const loadMyListings = async () => {
-    if (!user) return;
-    const { data } = await supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false });
-    if (data) setMyListings(data);
-  };
-
-  const loadSavedItems = async () => {
-    if (!user) return;
-    const { data } = await supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id);
-    if (data) {
-      setSavedItems(data.map((s) => s.listing).filter(Boolean));
-      setSavedIds(new Set(data.map((s) => s.listing_id)));
+    const [{ data: myData }, { data: savedData }] = await Promise.all([
+      supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false }),
+      supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id)
+    ]);
+    if (myData) setMyListings(myData);
+    if (savedData) {
+      setSavedItems(savedData.map((s) => s.listing).filter(Boolean));
+      setSavedIds(new Set(savedData.map((s) => s.listing_id)));
     }
+    loadConversations();
   };
 
-  // ─── [FIX #3] SELLER PROFILE ──────────────────────────
+  // ─── SELLER PROFILE ──────────────────────────────────
   const viewSellerProfile = async (sellerId) => {
     if (!sellerId) return;
     setLoadingSeller(true);
@@ -361,7 +361,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  // [FIX #2] Start conversation — works for real users, create if doesn't exist
+  // ─── START CONVERSATION — works for both buyer and seller ───
   const startConversation = async (item) => {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
 
@@ -373,21 +373,37 @@ export function AppProvider({ children }) {
       return;
     }
 
-    // Check if conversation already exists
-    const { data: existing } = await supabase
-      .from('conversations').select('*').eq('listing_id', item.id).eq('buyer_id', user.id).single();
+    const sellerId = item.seller_id || item.seller?.id;
+
+    // Prevent messaging yourself
+    if (sellerId === user.id) {
+      showToastMsg(lang === 'he' ? 'זה הפריט שלך!' : "That's your own listing!");
+      return;
+    }
+
+    // Check if conversation already exists — check BOTH directions
+    const { data: existingList } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('listing_id', item.id)
+      .or(`and(buyer_id.eq.${user.id},seller_id.eq.${sellerId}),and(buyer_id.eq.${sellerId},seller_id.eq.${user.id})`);
+
+    const existing = existingList?.[0];
 
     if (existing) {
-      const otherUser = existing.seller_id === user.id ? item.buyer : item.seller;
-      setActiveChat({ ...existing, listing: item, seller: item.seller, otherUser: otherUser || item.seller });
+      const otherUserId = existing.buyer_id === user.id ? existing.seller_id : existing.buyer_id;
+      const { data: otherProfile } = await supabase.from('profiles').select('id, full_name, avatar_url').eq('id', otherUserId).single();
+      setActiveChat({ ...existing, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
       loadMessages(existing.id);
       setView('chat');
       return;
     }
 
-    // Create new conversation
-    const sellerId = item.seller_id || item.seller?.id;
-    if (!sellerId) { setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation'); return; }
+    // Create new conversation — current user is the buyer (initiator)
+    if (!sellerId) {
+      setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation');
+      return;
+    }
 
     const { data: newConv, error: convError } = await supabase
       .from('conversations')
@@ -395,7 +411,25 @@ export function AppProvider({ children }) {
       .select().single();
 
     if (convError) {
-      console.error('Conversation error:', convError);
+      console.error('Conversation create error:', convError);
+      // Might be a duplicate — try to find existing one
+      const { data: retry } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('listing_id', item.id)
+        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+        .limit(1)
+        .single();
+
+      if (retry) {
+        const otherUserId = retry.buyer_id === user.id ? retry.seller_id : retry.buyer_id;
+        const { data: otherProfile } = await supabase.from('profiles').select('id, full_name, avatar_url').eq('id', otherUserId).single();
+        setActiveChat({ ...retry, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
+        loadMessages(retry.id);
+        setView('chat');
+        return;
+      }
+
       setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation');
       return;
     }
@@ -408,14 +442,15 @@ export function AppProvider({ children }) {
     }
   };
 
-  // [FIX #2] Send message — works for real users with proper error handling
+  // ─── SEND MESSAGE — optimistic UI + proper error handling ───
   const sendMessage = async (content, isOffer = false, offerAmount = null) => {
-    if (!content.trim() || !activeChat || sendingMessage) return;
+    const text = (typeof content === 'string' ? content : '').trim();
+    if (!text || !activeChat || sendingMessage) return;
 
     // Demo mode
     if (activeChat.isDemo) {
       const demoMsg = {
-        id: `demo-msg-${Date.now()}`, sender_id: user.id, content: content.trim(),
+        id: `demo-msg-${Date.now()}`, sender_id: user.id, content: text,
         is_offer: isOffer, offer_amount: offerAmount, created_at: new Date().toISOString(), is_read: true
       };
       setMessages((prev) => [...prev, demoMsg]);
@@ -430,37 +465,57 @@ export function AppProvider({ children }) {
           content: responses[Math.floor(Math.random() * responses.length)],
           created_at: new Date().toISOString(), is_read: false
         }]);
+        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       }, 1500);
 
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       return;
     }
 
-    // Real message to real user
+    // Real message
     setSendingMessage(true);
+    setNewMessage(''); // Clear input immediately for snappy UX
+
+    // Optimistic: add message to UI instantly
+    const optimisticId = `temp-${Date.now()}`;
+    const optimisticMsg = {
+      id: optimisticId,
+      conversation_id: activeChat.id,
+      sender_id: user.id,
+      content: text,
+      is_offer: isOffer,
+      offer_amount: offerAmount,
+      created_at: new Date().toISOString(),
+      is_read: false,
+    };
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
     try {
       const { data, error: msgError } = await supabase
         .from('messages')
         .insert({
           conversation_id: activeChat.id,
           sender_id: user.id,
-          content: content.trim(),
+          content: text,
           is_offer: isOffer,
-          offer_amount: offerAmount
+          offer_amount: offerAmount,
         })
         .select().single();
 
       if (msgError) throw msgError;
 
       if (data) {
-        setMessages((prev) => [...prev, data]);
-        setNewMessage('');
-        // Update conversation timestamp so it floats to top
+        // Replace optimistic message with real one (has real ID)
+        setMessages((prev) => prev.map((m) => m.id === optimisticId ? data : m));
+        // Update conversation timestamp so it floats to top for both users
         await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
-        setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       }
     } catch (e) {
       console.error('Send message error:', e);
+      // Remove optimistic message on failure
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+      setNewMessage(text); // Restore text so user can retry
       setError(lang === 'he' ? 'שליחת ההודעה נכשלה' : 'Failed to send message');
     }
     setSendingMessage(false);
@@ -472,7 +527,7 @@ export function AppProvider({ children }) {
     await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
   };
 
-const signInEmail = async (e) => {
+  const signInEmail = async (e) => {
     e.preventDefault();
     setAuthError(null);
     setAuthLoading(true);
@@ -491,6 +546,7 @@ const signInEmail = async (e) => {
             setAuthError(err.message);
           }
         } else if (data?.user) {
+          // Explicit redirect — don't rely on onAuthStateChange closure
           setView('profile');
           setTab('profile');
           setAuthForm({ name: '', email: '', password: '' });
@@ -517,6 +573,7 @@ const signInEmail = async (e) => {
     }
     setAuthLoading(false);
   };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setTab('home');
@@ -553,7 +610,7 @@ const signInEmail = async (e) => {
 
   const analyzeImage = useCallback(async (imgData) => {
     const controller = new AbortController();
-const timeoutId = setTimeout(() => controller.abort(), 60000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
     try {
       const res = await fetch('/api/analyze', {
         method: 'POST',
@@ -597,36 +654,50 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
     reader.readAsDataURL(file);
   }, [analyzeImage, playSound, t.failed]);
 
-  // ─── [FIX #5] CAMERA — Request permission once, reuse stream ───
+  // ─── CAMERA — Request permission once, reuse stream ───
+
+  // Helper: attach stream to video element with retries (fixes black screen)
+  const attachStreamToVideo = (stream, retries = 5) => {
+    const tryAttach = (attempt) => {
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play().catch(() => {});
+      } else if (attempt < retries) {
+        setTimeout(() => tryAttach(attempt + 1), 50 * (attempt + 1));
+      }
+    };
+    setTimeout(() => tryAttach(0), 50);
+  };
 
   const startCamera = async () => {
     try {
-      // Check if we already have a live stream we can reuse
+      // Try to reuse existing live stream (no re-prompt)
       if (cameraStreamRef.current) {
         const tracks = cameraStreamRef.current.getTracks();
         const hasLive = tracks.some((t) => t.readyState === 'live');
         if (hasLive) {
           setView('camera');
-          requestAnimationFrame(() => {
-            if (videoRef.current) {
-              videoRef.current.srcObject = cameraStreamRef.current;
-              videoRef.current.play().catch(() => {});
-            }
-          });
+          attachStreamToVideo(cameraStreamRef.current);
           return;
         }
+        // Dead tracks — clean up stale ref
+        cameraStreamRef.current = null;
       }
 
-      // Check permission state first (avoids re-prompting on supported browsers)
-      if (navigator.permissions && navigator.permissions.query) {
-        try {
-          const permResult = await navigator.permissions.query({ name: 'camera' });
-          // If denied, show error immediately without triggering browser prompt
-          if (permResult.state === 'denied') {
-            setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
-            return;
-          }
-        } catch { /* permissions.query not supported for camera — continue normally */ }
+      // Skip permission check if already granted this session
+      if (!cameraPermissionGranted.current) {
+        if (navigator.permissions && navigator.permissions.query) {
+          try {
+            const permResult = await navigator.permissions.query({ name: 'camera' });
+            if (permResult.state === 'denied') {
+              setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
+              return;
+            }
+            if (permResult.state === 'granted') {
+              cameraPermissionGranted.current = true;
+            }
+          } catch { /* permissions.query not supported for camera — continue normally */ }
+        }
       }
 
       // Request new stream
@@ -638,15 +709,11 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
       cameraPermissionGranted.current = true;
 
       setView('camera');
-      requestAnimationFrame(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().catch(() => {});
-        }
-      });
+      attachStreamToVideo(stream);
     } catch (err) {
       console.error('Camera error:', err);
       if (err.name === 'NotAllowedError') {
+        cameraPermissionGranted.current = false;
         setError(lang === 'he' ? 'הגישה למצלמה נדחתה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access denied. Please allow it in browser settings.');
       } else {
         setError(t.cameraDenied || (lang === 'he' ? 'שגיאה בפתיחת המצלמה' : 'Failed to open camera'));
@@ -671,8 +738,7 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
       setShowFlash(false);
       setImages([img]);
       setView('analyzing');
-      // [FIX #5] Don't stop the stream — just pause the video element
-      // This way we can reuse the stream next time without re-prompting
+      // Don't stop the stream — just pause the video element
       if (videoRef.current) {
         videoRef.current.pause();
       }
@@ -683,7 +749,7 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
   }, [analyzeImage, playSound, t.failed]);
 
   const stopCamera = () => {
-    // [FIX #5] Only pause — don't kill the stream so we can reuse it
+    // Only pause — don't kill the stream so we can reuse it
     if (videoRef.current) {
       videoRef.current.pause();
     }
@@ -700,7 +766,7 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
     };
   }, []);
 
-  // ─── [FIX #4] PUBLISH LISTING — Storage upload with base64 fallback ───
+  // ─── PUBLISH LISTING — Storage upload with base64 fallback ───
 
   const publishListing = async () => {
     if (!user) { setError(lang === 'he' ? 'יש להתחבר תחילה' : 'Please sign in first'); return; }
@@ -728,8 +794,6 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
 
             if (uploadError) {
               console.warn('Storage upload failed, using base64 fallback:', uploadError.message);
-              // [FIX #4] Fallback to base64 if storage isn't set up
-              // This ensures the feature works even if Supabase Storage bucket doesn't exist
               imageUrls.push(img);
             } else {
               const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
@@ -787,8 +851,8 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
     setActiveChat(null);
     if (newTab === 'home') setView('home');
     else if (newTab === 'browse') setView('browse');
-    else if (newTab === 'sell') { setView('myListings'); loadMyListings(); }
-    else if (newTab === 'saved') { setView('saved'); loadSavedItems(); }
+    else if (newTab === 'sell') setView('myListings');
+    else if (newTab === 'saved') setView('saved');
     else if (newTab === 'messages') { setView('inbox'); loadConversations(); }
     else if (newTab === 'profile') setView(user ? 'profile' : 'auth');
   };
@@ -816,7 +880,7 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
 
   const value = {
     lang, setLang, t, rtl,
-    user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError,
+    user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading,
     signInGoogle, signInEmail, signOut,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,
     tab, setTab, view, setView, goTab, reset,
@@ -824,7 +888,6 @@ const timeoutId = setTimeout(() => controller.abort(), 60000);
     hasMore, loadingMore, loadMoreListings, loadListings,
     toggleSave, deleteListing, viewItem, contactSeller,
     selected, setSelected, showContact, setShowContact, heartAnim,
-    // [FIX #3] Seller profile
     sellerProfile, sellerListings, loadingSeller, viewSellerProfile,
     search, setSearch, category, setCategory,
     priceRange, setPriceRange, sort, setSort,
