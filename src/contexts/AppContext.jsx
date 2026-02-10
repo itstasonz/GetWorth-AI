@@ -5,12 +5,50 @@ import SoundEffects from '../lib/sounds';
 import { sanitizeSearch, calcPrice, PAGE_SIZE } from '../lib/utils';
 
 const AppContext = createContext(null);
+const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 export const useApp = () => {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error('useApp must be used within AppProvider');
   return ctx;
 };
+
+// ═══════════════════════════════════════════════════════
+// Image compression — run BEFORE sending to API
+// Resizes to max 1800px, JPEG quality 0.85
+// Modern browsers auto-handle EXIF orientation on canvas draw
+// ═══════════════════════════════════════════════════════
+function compressImage(dataUrl, maxDim = 1800, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        if (w > maxDim || h > maxDim) {
+          const ratio = Math.min(maxDim / w, maxDim / h);
+          w = Math.round(w * ratio);
+          h = Math.round(h * ratio);
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w;
+        canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const compressed = canvas.toDataURL('image/jpeg', quality);
+        if (DEV) {
+          const origKB = Math.round(dataUrl.length * 0.75 / 1024);
+          const compKB = Math.round(compressed.length * 0.75 / 1024);
+          console.log(`[Compress] ${img.naturalWidth}×${img.naturalHeight} → ${w}×${h} | ${origKB}KB → ${compKB}KB (${Math.round(compKB / origKB * 100)}%)`);
+        }
+        resolve(compressed);
+      } catch (e) {
+        reject(new Error('Image compression failed: ' + e.message));
+      }
+    };
+    img.onerror = () => reject(new Error('Failed to load image for compression'));
+    img.src = dataUrl;
+  });
+}
 
 export function AppProvider({ children }) {
   // Core state
@@ -45,6 +83,17 @@ export function AppProvider({ children }) {
   const capturedImageRef = useRef(null);
   const [showFlash, setShowFlash] = useState(false);
 
+  // ─── Pipeline state machine ───
+  // idle → compressing → analyzing → success
+  // failure states: compress_error, analysis_error
+  const [pipelineState, setPipelineState] = useState('idle');
+  const [pipelineError, setPipelineError] = useState(null);
+  const pipelineAbortRef = useRef(null);
+
+  // ─── Torch (flash) state ───
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
+
   // Browse state
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -74,8 +123,7 @@ export function AppProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef(null);
 
-  // ─── In-app message notification banner ───
-  // Shape: { senderName, listingTitle, content, conversationId, listingImage, isOffer, offerAmount }
+  // In-app message notification banner
   const [msgNotification, setMsgNotification] = useState(null);
 
   // Seller profile state
@@ -95,7 +143,7 @@ export function AppProvider({ children }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // Profile cache to avoid repeated fetches for notification banners
+  // Profile cache for notification banners
   const profileCacheRef = useRef({});
 
   const t = T[lang];
@@ -209,17 +257,6 @@ export function AppProvider({ children }) {
   // ═══════════════════════════════════════════════════════
   // REALTIME MESSAGING + IN-APP NOTIFICATION ENGINE
   // ═══════════════════════════════════════════════════════
-  //
-  // This single subscription handles:
-  //  1. Appending incoming messages to the open chat (live thread)
-  //  2. Showing a rich banner notification when user is NOT in that chat
-  //  3. Refreshing unread badge counts
-  //  4. Playing a notification sound
-  //
-  // Key technique: setActiveChat(current => ...) reads the LATEST
-  // activeChat value inside the callback, avoiding the stale-closure
-  // bug where useEffect captures an old activeChat at mount time.
-  // ═══════════════════════════════════════════════════════
   useEffect(() => {
     if (!user) return;
 
@@ -230,31 +267,24 @@ export function AppProvider({ children }) {
         { event: 'INSERT', schema: 'public', table: 'messages' },
         async (payload) => {
           const newMsg = payload.new;
-
-          // Skip our own messages — we already added them optimistically
           if (newMsg.sender_id === user.id) return;
 
-          // ── Step 1: Check if we're currently viewing this conversation ──
           let isInThisChat = false;
           setActiveChat((current) => {
             if (current && newMsg.conversation_id === current.id) {
               isInThisChat = true;
-              // Append to open thread
               setMessages((prev) => {
-                if (prev.some((m) => m.id === newMsg.id)) return prev; // dedupe
+                if (prev.some((m) => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
               });
               setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-              // Auto-mark as read since user is looking at it
               supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {});
             }
-            return current; // IMPORTANT: don't mutate activeChat
+            return current;
           });
 
-          // ── Step 2: If NOT in this chat → show notification banner ──
           if (!isInThisChat) {
             try {
-              // Fetch sender profile + listing info in parallel
               const [senderProfile, convData] = await Promise.all([
                 getCachedProfile(newMsg.sender_id),
                 supabase
@@ -264,37 +294,26 @@ export function AppProvider({ children }) {
                   .single()
                   .then(r => r.data),
               ]);
-
               const senderName = senderProfile?.full_name || (lang === 'he' ? 'משתמש' : 'Someone');
               const listing = convData?.listing;
               const listingTitle = (lang === 'he' && listing?.title_hebrew)
-                ? listing.title_hebrew
-                : (listing?.title || '');
-
+                ? listing.title_hebrew : (listing?.title || '');
               setMsgNotification({
-                senderName,
-                listingTitle,
-                content: newMsg.content,
+                senderName, listingTitle, content: newMsg.content,
                 conversationId: newMsg.conversation_id,
                 listingImage: listing?.images?.[0] || null,
-                isOffer: newMsg.is_offer,
-                offerAmount: newMsg.offer_amount,
+                isOffer: newMsg.is_offer, offerAmount: newMsg.offer_amount,
               });
-
               playSound('tap');
             } catch (err) {
               console.warn('Notification enrichment failed:', err);
-              // Show basic notification anyway
               setMsgNotification({
                 senderName: lang === 'he' ? 'הודעה חדשה' : 'New message',
-                listingTitle: '',
-                content: newMsg.content,
+                listingTitle: '', content: newMsg.content,
                 conversationId: newMsg.conversation_id,
               });
             }
           }
-
-          // ── Step 3: Always refresh conversation list (updates unread badges) ──
           loadConversations();
         }
       )
@@ -302,28 +321,22 @@ export function AppProvider({ children }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
-          // Read-receipt updates
           const updated = payload.new;
           setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
         }
       )
       .subscribe((status) => {
-        if (status === 'SUBSCRIBED') {
-          console.log('✅ Realtime connected for', user.id);
-        } else if (status === 'CHANNEL_ERROR') {
-          console.error('❌ Realtime channel error');
-        }
+        if (status === 'SUBSCRIBED') console.log('✅ Realtime connected for', user.id);
+        else if (status === 'CHANNEL_ERROR') console.error('❌ Realtime channel error');
       });
 
     return () => { supabase.removeChannel(channel); };
-  }, [user?.id]); // Only re-subscribe on user change — NOT on activeChat
+  }, [user?.id]);
 
-  // ─── Tap notification banner → open that conversation ───
+  // Tap notification banner → open that conversation
   const openNotification = async (notification) => {
     if (!notification?.conversationId) return;
     setMsgNotification(null);
-
-    // Try to find it in already-loaded conversations
     const conv = conversations.find((c) => c.id === notification.conversationId);
     if (conv) {
       const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
@@ -333,14 +346,11 @@ export function AppProvider({ children }) {
       setTab('messages');
       return;
     }
-
-    // Not in list yet — fetch fresh
     const { data } = await supabase
       .from('conversations')
       .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url)`)
       .eq('id', notification.conversationId)
       .single();
-
     if (data) {
       const otherUser = data.buyer_id === user.id ? data.seller : data.buyer;
       setActiveChat({ ...data, otherUser });
@@ -358,25 +368,19 @@ export function AppProvider({ children }) {
   const loadListings = async (reset = false) => {
     const page = reset ? 0 : listingsPage;
     const offset = page * PAGE_SIZE;
-
     let query = supabase
       .from('listings')
       .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
-
     if (category !== 'all') query = query.eq('category', category);
     if (debouncedPriceRange.min) query = query.gte('price', parseInt(debouncedPriceRange.min));
     if (debouncedPriceRange.max) query = query.lte('price', parseInt(debouncedPriceRange.max));
-
     if (debouncedSearch) {
       const safe = sanitizeSearch(debouncedSearch);
-      if (safe) {
-        query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%`);
-      }
+      if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%`);
     }
-
     const { data } = await query;
     if (data) {
       if (reset || page === 0) { setListings(data); } else { setListings((prev) => [...prev, ...data]); }
@@ -389,7 +393,6 @@ export function AppProvider({ children }) {
     setLoadingMore(true);
     const nextPage = listingsPage + 1;
     setListingsPage(nextPage);
-
     const offset = nextPage * PAGE_SIZE;
     let query = supabase
       .from('listings')
@@ -397,7 +400,6 @@ export function AppProvider({ children }) {
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
-
     if (category !== 'all') query = query.eq('category', category);
     if (debouncedPriceRange.min) query = query.gte('price', parseInt(debouncedPriceRange.min));
     if (debouncedPriceRange.max) query = query.lte('price', parseInt(debouncedPriceRange.max));
@@ -405,7 +407,6 @@ export function AppProvider({ children }) {
       const safe = sanitizeSearch(debouncedSearch);
       if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%`);
     }
-
     const { data } = await query;
     if (data) {
       setListings((prev) => [...prev, ...data]);
@@ -433,16 +434,13 @@ export function AppProvider({ children }) {
     if (!sellerId) return;
     setLoadingSeller(true);
     setView('sellerProfile');
-
     const [{ data: profileData }, { data: listingsData }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', sellerId).single(),
       supabase.from('listings')
         .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
-        .eq('seller_id', sellerId)
-        .eq('status', 'active')
+        .eq('seller_id', sellerId).eq('status', 'active')
         .order('created_at', { ascending: false })
     ]);
-
     if (profileData) setSellerProfile(profileData);
     if (listingsData) setSellerListings(listingsData);
     setLoadingSeller(false);
@@ -457,7 +455,6 @@ export function AppProvider({ children }) {
       .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url), messages(id, content, created_at, sender_id, is_read)`)
       .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
       .order('updated_at', { ascending: false });
-
     if (data) {
       setConversations(data);
       const unread = data.reduce((count, conv) => {
@@ -469,173 +466,96 @@ export function AppProvider({ children }) {
 
   const loadMessages = async (conversationId) => {
     const { data } = await supabase
-      .from('messages')
-      .select('*')
+      .from('messages').select('*')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
-
     if (data) {
       setMessages(data);
       const unreadIds = data.filter((m) => !m.is_read && m.sender_id !== user.id).map((m) => m.id);
       if (unreadIds.length > 0) {
         await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
-        loadConversations(); // Refresh badges
+        loadConversations();
       }
     }
   };
 
-  // ─── START CONVERSATION — works for both buyer AND seller ───
+  // ─── START CONVERSATION ───
   const startConversation = async (item) => {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
-
-    // Demo items
     if (item.id?.toString().startsWith('s')) {
       setActiveChat({ id: `demo-${item.id}`, listing: item, seller: item.seller, otherUser: item.seller, isDemo: true });
-      setMessages([]);
-      setView('chat');
-      return;
+      setMessages([]); setView('chat'); return;
     }
-
     const sellerId = item.seller_id || item.seller?.id;
-
-    // Prevent messaging yourself
     if (sellerId === user.id) {
-      showToastMsg(lang === 'he' ? 'זה הפריט שלך!' : "That's your own listing!");
-      return;
+      showToastMsg(lang === 'he' ? 'זה הפריט שלך!' : "That's your own listing!"); return;
     }
-
-    // Check if conversation already exists — BOTH buyer→seller and seller→buyer
-    const { data: existingList } = await supabase
-      .from('conversations')
-      .select('*')
+    const { data: existingList } = await supabase.from('conversations').select('*')
       .eq('listing_id', item.id)
       .or(`and(buyer_id.eq.${user.id},seller_id.eq.${sellerId}),and(buyer_id.eq.${sellerId},seller_id.eq.${user.id})`);
-
     const existing = existingList?.[0];
-
     if (existing) {
       const otherUserId = existing.buyer_id === user.id ? existing.seller_id : existing.buyer_id;
       const otherProfile = await getCachedProfile(otherUserId);
       setActiveChat({ ...existing, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
-      loadMessages(existing.id);
-      setView('chat');
-      return;
+      loadMessages(existing.id); setView('chat'); return;
     }
-
-    // Create new conversation — initiator is always buyer
-    if (!sellerId) {
-      setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation');
-      return;
-    }
-
-    const { data: newConv, error: convError } = await supabase
-      .from('conversations')
-      .insert({ listing_id: item.id, buyer_id: user.id, seller_id: sellerId })
-      .select().single();
-
+    if (!sellerId) { setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation'); return; }
+    const { data: newConv, error: convError } = await supabase.from('conversations')
+      .insert({ listing_id: item.id, buyer_id: user.id, seller_id: sellerId }).select().single();
     if (convError) {
       console.error('Conversation create error:', convError);
-      // Race condition: might already exist — retry lookup
-      const { data: retry } = await supabase
-        .from('conversations')
-        .select('*')
-        .eq('listing_id', item.id)
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .limit(1)
-        .single();
-
+      const { data: retry } = await supabase.from('conversations').select('*')
+        .eq('listing_id', item.id).or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`).limit(1).single();
       if (retry) {
         const otherUserId = retry.buyer_id === user.id ? retry.seller_id : retry.buyer_id;
         const otherProfile = await getCachedProfile(otherUserId);
         setActiveChat({ ...retry, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
-        loadMessages(retry.id);
-        setView('chat');
-        return;
+        loadMessages(retry.id); setView('chat'); return;
       }
-      setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation');
-      return;
+      setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation'); return;
     }
-
     if (newConv) {
       setActiveChat({ ...newConv, listing: item, seller: item.seller, otherUser: item.seller });
-      setMessages([]);
-      setView('chat');
-      loadConversations();
+      setMessages([]); setView('chat'); loadConversations();
     }
   };
 
-  // ─── SEND MESSAGE — optimistic UI ───
+  // ─── SEND MESSAGE ───
   const sendMessage = async (content, isOffer = false, offerAmount = null) => {
     const text = (typeof content === 'string' ? content : '').trim();
     if (!text || !activeChat || sendingMessage) return;
-
-    // Demo mode
     if (activeChat.isDemo) {
-      const demoMsg = {
-        id: `demo-msg-${Date.now()}`, sender_id: user.id, content: text,
-        is_offer: isOffer, offer_amount: offerAmount, created_at: new Date().toISOString(), is_read: true
-      };
-      setMessages((prev) => [...prev, demoMsg]);
-      setNewMessage('');
+      const demoMsg = { id: `demo-msg-${Date.now()}`, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount, created_at: new Date().toISOString(), is_read: true };
+      setMessages((prev) => [...prev, demoMsg]); setNewMessage('');
       setTimeout(() => {
         const responses = lang === 'he'
           ? ['מעניין! בוא נדבר', 'אני זמין, איפה נוח לך להיפגש?', 'אשמח לשמוע עוד', 'בוא ניצור קשר בווטסאפ']
           : ["Interesting! Let's talk", "I'm available, where would you like to meet?", "I'd love to hear more", "Let's connect on WhatsApp"];
-        setMessages((prev) => [...prev, {
-          id: `demo-reply-${Date.now()}`, sender_id: 'seller',
-          content: responses[Math.floor(Math.random() * responses.length)],
-          created_at: new Date().toISOString(), is_read: false
-        }]);
+        setMessages((prev) => [...prev, { id: `demo-reply-${Date.now()}`, sender_id: 'seller', content: responses[Math.floor(Math.random() * responses.length)], created_at: new Date().toISOString(), is_read: false }]);
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       }, 1500);
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       return;
     }
-
-    // Real send
-    setSendingMessage(true);
-    setNewMessage(''); // Clear input instantly for snappy UX
-
-    // Optimistic UI — show message immediately
+    setSendingMessage(true); setNewMessage('');
     const optimisticId = `temp-${Date.now()}`;
-    const optimisticMsg = {
-      id: optimisticId,
-      conversation_id: activeChat.id,
-      sender_id: user.id,
-      content: text,
-      is_offer: isOffer,
-      offer_amount: offerAmount,
-      created_at: new Date().toISOString(),
-      is_read: false,
-    };
+    const optimisticMsg = { id: optimisticId, conversation_id: activeChat.id, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount, created_at: new Date().toISOString(), is_read: false };
     setMessages((prev) => [...prev, optimisticMsg]);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
-
     try {
-      const { data, error: msgError } = await supabase
-        .from('messages')
-        .insert({
-          conversation_id: activeChat.id,
-          sender_id: user.id,
-          content: text,
-          is_offer: isOffer,
-          offer_amount: offerAmount,
-        })
+      const { data, error: msgError } = await supabase.from('messages')
+        .insert({ conversation_id: activeChat.id, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount })
         .select().single();
-
       if (msgError) throw msgError;
-
       if (data) {
-        // Replace temp message with real one (has real DB id)
         setMessages((prev) => prev.map((m) => m.id === optimisticId ? data : m));
-        // Bump conversation timestamp so it sorts to top for both users
         await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
       }
     } catch (e) {
       console.error('Send message error:', e);
-      // Rollback optimistic message
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-      setNewMessage(text); // Give text back so user can retry
+      setNewMessage(text);
       setError(lang === 'he' ? 'שליחת ההודעה נכשלה' : 'Failed to send message');
     }
     setSendingMessage(false);
@@ -653,38 +573,20 @@ export function AppProvider({ children }) {
     setAuthLoading(true);
     try {
       if (authMode === 'login') {
-        const { data, error: err } = await supabase.auth.signInWithPassword({
-          email: authForm.email.trim(),
-          password: authForm.password,
-        });
+        const { data, error: err } = await supabase.auth.signInWithPassword({ email: authForm.email.trim(), password: authForm.password });
         if (err) {
-          if (err.message === 'Invalid login credentials') {
-            setAuthError(lang === 'he' ? 'אימייל או סיסמה שגויים' : 'Invalid email or password');
-          } else if (err.message.includes('Email not confirmed')) {
-            setAuthError(lang === 'he' ? 'יש לאשר את האימייל קודם' : 'Please confirm your email first');
-          } else {
-            setAuthError(err.message);
-          }
+          if (err.message === 'Invalid login credentials') setAuthError(lang === 'he' ? 'אימייל או סיסמה שגויים' : 'Invalid email or password');
+          else if (err.message.includes('Email not confirmed')) setAuthError(lang === 'he' ? 'יש לאשר את האימייל קודם' : 'Please confirm your email first');
+          else setAuthError(err.message);
         } else if (data?.user) {
-          setView('profile');
-          setTab('profile');
-          setAuthForm({ name: '', email: '', password: '' });
+          setView('profile'); setTab('profile'); setAuthForm({ name: '', email: '', password: '' });
           showToastMsg(lang === 'he' ? 'התחברת בהצלחה!' : 'Signed in!');
         }
       } else {
-        const { data, error: err } = await supabase.auth.signUp({
-          email: authForm.email.trim(),
-          password: authForm.password,
-          options: { data: { full_name: authForm.name } },
-        });
-        if (err) {
-          setAuthError(err.message);
-        } else if (data?.user?.identities?.length === 0) {
-          setAuthError(lang === 'he' ? 'חשבון כבר קיים עם אימייל זה' : 'An account already exists with this email');
-        } else {
-          setAuthError(null);
-          showToastMsg(lang === 'he' ? 'נרשמת! בדוק את האימייל שלך' : 'Signed up! Check your email');
-        }
+        const { data, error: err } = await supabase.auth.signUp({ email: authForm.email.trim(), password: authForm.password, options: { data: { full_name: authForm.name } } });
+        if (err) setAuthError(err.message);
+        else if (data?.user?.identities?.length === 0) setAuthError(lang === 'he' ? 'חשבון כבר קיים עם אימייל זה' : 'An account already exists with this email');
+        else { setAuthError(null); showToastMsg(lang === 'he' ? 'נרשמת! בדוק את האימייל שלך' : 'Signed up! Check your email'); }
       }
     } catch (err) {
       console.error('Auth error:', err);
@@ -694,10 +596,7 @@ export function AppProvider({ children }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setTab('home');
-    setView('home');
-    showToastMsg('Signed out');
+    await supabase.auth.signOut(); setTab('home'); setView('home'); showToastMsg('Signed out');
   };
 
   // ─── ITEM ACTIONS ───────────────────────────────────
@@ -721,59 +620,191 @@ export function AppProvider({ children }) {
 
   const deleteListing = async (id) => {
     await supabase.from('listings').update({ status: 'deleted' }).eq('id', id);
-    loadUserData();
-    showToastMsg('Deleted');
+    loadUserData(); showToastMsg('Deleted');
   };
 
-  // ─── ANALYZE ────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════
+  // IMAGE ANALYSIS PIPELINE
+  //
+  // State machine: idle → compressing → analyzing → success
+  // Failure states: compress_error | analysis_error
+  //
+  // Features:
+  //  • Client-side compression (1800px max, JPEG 0.85)
+  //  • Analysis API with retry (up to 2 attempts, exponential backoff)
+  //  • AbortController cancellation (new image aborts old pipeline)
+  //  • Instrumented dev logging
+  //  • Error UI stays on analyzing screen with Retry button
+  // ═══════════════════════════════════════════════════════
 
-  const analyzeImage = useCallback(async (imgData) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-    try {
-      const res = await fetch('/api/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageData: imgData.split(',')[1], lang }),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-      if (!res.ok) throw new Error('Analysis failed');
-      const data = await res.json();
-      if (data.content?.[0]?.text) {
-        return JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
+  // ── Internal: call /api/analyze with retry + timeout ──
+  const analyzeWithRetry = useCallback(async (compressedDataUrl, pipelineSignal, maxRetries = 1) => {
+    const base64 = compressedDataUrl.split(',')[1];
+    let lastError;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // Check if user cancelled before each attempt
+      if (pipelineSignal.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+      // Exponential backoff between retries (300ms, 900ms)
+      if (attempt > 0) {
+        const delay = 300 * Math.pow(3, attempt - 1);
+        if (DEV) console.log(`[Analyze] Retry #${attempt} in ${delay}ms`);
+        await new Promise((r) => setTimeout(r, delay));
+        if (pipelineSignal.aborted) throw new DOMException('Cancelled', 'AbortError');
       }
-      throw new Error('Invalid response');
-    } catch (e) {
-      clearTimeout(timeoutId);
-      if (e.name === 'AbortError') throw new Error(lang === 'he' ? 'הזמן הקצוב פג, נסה שוב' : 'Request timed out, please try again');
-      throw e;
+
+      // Create a per-attempt controller that aborts on timeout OR user cancel
+      const attemptCtrl = new AbortController();
+      const timeoutId = setTimeout(() => attemptCtrl.abort(), 35000);
+      const onPipelineAbort = () => { clearTimeout(timeoutId); attemptCtrl.abort(); };
+      pipelineSignal.addEventListener('abort', onPipelineAbort);
+
+      const t0 = performance.now();
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ imageData: base64, lang }),
+          signal: attemptCtrl.signal,
+        });
+        clearTimeout(timeoutId);
+        pipelineSignal.removeEventListener('abort', onPipelineAbort);
+
+        if (DEV) console.log(`[Analyze] Attempt ${attempt + 1}: HTTP ${res.status} in ${(performance.now() - t0).toFixed(0)}ms`);
+
+        if (!res.ok) {
+          // Retry server errors, not client errors
+          if (res.status >= 500 && attempt < maxRetries) {
+            lastError = new Error(`Server error (${res.status})`);
+            continue;
+          }
+          throw new Error(lang === 'he' ? `שגיאת שרת (${res.status})` : `Server error (${res.status})`);
+        }
+
+        const data = await res.json();
+        if (data.content?.[0]?.text) {
+          const parsed = JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
+          if (DEV) console.log(`[Analyze] Success:`, parsed.name || parsed.nameHebrew);
+          return parsed;
+        }
+        throw new Error(lang === 'he' ? 'תגובה לא תקינה מהשרת' : 'Invalid response from server');
+      } catch (e) {
+        clearTimeout(timeoutId);
+        pipelineSignal.removeEventListener('abort', onPipelineAbort);
+        lastError = e;
+
+        // User cancelled — stop immediately
+        if (pipelineSignal.aborted) throw new DOMException('Cancelled', 'AbortError');
+
+        // Timeout — retryable
+        if (e.name === 'AbortError') {
+          if (attempt === maxRetries) {
+            throw new Error(lang === 'he' ? 'הזמן הקצוב פג, נסה שוב' : 'Request timed out, please try again');
+          }
+          continue;
+        }
+
+        // Network error — retryable
+        if (e.message === 'Failed to fetch' && attempt < maxRetries) continue;
+
+        // Non-retryable error on last attempt
+        if (attempt === maxRetries) throw e;
+        if (DEV) console.warn(`[Analyze] Attempt ${attempt + 1} failed:`, e.message);
+      }
     }
+    throw lastError;
   }, [lang]);
 
+  // ── Main pipeline: compress → analyze ──
+  const runPipeline = useCallback(async (rawDataUrl) => {
+    // Cancel any in-flight pipeline
+    if (pipelineAbortRef.current) {
+      pipelineAbortRef.current.abort();
+    }
+    const abortCtrl = new AbortController();
+    pipelineAbortRef.current = abortCtrl;
+
+    setPipelineError(null);
+    const pipelineT0 = performance.now();
+
+    try {
+      // ── Step 1: Compress ──
+      setPipelineState('compressing');
+      if (DEV) console.log('[Pipeline] Compressing...');
+      const compressed = await compressImage(rawDataUrl);
+      setImages([compressed]); // Show compressed version in preview
+
+      if (abortCtrl.signal.aborted) return;
+
+      // ── Step 2: Analyze ──
+      setPipelineState('analyzing');
+      if (DEV) console.log('[Pipeline] Analyzing...');
+      const analysisResult = await analyzeWithRetry(compressed, abortCtrl.signal);
+
+      if (abortCtrl.signal.aborted) return;
+
+      // ── Success ──
+      setPipelineState('success');
+      setResult(analysisResult);
+      setView('results');
+      playSound('success');
+      if (DEV) console.log(`[Pipeline] Complete in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
+
+    } catch (e) {
+      // User cancelled — silent, no error UI
+      if (e.name === 'AbortError' || abortCtrl.signal.aborted) {
+        if (DEV) console.log('[Pipeline] Cancelled by user');
+        return;
+      }
+
+      console.error('[Pipeline] Failed:', e);
+      const failedAtCompress = !images.length || pipelineState === 'compressing';
+      setPipelineState(failedAtCompress ? 'compress_error' : 'analysis_error');
+      setPipelineError(e.message || (lang === 'he' ? 'שגיאה' : 'An error occurred'));
+      playSound('error');
+      // Stay on 'analyzing' view — it now shows error UI with Retry
+    }
+  }, [analyzeWithRetry, playSound, lang]);
+
+  // ── Retry from the failed step ──
+  const retryPipeline = useCallback(() => {
+    if (!capturedImageRef.current) return;
+    setView('analyzing');
+    runPipeline(capturedImageRef.current);
+  }, [runPipeline]);
+
+  // ── Cancel and go home ──
+  const cancelPipeline = useCallback(() => {
+    if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    setPipelineState('idle');
+    setPipelineError(null);
+    setView('home');
+  }, []);
+
+  // ── handleFile: user picks image from gallery ──
   const handleFile = useCallback((file) => {
     if (!file?.type.startsWith('image/')) return;
     playSound('tap');
     setView('analyzing');
+
     const reader = new FileReader();
-    reader.onload = async (e) => {
-      const imageData = e.target.result;
-      setImages([imageData]);
-      try {
-        const r = await analyzeImage(imageData);
-        setResult(r);
-        setView('results');
-        playSound('success');
-      } catch {
-        setError(t.failed);
-        setView('home');
-        playSound('error');
-      }
+    reader.onload = (e) => {
+      const rawData = e.target.result;
+      capturedImageRef.current = rawData;
+      setImages([rawData]); // Show original while compressing
+      runPipeline(rawData);
+    };
+    reader.onerror = () => {
+      setPipelineState('compress_error');
+      setPipelineError(lang === 'he' ? 'שגיאה בקריאת הקובץ' : 'Failed to read file');
     };
     reader.readAsDataURL(file);
-  }, [analyzeImage, playSound, t.failed]);
+  }, [runPipeline, playSound, lang]);
 
-  // ─── CAMERA ───
+  // ═══════════════════════════════════════════════════════
+  // CAMERA + TORCH
+  // ═══════════════════════════════════════════════════════
 
   const attachStreamToVideo = (stream, retries = 5) => {
     const tryAttach = (attempt) => {
@@ -787,12 +818,53 @@ export function AppProvider({ children }) {
     setTimeout(() => tryAttach(0), 50);
   };
 
+  // Detect torch capability on the current video track
+  const detectTorch = (stream) => {
+    try {
+      const videoTrack = stream.getVideoTracks()[0];
+      if (!videoTrack) { setTorchSupported(false); return; }
+      // getCapabilities may not exist on all browsers
+      if (typeof videoTrack.getCapabilities === 'function') {
+        const caps = videoTrack.getCapabilities();
+        const hasTorch = !!(caps.torch);
+        setTorchSupported(hasTorch);
+        if (DEV) console.log(`[Camera] Torch supported: ${hasTorch}`);
+      } else {
+        setTorchSupported(false);
+      }
+    } catch {
+      setTorchSupported(false);
+    }
+    setTorchOn(false); // Always reset on new stream
+  };
+
+  const toggleTorch = useCallback(async () => {
+    if (!cameraStreamRef.current) return;
+    const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
+    if (!videoTrack) return;
+    const next = !torchOn;
+    try {
+      await videoTrack.applyConstraints({ advanced: [{ torch: next }] });
+      setTorchOn(next);
+      if (DEV) console.log(`[Camera] Torch ${next ? 'ON' : 'OFF'}`);
+    } catch (e) {
+      console.warn('Torch toggle failed:', e.message);
+      setTorchSupported(false);
+      setTorchOn(false);
+    }
+  }, [torchOn]);
+
   const startCamera = async () => {
     try {
       if (cameraStreamRef.current) {
         const tracks = cameraStreamRef.current.getTracks();
         const hasLive = tracks.some((t) => t.readyState === 'live');
-        if (hasLive) { setView('camera'); attachStreamToVideo(cameraStreamRef.current); return; }
+        if (hasLive) {
+          setView('camera');
+          attachStreamToVideo(cameraStreamRef.current);
+          detectTorch(cameraStreamRef.current);
+          return;
+        }
         cameraStreamRef.current = null;
       }
       if (!cameraPermissionGranted.current && navigator.permissions?.query) {
@@ -812,6 +884,7 @@ export function AppProvider({ children }) {
       cameraPermissionGranted.current = true;
       setView('camera');
       attachStreamToVideo(stream);
+      detectTorch(stream);
     } catch (err) {
       console.error('Camera error:', err);
       if (err.name === 'NotAllowedError') {
@@ -833,24 +906,37 @@ export function AppProvider({ children }) {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
-    const img = canvas.toDataURL('image/jpeg', 0.85);
-    capturedImageRef.current = img;
+    const rawImg = canvas.toDataURL('image/jpeg', 0.85);
+    capturedImageRef.current = rawImg;
     setTimeout(() => {
       setShowFlash(false);
-      setImages([img]);
+      setImages([rawImg]);
       setView('analyzing');
       if (videoRef.current) videoRef.current.pause();
-      analyzeImage(img)
-        .then((r) => { setResult(r); setView('results'); playSound('success'); })
-        .catch(() => { setError(t.failed); setView('home'); playSound('error'); });
+      // Turn off torch when leaving camera
+      if (torchOn && cameraStreamRef.current) {
+        try {
+          cameraStreamRef.current.getVideoTracks()[0]?.applyConstraints({ advanced: [{ torch: false }] });
+        } catch {}
+        setTorchOn(false);
+      }
+      runPipeline(rawImg);
     }, 150);
-  }, [analyzeImage, playSound, t.failed]);
+  }, [runPipeline, playSound, torchOn]);
 
   const stopCamera = () => {
+    // Turn off torch before leaving
+    if (torchOn && cameraStreamRef.current) {
+      try {
+        cameraStreamRef.current.getVideoTracks()[0]?.applyConstraints({ advanced: [{ torch: false }] });
+      } catch {}
+      setTorchOn(false);
+    }
     if (videoRef.current) videoRef.current.pause();
     setView('home');
   };
 
+  // Cleanup camera stream on unmount
   useEffect(() => {
     return () => {
       if (cameraStreamRef.current) {
@@ -915,6 +1001,10 @@ export function AppProvider({ children }) {
   // ─── NAVIGATION ────────────────────────────────────
 
   const reset = () => {
+    // Cancel any in-flight pipeline
+    if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    setPipelineState('idle');
+    setPipelineError(null);
     setImages([]); setResult(null); setView('home'); setError(null);
     setCondition(null); setListingStep(0); setSelected(null);
     setActiveChat(null); capturedImageRef.current = null;
@@ -970,7 +1060,11 @@ export function AppProvider({ children }) {
     listingStep, setListingStep, condition, setCondition,
     answers, setAnswers, listingData, setListingData,
     publishing, publishListing, startListing, selectCondition,
-    analyzeImage, handleFile, startCamera, capture, stopCamera,
+    // Pipeline (replaces analyzeImage)
+    handleFile, startCamera, capture, stopCamera,
+    pipelineState, pipelineError, retryPipeline, cancelPipeline,
+    // Torch
+    torchSupported, torchOn, toggleTorch,
     showFlash, capturedImageRef,
     conversations, activeChat, setActiveChat,
     messages, setMessages, newMessage, setNewMessage,
