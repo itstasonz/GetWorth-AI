@@ -602,6 +602,131 @@ export function AppProvider({ children }) {
     await supabase.auth.signOut(); setTab('home'); setView('home'); showToastMsg('Signed out');
   };
 
+  // ─── AVATAR UPLOAD ─────────────────────────────────
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
+  const uploadAvatar = useCallback(async (file) => {
+    if (!user || !file) return;
+    if (!file.type.startsWith('image/')) {
+      showToastMsg(lang === 'he' ? 'קובץ לא תקין' : 'Invalid file type');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי (עד 10MB)' : 'File too large (max 10MB)');
+      return;
+    }
+
+    setAvatarUploading(true);
+    try {
+      // Read file to dataUrl
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      // Compress to 512x512
+      const compressed = await compressImage(dataUrl, 512, 0.85);
+
+      // Convert to blob
+      const res = await fetch(compressed);
+      const blob = await res.blob();
+
+      const filePath = `${user.id}/avatar.jpg`;
+
+      // Upload (upsert)
+      const { error: uploadErr } = await supabase.storage
+        .from('avatars')
+        .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+
+      if (uploadErr) throw uploadErr;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      const publicUrl = urlData.publicUrl + '?t=' + Date.now(); // cache bust
+
+      // Update profile
+      const { error: updateErr } = await supabase
+        .from('profiles')
+        .update({ avatar_url: publicUrl })
+        .eq('id', user.id);
+
+      if (updateErr) throw updateErr;
+
+      // Update local state
+      setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
+      showToastMsg(lang === 'he' ? 'התמונה עודכנה!' : 'Photo updated!');
+      if (DEV) console.log('[Avatar] Uploaded:', publicUrl);
+
+    } catch (e) {
+      console.error('[Avatar] Upload failed:', e);
+      showToastMsg(lang === 'he' ? 'שגיאה בהעלאת התמונה' : 'Failed to upload photo');
+    }
+    setAvatarUploading(false);
+  }, [user, lang, showToastMsg]);
+
+  // ─── VERIFICATION ──────────────────────────────────
+  const [verificationUploading, setVerificationUploading] = useState(false);
+
+  const requestVerification = useCallback(async (file) => {
+    if (!user || !file) return;
+    if (!file.type.startsWith('image/')) {
+      showToastMsg(lang === 'he' ? 'קובץ לא תקין' : 'Invalid file type');
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי (עד 10MB)' : 'File too large (max 10MB)');
+      return;
+    }
+
+    setVerificationUploading(true);
+    try {
+      // Read + compress
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result);
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
+
+      const compressed = await compressImage(dataUrl, 1024, 0.85);
+      const res = await fetch(compressed);
+      const blob = await res.blob();
+
+      const filePath = `${user.id}/selfie.jpg`;
+
+      // Upload selfie
+      const { error: uploadErr } = await supabase.storage
+        .from('verification-photos')
+        .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+
+      if (uploadErr) throw uploadErr;
+
+      // Get URL (private — only admins can access)
+      const { data: urlData } = supabase.storage.from('verification-photos').getPublicUrl(filePath);
+
+      // Update profile status
+      const { error: updateErr } = await supabase
+        .from('profiles')
+        .update({
+          verification_status: 'pending',
+          verification_photo_url: urlData.publicUrl,
+        })
+        .eq('id', user.id);
+
+      if (updateErr) throw updateErr;
+
+      setProfile(prev => ({ ...prev, verification_status: 'pending' }));
+      showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
+
+    } catch (e) {
+      console.error('[Verify] Upload failed:', e);
+      showToastMsg(lang === 'he' ? 'שגיאה בשליחת הבקשה' : 'Failed to submit verification');
+    }
+    setVerificationUploading(false);
+  }, [user, lang, showToastMsg]);
+
   // ─── ITEM ACTIONS ───────────────────────────────────
 
   const toggleSave = async (item) => {
@@ -1152,6 +1277,8 @@ export function AppProvider({ children }) {
     lang, setLang, t, rtl,
     user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading,
     signInGoogle, signInEmail, signOut,
+    uploadAvatar, avatarUploading,
+    requestVerification, verificationUploading,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,
     tab, setTab, view, setView, goTab, reset,
     listings, myListings, savedIds, savedItems,

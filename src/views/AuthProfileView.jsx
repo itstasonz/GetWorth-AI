@@ -1,5 +1,5 @@
-import React from 'react';
-import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2 } from 'lucide-react';
+import React, { useRef } from 'react';
+import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, InputField } from '../components/ui';
 import { STAT_COLORS } from '../lib/utils';
@@ -63,31 +63,180 @@ export function AuthView() {
 }
 
 export function ProfileView() {
-  const { t, lang, user, profile, signOut, myListings, savedItems, setView } = useApp();
+  const {
+    t, lang, user, profile, signOut, myListings, savedItems, setView,
+    uploadAvatar, avatarUploading,
+    requestVerification, verificationUploading,
+  } = useApp();
+
+  const avatarInputRef = useRef(null);
+  const verifyInputRef = useRef(null);
 
   if (!user) return null;
 
+  const vStatus = profile?.verification_status || 'unverified';
+  const isVerified = vStatus === 'verified' || profile?.is_verified;
+
+  const handleAvatarPick = (e) => {
+    const file = e.target.files?.[0];
+    if (file) uploadAvatar(file);
+    if (avatarInputRef.current) avatarInputRef.current.value = '';
+  };
+
+  const handleVerifyPick = (e) => {
+    const file = e.target.files?.[0];
+    if (file) requestVerification(file);
+    if (verifyInputRef.current) verifyInputRef.current.value = '';
+  };
+
   return (
     <div className="space-y-5">
+      {/* Profile Card with Avatar */}
       <FadeIn>
         <Card className="p-6">
           <div className="flex items-center gap-5">
-            <div className="relative">
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-3xl font-bold shadow-xl shadow-blue-500/30">
-                {profile?.full_name?.charAt(0) || user.email?.charAt(0) || 'U'}
-              </div>
+            {/* Avatar with upload overlay */}
+            <div className="relative group">
+              <button
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={avatarUploading}
+                className="relative w-20 h-20 rounded-3xl overflow-hidden shadow-xl shadow-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {profile?.avatar_url ? (
+                  <img
+                    src={profile.avatar_url}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-3xl font-bold">
+                    {profile?.full_name?.charAt(0) || user.email?.charAt(0) || 'U'}
+                  </div>
+                )}
+                {/* Hover/tap overlay */}
+                <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                  {avatarUploading ? (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  ) : (
+                    <Camera className="w-5 h-5" />
+                  )}
+                </div>
+              </button>
+              {/* Online indicator */}
               <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-green-500 border-2 border-[#060a14]" />
+              {/* Verified badge on avatar */}
+              {isVerified && (
+                <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-blue-500 border-2 border-[#060a14] flex items-center justify-center">
+                  <Shield className="w-3 h-3 text-white" />
+                </div>
+              )}
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleAvatarPick}
+              />
             </div>
-            <div className="flex-1">
-              <h3 className="text-xl font-bold">{profile?.full_name || user.email?.split('@')[0]}</h3>
-              <p className="text-sm text-slate-400">{user.email}</p>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <h3 className="text-xl font-bold truncate">{profile?.full_name || user.email?.split('@')[0]}</h3>
+                {isVerified && (
+                  <CheckCircle className="w-5 h-5 text-blue-400 flex-shrink-0" />
+                )}
+              </div>
+              <p className="text-sm text-slate-400 truncate">{user.email}</p>
               {profile?.badge && <Badge color="blue" className="mt-2">{profile.badge}</Badge>}
             </div>
-            <button onClick={signOut} className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition-all">
+            <button onClick={signOut} className="p-3 rounded-2xl bg-white/5 hover:bg-white/10 transition-all flex-shrink-0">
               <LogOut className="w-5 h-5 text-slate-400" />
             </button>
           </div>
         </Card>
+      </FadeIn>
+
+      {/* Verification Status Card */}
+      <FadeIn delay={50}>
+        {vStatus === 'unverified' && (
+          <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(59,130,246,0.02))">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                <Shield className="w-5 h-5 text-blue-400" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold">{lang === 'he' ? 'אמת את הפרופיל שלך' : 'Verify your profile'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'קונים סומכים יותר על מוכרים מאומתים' : 'Buyers trust verified sellers more'}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => verifyInputRef.current?.click()}
+              disabled={verificationUploading}
+              className="w-full mt-3 py-2.5 rounded-xl bg-blue-600/20 border border-blue-500/30 text-sm font-semibold text-blue-300 flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-all"
+            >
+              {verificationUploading ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'מעלה...' : 'Uploading...'}</>
+              ) : (
+                <><Upload className="w-4 h-4" />{lang === 'he' ? 'העלה סלפי לאימות' : 'Upload selfie to verify'}</>
+              )}
+            </button>
+            <input ref={verifyInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="user" className="hidden" onChange={handleVerifyPick} />
+          </Card>
+        )}
+
+        {vStatus === 'pending' && (
+          <Card className="p-4" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.02))">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                <Clock className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-amber-200">{lang === 'he' ? 'בבדיקה' : 'Verification pending'}</p>
+                <p className="text-xs text-slate-400">{lang === 'he' ? 'הבקשה שלך נבדקת. זה ייקח עד 24 שעות' : 'Your request is being reviewed. This takes up to 24h'}</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {vStatus === 'verified' && (
+          <Card className="p-4" gradient="linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                <CheckCircle className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-emerald-200">{lang === 'he' ? '✔ מוכר מאומת' : '✔ Verified Seller'}</p>
+                <p className="text-xs text-slate-400">{lang === 'he' ? 'הפרופיל שלך אומת בהצלחה' : 'Your profile has been verified'}</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {vStatus === 'rejected' && (
+          <Card className="p-4" gradient="linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.02))">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <XCircle className="w-5 h-5 text-red-400" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-semibold text-red-200">{lang === 'he' ? 'הבקשה נדחתה' : 'Verification rejected'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'נסה שוב עם תמונת סלפי ברורה' : 'Try again with a clear selfie photo'}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => verifyInputRef.current?.click()}
+              disabled={verificationUploading}
+              className="w-full mt-3 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-sm font-semibold text-red-300 flex items-center justify-center gap-2 hover:bg-red-600/30 transition-all"
+            >
+              {verificationUploading ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'מעלה...' : 'Uploading...'}</>
+              ) : (
+                <><Upload className="w-4 h-4" />{lang === 'he' ? 'נסה שוב' : 'Try again'}</>
+              )}
+            </button>
+            <input ref={verifyInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="user" className="hidden" onChange={handleVerifyPick} />
+          </Card>
+        )}
       </FadeIn>
 
       {/* Profile stats */}
