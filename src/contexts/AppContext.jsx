@@ -984,20 +984,11 @@ export function AppProvider({ children }) {
   // CAMERA + TORCH
   // ═══════════════════════════════════════════════════════
 
-  const attachStreamToVideo = (stream, retries = 5) => {
-    const tryAttach = (attempt) => {
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      } else if (attempt < retries) {
-        setTimeout(() => tryAttach(attempt + 1), 50 * (attempt + 1));
-      }
-    };
-    setTimeout(() => tryAttach(0), 50);
-  };
+  const cameraStartingRef = useRef(false); // Prevent double getUserMedia
 
   // ── Kill all tracks, release hardware, clear video element ──
   const releaseCamera = useCallback(() => {
+    if (DEV) console.log('[Camera] releaseCamera called');
     // Turn off torch first
     if (cameraStreamRef.current) {
       try {
@@ -1015,19 +1006,18 @@ export function AppProvider({ children }) {
     // Clear video element
     if (videoRef.current) {
       videoRef.current.pause();
-      videoRef.current.srcObject = null;
+      try { videoRef.current.srcObject = null; } catch {}
     }
     setTorchOn(false);
     setTorchSupported(false);
-    if (DEV) console.log('[Camera] Released');
+    cameraStartingRef.current = false;
   }, []);
 
   // Detect torch capability on the current video track
-  const detectTorch = (stream) => {
+  const detectTorch = useCallback((stream) => {
     try {
       const videoTrack = stream.getVideoTracks()[0];
       if (!videoTrack) { setTorchSupported(false); return; }
-      // getCapabilities may not exist on all browsers
       if (typeof videoTrack.getCapabilities === 'function') {
         const caps = videoTrack.getCapabilities();
         const hasTorch = !!(caps.torch);
@@ -1039,8 +1029,8 @@ export function AppProvider({ children }) {
     } catch {
       setTorchSupported(false);
     }
-    setTorchOn(false); // Always reset on new stream
-  };
+    setTorchOn(false);
+  }, []);
 
   const toggleTorch = useCallback(async () => {
     if (!cameraStreamRef.current) return;
@@ -1058,74 +1048,204 @@ export function AppProvider({ children }) {
     }
   }, [torchOn]);
 
-  const startCamera = async () => {
-    try {
-      // Always release previous stream before starting fresh
-      releaseCamera();
+  // ── Attach stream to video element using loadedmetadata (reliable on iOS) ──
+  const attachStreamToVideo = useCallback((stream) => {
+    return new Promise((resolve) => {
+      let resolved = false;
+      const done = (val) => { if (!resolved) { resolved = true; resolve(val); } };
 
-      if (!cameraPermissionGranted.current && navigator.permissions?.query) {
+      const video = videoRef.current;
+      if (!video) { done(false); return; }
+
+      video.onloadedmetadata = null;
+      video.srcObject = stream;
+      video.onloadedmetadata = () => {
+        video.play()
+          .then(() => {
+            if (DEV) console.log(`[Camera] Video playing: ${video.videoWidth}×${video.videoHeight}`);
+            done(true);
+          })
+          .catch((e) => {
+            console.warn('[Camera] play() failed:', e.message);
+            done(false);
+          });
+      };
+
+      // Fallback: if metadata doesn't fire in 3s, force play
+      setTimeout(() => {
+        if (!resolved) {
+          video.play().catch(() => {});
+          done(true);
+        }
+      }, 3000);
+    });
+  }, []);
+
+  // ── Wait for videoRef to be mounted (React may not have rendered yet) ──
+  const waitForVideoElement = useCallback(() => {
+    return new Promise((resolve) => {
+      if (videoRef.current) { resolve(true); return; }
+      let attempts = 0;
+      const poll = setInterval(() => {
+        attempts++;
+        if (videoRef.current) { clearInterval(poll); resolve(true); return; }
+        if (attempts > 30) { clearInterval(poll); resolve(false); } // 1.5s max
+      }, 50);
+    });
+  }, []);
+
+  // ── Start camera — single entry point, guarded against double calls ──
+  const startCamera = useCallback(async () => {
+    // Prevent double start
+    if (cameraStartingRef.current) {
+      if (DEV) console.log('[Camera] Start already in progress, skipping');
+      return;
+    }
+    cameraStartingRef.current = true;
+
+    if (DEV) console.log('[Camera] Start requested');
+
+    try {
+      // Always release previous stream first
+      releaseCamera();
+      cameraStartingRef.current = true; // Re-set after releaseCamera clears it
+
+      // Check permission (not supported on all browsers)
+      if (navigator.permissions?.query) {
         try {
           const permResult = await navigator.permissions.query({ name: 'camera' });
           if (permResult.state === 'denied') {
             setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
+            cameraStartingRef.current = false;
             return;
           }
-          if (permResult.state === 'granted') cameraPermissionGranted.current = true;
         } catch {}
       }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-      });
+
+      // Try environment camera first, fallback to user
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      } catch (envErr) {
+        if (DEV) console.log('[Camera] Environment failed, trying user camera:', envErr.message);
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        });
+      }
+
+      // Store stream
       cameraStreamRef.current = stream;
       cameraPermissionGranted.current = true;
+
+      // Navigate to camera view so React mounts the <video> element
       setView('camera');
-      attachStreamToVideo(stream);
+
+      // Wait for videoRef to exist in DOM (polling, not fixed delay)
+      const videoMounted = await waitForVideoElement();
+      if (!videoMounted) {
+        console.warn('[Camera] Video element never mounted');
+        releaseCamera();
+        cameraStartingRef.current = false;
+        return;
+      }
+
+      // Check if stream was released while waiting (user cancelled fast)
+      if (!cameraStreamRef.current) {
+        cameraStartingRef.current = false;
+        return;
+      }
+
+      await attachStreamToVideo(stream);
       detectTorch(stream);
+
+      if (DEV) console.log('[Camera] Start success');
+
     } catch (err) {
-      console.error('Camera error:', err);
-      if (err.name === 'NotAllowedError') {
+      console.error('[Camera] Start error:', err);
+      releaseCamera();
+      if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
         cameraPermissionGranted.current = false;
         setError(lang === 'he' ? 'הגישה למצלמה נדחתה' : 'Camera access denied.');
       } else {
-        setError(t.cameraDenied || (lang === 'he' ? 'שגיאה בפתיחת המצלמה' : 'Failed to open camera'));
+        setError(lang === 'he' ? 'שגיאה בפתיחת המצלמה' : 'Failed to open camera');
       }
     }
-  };
+    cameraStartingRef.current = false;
+  }, [releaseCamera, attachStreamToVideo, waitForVideoElement, detectTorch, lang, setError]);
 
+  // ── Capture — waits for video readyState, validates frame ──
   const capture = useCallback(() => {
-    if (!videoRef.current || !canvasRef.current) return;
-    playSound('shutter');
-    setShowFlash(true);
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    if (!video || !canvas) return;
+
+    // Check video is actually producing frames
+    if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      if (DEV) console.warn('[Camera] Capture aborted: video not ready', video.readyState, video.videoWidth);
+      showToastMsg(lang === 'he' ? 'המצלמה עדיין נטענת, נסה שוב' : 'Camera still loading, try again');
+      return;
+    }
+
+    if (DEV) console.log(`[Camera] Capture: ${video.videoWidth}×${video.videoHeight}`);
+
+    playSound('shutter');
+    setShowFlash(true);
+
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0);
-    const rawImg = canvas.toDataURL('image/jpeg', 0.85);
-    capturedImageRef.current = rawImg;
-    setTimeout(() => {
+
+    // Try toBlob first (better), fallback to toDataURL
+    const processCapture = (rawImg) => {
+      if (!rawImg) {
+        if (DEV) console.warn('[Camera] Capture produced empty image');
+        setShowFlash(false);
+        showToastMsg(lang === 'he' ? 'שגיאה בצילום, נסה שוב' : 'Capture failed, try again');
+        return;
+      }
+      capturedImageRef.current = rawImg;
+      if (DEV) console.log('[Camera] Capture success');
+      setTimeout(() => {
+        setShowFlash(false);
+        setImages([rawImg]);
+        setView('analyzing');
+        releaseCamera();
+        runPipeline(rawImg);
+      }, 150);
+    };
+
+    // Use toDataURL (synchronous, reliable on all browsers)
+    try {
+      const rawImg = canvas.toDataURL('image/jpeg', 0.85);
+      if (rawImg && rawImg.length > 100) {
+        processCapture(rawImg);
+      } else {
+        processCapture(null);
+      }
+    } catch (e) {
+      console.error('[Camera] Canvas toDataURL failed:', e);
       setShowFlash(false);
-      setImages([rawImg]);
-      setView('analyzing');
-      // Immediately release camera hardware
-      releaseCamera();
-      runPipeline(rawImg);
-    }, 150);
-  }, [runPipeline, playSound, releaseCamera]);
+      showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture error');
+    }
+  }, [runPipeline, playSound, releaseCamera, lang, showToastMsg]);
 
   const stopCamera = useCallback(() => {
+    if (DEV) console.log('[Camera] Stop requested');
     releaseCamera();
     setView('home');
   }, [releaseCamera]);
 
-  // Release camera when app goes to background (iOS Safari)
+  // Release camera when app goes to background (iOS Safari PWA)
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden && cameraStreamRef.current) {
         if (DEV) console.log('[Camera] App hidden — releasing camera');
         releaseCamera();
-        // If user was on camera screen, send them home
         setView(prev => prev === 'camera' ? 'home' : prev);
       }
     };
@@ -1133,21 +1253,11 @@ export function AppProvider({ children }) {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [releaseCamera]);
 
-  // Safety: release camera on unmount
+  // Safety: release camera on provider unmount
   useEffect(() => {
     return () => {
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getTracks().forEach(t => { try { t.stop(); } catch {} });
-        cameraStreamRef.current = null;
-      }
-    };
-  }, []);
-
-  // Cleanup camera stream on unmount
-  useEffect(() => {
-    return () => {
-      if (cameraStreamRef.current) {
-        cameraStreamRef.current.getTracks().forEach((t) => t.stop());
         cameraStreamRef.current = null;
       }
     };
@@ -1189,14 +1299,21 @@ export function AppProvider({ children }) {
         images: imageUrls, condition, price: listingData.price,
         category: result?.category,
       });
-      const { error: insertError } = await supabase.from('listings').insert({
+      const listingRow = {
         seller_id: user.id, title: listingData.title, title_hebrew: result?.nameHebrew || '',
         description: listingData.desc || '', category: result?.category || 'Other',
         condition, price: listingData.price, images: imageUrls,
         location: listingData.location, contact_phone: listingData.phone, status: 'active',
         quality_score: qualityScore
-      }).select();
-      if (insertError) throw insertError;
+      };
+      let insertResult = await supabase.from('listings').insert(listingRow).select();
+      // Fallback: if quality_score column doesn't exist, retry without it
+      if (insertResult.error && insertResult.error.message?.includes('quality_score')) {
+        if (DEV) console.warn('[Publish] quality_score column missing, retrying without it');
+        delete listingRow.quality_score;
+        insertResult = await supabase.from('listings').insert(listingRow).select();
+      }
+      if (insertResult.error) throw insertResult.error;
       await loadUserData();
       await loadListings(true);
       setListingStep(3);
@@ -1296,7 +1413,7 @@ export function AppProvider({ children }) {
     publishing, publishListing, startListing, selectCondition,
     reportListing,
     // Pipeline (replaces analyzeImage)
-    handleFile, startCamera, capture, stopCamera,
+    handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
     // Recognition refinement
     refineResult, confirmResult, correctResult,
