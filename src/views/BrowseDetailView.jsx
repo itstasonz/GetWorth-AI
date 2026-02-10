@@ -3,6 +3,7 @@ import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbel
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp } from '../components/ui';
 import ListingCard from '../components/ListingCard';
+import ImageGallery from '../components/ImageGallery';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, getQualityBadge, computeSellerTrust, STAT_COLORS } from '../lib/utils';
 
 export function BrowseView() {
@@ -187,29 +188,29 @@ export function DetailView() {
 
   return (
     <div className="space-y-5 -mx-5 -mt-4">
-      {/* Image */}
-      <div className="relative">
-        <div className="aspect-square">
-          <img src={selected.images?.[0]} className="w-full h-full object-cover" />
-        </div>
-        <div className="absolute inset-0 bg-gradient-to-t from-[#060a14] via-transparent to-[#060a14]/50" />
+      {/* Image Gallery */}
+      <ImageGallery
+        images={selected.images || []}
+        overlay={
+          <>
+            <button onClick={() => { setSelected(null); setView(tab === 'home' ? 'home' : 'browse'); }}
+              className={`absolute top-4 ${rtl ? 'right-4' : 'left-4'} w-12 h-12 rounded-2xl bg-black/30 backdrop-blur-md flex items-center justify-center hover:bg-black/50 transition-all z-20`}>
+              {rtl ? <ChevronRight className="w-6 h-6" /> : <ChevronLeft className="w-6 h-6" />}
+            </button>
 
-        <button onClick={() => { setSelected(null); setView(tab === 'home' ? 'home' : 'browse'); }}
-          className={`absolute top-4 ${rtl ? 'right-4' : 'left-4'} w-12 h-12 rounded-2xl bg-black/30 backdrop-blur-md flex items-center justify-center hover:bg-black/50 transition-all`}>
-          {rtl ? <ChevronRight className="w-6 h-6" /> : <ChevronLeft className="w-6 h-6" />}
-        </button>
+            <button onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)}
+              className={`absolute top-4 ${rtl ? 'left-4' : 'right-4'} w-12 h-12 rounded-2xl flex items-center justify-center transition-all backdrop-blur-md z-20 ${savedIds.has(selected.id) ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'}`}>
+              <Heart className={`w-6 h-6 ${savedIds.has(selected.id) ? 'fill-current' : ''}`} />
+            </button>
 
-        <button onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)}
-          className={`absolute top-4 ${rtl ? 'left-4' : 'right-4'} w-12 h-12 rounded-2xl flex items-center justify-center transition-all backdrop-blur-md ${savedIds.has(selected.id) ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'}`}>
-          <Heart className={`w-6 h-6 ${savedIds.has(selected.id) ? 'fill-current' : ''}`} />
-        </button>
-
-        {selected.condition && (
-          <div className={`absolute bottom-4 ${rtl ? 'right-4' : 'left-4'} px-3 py-1.5 rounded-xl text-xs font-bold uppercase backdrop-blur-md ${getConditionColorAlpha(selected.condition)}`}>
-            {getConditionLabel(selected.condition, lang)}
-          </div>
-        )}
-      </div>
+            {selected.condition && (
+              <div className={`absolute bottom-12 ${rtl ? 'right-4' : 'left-4'} px-3 py-1.5 rounded-xl text-xs font-bold uppercase backdrop-blur-md z-20 ${getConditionColorAlpha(selected.condition)}`}>
+                {getConditionLabel(selected.condition, lang)}
+              </div>
+            )}
+          </>
+        }
+      />
 
       <div className="px-5 space-y-4">
         {/* Seller Card */}

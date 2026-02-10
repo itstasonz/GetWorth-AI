@@ -1,5 +1,5 @@
-import React from 'react';
-import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, AlertTriangle, CheckCircle, Circle, Check, Share2, Loader2, Phone } from 'lucide-react';
+import React, { useRef } from 'react';
+import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, AlertTriangle, CheckCircle, Circle, Check, Share2, Loader2, Phone, Plus, X, Camera } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, ScaleIn, InputField, BackButton } from '../components/ui';
 import ListingCard from '../components/ListingCard';
@@ -101,9 +101,32 @@ export function ListingFlowView() {
   const {
     t, lang, rtl, result, condition, answers, setAnswers,
     listingStep, setListingStep, listingData, setListingData,
+    images, setImages,
     publishing, publishListing, selectCondition, setView,
     reset, goTab, playSound,
   } = useApp();
+
+  const fileInputRef = useRef(null);
+
+  const addMoreImages = (e) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach((file) => {
+      if (!file.type.startsWith('image/')) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        setImages((prev) => {
+          if (prev.length >= 6) return prev; // Max 6 images
+          return [...prev, ev.target.result];
+        });
+      };
+      reader.readAsDataURL(file);
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const removeImage = (index) => {
+    setImages((prev) => prev.filter((_, i) => i !== index));
+  };
 
   if (!result) return null;
 
@@ -183,6 +206,60 @@ export function ListingFlowView() {
         <>
           <BackButton onClick={() => setListingStep(condition === 'used' ? 1 : 0)} rtl={rtl} label={t.back} />
           <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.review}</h2></FadeIn>
+
+          {/* Image management strip */}
+          <FadeIn delay={25}>
+            <div className="space-y-2">
+              <label className="text-sm text-slate-400 font-medium flex items-center gap-2">
+                <Camera className="w-4 h-4" />
+                {lang === 'he' ? 'תמונות' : 'Photos'} ({images.length}/6)
+              </label>
+              <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                {images.map((img, i) => (
+                  <div key={i} className="relative flex-shrink-0 w-20 h-20 rounded-xl overflow-hidden border-2 border-white/10">
+                    <img src={img} alt="" className="w-full h-full object-cover" />
+                    {images.length > 1 && (
+                      <button
+                        onClick={() => removeImage(i)}
+                        className="absolute top-1 right-1 w-5 h-5 rounded-full bg-red-500 flex items-center justify-center"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    )}
+                    {i === 0 && (
+                      <div className="absolute bottom-0 inset-x-0 bg-blue-600/90 text-[8px] font-bold text-center py-0.5">
+                        {lang === 'he' ? 'ראשית' : 'Cover'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {images.length < 6 && (
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex-shrink-0 w-20 h-20 rounded-xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center gap-1 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all"
+                  >
+                    <Plus className="w-5 h-5 text-slate-500" />
+                    <span className="text-[9px] text-slate-500">{lang === 'he' ? 'הוסף' : 'Add'}</span>
+                  </button>
+                )}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={addMoreImages}
+                  className="hidden"
+                />
+              </div>
+              {images.length < 2 && (
+                <p className="text-[10px] text-amber-400/80 flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  {lang === 'he' ? 'הוסף עוד תמונה לדירוג איכות גבוה יותר' : 'Add more photos for a higher quality score'}
+                </p>
+              )}
+            </div>
+          </FadeIn>
+
           <FadeIn delay={50}><InputField label={t.title} rtl={rtl} value={listingData.title} onChange={(e) => setListingData({ ...listingData, title: e.target.value })} /></FadeIn>
           <FadeIn delay={100}>
             <div className="space-y-2">
