@@ -641,7 +641,7 @@ export function AppProvider({ children }) {
   // ═══════════════════════════════════════════════════════
 
   // ── Internal: call /api/analyze with retry + timeout ──
-  const analyzeWithRetry = useCallback(async (compressedDataUrl, pipelineSignal, maxRetries = 1) => {
+  const analyzeWithRetry = useCallback(async (compressedDataUrl, pipelineSignal, maxRetries = 1, refineModel = null) => {
     const base64 = compressedDataUrl.split(',')[1];
     let lastError;
 
@@ -665,10 +665,13 @@ export function AppProvider({ children }) {
 
       const t0 = performance.now();
       try {
+        const body = { imageData: base64, lang };
+        if (refineModel) body.refineModel = refineModel;
+
         const res = await fetch('/api/analyze', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ imageData: base64, lang }),
+          body: JSON.stringify(body),
           signal: attemptCtrl.signal,
         });
         clearTimeout(timeoutId);
@@ -784,6 +787,53 @@ export function AppProvider({ children }) {
     setPipelineError(null);
     setView('home');
   }, []);
+
+  // ── Refine: re-analyze with a confirmed model name ──
+  const refineResult = useCallback(async (modelName) => {
+    if (!images[0]) return;
+    try {
+      setPipelineState('analyzing');
+      setView('analyzing');
+
+      const abortCtrl = new AbortController();
+      if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+      pipelineAbortRef.current = abortCtrl;
+
+      const refined = await analyzeWithRetry(images[0], abortCtrl.signal, 1, modelName);
+
+      if (abortCtrl.signal.aborted) return;
+
+      // Mark as confirmed since user selected the model
+      refined.userConfirmed = true;
+      refined.needsConfirmation = false;
+
+      setPipelineState('success');
+      setResult(refined);
+      setView('results');
+      playSound('success');
+      if (DEV) console.log('[Refine] Complete:', refined.name);
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      console.error('[Refine] Failed:', e);
+      // Fall back to existing result instead of showing error
+      setView('results');
+      showToastMsg(lang === 'he' ? 'שגיאה בעדכון, מחירים מקוריים נשמרו' : 'Update failed, original prices kept');
+    }
+  }, [images, analyzeWithRetry, playSound, lang, showToastMsg]);
+
+  // ── Confirm: user says the identification is correct ──
+  const confirmResult = useCallback(() => {
+    if (!result) return;
+    setResult(prev => ({ ...prev, userConfirmed: true, needsConfirmation: false }));
+    playSound('tap');
+    if (DEV) console.log('[Confirm] User confirmed:', result.name);
+  }, [result, playSound]);
+
+  // ── Correct: user types the correct model manually ──
+  const correctResult = useCallback(async (userInput) => {
+    if (!userInput?.trim()) return;
+    await refineResult(userInput.trim());
+  }, [refineResult]);
 
   // ── handleFile: user picks image from gallery ──
   const handleFile = useCallback((file) => {
@@ -1092,6 +1142,8 @@ export function AppProvider({ children }) {
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
+    // Recognition refinement
+    refineResult, confirmResult, correctResult,
     // Torch
     torchSupported, torchOn, toggleTorch,
     showFlash, capturedImageRef,
