@@ -103,4 +103,3 @@ export const BackButton = ({ onClick, rtl, label }) => {
     </button>
   );
 };
-

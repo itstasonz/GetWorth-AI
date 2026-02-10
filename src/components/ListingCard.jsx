@@ -1,5 +1,5 @@
 import React from 'react';
-import { Heart, MapPin, Clock, CheckCircle } from 'lucide-react';
+import { Heart, MapPin, Clock, CheckCircle, Camera } from 'lucide-react';
 import { Card, FadeIn } from './ui';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getQualityBadge } from '../lib/utils';
 
@@ -12,6 +12,7 @@ const QUALITY_COLORS = {
 const ListingCard = ({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggleSave, viewItem }) => {
   const quality = item.quality_score != null ? getQualityBadge(item.quality_score, lang) : null;
   const qColor = quality ? QUALITY_COLORS[quality.color] : null;
+  const imageCount = item.images?.length || 0;
 
   return (
     <FadeIn delay={index * 50}>
@@ -33,6 +34,14 @@ const ListingCard = ({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggl
             <div className={`absolute top-3 ${rtl ? 'right-14' : 'left-3'} px-2 py-1 rounded-lg text-[9px] font-bold backdrop-blur-md flex items-center gap-1 ${qColor.bg} ${qColor.text}`}>
               {quality.color === 'green' && <CheckCircle className="w-3 h-3" />}
               {quality.label}
+            </div>
+          )}
+
+          {/* Image count badge */}
+          {imageCount > 1 && (
+            <div className={`absolute bottom-3 ${rtl ? 'left-3' : 'right-3'} px-2 py-1 rounded-lg text-[10px] font-bold backdrop-blur-md bg-black/50 flex items-center gap-1`}>
+              <Camera className="w-3 h-3" />
+              {imageCount}
             </div>
           )}
 
