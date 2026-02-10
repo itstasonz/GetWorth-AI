@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, PAGE_SIZE } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE } from '../lib/utils';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -101,6 +101,7 @@ export function AppProvider({ children }) {
   const [priceRange, setPriceRange] = useState({ min: '', max: '' });
   const [debouncedPriceRange, setDebouncedPriceRange] = useState({ min: '', max: '' });
   const [sort, setSort] = useState('newest');
+  const [filterCondition, setFilterCondition] = useState('all');
   const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState(null);
 
@@ -230,7 +231,7 @@ export function AppProvider({ children }) {
     setListingsPage(0);
     setHasMore(true);
     loadListings(true);
-  }, [category, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
+  }, [category, filterCondition, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
 
   // Load user data when auth changes
   useEffect(() => {
@@ -375,11 +376,12 @@ export function AppProvider({ children }) {
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
     if (category !== 'all') query = query.eq('category', category);
+    if (filterCondition !== 'all') query = query.eq('condition', filterCondition);
     if (debouncedPriceRange.min) query = query.gte('price', parseInt(debouncedPriceRange.min));
     if (debouncedPriceRange.max) query = query.lte('price', parseInt(debouncedPriceRange.max));
     if (debouncedSearch) {
       const safe = sanitizeSearch(debouncedSearch);
-      if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%`);
+      if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%,description.ilike.%${safe}%,category.ilike.%${safe}%`);
     }
     const { data } = await query;
     if (data) {
@@ -401,11 +403,12 @@ export function AppProvider({ children }) {
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
     if (category !== 'all') query = query.eq('category', category);
+    if (filterCondition !== 'all') query = query.eq('condition', filterCondition);
     if (debouncedPriceRange.min) query = query.gte('price', parseInt(debouncedPriceRange.min));
     if (debouncedPriceRange.max) query = query.lte('price', parseInt(debouncedPriceRange.max));
     if (debouncedSearch) {
       const safe = sanitizeSearch(debouncedSearch);
-      if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%`);
+      if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%,description.ilike.%${safe}%,category.ilike.%${safe}%`);
     }
     const { data } = await query;
     if (data) {
@@ -977,11 +980,17 @@ export function AppProvider({ children }) {
         imageUrls = images.length > 0 ? images : [];
         if (imageUrls.length === 0) throw new Error(lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required');
       }
+      const qualityScore = computeQualityScore({
+        title: listingData.title, description: listingData.desc,
+        images: imageUrls, condition, price: listingData.price,
+        category: result?.category,
+      });
       const { error: insertError } = await supabase.from('listings').insert({
         seller_id: user.id, title: listingData.title, title_hebrew: result?.nameHebrew || '',
         description: listingData.desc || '', category: result?.category || 'Other',
         condition, price: listingData.price, images: imageUrls,
-        location: listingData.location, contact_phone: listingData.phone, status: 'active'
+        location: listingData.location, contact_phone: listingData.phone, status: 'active',
+        quality_score: qualityScore
       }).select();
       if (insertError) throw insertError;
       await loadUserData();
@@ -995,6 +1004,24 @@ export function AppProvider({ children }) {
       playSound('error');
     } finally {
       setPublishing(false);
+    }
+  };
+
+  // ─── REPORT LISTING ───
+  const reportListing = async (listingId, reason) => {
+    if (!user) { setSignInAction('contact'); setShowSignInModal(true); return false; }
+    if (!listingId || !reason) return false;
+    try {
+      const { error: rptError } = await supabase.from('reports').insert({
+        listing_id: listingId, reporter_id: user.id, reason,
+      });
+      if (rptError) throw rptError;
+      showToastMsg(lang === 'he' ? 'הדיווח נשלח, תודה!' : 'Report submitted, thank you!');
+      return true;
+    } catch (e) {
+      console.error('Report error:', e);
+      setError(lang === 'he' ? 'שגיאה בדיווח' : 'Failed to submit report');
+      return false;
     }
   };
 
@@ -1055,11 +1082,13 @@ export function AppProvider({ children }) {
     sellerProfile, sellerListings, loadingSeller, viewSellerProfile,
     search, setSearch, category, setCategory,
     priceRange, setPriceRange, sort, setSort,
+    filterCondition, setFilterCondition,
     showFilters, setShowFilters,
     images, setImages, result, setResult,
     listingStep, setListingStep, condition, setCondition,
     answers, setAnswers, listingData, setListingData,
     publishing, publishListing, startListing, selectCondition,
+    reportListing,
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
