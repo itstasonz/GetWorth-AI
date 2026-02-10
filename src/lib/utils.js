@@ -136,5 +136,46 @@ export const getSellerBadgeLabel = (badge, lang) => {
   return labels[badge] || labels.newSeller;
 };
 
+// ─── Listing quality score (0–100) ───
+// Computed at publish time and stored in DB
+export const computeQualityScore = ({ title, description, images, condition, price, category }) => {
+  let score = 0;
+  if (title && title.length > 8) score += 20; else if (title) score += 8;
+  if (description && description.length > 30) score += 20; else if (description && description.length > 0) score += 8;
+  if (images && images.length >= 2) score += 20; else if (images && images.length === 1) score += 10;
+  if (condition) score += 15;
+  if (price && price > 0) score += 15;
+  if (category && category !== 'Other') score += 10; else if (category) score += 5;
+  return Math.min(100, score);
+};
+
+export const getQualityBadge = (score, lang) => {
+  if (score >= 75) return { label: lang === 'he' ? 'איכות גבוהה' : 'High Quality', color: 'green', icon: '✓' };
+  if (score >= 45) return { label: lang === 'he' ? 'סביר' : 'Fair', color: 'yellow', icon: '~' };
+  return { label: lang === 'he' ? 'שפר מודעה' : 'Improve', color: 'red', icon: '!' };
+};
+
+// ─── Seller trust — computed client-side from profile data ───
+export const computeSellerTrust = (seller, listingsCount = 0) => {
+  if (!seller) return { badge: 'newSeller', trustScore: 0 };
+  let score = 0;
+  // Has listings
+  if (listingsCount >= 5) score += 25; else if (listingsCount >= 1) score += 10;
+  // Is verified
+  if (seller.is_verified) score += 25;
+  // Has rating
+  if (seller.rating >= 4.5) score += 25; else if (seller.rating >= 3.5) score += 15;
+  // Has profile info
+  if (seller.full_name && seller.full_name.length > 2) score += 10;
+  if (seller.avatar_url) score += 5;
+  if (seller.bio) score += 10;
+
+  let badge = 'newSeller';
+  if (score >= 70) badge = 'topSeller';
+  else if (score >= 40) badge = 'trustedSeller';
+
+  return { badge, trustScore: Math.min(100, score) };
+};
+
 // Pagination constants
 export const PAGE_SIZE = 20;
