@@ -1,19 +1,46 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="theme-color" content="#0a0f1a" />
-    <meta name="description" content="GetWorth - AI-Powered Item Valuation. Snap a photo and get instant market value." />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#060a14" />
+    <meta name="background-color" content="#060a14" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="GetWorth" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="manifest" href="/manifest.json" />
-    <title>GetWorth - AI Item Valuation</title>
+    <meta name="application-name" content="GetWorth" />
+    <meta name="msapplication-TileColor" content="#060a14" />
+    <meta name="msapplication-tap-highlight" content="no" />
+    <meta name="format-detection" content="telephone=no" />
+    
+    <!-- SEO -->
+    <meta name="description" content="Snap any item, get instant AI valuation, and sell on Israel's smartest marketplace." />
+    <meta name="keywords" content="marketplace, AI, valuation, Israel, buy, sell, second-hand" />
+    
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="GetWorth – AI Marketplace" />
+    <meta property="og:description" content="Snap any item, get instant AI valuation." />
+    <meta property="og:url" content="https://get-worth-ai.vercel.app" />
+    <meta property="og:image" content="https://get-worth-ai.vercel.app/og-image.png" />
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Splash Screens (iOS) -->
+    <link rel="apple-touch-startup-image" href="/splash-1170x2532.png" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3)" />
+    <link rel="apple-touch-startup-image" href="/splash-1284x2778.png" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3)" />
+    <link rel="apple-touch-startup-image" href="/splash-1179x2556.png" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3)" />
+    
+    <title>GetWorth – AI Marketplace</title>
   </head>
-  <body>
+  <body class="bg-[#060a14] text-white antialiased overscroll-none">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
