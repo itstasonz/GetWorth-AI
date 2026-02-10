@@ -59,7 +59,7 @@ export function AppProvider({ children }) {
   const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState(null);
-  const [authLoading, setAuthLoading] = usetState(false);
+  const [authLoading, setAuthLoading] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [signInAction, setSignInAction] = useState(null);
   const [showContact, setShowContact] = useState(false);
