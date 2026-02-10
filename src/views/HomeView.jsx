@@ -57,7 +57,7 @@ function useAutoScroll(speed = 0.5, direction = 'left') {
 }
 
 export default function HomeView() {
-const { t, lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
+  const { t, lang, rtl, listings, goTab, startCamera, fileRef, viewItem } = useApp();
 
   const baseItems1 = [...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)];
   const baseItems2 = [...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)];
@@ -69,7 +69,7 @@ const { t, lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewIte
 
   return (
     <div className="space-y-6">
-<input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files[0]) handleFile(e.target.files[0]); e.target.value = ''; }} />
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { /* handled by parent */ }} />
 
       {/* Hero */}
       <FadeIn className="text-center space-y-4 pt-2">

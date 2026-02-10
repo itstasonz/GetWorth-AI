@@ -1,14 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, Loader2, DollarSign, X, Send, Tag } from 'lucide-react';
+import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, Loader2, Flag } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp } from '../components/ui';
 import ListingCard from '../components/ListingCard';
-import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, STAT_COLORS } from '../lib/utils';
+import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, getQualityBadge, computeSellerTrust, STAT_COLORS } from '../lib/utils';
 
 export function BrowseView() {
   const {
     t, lang, rtl, listings, search, setSearch, category, setCategory,
     priceRange, setPriceRange, sort, setSort, showFilters, setShowFilters,
+    filterCondition, setFilterCondition,
     savedIds, heartAnim, toggleSave, viewItem, loadListings,
     hasMore, loadingMore, loadMoreListings,
   } = useApp();
@@ -22,6 +23,14 @@ export function BrowseView() {
     { id: 'Sports', label: t.sports, icon: Dumbbell }
   ];
 
+  const conditions = [
+    { id: 'all', label: lang === 'he' ? 'הכל' : 'All' },
+    { id: 'newSealed', label: lang === 'he' ? 'חדש' : 'New' },
+    { id: 'likeNew', label: lang === 'he' ? 'כמו חדש' : 'Like New' },
+    { id: 'used', label: lang === 'he' ? 'משומש' : 'Used' },
+    { id: 'poor', label: lang === 'he' ? 'סביר' : 'Fair' },
+  ];
+
   const sortedListings = useMemo(() => {
     let arr = [...listings];
     if (sort === 'lowHigh') arr.sort((a, b) => a.price - b.price);
@@ -29,16 +38,27 @@ export function BrowseView() {
     return arr;
   }, [listings, sort]);
 
+  const activeFilterCount = [
+    category !== 'all',
+    filterCondition !== 'all',
+    priceRange.min,
+    priceRange.max,
+    sort !== 'newest',
+  ].filter(Boolean).length;
+
   return (
     <div className="space-y-5">
       <FadeIn>
         <div className="relative">
           <Search className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />
-          <input type="text" placeholder="Search..." value={search} onChange={(e) => setSearch(e.target.value)}
+          <input type="text" placeholder={lang === 'he' ? 'חיפוש לפי שם, תיאור, קטגוריה...' : 'Search name, description, category...'} value={search} onChange={(e) => setSearch(e.target.value)}
             className={`w-full py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 focus:border-blue-500/50 focus:bg-white/10 transition-all`} />
           <button onClick={() => setShowFilters(!showFilters)}
-            className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-3' : 'right-3'} p-2 rounded-xl transition-all ${showFilters ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/10 hover:bg-white/20'}`}>
+            className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-3' : 'right-3'} p-2 rounded-xl transition-all relative ${showFilters ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/10 hover:bg-white/20'}`}>
             <SlidersHorizontal className="w-5 h-5" />
+            {activeFilterCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-[9px] font-bold flex items-center justify-center">{activeFilterCount}</span>
+            )}
           </button>
         </div>
       </FadeIn>
@@ -56,26 +76,41 @@ export function BrowseView() {
 
       {showFilters && (
         <FadeIn>
-          <Card className="p-4 space-y-4">
+          <Card className="p-5 space-y-4">
+            <div className="flex justify-between items-center">
+              <span className="font-semibold">{t.filters}</span>
+              <button onClick={() => { setPriceRange({ min: '', max: '' }); setSort('newest'); setFilterCondition('all'); }} className="text-xs text-blue-400 hover:text-blue-300">{t.clear}</button>
+            </div>
+
+            {/* Price range */}
             <div>
-              <label className="text-xs text-slate-500 font-medium mb-2 block">{lang === 'he' ? 'טווח מחיר' : 'Price Range'}</label>
+              <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'טווח מחיר' : 'Price Range'}</p>
               <div className="flex gap-3">
-                <input type="number" placeholder={lang === 'he' ? 'מינימום' : 'Min'} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })}
-                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm" />
-                <input type="number" placeholder={lang === 'he' ? 'מקסימום' : 'Max'} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })}
-                  className="flex-1 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm" />
+                <input type="number" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm" />
+                <span className="self-center text-slate-500">—</span>
+                <input type="number" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm" />
               </div>
             </div>
+
+            {/* Condition filter */}
             <div>
-              <label className="text-xs text-slate-500 font-medium mb-2 block">{lang === 'he' ? 'מיון' : 'Sort'}</label>
-              <div className="flex gap-2">
-                {[
-                  { id: 'newest', label: lang === 'he' ? 'חדש' : 'Newest' },
-                  { id: 'lowHigh', label: lang === 'he' ? 'מחיר ↑' : 'Price ↑' },
-                  { id: 'highLow', label: lang === 'he' ? 'מחיר ↓' : 'Price ↓' }
-                ].map((s) => (
-                  <button key={s.id} onClick={() => setSort(s.id)}
-                    className={`px-4 py-2 rounded-xl text-xs font-semibold ${sort === s.id ? 'bg-blue-600' : 'bg-white/5'}`}>{s.label}</button>
+              <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'מצב' : 'Condition'}</p>
+              <div className="flex gap-2 flex-wrap">
+                {conditions.map((c) => (
+                  <button key={c.id} onClick={() => setFilterCondition(c.id)}
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${filterCondition === c.id ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Sort */}
+            <div>
+              <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'מיון' : 'Sort'}</p>
+              <div className="grid grid-cols-3 gap-2">
+                {['newest', 'lowHigh', 'highLow'].map((s) => (
+                  <button key={s} onClick={() => setSort(s)} className={`py-3 rounded-xl text-xs font-semibold transition-all ${sort === s ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>{t[s]}</button>
                 ))}
               </div>
             </div>
@@ -84,91 +119,71 @@ export function BrowseView() {
       )}
 
       <div className="flex items-center justify-between">
-        <p className="text-sm text-slate-400">{sortedListings.length} {lang === 'he' ? 'פריטים' : 'items'}</p>
-        <button onClick={() => loadListings(true)} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 transition-all">
-          <RefreshCw className="w-4 h-4 text-slate-500" />
+        <p className="text-sm text-slate-400">{sortedListings.length} {t.results}</p>
+        <button onClick={() => loadListings(true)} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+          <RefreshCw className="w-3 h-3" /> Refresh
         </button>
       </div>
 
       {sortedListings.length === 0 ? (
-        <FadeIn className="text-center py-10">
-          <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center mx-auto mb-3">
-            <Search className="w-8 h-8 text-slate-600" />
+        <FadeIn className="text-center py-16">
+          <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+            <Search className="w-10 h-10 text-slate-600" />
           </div>
-          <p className="text-slate-500">{t.noResults}</p>
+          <p className="text-slate-400 font-medium">{t.noResults}</p>
         </FadeIn>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
-          {sortedListings.map((item, i) => (
-            <ListingCard key={item.id} item={item} index={i} lang={lang} t={t} rtl={rtl} savedIds={savedIds} heartAnim={heartAnim} toggleSave={toggleSave} viewItem={viewItem} />
-          ))}
-        </div>
-      )}
+        <>
+          <div className="grid grid-cols-2 gap-4">
+            {sortedListings.map((item, i) => (
+              <ListingCard key={item.id} item={item} index={i} lang={lang} t={t} rtl={rtl} savedIds={savedIds} heartAnim={heartAnim} toggleSave={toggleSave} viewItem={viewItem} />
+            ))}
+          </div>
 
-      {hasMore && sortedListings.length > 0 && (
-        <FadeIn>
-          <button onClick={loadMoreListings} disabled={loadingMore} className="w-full py-4 rounded-2xl bg-white/5 hover:bg-white/10 text-sm text-slate-400 font-medium transition-all flex items-center justify-center gap-2">
-            {loadingMore ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'טוען...' : 'Loading...'}</> : (lang === 'he' ? 'טען עוד' : 'Load More')}
-          </button>
-        </FadeIn>
+          {hasMore && (
+            <FadeIn className="text-center pt-4">
+              <Btn onClick={loadMoreListings} disabled={loadingMore} className="mx-auto">
+                {loadingMore ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                {loadingMore ? (lang === 'he' ? 'טוען...' : 'Loading...') : (lang === 'he' ? 'טען עוד' : 'Load More')}
+              </Btn>
+            </FadeIn>
+          )}
+        </>
       )}
     </div>
   );
 }
 
-// ─── Detail View with Make Offer ───
+// ═══════════════════════════════════════════════════════
+// DETAIL VIEW — with report + quality badge + seller trust
+// ═══════════════════════════════════════════════════════
 export function DetailView() {
-  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, startConversation, setShowSignInModal, setSignInAction } = useApp();
-  const [showOffer, setShowOffer] = useState(false);
-  const [offerPrice, setOfferPrice] = useState('');
-  const [offerMessage, setOfferMessage] = useState('');
-  const [offerSent, setOfferSent] = useState(false);
-  const [sendingOffer, setSendingOffer] = useState(false);
+  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing } = useApp();
+  const [showReport, setShowReport] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [reporting, setReporting] = useState(false);
 
   if (!selected) return null;
 
-  const suggestedOffers = selected.price ? [
-    { pct: 80, label: '80%', amount: Math.round(selected.price * 0.8) },
-    { pct: 85, label: '85%', amount: Math.round(selected.price * 0.85) },
-    { pct: 90, label: '90%', amount: Math.round(selected.price * 0.9) },
-  ] : [];
+  const quality = selected.quality_score != null ? getQualityBadge(selected.quality_score, lang) : null;
+  const sellerTrust = selected.seller ? computeSellerTrust(selected.seller) : null;
 
-  const handleMakeOffer = () => {
-    if (!user) {
-      setSignInAction('contact');
-      setShowSignInModal(true);
-      return;
-    }
-    setOfferPrice(suggestedOffers[1]?.amount?.toString() || '');
-    setOfferMessage(lang === 'he' ? `היי, אשמח לרכוש את ${selected.title_hebrew || selected.title}` : `Hi, I'm interested in ${selected.title}`);
-    setShowOffer(true);
+  const handleReport = async () => {
+    if (!reportReason.trim()) return;
+    setReporting(true);
+    const ok = await reportListing(selected.id, reportReason.trim());
+    setReporting(false);
+    if (ok) { setShowReport(false); setReportReason(''); }
   };
 
-  const sendOffer = async () => {
-    if (!offerPrice || !user) return;
-    setSendingOffer(true);
-
-    // Start conversation with the offer as first message
-    const offerText = lang === 'he'
-      ? `💰 הצעת מחיר: ₪${parseInt(offerPrice).toLocaleString()}\n\n${offerMessage}`
-      : `💰 Offer: ₪${parseInt(offerPrice).toLocaleString()}\n\n${offerMessage}`;
-
-    try {
-      // Use startConversation to open chat, then we'll send the offer message
-      await startConversation(selected);
-
-      // Small delay to let the conversation open
-      setTimeout(() => {
-        setSendingOffer(false);
-        setShowOffer(false);
-        setOfferSent(true);
-        setTimeout(() => setOfferSent(false), 3000);
-      }, 500);
-    } catch (e) {
-      console.error('Offer error:', e);
-      setSendingOffer(false);
-    }
-  };
+  const REPORT_REASONS = [
+    { id: 'fake', label: lang === 'he' ? 'מודעה מזויפת' : 'Fake listing' },
+    { id: 'scam', label: lang === 'he' ? 'הונאה' : 'Scam / fraud' },
+    { id: 'wrong_price', label: lang === 'he' ? 'מחיר שגוי' : 'Wrong price' },
+    { id: 'inappropriate', label: lang === 'he' ? 'תוכן לא הולם' : 'Inappropriate content' },
+    { id: 'duplicate', label: lang === 'he' ? 'כפול' : 'Duplicate listing' },
+    { id: 'other', label: lang === 'he' ? 'אחר' : 'Other' },
+  ];
 
   return (
     <div className="space-y-5 -mx-5 -mt-4">
@@ -205,31 +220,26 @@ export function DetailView() {
               gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.05))"
               onClick={() => {
                 const sellerId = selected.seller_id || selected.seller?.id;
-                if (sellerId && !selected.id?.toString().startsWith('s')) {
-                  viewSellerProfile(sellerId);
-                }
+                if (sellerId) viewSellerProfile(sellerId);
               }}
             >
               <div className="flex items-center gap-4">
-                <div className="relative">
-                  <div className={`w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(selected.seller.badge).gradient} ${getSellerBadgeStyle(selected.seller.badge).shadow}`}>
-                    {selected.seller.full_name?.charAt(0) || 'S'}
-                  </div>
+                <div className={`relative w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).gradient} ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).shadow}`}>
+                  {selected.seller.full_name?.charAt(0) || 'S'}
                   {selected.seller.is_verified && (
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center border-2 border-[#060a14]">
-                      <Check className="w-3.5 h-3.5 text-white" />
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center border-2 border-[#0a1020]">
+                      <Shield className="w-3 h-3 text-white" />
                     </div>
                   )}
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-lg">{selected.seller.full_name || 'Seller'}</span>
-                    {selected.seller.is_verified && <Shield className="w-4 h-4 text-blue-400" />}
+                    <span className="font-bold">{selected.seller.full_name || 'Seller'}</span>
                   </div>
-                  {selected.seller.badge && (
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold uppercase ${getSellerBadgeStyle(selected.seller.badge).bg} ${getSellerBadgeStyle(selected.seller.badge).text}`}>
-                        {getSellerBadgeLabel(selected.seller.badge, lang)}
+                  {(sellerTrust?.badge || selected.seller.badge) && (
+                    <div className="mt-1">
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).bg} ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).text}`}>
+                        {getSellerBadgeLabel(sellerTrust?.badge || selected.seller.badge, lang)}
                       </span>
                     </div>
                   )}
@@ -255,11 +265,14 @@ export function DetailView() {
           </FadeIn>
         )}
 
-        {/* Title & Price */}
+        {/* Title & Price + Quality badge */}
         <FadeIn delay={50}>
           <div>
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               {selected.category && <Badge>{selected.category}</Badge>}
+              {quality && (
+                <Badge color={quality.color}>{quality.icon} {quality.label}</Badge>
+              )}
               <span className="text-xs text-slate-500 flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{selected.views || 0} {lang === 'he' ? 'צפיות' : 'views'}</span>
               <span className="text-xs text-slate-500 flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{timeAgo(selected.created_at, t)}</span>
             </div>
@@ -279,130 +292,81 @@ export function DetailView() {
           </FadeIn>
         )}
 
-        {/* Action Buttons: Contact + Make Offer + Save */}
-        <FadeIn delay={150} className="space-y-3 pb-6">
-          {/* Offer Sent Success */}
-          {offerSent && (
-            <div className="p-3 rounded-2xl bg-green-500/20 border border-green-500/30 text-center">
-              <p className="text-sm font-semibold text-green-400 flex items-center justify-center gap-2">
-                <Check className="w-4 h-4" />
-                {lang === 'he' ? 'ההצעה נשלחה! בדוק בהודעות' : 'Offer sent! Check your messages'}
-              </p>
-            </div>
-          )}
-
-          <div className="flex gap-3">
-            {/* Make Offer Button */}
-            <Btn className="flex-1 py-4" onClick={handleMakeOffer}
-              style={{
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-                boxShadow: '0 8px 24px rgba(16,185,129,0.4), inset 0 1px 0 rgba(255,255,255,0.2)',
-              }}>
-              <Tag className="w-5 h-5" />
-              {lang === 'he' ? 'הצע מחיר' : 'Make Offer'}
-            </Btn>
-
-            {/* Contact Button */}
-            <Btn primary className="flex-1 py-4" onClick={contactSeller}>
-              <MessageCircle className="w-5 h-5" />
-              {lang === 'he' ? 'צור קשר' : 'Contact'}
-            </Btn>
-          </div>
-
-          {/* Save Button */}
-          <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="w-full py-3">
+        {/* Contact + Save */}
+        <FadeIn delay={150} className="flex gap-3">
+          <Btn primary className="flex-1 py-4" onClick={contactSeller}>
+            <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
+          </Btn>
+          <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="px-5">
             <Heart className={`w-5 h-5 ${savedIds.has(selected.id) ? 'fill-current text-red-400' : ''}`} />
-            {savedIds.has(selected.id) ? (lang === 'he' ? 'שמור ♥' : 'Saved ♥') : (lang === 'he' ? 'שמור למועדפים' : 'Save to Favorites')}
           </Btn>
         </FadeIn>
+
+        {/* Report button */}
+        {user && selected.seller_id !== user?.id && !selected.id?.toString().startsWith('s') && (
+          <FadeIn delay={200}>
+            <button
+              onClick={() => setShowReport(true)}
+              className="w-full py-3 text-slate-500 text-xs flex items-center justify-center gap-2 hover:text-red-400 transition-colors"
+            >
+              <Flag className="w-3.5 h-3.5" />
+              {lang === 'he' ? 'דווח על מודעה' : 'Report listing'}
+            </button>
+          </FadeIn>
+        )}
       </div>
 
-      {/* ─── Make Offer Modal ─── */}
-      {showOffer && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn" onClick={() => setShowOffer(false)}>
-          <div className="w-full max-w-md animate-slideUp" onClick={(e) => e.stopPropagation()}>
-            <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-5">
-              {/* Handle */}
+      {/* Report Modal */}
+      {showReport && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <SlideUp className="w-full max-w-md">
+            <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-4">
               <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+              <h3 className="text-lg font-bold text-center flex items-center justify-center gap-2">
+                <Flag className="w-5 h-5 text-red-400" />
+                {lang === 'he' ? 'דווח על מודעה' : 'Report Listing'}
+              </h3>
+              <p className="text-sm text-slate-400 text-center">
+                {lang === 'he' ? 'בחר סיבה לדיווח:' : 'Select a reason:'}
+              </p>
 
-              {/* Header */}
-              <div className="text-center">
-                <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-green-500/30 to-emerald-500/30 border border-green-500/30 flex items-center justify-center mx-auto mb-3">
-                  <Tag className="w-7 h-7 text-green-400" />
-                </div>
-                <h3 className="text-xl font-bold">{lang === 'he' ? 'הצע מחיר' : 'Make an Offer'}</h3>
-                <p className="text-sm text-slate-400 mt-1">
-                  {lang === 'he' ? `מחיר מבוקש: ${formatPrice(selected.price)}` : `Asking price: ${formatPrice(selected.price)}`}
-                </p>
+              <div className="space-y-2">
+                {REPORT_REASONS.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setReportReason(r.label)}
+                    className={`w-full py-3 px-4 rounded-xl text-sm text-left transition-all ${
+                      reportReason === r.label
+                        ? 'bg-red-500/20 border border-red-500/40 text-red-300'
+                        : 'bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10'
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
               </div>
 
-              {/* Quick Offer Buttons */}
-              <div>
-                <p className="text-xs text-slate-500 mb-2">{lang === 'he' ? 'הצעות מהירות' : 'Quick offers'}</p>
-                <div className="flex gap-2">
-                  {suggestedOffers.map((s) => (
-                    <button key={s.pct} onClick={() => setOfferPrice(s.amount.toString())}
-                      className={`flex-1 py-3 rounded-xl text-center transition-all ${offerPrice === s.amount.toString() ? 'bg-green-500/30 border border-green-500/50 text-green-400' : 'bg-white/5 border border-white/10 text-slate-300 hover:bg-white/10'}`}>
-                      <p className="text-sm font-bold">₪{s.amount.toLocaleString()}</p>
-                      <p className="text-[10px] text-slate-500">{s.label}</p>
-                    </button>
-                  ))}
-                </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => { setShowReport(false); setReportReason(''); }}
+                  className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-all"
+                >
+                  {lang === 'he' ? 'ביטול' : 'Cancel'}
+                </button>
+                <button
+                  onClick={handleReport}
+                  disabled={!reportReason.trim() || reporting}
+                  className="flex-1 py-3 rounded-xl bg-red-600 text-sm font-semibold text-white shadow-lg shadow-red-500/30 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-500 transition-all flex items-center justify-center gap-2"
+                >
+                  {reporting
+                    ? <Loader2 className="w-4 h-4 animate-spin" />
+                    : <Flag className="w-4 h-4" />
+                  }
+                  {lang === 'he' ? 'שלח דיווח' : 'Submit'}
+                </button>
               </div>
-
-              {/* Custom Price Input */}
-              <div>
-                <p className="text-xs text-slate-500 mb-2">{lang === 'he' ? 'או הזן סכום' : 'Or enter amount'}</p>
-                <div className="relative">
-                  <span className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} text-lg font-bold text-green-400`}>₪</span>
-                  <input
-                    type="number"
-                    value={offerPrice}
-                    onChange={(e) => setOfferPrice(e.target.value)}
-                    placeholder="0"
-                    className={`w-full py-4 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 text-2xl font-bold text-white text-center focus:outline-none focus:border-green-500/50 focus:bg-white/10 transition-all`}
-                  />
-                </div>
-                {offerPrice && selected.price && (
-                  <p className="text-xs text-slate-500 text-center mt-2">
-                    {Math.round((parseInt(offerPrice) / selected.price) * 100)}% {lang === 'he' ? 'מהמחיר המבוקש' : 'of asking price'}
-                  </p>
-                )}
-              </div>
-
-              {/* Message */}
-              <div>
-                <p className="text-xs text-slate-500 mb-2">{lang === 'he' ? 'הודעה למוכר (אופציונלי)' : 'Message to seller (optional)'}</p>
-                <textarea
-                  value={offerMessage}
-                  onChange={(e) => setOfferMessage(e.target.value)}
-                  rows={2}
-                  className="w-full px-4 py-3 rounded-2xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-green-500/50 resize-none"
-                  placeholder={lang === 'he' ? 'הוסף הודעה...' : 'Add a message...'}
-                  dir={rtl ? 'rtl' : 'ltr'}
-                />
-              </div>
-
-              {/* Send Button */}
-              <button
-                onClick={sendOffer}
-                disabled={!offerPrice || sendingOffer}
-                className="w-full py-4 rounded-2xl font-bold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
-                style={{ background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', boxShadow: '0 8px 24px rgba(16,185,129,0.4)' }}
-              >
-                {sendingOffer ? (
-                  <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</>
-                ) : (
-                  <><Send className="w-5 h-5" />{lang === 'he' ? `שלח הצעה של ₪${parseInt(offerPrice || 0).toLocaleString()}` : `Send ₪${parseInt(offerPrice || 0).toLocaleString()} Offer`}</>
-                )}
-              </button>
-
-              {/* Cancel */}
-              <button onClick={() => setShowOffer(false)} className="w-full py-3 text-slate-400 text-sm">
-                {lang === 'he' ? 'ביטול' : 'Cancel'}
-              </button>
             </div>
-          </div>
+          </SlideUp>
         </div>
       )}
     </div>
@@ -423,9 +387,10 @@ export function SellerProfileView() {
 
   if (!sellerProfile) return null;
 
+  const trust = computeSellerTrust(sellerProfile, sellerListings.length);
+
   return (
     <div className="space-y-5">
-      {/* Back */}
       <FadeIn>
         <button onClick={() => setView('detail')} className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
           {rtl ? <ChevronRight className="w-4 h-4" /> : <ChevronLeft className="w-4 h-4" />}
@@ -433,11 +398,10 @@ export function SellerProfileView() {
         </button>
       </FadeIn>
 
-      {/* Seller Card */}
       <FadeIn delay={50}>
         <Card className="p-6 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.05))">
           <div className="relative inline-block">
-            <div className={`w-24 h-24 rounded-3xl flex items-center justify-center text-4xl font-bold shadow-xl mx-auto bg-gradient-to-br ${getSellerBadgeStyle(sellerProfile.badge).gradient} ${getSellerBadgeStyle(sellerProfile.badge).shadow}`}>
+            <div className={`w-24 h-24 rounded-3xl flex items-center justify-center text-4xl font-bold shadow-xl mx-auto bg-gradient-to-br ${getSellerBadgeStyle(trust.badge).gradient} ${getSellerBadgeStyle(trust.badge).shadow}`}>
               {sellerProfile.full_name?.charAt(0) || 'S'}
             </div>
             {sellerProfile.is_verified && (
@@ -447,11 +411,24 @@ export function SellerProfileView() {
             )}
           </div>
           <h2 className="text-2xl font-bold mt-4">{sellerProfile.full_name || 'Seller'}</h2>
-          {sellerProfile.badge && (
-            <span className={`inline-block mt-2 px-3 py-1 rounded-lg text-xs font-bold uppercase ${getSellerBadgeStyle(sellerProfile.badge).bg} ${getSellerBadgeStyle(sellerProfile.badge).text}`}>
-              {getSellerBadgeLabel(sellerProfile.badge, lang)}
-            </span>
-          )}
+          <span className={`inline-block mt-2 px-3 py-1 rounded-lg text-xs font-bold uppercase ${getSellerBadgeStyle(trust.badge).bg} ${getSellerBadgeStyle(trust.badge).text}`}>
+            {getSellerBadgeLabel(trust.badge, lang)}
+          </span>
+
+          {/* Trust score bar */}
+          <div className="mt-3 max-w-[200px] mx-auto">
+            <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+              <span>{lang === 'he' ? 'ציון אמון' : 'Trust Score'}</span>
+              <span>{trust.trustScore}/100</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-white/10">
+              <div
+                className={`h-full rounded-full transition-all ${trust.trustScore >= 70 ? 'bg-green-500' : trust.trustScore >= 40 ? 'bg-blue-500' : 'bg-slate-500'}`}
+                style={{ width: `${trust.trustScore}%` }}
+              />
+            </div>
+          </div>
+
           <div className="flex items-center justify-center gap-4 mt-3">
             {sellerProfile.rating && (
               <div className="flex items-center gap-1">
@@ -465,6 +442,10 @@ export function SellerProfileView() {
                 <span className="text-xs font-medium">{lang === 'he' ? 'מאומת' : 'Verified'}</span>
               </div>
             )}
+            <div className="flex items-center gap-1 text-slate-400">
+              <ShoppingBag className="w-4 h-4" />
+              <span className="text-xs">{sellerListings.length} {lang === 'he' ? 'פריטים' : 'items'}</span>
+            </div>
           </div>
           {sellerProfile.bio && (
             <p className="text-sm text-slate-400 mt-3 max-w-xs mx-auto">{sellerProfile.bio}</p>
@@ -472,7 +453,6 @@ export function SellerProfileView() {
         </Card>
       </FadeIn>
 
-      {/* Seller's Listings */}
       <FadeIn delay={100}>
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-lg">{lang === 'he' ? 'הפריטים של' : 'Listings by'} {sellerProfile.full_name?.split(' ')[0] || 'Seller'}</h3>
