@@ -12,6 +12,7 @@ import { BrowseView, DetailView, SellerProfileView } from './views/BrowseDetailV
 import { InboxView, ChatView } from './views/ChatViews';
 import { AuthView, ProfileView } from './views/AuthProfileView';
 import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
+import AnalyticsView from './views/AnalyticsView';
 
 // ─── In-App Message Notification Banner ───
 // Slides down from top when a message arrives and user is NOT in that chat
@@ -260,6 +261,7 @@ function AppShell() {
           {view === 'profile' && user && <ProfileView />}
           {view === 'myListings' && <MyListingsView />}
           {view === 'listing' && <ListingFlowView />}
+          {view === 'analytics' && <AnalyticsView />}
         </main>
 
         {/* Bottom Nav */}
