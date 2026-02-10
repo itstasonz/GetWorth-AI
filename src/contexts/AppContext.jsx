@@ -59,6 +59,7 @@ export function AppProvider({ children }) {
   const [authMode, setAuthMode] = useState('login');
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState(null);
+  const [authLoading, setAuthLoading] = usetState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [signInAction, setSignInAction] = useState(null);
   const [showContact, setShowContact] = useState(false);
@@ -471,16 +472,51 @@ export function AppProvider({ children }) {
     await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
   };
 
-  const signInEmail = async (e) => {
+const signInEmail = async (e) => {
     e.preventDefault();
     setAuthError(null);
-    const { error: err } = authMode === 'login'
-      ? await supabase.auth.signInWithPassword({ email: authForm.email, password: authForm.password })
-      : await supabase.auth.signUp({ email: authForm.email, password: authForm.password, options: { data: { full_name: authForm.name } } });
-    if (err) setAuthError(err.message);
-    else if (authMode === 'signup') setAuthError('Check your email!');
+    setAuthLoading(true);
+    try {
+      if (authMode === 'login') {
+        const { data, error: err } = await supabase.auth.signInWithPassword({
+          email: authForm.email.trim(),
+          password: authForm.password,
+        });
+        if (err) {
+          if (err.message === 'Invalid login credentials') {
+            setAuthError(lang === 'he' ? 'אימייל או סיסמה שגויים' : 'Invalid email or password');
+          } else if (err.message.includes('Email not confirmed')) {
+            setAuthError(lang === 'he' ? 'יש לאשר את האימייל קודם' : 'Please confirm your email first');
+          } else {
+            setAuthError(err.message);
+          }
+        } else if (data?.user) {
+          setView('profile');
+          setTab('profile');
+          setAuthForm({ name: '', email: '', password: '' });
+          showToastMsg(lang === 'he' ? 'התחברת בהצלחה!' : 'Signed in!');
+        }
+      } else {
+        const { data, error: err } = await supabase.auth.signUp({
+          email: authForm.email.trim(),
+          password: authForm.password,
+          options: { data: { full_name: authForm.name } },
+        });
+        if (err) {
+          setAuthError(err.message);
+        } else if (data?.user?.identities?.length === 0) {
+          setAuthError(lang === 'he' ? 'חשבון כבר קיים עם אימייל זה' : 'An account already exists with this email');
+        } else {
+          setAuthError(null);
+          showToastMsg(lang === 'he' ? 'נרשמת! בדוק את האימייל שלך' : 'Signed up! Check your email');
+        }
+      }
+    } catch (err) {
+      console.error('Auth error:', err);
+      setAuthError(lang === 'he' ? 'שגיאת חיבור' : 'Connection error');
+    }
+    setAuthLoading(false);
   };
-
   const signOut = async () => {
     await supabase.auth.signOut();
     setTab('home');
