@@ -12,7 +12,72 @@ import { BrowseView, DetailView, SellerProfileView } from './views/BrowseDetailV
 import { InboxView, ChatView } from './views/ChatViews';
 import { AuthView, ProfileView } from './views/AuthProfileView';
 import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
-import AnalyticsView from './views/AnalyticsView';
+
+// ─── In-App Message Notification Banner ───
+// Slides down from top when a message arrives and user is NOT in that chat
+function MessageNotificationBanner() {
+  const { msgNotification, openNotification, dismissNotification, lang } = useApp();
+  if (!msgNotification) return null;
+
+  const n = msgNotification;
+  return (
+    <div className="fixed top-4 left-3 right-3 z-[60] animate-slideDown" style={{ pointerEvents: 'auto' }}>
+      <div
+        onClick={() => openNotification(n)}
+        className="relative overflow-hidden rounded-2xl p-3.5 flex items-center gap-3 cursor-pointer active:scale-[0.98] transition-transform shadow-2xl"
+        style={{
+          background: 'linear-gradient(135deg, rgba(59,130,246,0.25) 0%, rgba(30,64,175,0.35) 100%)',
+          border: '1px solid rgba(59,130,246,0.3)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
+        {/* Listing thumbnail or avatar */}
+        <div className="w-12 h-12 rounded-xl overflow-hidden flex-shrink-0 bg-white/10">
+          {n.listingImage ? (
+            <img src={n.listingImage} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center">
+              <MessageCircle className="w-6 h-6 text-blue-300" />
+            </div>
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-sm text-white truncate">{n.senderName}</span>
+            {n.listingTitle && (
+              <span className="text-[10px] text-blue-200 truncate max-w-[120px]">• {n.listingTitle}</span>
+            )}
+          </div>
+          <p className="text-xs text-slate-200 truncate mt-0.5">
+            {n.isOffer
+              ? `💰 ${lang === 'he' ? 'הצעת מחיר' : 'Price offer'}: ₪${n.offerAmount?.toLocaleString() || ''}`
+              : n.content
+            }
+          </p>
+          <p className="text-[10px] text-blue-300 mt-1">
+            {lang === 'he' ? 'לחץ לפתוח שיחה' : 'Tap to open chat'} →
+          </p>
+        </div>
+
+        {/* Dismiss X */}
+        <button
+          onClick={(e) => { e.stopPropagation(); dismissNotification(); }}
+          className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0 hover:bg-white/20 transition-colors"
+        >
+          <X className="w-3.5 h-3.5 text-white/70" />
+        </button>
+
+        {/* Animated progress bar at bottom (auto-dismiss indicator) */}
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-400/20">
+          <div className="h-full bg-blue-400/60 animate-notifProgress" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function AppShell() {
   const {
@@ -58,6 +123,9 @@ function AppShell() {
         <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[100px]" />
         <div className="absolute top-1/2 right-0 w-[300px] h-[300px] bg-cyan-500/10 rounded-full blur-[80px]" />
       </div>
+
+      {/* ── Message Notification Banner (renders above everything) ── */}
+      <MessageNotificationBanner />
 
       {toast && <Toast message={toast} onClose={() => setToast(null)} />}
 
@@ -192,7 +260,6 @@ function AppShell() {
           {view === 'profile' && user && <ProfileView />}
           {view === 'myListings' && <MyListingsView />}
           {view === 'listing' && <ListingFlowView />}
-          {view === 'analytics' && <AnalyticsView />}
         </main>
 
         {/* Bottom Nav */}
@@ -215,7 +282,7 @@ function AppShell() {
                     <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-blue-400 text-[9px] flex items-center justify-center font-bold">{myListings.length}</span>
                   )}
                   {n.id === 'messages' && unreadCount > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold">{unreadCount}</span>
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
                   )}
                 </div>
                 <span className="text-[10px] font-medium">{n.id === 'messages' ? (lang === 'he' ? 'הודעות' : 'Chat') : t[n.id]}</span>
@@ -240,6 +307,7 @@ function AppShell() {
         @keyframes progress { 0% { width: 0%; } 50% { width: 70%; } 100% { width: 100%; } }
         @keyframes float { 0%, 100% { transform: translateY(0) scale(1); opacity: 0.6; } 50% { transform: translateY(-15px) scale(1.2); opacity: 1; } }
         @keyframes flash { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+        @keyframes notifProgress { from { width: 100%; } to { width: 0%; } }
         .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; opacity: 0; }
         .animate-slideUp { animation: slideUp 0.4s ease-out forwards; }
         .animate-slideDown { animation: slideDown 0.3s ease-out forwards; }
@@ -253,6 +321,7 @@ function AppShell() {
         .animate-progress { animation: progress 3s ease-in-out infinite; }
         .animate-float { animation: float 2s ease-in-out infinite; }
         .animate-flash { animation: flash 0.15s ease-out forwards; }
+        .animate-notifProgress { animation: notifProgress 6s linear forwards; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
       `}</style>
