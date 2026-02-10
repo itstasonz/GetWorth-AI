@@ -49,13 +49,16 @@ export function BrowseView() {
 
   return (
     <div className="space-y-5">
+      {/* Search + Filter — flex row, no absolute positioning */}
       <FadeIn>
-        <div className="relative">
-          <Search className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />
-          <input type="text" placeholder={lang === 'he' ? 'חיפוש לפי שם, תיאור, קטגוריה...' : 'Search name, description, category...'} value={search} onChange={(e) => setSearch(e.target.value)}
-            className={`w-full py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 focus:border-blue-500/50 focus:bg-white/10 transition-all`} />
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1 min-w-0">
+            <Search className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500 pointer-events-none`} />
+            <input type="text" placeholder={lang === 'he' ? 'חיפוש לפי שם, תיאור, קטגוריה...' : 'Search name, description, category...'} value={search} onChange={(e) => setSearch(e.target.value)}
+              className={`w-full h-12 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 focus:border-blue-500/50 focus:bg-white/10 transition-all text-sm`} />
+          </div>
           <button onClick={() => setShowFilters(!showFilters)}
-            className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-2' : 'right-2'} p-2.5 rounded-xl transition-all relative ${showFilters ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/10 hover:bg-white/20'}`}>
+            className={`relative flex-shrink-0 h-12 w-12 rounded-2xl flex items-center justify-center transition-all ${showFilters ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/5 border border-white/10 hover:bg-white/10'}`}>
             <SlidersHorizontal className="w-5 h-5" />
             {activeFilterCount > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-[9px] font-bold flex items-center justify-center">{activeFilterCount}</span>
@@ -64,6 +67,7 @@ export function BrowseView() {
         </div>
       </FadeIn>
 
+      {/* Categories — horizontal scroll */}
       <FadeIn delay={50}>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5 scrollbar-hide">
           {categories.map((c) => (
@@ -75,21 +79,22 @@ export function BrowseView() {
         </div>
       </FadeIn>
 
+      {/* Filters panel */}
       {showFilters && (
         <FadeIn>
-          <Card className="p-5 space-y-4">
+          <Card className="p-4 sm:p-5 space-y-4 overflow-hidden">
             <div className="flex justify-between items-center">
-              <span className="font-semibold">{t.filters}</span>
+              <span className="font-semibold text-sm">{t.filters}</span>
               <button onClick={() => { setPriceRange({ min: '', max: '' }); setSort('newest'); setFilterCondition('all'); }} className="text-xs text-blue-400 hover:text-blue-300">{t.clear}</button>
             </div>
 
-            {/* Price range */}
+            {/* Price range — flex with min-w-0 to prevent overflow */}
             <div>
               <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'טווח מחיר' : 'Price Range'}</p>
-              <div className="flex gap-3">
-                <input type="number" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm" />
-                <span className="self-center text-slate-500">—</span>
-                <input type="number" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-sm" />
+              <div className="flex items-center gap-2">
+                <input type="number" inputMode="numeric" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all" />
+                <span className="flex-shrink-0 text-slate-500 text-sm">—</span>
+                <input type="number" inputMode="numeric" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all" />
               </div>
             </div>
 
@@ -111,7 +116,7 @@ export function BrowseView() {
               <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'מיון' : 'Sort'}</p>
               <div className="grid grid-cols-3 gap-2">
                 {['newest', 'lowHigh', 'highLow'].map((s) => (
-                  <button key={s} onClick={() => setSort(s)} className={`py-3 rounded-xl text-xs font-semibold transition-all ${sort === s ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>{t[s]}</button>
+                  <button key={s} onClick={() => setSort(s)} className={`py-2.5 rounded-xl text-xs font-semibold transition-all ${sort === s ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>{t[s]}</button>
                 ))}
               </div>
             </div>
