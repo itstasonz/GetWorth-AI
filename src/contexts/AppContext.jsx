@@ -74,6 +74,10 @@ export function AppProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef(null);
 
+  // ─── In-app message notification banner ───
+  // Shape: { senderName, listingTitle, content, conversationId, listingImage, isOffer, offerAmount }
+  const [msgNotification, setMsgNotification] = useState(null);
+
   // Seller profile state
   const [sellerProfile, setSellerProfile] = useState(null);
   const [sellerListings, setSellerListings] = useState([]);
@@ -82,7 +86,7 @@ export function AppProvider({ children }) {
   // Sound
   const [soundEnabled, setSoundEnabled] = useState(true);
 
-  // Camera permission — remember if granted so we don't re-prompt
+  // Camera permission
   const cameraStreamRef = useRef(null);
   const cameraPermissionGranted = useRef(false);
 
@@ -90,6 +94,9 @@ export function AppProvider({ children }) {
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+
+  // Profile cache to avoid repeated fetches for notification banners
+  const profileCacheRef = useRef({});
 
   const t = T[lang];
   const rtl = lang === 'he';
@@ -101,6 +108,15 @@ export function AppProvider({ children }) {
   }, [soundEnabled]);
 
   const showToastMsg = (msg) => setToast(msg);
+
+  // ─── Helper: get profile with in-memory cache ───
+  const getCachedProfile = async (userId) => {
+    if (!userId) return null;
+    if (profileCacheRef.current[userId]) return profileCacheRef.current[userId];
+    const { data } = await supabase.from('profiles').select('id, full_name, avatar_url').eq('id', userId).single();
+    if (data) profileCacheRef.current[userId] = data;
+    return data;
+  };
 
   // ─── INIT + AUTH LISTENER ────────────────────────────
   useEffect(() => {
@@ -143,7 +159,6 @@ export function AppProvider({ children }) {
         supabase.from('profiles').select('*').eq('id', session.user.id).single()
           .then(({ data }) => { if (data) setProfile(data); })
           .catch(() => {});
-        // Note: redirect on login is handled in signInEmail directly
       } else { setUser(null); setProfile(null); }
     });
 
@@ -172,7 +187,7 @@ export function AppProvider({ children }) {
   // Load user data when auth changes
   useEffect(() => {
     if (user) loadUserData();
-    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); }
+    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setUnreadCount(0); }
   }, [user]);
 
   // Auto-dismiss errors
@@ -183,35 +198,103 @@ export function AppProvider({ children }) {
     }
   }, [error]);
 
-  // ─── REAL-TIME CHAT — Both parties see messages instantly ───
+  // Auto-dismiss message notification banner
+  useEffect(() => {
+    if (msgNotification) {
+      const timer = setTimeout(() => setMsgNotification(null), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [msgNotification]);
+
+  // ═══════════════════════════════════════════════════════
+  // REALTIME MESSAGING + IN-APP NOTIFICATION ENGINE
+  // ═══════════════════════════════════════════════════════
+  //
+  // This single subscription handles:
+  //  1. Appending incoming messages to the open chat (live thread)
+  //  2. Showing a rich banner notification when user is NOT in that chat
+  //  3. Refreshing unread badge counts
+  //  4. Playing a notification sound
+  //
+  // Key technique: setActiveChat(current => ...) reads the LATEST
+  // activeChat value inside the callback, avoiding the stale-closure
+  // bug where useEffect captures an old activeChat at mount time.
+  // ═══════════════════════════════════════════════════════
   useEffect(() => {
     if (!user) return;
 
     const channel = supabase
-      .channel(`user-messages-${user.id}-${Date.now()}`)
+      .channel(`rt-msgs-${user.id}-${Date.now()}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
-        (payload) => {
+        async (payload) => {
           const newMsg = payload.new;
-          // Only process messages from OTHER people (we add our own optimistically)
+
+          // Skip our own messages — we already added them optimistically
           if (newMsg.sender_id === user.id) return;
 
-          // Use setActiveChat to read fresh state (avoids stale closure)
+          // ── Step 1: Check if we're currently viewing this conversation ──
+          let isInThisChat = false;
           setActiveChat((current) => {
             if (current && newMsg.conversation_id === current.id) {
+              isInThisChat = true;
+              // Append to open thread
               setMessages((prev) => {
-                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                if (prev.some((m) => m.id === newMsg.id)) return prev; // dedupe
                 return [...prev, newMsg];
               });
               setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-              // Mark as read
+              // Auto-mark as read since user is looking at it
               supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {});
             }
-            return current; // Don't modify activeChat state
+            return current; // IMPORTANT: don't mutate activeChat
           });
 
-          // Always refresh conversations list so unread badges update
+          // ── Step 2: If NOT in this chat → show notification banner ──
+          if (!isInThisChat) {
+            try {
+              // Fetch sender profile + listing info in parallel
+              const [senderProfile, convData] = await Promise.all([
+                getCachedProfile(newMsg.sender_id),
+                supabase
+                  .from('conversations')
+                  .select('listing:listings(id, title, title_hebrew, images)')
+                  .eq('id', newMsg.conversation_id)
+                  .single()
+                  .then(r => r.data),
+              ]);
+
+              const senderName = senderProfile?.full_name || (lang === 'he' ? 'משתמש' : 'Someone');
+              const listing = convData?.listing;
+              const listingTitle = (lang === 'he' && listing?.title_hebrew)
+                ? listing.title_hebrew
+                : (listing?.title || '');
+
+              setMsgNotification({
+                senderName,
+                listingTitle,
+                content: newMsg.content,
+                conversationId: newMsg.conversation_id,
+                listingImage: listing?.images?.[0] || null,
+                isOffer: newMsg.is_offer,
+                offerAmount: newMsg.offer_amount,
+              });
+
+              playSound('tap');
+            } catch (err) {
+              console.warn('Notification enrichment failed:', err);
+              // Show basic notification anyway
+              setMsgNotification({
+                senderName: lang === 'he' ? 'הודעה חדשה' : 'New message',
+                listingTitle: '',
+                content: newMsg.content,
+                conversationId: newMsg.conversation_id,
+              });
+            }
+          }
+
+          // ── Step 3: Always refresh conversation list (updates unread badges) ──
           loadConversations();
         }
       )
@@ -219,16 +302,56 @@ export function AppProvider({ children }) {
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'messages' },
         (payload) => {
+          // Read-receipt updates
           const updated = payload.new;
           setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
         }
       )
       .subscribe((status) => {
-        console.log('Realtime status:', status);
+        if (status === 'SUBSCRIBED') {
+          console.log('✅ Realtime connected for', user.id);
+        } else if (status === 'CHANNEL_ERROR') {
+          console.error('❌ Realtime channel error');
+        }
       });
 
     return () => { supabase.removeChannel(channel); };
-  }, [user?.id]);
+  }, [user?.id]); // Only re-subscribe on user change — NOT on activeChat
+
+  // ─── Tap notification banner → open that conversation ───
+  const openNotification = async (notification) => {
+    if (!notification?.conversationId) return;
+    setMsgNotification(null);
+
+    // Try to find it in already-loaded conversations
+    const conv = conversations.find((c) => c.id === notification.conversationId);
+    if (conv) {
+      const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
+      setActiveChat({ ...conv, otherUser });
+      loadMessages(conv.id);
+      setView('chat');
+      setTab('messages');
+      return;
+    }
+
+    // Not in list yet — fetch fresh
+    const { data } = await supabase
+      .from('conversations')
+      .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url)`)
+      .eq('id', notification.conversationId)
+      .single();
+
+    if (data) {
+      const otherUser = data.buyer_id === user.id ? data.seller : data.buyer;
+      setActiveChat({ ...data, otherUser });
+      loadMessages(data.id);
+      setView('chat');
+      setTab('messages');
+      loadConversations();
+    }
+  };
+
+  const dismissNotification = () => setMsgNotification(null);
 
   // ─── DATA LOADING ───────────────────────────────────
 
@@ -356,12 +479,12 @@ export function AppProvider({ children }) {
       const unreadIds = data.filter((m) => !m.is_read && m.sender_id !== user.id).map((m) => m.id);
       if (unreadIds.length > 0) {
         await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
-        loadConversations();
+        loadConversations(); // Refresh badges
       }
     }
   };
 
-  // ─── START CONVERSATION — works for both buyer and seller ───
+  // ─── START CONVERSATION — works for both buyer AND seller ───
   const startConversation = async (item) => {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
 
@@ -381,7 +504,7 @@ export function AppProvider({ children }) {
       return;
     }
 
-    // Check if conversation already exists — check BOTH directions
+    // Check if conversation already exists — BOTH buyer→seller and seller→buyer
     const { data: existingList } = await supabase
       .from('conversations')
       .select('*')
@@ -392,14 +515,14 @@ export function AppProvider({ children }) {
 
     if (existing) {
       const otherUserId = existing.buyer_id === user.id ? existing.seller_id : existing.buyer_id;
-      const { data: otherProfile } = await supabase.from('profiles').select('id, full_name, avatar_url').eq('id', otherUserId).single();
+      const otherProfile = await getCachedProfile(otherUserId);
       setActiveChat({ ...existing, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
       loadMessages(existing.id);
       setView('chat');
       return;
     }
 
-    // Create new conversation — current user is the buyer (initiator)
+    // Create new conversation — initiator is always buyer
     if (!sellerId) {
       setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation');
       return;
@@ -412,7 +535,7 @@ export function AppProvider({ children }) {
 
     if (convError) {
       console.error('Conversation create error:', convError);
-      // Might be a duplicate — try to find existing one
+      // Race condition: might already exist — retry lookup
       const { data: retry } = await supabase
         .from('conversations')
         .select('*')
@@ -423,13 +546,12 @@ export function AppProvider({ children }) {
 
       if (retry) {
         const otherUserId = retry.buyer_id === user.id ? retry.seller_id : retry.buyer_id;
-        const { data: otherProfile } = await supabase.from('profiles').select('id, full_name, avatar_url').eq('id', otherUserId).single();
+        const otherProfile = await getCachedProfile(otherUserId);
         setActiveChat({ ...retry, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
         loadMessages(retry.id);
         setView('chat');
         return;
       }
-
       setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation');
       return;
     }
@@ -442,7 +564,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  // ─── SEND MESSAGE — optimistic UI + proper error handling ───
+  // ─── SEND MESSAGE — optimistic UI ───
   const sendMessage = async (content, isOffer = false, offerAmount = null) => {
     const text = (typeof content === 'string' ? content : '').trim();
     if (!text || !activeChat || sendingMessage) return;
@@ -455,7 +577,6 @@ export function AppProvider({ children }) {
       };
       setMessages((prev) => [...prev, demoMsg]);
       setNewMessage('');
-
       setTimeout(() => {
         const responses = lang === 'he'
           ? ['מעניין! בוא נדבר', 'אני זמין, איפה נוח לך להיפגש?', 'אשמח לשמוע עוד', 'בוא ניצור קשר בווטסאפ']
@@ -467,16 +588,15 @@ export function AppProvider({ children }) {
         }]);
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       }, 1500);
-
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       return;
     }
 
-    // Real message
+    // Real send
     setSendingMessage(true);
-    setNewMessage(''); // Clear input immediately for snappy UX
+    setNewMessage(''); // Clear input instantly for snappy UX
 
-    // Optimistic: add message to UI instantly
+    // Optimistic UI — show message immediately
     const optimisticId = `temp-${Date.now()}`;
     const optimisticMsg = {
       id: optimisticId,
@@ -506,16 +626,16 @@ export function AppProvider({ children }) {
       if (msgError) throw msgError;
 
       if (data) {
-        // Replace optimistic message with real one (has real ID)
+        // Replace temp message with real one (has real DB id)
         setMessages((prev) => prev.map((m) => m.id === optimisticId ? data : m));
-        // Update conversation timestamp so it floats to top for both users
+        // Bump conversation timestamp so it sorts to top for both users
         await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
       }
     } catch (e) {
       console.error('Send message error:', e);
-      // Remove optimistic message on failure
+      // Rollback optimistic message
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
-      setNewMessage(text); // Restore text so user can retry
+      setNewMessage(text); // Give text back so user can retry
       setError(lang === 'he' ? 'שליחת ההודעה נכשלה' : 'Failed to send message');
     }
     setSendingMessage(false);
@@ -546,7 +666,6 @@ export function AppProvider({ children }) {
             setAuthError(err.message);
           }
         } else if (data?.user) {
-          // Explicit redirect — don't rely on onAuthStateChange closure
           setView('profile');
           setTab('profile');
           setAuthForm({ name: '', email: '', password: '' });
@@ -654,9 +773,8 @@ export function AppProvider({ children }) {
     reader.readAsDataURL(file);
   }, [analyzeImage, playSound, t.failed]);
 
-  // ─── CAMERA — Request permission once, reuse stream ───
+  // ─── CAMERA ───
 
-  // Helper: attach stream to video element with retries (fixes black screen)
   const attachStreamToVideo = (stream, retries = 5) => {
     const tryAttach = (attempt) => {
       if (videoRef.current) {
@@ -671,50 +789,34 @@ export function AppProvider({ children }) {
 
   const startCamera = async () => {
     try {
-      // Try to reuse existing live stream (no re-prompt)
       if (cameraStreamRef.current) {
         const tracks = cameraStreamRef.current.getTracks();
         const hasLive = tracks.some((t) => t.readyState === 'live');
-        if (hasLive) {
-          setView('camera');
-          attachStreamToVideo(cameraStreamRef.current);
-          return;
-        }
-        // Dead tracks — clean up stale ref
+        if (hasLive) { setView('camera'); attachStreamToVideo(cameraStreamRef.current); return; }
         cameraStreamRef.current = null;
       }
-
-      // Skip permission check if already granted this session
-      if (!cameraPermissionGranted.current) {
-        if (navigator.permissions && navigator.permissions.query) {
-          try {
-            const permResult = await navigator.permissions.query({ name: 'camera' });
-            if (permResult.state === 'denied') {
-              setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
-              return;
-            }
-            if (permResult.state === 'granted') {
-              cameraPermissionGranted.current = true;
-            }
-          } catch { /* permissions.query not supported for camera — continue normally */ }
-        }
+      if (!cameraPermissionGranted.current && navigator.permissions?.query) {
+        try {
+          const permResult = await navigator.permissions.query({ name: 'camera' });
+          if (permResult.state === 'denied') {
+            setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
+            return;
+          }
+          if (permResult.state === 'granted') cameraPermissionGranted.current = true;
+        } catch {}
       }
-
-      // Request new stream
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
       });
-
       cameraStreamRef.current = stream;
       cameraPermissionGranted.current = true;
-
       setView('camera');
       attachStreamToVideo(stream);
     } catch (err) {
       console.error('Camera error:', err);
       if (err.name === 'NotAllowedError') {
         cameraPermissionGranted.current = false;
-        setError(lang === 'he' ? 'הגישה למצלמה נדחתה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access denied. Please allow it in browser settings.');
+        setError(lang === 'he' ? 'הגישה למצלמה נדחתה' : 'Camera access denied.');
       } else {
         setError(t.cameraDenied || (lang === 'he' ? 'שגיאה בפתיחת המצלמה' : 'Failed to open camera'));
       }
@@ -733,15 +835,11 @@ export function AppProvider({ children }) {
     ctx.drawImage(video, 0, 0);
     const img = canvas.toDataURL('image/jpeg', 0.85);
     capturedImageRef.current = img;
-
     setTimeout(() => {
       setShowFlash(false);
       setImages([img]);
       setView('analyzing');
-      // Don't stop the stream — just pause the video element
-      if (videoRef.current) {
-        videoRef.current.pause();
-      }
+      if (videoRef.current) videoRef.current.pause();
       analyzeImage(img)
         .then((r) => { setResult(r); setView('results'); playSound('success'); })
         .catch(() => { setError(t.failed); setView('home'); playSound('error'); });
@@ -749,14 +847,10 @@ export function AppProvider({ children }) {
   }, [analyzeImage, playSound, t.failed]);
 
   const stopCamera = () => {
-    // Only pause — don't kill the stream so we can reuse it
-    if (videoRef.current) {
-      videoRef.current.pause();
-    }
+    if (videoRef.current) videoRef.current.pause();
     setView('home');
   };
 
-  // Cleanup camera stream on unmount (app close)
   useEffect(() => {
     return () => {
       if (cameraStreamRef.current) {
@@ -766,62 +860,44 @@ export function AppProvider({ children }) {
     };
   }, []);
 
-  // ─── PUBLISH LISTING — Storage upload with base64 fallback ───
+  // ─── PUBLISH LISTING ───
 
   const publishListing = async () => {
     if (!user) { setError(lang === 'he' ? 'יש להתחבר תחילה' : 'Please sign in first'); return; }
     if (!listingData.title || !listingData.price || !listingData.phone || !listingData.location) {
       setError(lang === 'he' ? 'נא למלא את כל השדות' : 'Please fill all fields'); return;
     }
-
     setPublishing(true);
     setError(null);
-
     try {
       let imageUrls = [];
-
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
         if (img.startsWith('data:')) {
           const response = await fetch(img);
           const blob = await response.blob();
           const fileName = `${user.id}/${Date.now()}-${i}.jpg`;
-
           try {
-            const { error: uploadError } = await supabase.storage
-              .from('listings')
-              .upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
-
-            if (uploadError) {
-              console.warn('Storage upload failed, using base64 fallback:', uploadError.message);
-              imageUrls.push(img);
-            } else {
+            const { error: uploadError } = await supabase.storage.from('listings').upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
+            if (uploadError) { imageUrls.push(img); }
+            else {
               const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
               imageUrls.push(publicUrl);
             }
-          } catch (storageErr) {
-            console.warn('Storage exception, using base64 fallback:', storageErr);
-            imageUrls.push(img);
-          }
-        } else {
-          imageUrls.push(img);
-        }
+          } catch { imageUrls.push(img); }
+        } else { imageUrls.push(img); }
       }
-
       if (imageUrls.length === 0) {
         imageUrls = images.length > 0 ? images : [];
         if (imageUrls.length === 0) throw new Error(lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required');
       }
-
       const { error: insertError } = await supabase.from('listings').insert({
         seller_id: user.id, title: listingData.title, title_hebrew: result?.nameHebrew || '',
         description: listingData.desc || '', category: result?.category || 'Other',
         condition, price: listingData.price, images: imageUrls,
         location: listingData.location, contact_phone: listingData.phone, status: 'active'
       }).select();
-
       if (insertError) throw insertError;
-
       await loadUserData();
       await loadListings(true);
       setListingStep(3);
@@ -864,8 +940,6 @@ export function AppProvider({ children }) {
     setShowContact(true);
   };
 
-  // ─── LISTING FLOW HELPERS ──────────────────────────
-
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
@@ -903,6 +977,8 @@ export function AppProvider({ children }) {
     sendingMessage, sendMessage, unreadCount,
     loadMessages, startConversation, loadConversations,
     messagesEndRef,
+    // Notification system
+    msgNotification, openNotification, dismissNotification,
     error, setError, toast, setToast, showToastMsg,
     soundEnabled, setSoundEnabled, playSound,
     fileRef, videoRef, canvasRef,
