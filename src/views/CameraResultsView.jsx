@@ -13,18 +13,14 @@ export function CameraView() {
     torchSupported, torchOn, toggleTorch, lang,
   } = useApp();
 
-  // Clean up camera stream if component unmounts (e.g. tab switch)
+  // Release camera on unmount (tab switch, navigation, etc.)
   useEffect(() => {
-    return () => {
-      if (videoRef.current?.srcObject) {
-        videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
-      }
-    };
-  }, [videoRef]);
+    return () => stopCamera();
+  }, [stopCamera]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black">
-      <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
+      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
       <canvas ref={canvasRef} className="hidden" />
       
       {showFlash && <div className="absolute inset-0 bg-white animate-flash z-50" />}

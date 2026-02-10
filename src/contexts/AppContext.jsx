@@ -871,6 +871,32 @@ export function AppProvider({ children }) {
     setTimeout(() => tryAttach(0), 50);
   };
 
+  // ── Kill all tracks, release hardware, clear video element ──
+  const releaseCamera = useCallback(() => {
+    // Turn off torch first
+    if (cameraStreamRef.current) {
+      try {
+        const vt = cameraStreamRef.current.getVideoTracks()[0];
+        if (vt && typeof vt.applyConstraints === 'function') {
+          vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+        }
+      } catch {}
+      // Stop every track
+      cameraStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch {}
+      });
+      cameraStreamRef.current = null;
+    }
+    // Clear video element
+    if (videoRef.current) {
+      videoRef.current.pause();
+      videoRef.current.srcObject = null;
+    }
+    setTorchOn(false);
+    setTorchSupported(false);
+    if (DEV) console.log('[Camera] Released');
+  }, []);
+
   // Detect torch capability on the current video track
   const detectTorch = (stream) => {
     try {
@@ -909,17 +935,9 @@ export function AppProvider({ children }) {
 
   const startCamera = async () => {
     try {
-      if (cameraStreamRef.current) {
-        const tracks = cameraStreamRef.current.getTracks();
-        const hasLive = tracks.some((t) => t.readyState === 'live');
-        if (hasLive) {
-          setView('camera');
-          attachStreamToVideo(cameraStreamRef.current);
-          detectTorch(cameraStreamRef.current);
-          return;
-        }
-        cameraStreamRef.current = null;
-      }
+      // Always release previous stream before starting fresh
+      releaseCamera();
+
       if (!cameraPermissionGranted.current && navigator.permissions?.query) {
         try {
           const permResult = await navigator.permissions.query({ name: 'camera' });
@@ -965,29 +983,40 @@ export function AppProvider({ children }) {
       setShowFlash(false);
       setImages([rawImg]);
       setView('analyzing');
-      if (videoRef.current) videoRef.current.pause();
-      // Turn off torch when leaving camera
-      if (torchOn && cameraStreamRef.current) {
-        try {
-          cameraStreamRef.current.getVideoTracks()[0]?.applyConstraints({ advanced: [{ torch: false }] });
-        } catch {}
-        setTorchOn(false);
-      }
+      // Immediately release camera hardware
+      releaseCamera();
       runPipeline(rawImg);
     }, 150);
-  }, [runPipeline, playSound, torchOn]);
+  }, [runPipeline, playSound, releaseCamera]);
 
-  const stopCamera = () => {
-    // Turn off torch before leaving
-    if (torchOn && cameraStreamRef.current) {
-      try {
-        cameraStreamRef.current.getVideoTracks()[0]?.applyConstraints({ advanced: [{ torch: false }] });
-      } catch {}
-      setTorchOn(false);
-    }
-    if (videoRef.current) videoRef.current.pause();
+  const stopCamera = useCallback(() => {
+    releaseCamera();
     setView('home');
-  };
+  }, [releaseCamera]);
+
+  // Release camera when app goes to background (iOS Safari)
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.hidden && cameraStreamRef.current) {
+        if (DEV) console.log('[Camera] App hidden — releasing camera');
+        releaseCamera();
+        // If user was on camera screen, send them home
+        setView(prev => prev === 'camera' ? 'home' : prev);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [releaseCamera]);
+
+  // Safety: release camera on unmount
+  useEffect(() => {
+    return () => {
+      if (cameraStreamRef.current) {
+        cameraStreamRef.current.getTracks().forEach(t => { try { t.stop(); } catch {} });
+        cameraStreamRef.current = null;
+      }
+    };
+  }, []);
 
   // Cleanup camera stream on unmount
   useEffect(() => {
