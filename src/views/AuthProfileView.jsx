@@ -271,16 +271,16 @@ export function ProfileView() {
         </button>
       </FadeIn>
 
-      {/* Admin-only Analytics Dashboard Button */}
+      {/* Admin-only Panel */}
       {profile?.is_admin && (
         <FadeIn delay={200}>
-          <button onClick={() => setView('analytics')} className="w-full p-4 rounded-3xl bg-gradient-to-r from-blue-500/10 to-purple-500/10 border border-blue-500/20 flex items-center gap-4 hover:bg-blue-500/20 transition-all active:scale-[0.98]">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/30 to-purple-500/30 flex items-center justify-center">
-              <BarChart3 className="w-6 h-6 text-blue-400" />
+          <button onClick={() => setView('admin')} className="w-full p-4 rounded-3xl bg-gradient-to-r from-purple-500/10 to-blue-500/10 border border-purple-500/20 flex items-center gap-4 hover:bg-purple-500/20 transition-all active:scale-[0.98]">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500/30 to-blue-500/30 flex items-center justify-center">
+              <Shield className="w-6 h-6 text-purple-400" />
             </div>
             <div className="flex-1 text-left">
-              <p className="font-bold text-white">{lang === 'he' ? 'דשבורד אנליטיקס' : 'Analytics Dashboard'}</p>
-              <p className="text-xs text-slate-400">{lang === 'he' ? 'צפה בנתוני הפלטפורמה' : 'View platform metrics'}</p>
+              <p className="font-bold text-white">{lang === 'he' ? 'פאנל ניהול' : 'Admin Panel'}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'אימותים, דיווחים, הזמנות, משתמשים' : 'Verifications, reports, orders, users'}</p>
             </div>
           </button>
         </FadeIn>

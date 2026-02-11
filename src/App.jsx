@@ -14,6 +14,7 @@ import { AuthView, ProfileView } from './views/AuthProfileView';
 import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
 import { CheckoutSheet, OrdersView, OrderDetailView } from './views/OrderViews';
 import AnalyticsView from './views/AnalyticsView';
+import AdminPanel from './views/AdminPanel';
 
 // ─── In-App Message Notification Banner ───
 // Slides down from top when a message arrives and user is NOT in that chat
@@ -263,6 +264,7 @@ function AppShell() {
           {view === 'myListings' && <MyListingsView />}
           {view === 'listing' && <ListingFlowView />}
           {view === 'analytics' && <AnalyticsView />}
+          {view === 'admin' && <AdminPanel />}
           {view === 'orders' && <OrdersView />}
           {view === 'orderDetail' && <OrderDetailView />}
         </main>
