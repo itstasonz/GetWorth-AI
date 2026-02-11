@@ -10,13 +10,43 @@ import { formatPrice } from '../lib/utils';
 export function CameraView() {
   const {
     videoRef, canvasRef, capture, stopCamera, showFlash,
-    torchSupported, torchOn, toggleTorch, lang,
+    torchSupported, torchOn, toggleTorch, lang, releaseCamera,
   } = useApp();
 
-  // Release camera on unmount (tab switch, navigation, etc.)
+  const [cameraReady, setCameraReady] = React.useState(false);
+
+  // Track when video starts producing frames
   useEffect(() => {
-    return () => stopCamera();
-  }, [stopCamera]);
+    const video = videoRef.current;
+    if (!video) return;
+
+    const checkReady = () => {
+      if (video.readyState >= 2 && video.videoWidth > 0) {
+        setCameraReady(true);
+      }
+    };
+
+    // Check immediately and on events
+    checkReady();
+    video.addEventListener('loadeddata', checkReady);
+    video.addEventListener('playing', checkReady);
+
+    // Fallback polling for iOS
+    const interval = setInterval(checkReady, 200);
+    const timeout = setTimeout(() => { setCameraReady(true); }, 5000); // Safety: enable after 5s
+
+    return () => {
+      video.removeEventListener('loadeddata', checkReady);
+      video.removeEventListener('playing', checkReady);
+      clearInterval(interval);
+      clearTimeout(timeout);
+    };
+  }, [videoRef]);
+
+  // Release camera on unmount — but do NOT navigate (capture already handles navigation)
+  useEffect(() => {
+    return () => releaseCamera();
+  }, [releaseCamera]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black">
@@ -37,9 +67,14 @@ export function CameraView() {
           <X className="w-6 h-6 text-white" />
         </button>
 
-        {/* Capture button */}
-        <button onClick={capture} className="w-20 h-20 rounded-full bg-gradient-to-r from-blue-500 to-blue-600 flex items-center justify-center shadow-xl shadow-blue-500/50 active:scale-95 transition-transform">
-          <div className="w-16 h-16 rounded-full border-4 border-white/30" />
+        {/* Capture button — disabled until camera ready */}
+        <button onClick={capture} disabled={!cameraReady}
+          className={`w-20 h-20 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-all ${cameraReady ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-blue-500/50' : 'bg-white/10 opacity-50'}`}>
+          {cameraReady ? (
+            <div className="w-16 h-16 rounded-full border-4 border-white/30" />
+          ) : (
+            <div className="w-6 h-6 border-2 border-white/50 border-t-transparent rounded-full animate-spin" />
+          )}
         </button>
 
         {/* Torch button — only shown if device supports it */}
