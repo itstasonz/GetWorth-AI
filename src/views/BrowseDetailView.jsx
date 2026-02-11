@@ -250,10 +250,13 @@ export function DetailView() {
                     </div>
                   )}
                   <div className="flex items-center gap-3 mt-2">
-                    {selected.seller.rating && (
+                    {selected.seller.rating > 0 && (
                       <div className="flex items-center gap-1">
                         <Star className="w-4 h-4 text-yellow-400 fill-current" />
                         <span className="text-sm font-semibold">{selected.seller.rating}</span>
+                        {selected.seller.review_count > 0 && (
+                          <span className="text-xs text-slate-400">({selected.seller.review_count})</span>
+                        )}
                       </div>
                     )}
                     {selected.seller.total_sales > 0 && (
@@ -389,7 +392,12 @@ export function DetailView() {
 
 // ─── Seller Profile View ───
 export function SellerProfileView() {
-  const { lang, rtl, sellerProfile, sellerListings, loadingSeller, setView, tab, savedIds, heartAnim, toggleSave, viewItem } = useApp();
+  const { lang, rtl, sellerProfile, sellerListings, loadingSeller, setView, tab, savedIds, heartAnim, toggleSave, viewItem, sellerReviews, reviewsLoading, loadSellerReviews } = useApp();
+
+  // Load reviews when seller profile loads
+  React.useEffect(() => {
+    if (sellerProfile?.id) loadSellerReviews(sellerProfile.id);
+  }, [sellerProfile?.id, loadSellerReviews]);
 
   if (loadingSeller) {
     return (
@@ -444,10 +452,13 @@ export function SellerProfileView() {
           </div>
 
           <div className="flex items-center justify-center gap-4 mt-3">
-            {sellerProfile.rating && (
+            {sellerProfile.rating > 0 && (
               <div className="flex items-center gap-1">
                 <Star className="w-4 h-4 text-yellow-400 fill-current" />
                 <span className="font-semibold">{sellerProfile.rating}</span>
+                {sellerProfile.review_count > 0 && (
+                  <span className="text-xs text-slate-400">({sellerProfile.review_count})</span>
+                )}
               </div>
             )}
             {sellerProfile.is_verified && (
@@ -467,7 +478,58 @@ export function SellerProfileView() {
         </Card>
       </FadeIn>
 
-      <FadeIn delay={100}>
+      {/* Reviews Section */}
+      {sellerReviews.length > 0 && (
+        <FadeIn delay={100}>
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <Star className="w-5 h-5 text-yellow-400" />
+                {lang === 'he' ? 'ביקורות' : 'Reviews'}
+              </h3>
+              <Badge>{sellerReviews.length}</Badge>
+            </div>
+            {sellerReviews.slice(0, 5).map((review) => (
+              <Card key={review.id} className="p-4">
+                <div className="flex items-start gap-3">
+                  {review.reviewer?.avatar_url ? (
+                    <img src={review.reviewer.avatar_url} alt="" className="w-9 h-9 rounded-xl object-cover" />
+                  ) : (
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-sm font-bold text-white">
+                      {review.reviewer?.full_name?.charAt(0) || '?'}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{review.reviewer?.full_name || (lang === 'he' ? 'קונה' : 'Buyer')}</span>
+                      <div className="flex items-center gap-0.5">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star key={s} className={`w-3 h-3 ${s <= review.rating ? 'text-yellow-400 fill-current' : 'text-slate-600'}`} />
+                        ))}
+                      </div>
+                    </div>
+                    {review.comment && (
+                      <p className="text-sm text-slate-300 mt-1">{review.comment}</p>
+                    )}
+                    <div className="flex items-center gap-2 mt-1.5">
+                      {review.listing?.images?.[0] && (
+                        <img src={review.listing.images[0]} alt="" className="w-5 h-5 rounded object-cover" />
+                      )}
+                      <span className="text-[10px] text-slate-500">
+                        {lang === 'he' && review.listing?.title_hebrew ? review.listing.title_hebrew : (review.listing?.title || '')}
+                      </span>
+                      <span className="text-[10px] text-slate-600">•</span>
+                      <span className="text-[10px] text-slate-500">{timeAgo(review.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })}</span>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </FadeIn>
+      )}
+
+      <FadeIn delay={150}>
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-lg">{lang === 'he' ? 'הפריטים של' : 'Listings by'} {sellerProfile.full_name?.split(' ')[0] || 'Seller'}</h3>
           <Badge>{sellerListings.length} {lang === 'he' ? 'פריטים' : 'items'}</Badge>

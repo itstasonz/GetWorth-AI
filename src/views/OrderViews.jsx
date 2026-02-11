@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Package, Truck, MapPin, Clock, Check, CheckCircle, XCircle, ChevronRight, ArrowLeft, ShoppingBag, Loader2, AlertTriangle, MessageCircle, Shield } from 'lucide-react';
+import { Package, Truck, MapPin, Clock, Check, CheckCircle, XCircle, ChevronRight, ArrowLeft, ShoppingBag, Loader2, AlertTriangle, MessageCircle, Shield, Star } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp, InputField } from '../components/ui';
 import { formatPrice, timeAgo } from '../lib/utils';
@@ -306,12 +306,17 @@ export function OrdersView() {
 export function OrderDetailView() {
   const {
     lang, user, activeOrder, updateOrderStatus, cancelOrder, setView,
-    startConversation,
+    startConversation, submitReview,
   } = useApp();
 
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [updating, setUpdating] = useState(false);
+  // Review state
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewDone, setReviewDone] = useState(false);
 
   if (!activeOrder || !user) return null;
 
@@ -559,13 +564,96 @@ export function OrderDetailView() {
         </FadeIn>
       )}
 
-      {/* Completed Badge */}
+      {/* Completed Badge + Review Prompt */}
       {order.status === 'completed' && (
         <FadeIn delay={250}>
           <Card className="p-6 text-center" gradient="linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))">
             <CheckCircle className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
             <h3 className="text-lg font-bold text-emerald-300">{lang === 'he' ? 'העסקה הושלמה!' : 'Transaction Complete!'}</h3>
             <p className="text-sm text-slate-400 mt-1">{lang === 'he' ? 'תודה על השימוש ב-GetWorth' : 'Thanks for using GetWorth'}</p>
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Review Form — buyer only, after completion */}
+      {order.status === 'completed' && isBuyer && !reviewDone && (
+        <FadeIn delay={300}>
+          <Card className="p-5 space-y-4" gradient="linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02))">
+            <div className="text-center">
+              <Star className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
+              <h4 className="font-bold">{lang === 'he' ? 'דרג את המוכר' : 'Rate the Seller'}</h4>
+              <p className="text-xs text-slate-400 mt-1">
+                {lang === 'he' ? 'הביקורת שלך עוזרת לקונים אחרים' : 'Your review helps other buyers'}
+              </p>
+            </div>
+
+            {/* Star rating */}
+            <div className="flex justify-center gap-2">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  onClick={() => setReviewRating(star)}
+                  className="p-1 transition-transform hover:scale-110 active:scale-95"
+                >
+                  <Star className={`w-9 h-9 transition-colors ${
+                    star <= reviewRating
+                      ? 'text-yellow-400 fill-current'
+                      : 'text-slate-600'
+                  }`} />
+                </button>
+              ))}
+            </div>
+
+            {/* Rating label */}
+            {reviewRating > 0 && (
+              <p className="text-center text-sm font-medium text-yellow-300">
+                {reviewRating === 1 ? (lang === 'he' ? 'גרוע' : 'Poor') :
+                 reviewRating === 2 ? (lang === 'he' ? 'לא טוב' : 'Fair') :
+                 reviewRating === 3 ? (lang === 'he' ? 'בסדר' : 'OK') :
+                 reviewRating === 4 ? (lang === 'he' ? 'טוב' : 'Good') :
+                 (lang === 'he' ? 'מעולה!' : 'Excellent!')}
+              </p>
+            )}
+
+            {/* Comment */}
+            <textarea
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              placeholder={lang === 'he' ? 'ספר על החוויה שלך (אופציונלי)' : 'Tell us about your experience (optional)'}
+              className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-yellow-500/50"
+              rows={2}
+            />
+
+            {/* Submit */}
+            <Btn
+              primary
+              className="w-full py-3.5"
+              disabled={reviewRating === 0 || reviewSubmitting}
+              onClick={async () => {
+                setReviewSubmitting(true);
+                const ok = await submitReview(order.id, order.listing_id, order.seller_id, reviewRating, reviewComment);
+                setReviewSubmitting(false);
+                if (ok) setReviewDone(true);
+              }}
+            >
+              {reviewSubmitting ? (
+                <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Submitting...'}</>
+              ) : (
+                <><Star className="w-4 h-4" />{lang === 'he' ? 'שלח ביקורת' : 'Submit Review'}</>
+              )}
+            </Btn>
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Review submitted confirmation */}
+      {reviewDone && (
+        <FadeIn>
+          <Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
+            <div className="flex items-center justify-center gap-2">
+              <CheckCircle className="w-5 h-5 text-yellow-400" />
+              <span className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'הביקורת נשלחה!' : 'Review submitted!'}</span>
+            </div>
           </Card>
         </FadeIn>
       )}

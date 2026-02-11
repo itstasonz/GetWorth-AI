@@ -182,7 +182,7 @@ export function AppProvider({ children }) {
       try {
         const listingsPromise = supabase
           .from('listings')
-          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
+          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
           .eq('status', 'active')
           .order('created_at', { ascending: false })
           .limit(PAGE_SIZE);
@@ -377,7 +377,7 @@ export function AppProvider({ children }) {
     const offset = page * PAGE_SIZE;
     let query = supabase
       .from('listings')
-      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
+      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -404,7 +404,7 @@ export function AppProvider({ children }) {
     const offset = nextPage * PAGE_SIZE;
     let query = supabase
       .from('listings')
-      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
+      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -446,7 +446,7 @@ export function AppProvider({ children }) {
     const [{ data: profileData }, { data: listingsData }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', sellerId).single(),
       supabase.from('listings')
-        .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating)')
+        .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
         .eq('seller_id', sellerId).eq('status', 'active')
         .order('created_at', { ascending: false })
     ]);
@@ -1506,6 +1506,71 @@ export function AppProvider({ children }) {
     setView('orderDetail');
   }, []);
 
+  // ─── REVIEWS & RATINGS ─────────────────────────────
+
+  const [sellerReviews, setSellerReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+
+  // Submit a review for a completed order
+  const submitReview = useCallback(async (orderId, listingId, sellerId, rating, comment) => {
+    if (!user) return false;
+    try {
+      // Check if already reviewed
+      const { data: existing } = await supabase
+        .from('reviews')
+        .select('id')
+        .eq('order_id', orderId)
+        .limit(1);
+      if (existing?.length > 0) {
+        showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת' : 'You already reviewed this order');
+        return false;
+      }
+
+      const { error: err } = await supabase.from('reviews').insert({
+        order_id: orderId,
+        listing_id: listingId,
+        reviewer_id: user.id,
+        seller_id: sellerId,
+        rating,
+        comment: comment?.trim() || null,
+      });
+
+      if (err) throw err;
+
+      showToastMsg(lang === 'he' ? 'הביקורת נשלחה! תודה' : 'Review submitted! Thank you');
+      playSound('coin');
+      return true;
+    } catch (e) {
+      console.error('[Reviews] Submit error:', e);
+      if (e.message?.includes('one_review_per_order')) {
+        showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת' : 'You already reviewed this order');
+      } else {
+        setError(lang === 'he' ? 'שגיאה בשליחת הביקורת' : 'Failed to submit review');
+      }
+      return false;
+    }
+  }, [user, lang, showToastMsg, playSound]);
+
+  // Load reviews for a seller
+  const loadSellerReviews = useCallback(async (sellerId) => {
+    if (!sellerId) return;
+    setReviewsLoading(true);
+    try {
+      const { data, error: err } = await supabase
+        .from('reviews')
+        .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url), listing:listings(id, title, title_hebrew, images)')
+        .eq('seller_id', sellerId)
+        .order('created_at', { ascending: false })
+        .limit(20);
+      if (err) throw err;
+      setSellerReviews(data || []);
+    } catch (e) {
+      console.error('[Reviews] Load error:', e);
+      setSellerReviews([]);
+    }
+    setReviewsLoading(false);
+  }, []);
+
   // ─── NAVIGATION ────────────────────────────────────
 
   const reset = () => {
@@ -1576,6 +1641,8 @@ export function AppProvider({ children }) {
     orders, activeOrder, setActiveOrder, ordersLoading,
     showCheckout, setShowCheckout,
     loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder,
+    // Reviews
+    sellerReviews, reviewsLoading, submitReview, loadSellerReviews,
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
