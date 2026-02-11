@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload } from 'lucide-react';
+import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload, Package } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, InputField } from '../components/ui';
 import { STAT_COLORS } from '../lib/utils';
@@ -67,6 +67,7 @@ export function ProfileView() {
     t, lang, user, profile, signOut, myListings, savedItems, setView,
     uploadAvatar, avatarUploading,
     requestVerification, verificationUploading,
+    loadOrders,
   } = useApp();
 
   const avatarInputRef = useRef(null);
@@ -255,6 +256,19 @@ export function ProfileView() {
             </Card>
           );
         })}
+      </FadeIn>
+
+      {/* My Orders */}
+      <FadeIn delay={150}>
+        <button onClick={() => { loadOrders(); setView('orders'); }} className="w-full p-4 rounded-3xl bg-gradient-to-r from-emerald-500/10 to-teal-500/10 border border-emerald-500/20 flex items-center gap-4 hover:bg-emerald-500/20 transition-all active:scale-[0.98]">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500/30 to-teal-500/30 flex items-center justify-center">
+            <Package className="w-6 h-6 text-emerald-400" />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="font-bold text-white">{lang === 'he' ? 'ההזמנות שלי' : 'My Orders'}</p>
+            <p className="text-xs text-slate-400">{lang === 'he' ? 'קניות ומכירות' : 'Purchases & sales'}</p>
+          </div>
+        </button>
       </FadeIn>
 
       {/* Admin-only Analytics Dashboard Button */}

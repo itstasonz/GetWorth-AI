@@ -164,7 +164,7 @@ export function BrowseView() {
 // DETAIL VIEW — with report + quality badge + seller trust
 // ═══════════════════════════════════════════════════════
 export function DetailView() {
-  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing } = useApp();
+  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing, setShowCheckout } = useApp();
   const [showReport, setShowReport] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reporting, setReporting] = useState(false);
@@ -298,14 +298,22 @@ export function DetailView() {
           </FadeIn>
         )}
 
-        {/* Contact + Save */}
-        <FadeIn delay={150} className="flex gap-3">
-          <Btn primary className="flex-1 py-4" onClick={contactSeller}>
-            <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
-          </Btn>
-          <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="px-5">
-            <Heart className={`w-5 h-5 ${savedIds.has(selected.id) ? 'fill-current text-red-400' : ''}`} />
-          </Btn>
+        {/* Buy + Contact + Save */}
+        <FadeIn delay={150} className="space-y-3">
+          {/* Buy Now — only show if not own listing */}
+          {user && selected.seller_id !== user?.id && !selected.id?.toString().startsWith('s') && (
+            <Btn primary className="w-full py-4" onClick={() => setShowCheckout(true)}>
+              <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
+            </Btn>
+          )}
+          <div className="flex gap-3">
+            <Btn className="flex-1 py-4 bg-white/5 border border-white/10" onClick={contactSeller}>
+              <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
+            </Btn>
+            <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="px-5">
+              <Heart className={`w-5 h-5 ${savedIds.has(selected.id) ? 'fill-current text-red-400' : ''}`} />
+            </Btn>
+          </div>
         </FadeIn>
 
         {/* Report button */}

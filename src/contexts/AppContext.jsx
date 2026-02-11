@@ -132,6 +132,12 @@ export function AppProvider({ children }) {
   const [sellerListings, setSellerListings] = useState([]);
   const [loadingSeller, setLoadingSeller] = useState(false);
 
+  // Orders state
+  const [orders, setOrders] = useState([]);
+  const [activeOrder, setActiveOrder] = useState(null);
+  const [ordersLoading, setOrdersLoading] = useState(false);
+  const [showCheckout, setShowCheckout] = useState(false);
+
   // Sound
   const [soundEnabled, setSoundEnabled] = useState(true);
 
@@ -1346,6 +1352,160 @@ export function AppProvider({ children }) {
     }
   };
 
+  // ─── ORDERS / CHECKOUT ─────────────────────────────
+
+  // Load all orders for current user (as buyer or seller)
+  const loadOrders = useCallback(async () => {
+    if (!user) return;
+    setOrdersLoading(true);
+    try {
+      const { data, error: err } = await supabase
+        .from('orders')
+        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_id_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_id_fkey(id, full_name, avatar_url, is_verified)')
+        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+        .order('created_at', { ascending: false });
+      if (err) throw err;
+      setOrders(data || []);
+    } catch (e) {
+      console.error('[Orders] Load error:', e);
+    }
+    setOrdersLoading(false);
+  }, [user]);
+
+  // Create a new order (buyer initiates)
+  const createOrder = useCallback(async ({ listingId, sellerId, price, deliveryMethod, shippingAddress, buyerNote }) => {
+    if (!user) { setSignInAction('buy'); setShowSignInModal(true); return null; }
+    if (user.id === sellerId) {
+      showToastMsg(lang === 'he' ? 'אי אפשר לקנות מעצמך' : "You can't buy your own listing");
+      return null;
+    }
+    try {
+      // Check for existing active order
+      const { data: existing } = await supabase
+        .from('orders')
+        .select('id, status')
+        .eq('listing_id', listingId)
+        .eq('buyer_id', user.id)
+        .not('status', 'in', '("cancelled","completed")')
+        .limit(1);
+      if (existing?.length > 0) {
+        showToastMsg(lang === 'he' ? 'כבר יש לך הזמנה פעילה למוצר הזה' : 'You already have an active order for this item');
+        return null;
+      }
+
+      const { data, error: err } = await supabase.from('orders').insert({
+        listing_id: listingId,
+        buyer_id: user.id,
+        seller_id: sellerId,
+        price,
+        delivery_method: deliveryMethod,
+        shipping_address: shippingAddress || null,
+        buyer_note: buyerNote || null,
+        status: 'pending',
+      }).select().single();
+
+      if (err) throw err;
+
+      showToastMsg(lang === 'he' ? 'ההזמנה נשלחה למוכר!' : 'Order sent to seller!');
+      playSound('coin');
+      setShowCheckout(false);
+      await loadOrders();
+      setView('orderDetail');
+      setActiveOrder(data);
+      return data;
+    } catch (e) {
+      console.error('[Orders] Create error:', e);
+      setError(lang === 'he' ? 'שגיאה ביצירת הזמנה' : 'Failed to create order');
+      return null;
+    }
+  }, [user, lang, showToastMsg, playSound, loadOrders]);
+
+  // Update order status (seller accepts, marks shipped/ready, buyer confirms)
+  const updateOrderStatus = useCallback(async (orderId, newStatus) => {
+    if (!user || !orderId) return false;
+    try {
+      const timestamps = {};
+      if (newStatus === 'accepted') timestamps.accepted_at = new Date().toISOString();
+      if (newStatus === 'shipped' || newStatus === 'ready_pickup') timestamps.shipped_at = new Date().toISOString();
+      if (newStatus === 'delivered') timestamps.delivered_at = new Date().toISOString();
+      if (newStatus === 'completed') timestamps.completed_at = new Date().toISOString();
+      if (newStatus === 'cancelled') {
+        timestamps.cancelled_at = new Date().toISOString();
+        timestamps.cancelled_by = user.id;
+      }
+
+      const { error: err } = await supabase
+        .from('orders')
+        .update({ status: newStatus, ...timestamps })
+        .eq('id', orderId);
+
+      if (err) throw err;
+
+      // If completed, mark listing as sold
+      if (newStatus === 'completed' && activeOrder) {
+        await supabase.from('listings').update({
+          status: 'sold',
+          sold_to: activeOrder.buyer_id,
+          sold_at: new Date().toISOString(),
+        }).eq('id', activeOrder.listing_id);
+      }
+
+      const statusLabels = {
+        accepted: lang === 'he' ? 'ההזמנה אושרה!' : 'Order accepted!',
+        shipped: lang === 'he' ? 'המוצר נשלח!' : 'Item shipped!',
+        ready_pickup: lang === 'he' ? 'המוצר מוכן לאיסוף!' : 'Ready for pickup!',
+        delivered: lang === 'he' ? 'המוצר התקבל!' : 'Item received!',
+        completed: lang === 'he' ? 'העסקה הושלמה!' : 'Transaction complete!',
+        cancelled: lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled',
+      };
+      showToastMsg(statusLabels[newStatus] || 'Updated');
+      playSound(newStatus === 'completed' ? 'coin' : 'tap');
+
+      // Refresh
+      await loadOrders();
+      // Update activeOrder in place
+      setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus, ...timestamps } : prev);
+
+      return true;
+    } catch (e) {
+      console.error('[Orders] Update error:', e);
+      setError(lang === 'he' ? 'שגיאה בעדכון ההזמנה' : 'Failed to update order');
+      return false;
+    }
+  }, [user, lang, activeOrder, showToastMsg, playSound, loadOrders]);
+
+  // Cancel order (either party)
+  const cancelOrder = useCallback(async (orderId, reason) => {
+    if (!user || !orderId) return false;
+    try {
+      const { error: err } = await supabase
+        .from('orders')
+        .update({
+          status: 'cancelled',
+          cancelled_at: new Date().toISOString(),
+          cancelled_by: user.id,
+          cancel_reason: reason || null,
+        })
+        .eq('id', orderId);
+
+      if (err) throw err;
+      showToastMsg(lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled');
+      await loadOrders();
+      setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: 'cancelled' } : prev);
+      return true;
+    } catch (e) {
+      console.error('[Orders] Cancel error:', e);
+      setError(lang === 'he' ? 'שגיאה בביטול' : 'Failed to cancel order');
+      return false;
+    }
+  }, [user, lang, showToastMsg, loadOrders]);
+
+  // View an order's detail
+  const viewOrder = useCallback((order) => {
+    setActiveOrder(order);
+    setView('orderDetail');
+  }, []);
+
   // ─── NAVIGATION ────────────────────────────────────
 
   const reset = () => {
@@ -1412,6 +1572,10 @@ export function AppProvider({ children }) {
     answers, setAnswers, listingData, setListingData,
     publishing, publishListing, startListing, selectCondition,
     reportListing,
+    // Orders / Checkout
+    orders, activeOrder, setActiveOrder, ordersLoading,
+    showCheckout, setShowCheckout,
+    loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder,
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline,

@@ -12,6 +12,7 @@ import { BrowseView, DetailView, SellerProfileView } from './views/BrowseDetailV
 import { InboxView, ChatView } from './views/ChatViews';
 import { AuthView, ProfileView } from './views/AuthProfileView';
 import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
+import { CheckoutSheet, OrdersView, OrderDetailView } from './views/OrderViews';
 import AnalyticsView from './views/AnalyticsView';
 
 // ─── In-App Message Notification Banner ───
@@ -262,7 +263,12 @@ function AppShell() {
           {view === 'myListings' && <MyListingsView />}
           {view === 'listing' && <ListingFlowView />}
           {view === 'analytics' && <AnalyticsView />}
+          {view === 'orders' && <OrdersView />}
+          {view === 'orderDetail' && <OrderDetailView />}
         </main>
+
+        {/* Checkout Sheet (modal overlay) */}
+        <CheckoutSheet />
 
         {/* Bottom Nav */}
         <nav className="fixed bottom-0 left-0 right-0 z-40">
