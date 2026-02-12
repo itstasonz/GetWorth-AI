@@ -139,6 +139,10 @@ export function AppProvider({ children }) {
   const [orders, setOrders] = useState([]);
   const [activeOrder, setActiveOrder] = useState(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
+
+  // Notifications state (order events)
+  const [orderNotifications, setOrderNotifications] = useState([]);
+  const [notifUnreadCount, setNotifUnreadCount] = useState(0);
   const [showCheckout, setShowCheckout] = useState(false);
 
   // Sound
@@ -348,6 +352,85 @@ export function AppProvider({ children }) {
       });
 
     return () => { supabase.removeChannel(channel); };
+  }, [user?.id]);
+
+  // ═══════════════════════════════════════════════════════
+  // REALTIME: ORDER NOTIFICATIONS + ORDER STATUS CHANGES
+  // ═══════════════════════════════════════════════════════
+  // Load notification count + subscribe for live updates
+  const loadNotifications = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('id, type, title, body, data, read_at, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (error) throw error;
+      setOrderNotifications(data || []);
+      setNotifUnreadCount((data || []).filter(n => !n.read_at).length);
+    } catch (e) {
+      if (DEV) console.warn('[Notifs] Load error:', e.message);
+    }
+  }, [user]);
+
+  const markNotifRead = useCallback(async (notifId) => {
+    await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', notifId);
+    setOrderNotifications(prev => prev.map(n => n.id === notifId ? { ...n, read_at: new Date().toISOString() } : n));
+    setNotifUnreadCount(prev => Math.max(0, prev - 1));
+  }, []);
+
+  const markAllNotifsRead = useCallback(async () => {
+    if (!user) return;
+    await supabase.from('notifications').update({ read_at: new Date().toISOString() })
+      .eq('user_id', user.id).is('read_at', null);
+    setOrderNotifications(prev => prev.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
+    setNotifUnreadCount(0);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    // Initial load
+    loadNotifications();
+
+    const notifChannel = supabase
+      .channel(`rt-notifs-${user.id}-${Date.now()}`)
+      // New notification inserted → show toast + update badge
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+        (payload) => {
+          const notif = payload.new;
+          setOrderNotifications(prev => [notif, ...prev]);
+          setNotifUnreadCount(prev => prev + 1);
+          showToastMsg(notif.title || (lang === 'he' ? 'התראה חדשה' : 'New notification'));
+          playSound('tap');
+
+          // Auto-refresh orders when order-related notification arrives
+          if (notif.type?.startsWith('ORDER_')) {
+            loadOrders();
+          }
+        }
+      )
+      // Order status changed → refresh orders + update activeOrder
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'orders' },
+        (payload) => {
+          const updated = payload.new;
+          // Only process if user is involved
+          if (updated.buyer_id !== user.id && updated.seller_id !== user.id) return;
+          setOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
+          setActiveOrder(prev => prev?.id === updated.id ? { ...prev, ...updated } : prev);
+        }
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED' && DEV) console.log('✅ Notifs realtime connected');
+      });
+
+    return () => { supabase.removeChannel(notifChannel); };
   }, [user?.id]);
 
   // Tap notification banner → open that conversation
@@ -1553,38 +1636,25 @@ export function AppProvider({ children }) {
     }
   }, [user, lang, showToastMsg, playSound, loadOrders]);
 
-  // Update order status (seller accepts, marks shipped/ready, buyer confirms)
+  // Update order status via server-side RPC (validates transitions)
   const updateOrderStatus = useCallback(async (orderId, newStatus) => {
     if (!user || !orderId) return false;
     try {
-      const timestamps = {};
-      if (newStatus === 'accepted') timestamps.accepted_at = new Date().toISOString();
-      if (newStatus === 'shipped' || newStatus === 'ready_pickup') timestamps.shipped_at = new Date().toISOString();
-      if (newStatus === 'delivered') timestamps.delivered_at = new Date().toISOString();
-      if (newStatus === 'completed') timestamps.completed_at = new Date().toISOString();
-      if (newStatus === 'cancelled') {
-        timestamps.cancelled_at = new Date().toISOString();
-        timestamps.cancelled_by = user.id;
-      }
+      const { data: rpcResult, error: rpcErr } = await supabase.rpc('transition_order', {
+        p_order_id: orderId,
+        p_new_status: newStatus,
+        p_meta: {},
+      });
 
-      const { error: err } = await supabase
-        .from('orders')
-        .update({ status: newStatus, ...timestamps })
-        .eq('id', orderId);
-
-      if (err) throw err;
-
-      // If completed, mark listing as sold
-      if (newStatus === 'completed' && activeOrder) {
-        await supabase.from('listings').update({
-          status: 'sold',
-          sold_to: activeOrder.buyer_id,
-          sold_at: new Date().toISOString(),
-        }).eq('id', activeOrder.listing_id);
+      if (rpcErr) throw rpcErr;
+      if (rpcResult?.error) {
+        showToastMsg(rpcResult.error);
+        return false;
       }
 
       const statusLabels = {
         accepted: lang === 'he' ? 'ההזמנה אושרה!' : 'Order accepted!',
+        declined: lang === 'he' ? 'ההזמנה נדחתה' : 'Order declined',
         shipped: lang === 'he' ? 'המוצר נשלח!' : 'Item shipped!',
         ready_pickup: lang === 'he' ? 'המוצר מוכן לאיסוף!' : 'Ready for pickup!',
         delivered: lang === 'he' ? 'המוצר התקבל!' : 'Item received!',
@@ -1596,42 +1666,50 @@ export function AppProvider({ children }) {
 
       // Refresh
       await loadOrders();
-      // Update activeOrder in place
-      setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus, ...timestamps } : prev);
+      setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus } : prev);
 
       return true;
     } catch (e) {
-      console.error('[Orders] Update error:', e);
+      console.error('[Orders] Transition error:', e);
+      // Fallback: try direct update if RPC doesn't exist yet
+      if (e.message?.includes('function') || e.code === '42883') {
+        if (DEV) console.warn('[Orders] RPC not found, falling back to direct update');
+        const timestamps = {};
+        if (newStatus === 'accepted') timestamps.accepted_at = new Date().toISOString();
+        if (newStatus === 'declined') timestamps.declined_at = new Date().toISOString();
+        if (newStatus === 'shipped' || newStatus === 'ready_pickup') timestamps.shipped_at = new Date().toISOString();
+        if (newStatus === 'delivered') timestamps.delivered_at = new Date().toISOString();
+        if (newStatus === 'completed') timestamps.completed_at = new Date().toISOString();
+        if (newStatus === 'cancelled') { timestamps.cancelled_at = new Date().toISOString(); timestamps.cancelled_by = user.id; }
+
+        const { error: directErr } = await supabase
+          .from('orders')
+          .update({ status: newStatus, ...timestamps })
+          .eq('id', orderId);
+
+        if (directErr) throw directErr;
+
+        if (newStatus === 'completed' && activeOrder) {
+          await supabase.from('listings').update({ status: 'sold', sold_to: activeOrder.buyer_id, sold_at: new Date().toISOString() })
+            .eq('id', activeOrder.listing_id);
+        }
+
+        showToastMsg(lang === 'he' ? 'עודכן' : 'Updated');
+        playSound('tap');
+        await loadOrders();
+        setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus } : prev);
+        return true;
+      }
       setError(lang === 'he' ? 'שגיאה בעדכון ההזמנה' : 'Failed to update order');
       return false;
     }
   }, [user, lang, activeOrder, showToastMsg, playSound, loadOrders]);
 
-  // Cancel order (either party)
+  // Cancel order (via RPC or direct fallback)
   const cancelOrder = useCallback(async (orderId, reason) => {
     if (!user || !orderId) return false;
-    try {
-      const { error: err } = await supabase
-        .from('orders')
-        .update({
-          status: 'cancelled',
-          cancelled_at: new Date().toISOString(),
-          cancelled_by: user.id,
-          cancel_reason: reason || null,
-        })
-        .eq('id', orderId);
-
-      if (err) throw err;
-      showToastMsg(lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled');
-      await loadOrders();
-      setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: 'cancelled' } : prev);
-      return true;
-    } catch (e) {
-      console.error('[Orders] Cancel error:', e);
-      setError(lang === 'he' ? 'שגיאה בביטול' : 'Failed to cancel order');
-      return false;
-    }
-  }, [user, lang, showToastMsg, loadOrders]);
+    return updateOrderStatus(orderId, 'cancelled');
+  }, [user, updateOrderStatus]);
 
   // View an order's detail
   const viewOrder = useCallback((order) => {
@@ -1644,15 +1722,16 @@ export function AppProvider({ children }) {
   const [sellerReviews, setSellerReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
 
-  // Submit a review for a completed order
-  const submitReview = useCallback(async (orderId, listingId, sellerId, rating, comment) => {
+  // Submit a review for a completed order (buyer rates seller, or seller rates buyer)
+  const submitReview = useCallback(async (orderId, listingId, sellerId, rating, comment, reviewerRole = 'buyer') => {
     if (!user) return false;
     try {
-      // Check if already reviewed
+      // Check if already reviewed this order in this role
       const { data: existing } = await supabase
         .from('reviews')
         .select('id')
         .eq('order_id', orderId)
+        .eq('reviewer_role', reviewerRole)
         .limit(1);
       if (existing?.length > 0) {
         showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת' : 'You already reviewed this order');
@@ -1666,6 +1745,7 @@ export function AppProvider({ children }) {
         seller_id: sellerId,
         rating,
         comment: comment?.trim() || null,
+        reviewer_role: reviewerRole,
       });
 
       if (err) throw err;
@@ -1675,7 +1755,7 @@ export function AppProvider({ children }) {
       return true;
     } catch (e) {
       console.error('[Reviews] Submit error:', e);
-      if (e.message?.includes('one_review_per_order')) {
+      if (e.message?.includes('one_review_per_order') || e.message?.includes('one_review_per_order_role')) {
         showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת' : 'You already reviewed this order');
       } else {
         setError(lang === 'he' ? 'שגיאה בשליחת הביקורת' : 'Failed to submit review');
@@ -1775,6 +1855,9 @@ export function AppProvider({ children }) {
     orders, activeOrder, setActiveOrder, ordersLoading,
     showCheckout, setShowCheckout,
     loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder,
+    // Order notifications
+    orderNotifications, notifUnreadCount,
+    loadNotifications, markNotifRead, markAllNotifsRead,
     // Reviews
     sellerReviews, reviewsLoading, submitReview, loadSellerReviews,
     // Pipeline (replaces analyzeImage)

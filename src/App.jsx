@@ -12,7 +12,7 @@ import { BrowseView, DetailView, SellerProfileView } from './views/BrowseDetailV
 import { InboxView, ChatView } from './views/ChatViews';
 import { AuthView, ProfileView } from './views/AuthProfileView';
 import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
-import { CheckoutSheet, OrdersView, OrderDetailView } from './views/OrderViews';
+import { CheckoutSheet, OrdersView, OrderDetailView, NotificationsView } from './views/OrderViews';
 import AnalyticsView from './views/AnalyticsView';
 import AdminPanel from './views/AdminPanel';
 
@@ -93,7 +93,7 @@ function AppShell() {
     showSignInModal, setShowSignInModal, signInAction,
     showContact, setShowContact, selected, startConversation,
     // Misc
-    myListings, unreadCount, fileRef,
+    myListings, unreadCount, notifUnreadCount, fileRef,
   } = useApp();
 
   // Loading screen
@@ -267,6 +267,7 @@ function AppShell() {
           {view === 'admin' && <AdminPanel />}
           {view === 'orders' && <OrdersView />}
           {view === 'orderDetail' && <OrderDetailView />}
+          {view === 'notifications' && <NotificationsView />}
         </main>
 
         {/* Checkout Sheet (modal overlay) */}
@@ -293,6 +294,9 @@ function AppShell() {
                   )}
                   {n.id === 'messages' && unreadCount > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
+                  )}
+                  {n.id === 'profile' && notifUnreadCount > 0 && tab !== 'profile' && (
+                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{notifUnreadCount}</span>
                   )}
                 </div>
                 <span className="text-[10px] font-medium">{n.id === 'messages' ? (lang === 'he' ? 'הודעות' : 'Chat') : t[n.id]}</span>
