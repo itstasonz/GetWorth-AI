@@ -244,7 +244,6 @@ export function AppProvider({ children }) {
   useEffect(() => {
     setListingsPage(0);
     setHasMore(true);
-    setListings([]); // Clear immediately — prevents stale items from previous tab showing during load
     loadListings(true);
   }, [category, filterCondition, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
 
