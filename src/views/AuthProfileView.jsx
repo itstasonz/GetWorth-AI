@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload, Package, Scan } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload, Package, Scan, Trash2, ChevronDown, X } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, InputField } from '../components/ui';
 import { STAT_COLORS } from '../lib/utils';
@@ -68,11 +68,14 @@ export function ProfileView() {
     uploadAvatar, avatarUploading,
     requestVerification, verificationUploading,
     loadOrders,
-    valuations, valuationsLoading, loadValuations,
+    valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
   } = useApp();
 
   const avatarInputRef = useRef(null);
   const verifyInputRef = useRef(null);
+  const [scansExpanded, setScansExpanded] = useState(false);
+  const [scansVisible, setScansVisible] = useState(5);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
 
   if (!user) return null;
 
@@ -274,52 +277,120 @@ export function ProfileView() {
 
       {/* My Scans — Valuation History */}
       <FadeIn delay={175}>
-        <button onClick={loadValuations} className="w-full p-4 rounded-3xl bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/20 flex items-center gap-4 hover:bg-blue-500/20 transition-all active:scale-[0.98]">
+        <button onClick={() => {
+          if (!scansExpanded) { loadValuations(); setScansExpanded(true); setScansVisible(5); }
+          else setScansExpanded(false);
+        }} className="w-full p-4 rounded-3xl bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/20 flex items-center gap-4 hover:bg-blue-500/20 transition-all active:scale-[0.98]">
           <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/30 to-cyan-500/30 flex items-center justify-center">
             <Scan className="w-6 h-6 text-blue-400" />
           </div>
           <div className="flex-1 text-left">
             <p className="font-bold text-white">{lang === 'he' ? 'הסריקות שלי' : 'My Scans'}</p>
-            <p className="text-xs text-slate-400">{lang === 'he' ? 'היסטוריית הערכות AI' : 'AI valuation history'}</p>
+            <p className="text-xs text-slate-400">
+              {scansExpanded && valuations.length > 0
+                ? (lang === 'he' ? `${valuations.length} סריקות` : `${valuations.length} scans`)
+                : (lang === 'he' ? 'היסטוריית הערכות AI' : 'AI valuation history')}
+            </p>
           </div>
+          <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-300 ${scansExpanded ? 'rotate-180' : ''}`} />
         </button>
 
-        {/* Inline valuation list (shown after load) */}
-        {valuationsLoading && (
-          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
-        )}
-        {!valuationsLoading && valuations.length > 0 && (
-          <div className="mt-3 space-y-2">
-            {valuations.slice(0, 10).map((v) => (
-              <Card key={v.id} className="p-3 flex items-center gap-3">
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold ${
-                  v.ai_confidence >= 0.9 ? 'bg-green-500/20 text-green-300' :
-                  v.ai_confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' :
-                  'bg-amber-500/20 text-amber-300'
-                }`}>
-                  {Math.round((v.ai_confidence || 0) * 100)}%
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{lang === 'he' && v.ai_name_hebrew ? v.ai_name_hebrew : v.ai_name}</p>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    <span className="text-[10px] text-slate-500">{v.ai_category}</span>
-                    {v.user_confirmed && <CheckCircle className="w-3 h-3 text-green-400" />}
-                    {v.user_correction && <span className="text-[10px] text-amber-400">→ {v.user_correction}</span>}
-                  </div>
-                </div>
-                <div className="text-right">
-                  {v.price_mid > 0 && <p className="text-sm font-bold text-blue-400">₪{v.price_mid.toLocaleString()}</p>}
-                  <p className="text-[10px] text-slate-600">{new Date(v.created_at).toLocaleDateString()}</p>
-                </div>
-              </Card>
-            ))}
-            {valuations.length > 10 && (
-              <p className="text-center text-xs text-slate-500 py-1">{lang === 'he' ? `+${valuations.length - 10} נוספים` : `+${valuations.length - 10} more`}</p>
+        {/* Scan list (collapsible) */}
+        {scansExpanded && (
+          <>
+            {valuationsLoading && (
+              <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
             )}
-          </div>
-        )}
-        {!valuationsLoading && valuations.length === 0 && valuations !== null && (
-          <p className="text-center text-xs text-slate-500 py-3">{lang === 'he' ? 'אין סריקות עדיין' : 'No scans yet'}</p>
+
+            {!valuationsLoading && valuations.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {/* Clear All button */}
+                <div className="flex justify-end px-1">
+                  {!confirmClearAll ? (
+                    <button
+                      onClick={() => setConfirmClearAll(true)}
+                      className="flex items-center gap-1.5 text-[11px] text-red-400/70 hover:text-red-400 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      {lang === 'he' ? 'מחק הכל' : 'Clear All'}
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-red-300">{lang === 'he' ? 'בטוח?' : 'Sure?'}</span>
+                      <button
+                        onClick={() => { clearAllValuations(); setConfirmClearAll(false); setScansExpanded(false); }}
+                        className="px-2.5 py-1 rounded-lg bg-red-500/20 text-[11px] text-red-300 font-semibold hover:bg-red-500/30 transition-colors"
+                      >
+                        {lang === 'he' ? 'כן, מחק' : 'Yes, delete'}
+                      </button>
+                      <button
+                        onClick={() => setConfirmClearAll(false)}
+                        className="px-2.5 py-1 rounded-lg bg-white/5 text-[11px] text-slate-400 hover:bg-white/10 transition-colors"
+                      >
+                        {lang === 'he' ? 'ביטול' : 'Cancel'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Scan items */}
+                {valuations.slice(0, scansVisible).map((v) => (
+                  <Card key={v.id} className="p-3 flex items-center gap-3">
+                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                      v.ai_confidence >= 0.9 ? 'bg-green-500/20 text-green-300' :
+                      v.ai_confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' :
+                      'bg-amber-500/20 text-amber-300'
+                    }`}>
+                      {Math.round((v.ai_confidence || 0) * 100)}%
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{lang === 'he' && v.ai_name_hebrew ? v.ai_name_hebrew : v.ai_name}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[10px] text-slate-500">{v.ai_category}</span>
+                        {v.user_confirmed && <CheckCircle className="w-3 h-3 text-green-400" />}
+                        {v.user_correction && <span className="text-[10px] text-amber-400">→ {v.user_correction}</span>}
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      {v.price_mid > 0 && <p className="text-sm font-bold text-blue-400">₪{v.price_mid.toLocaleString()}</p>}
+                      <p className="text-[10px] text-slate-600">{new Date(v.created_at).toLocaleDateString()}</p>
+                    </div>
+                    {/* Delete button */}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteValuation(v.id); }}
+                      className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all flex-shrink-0 active:scale-90"
+                      aria-label="Delete scan"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </Card>
+                ))}
+
+                {/* Show More / Show Less */}
+                {valuations.length > scansVisible && (
+                  <button
+                    onClick={() => setScansVisible(prev => prev + 10)}
+                    className="w-full py-2.5 rounded-2xl bg-white/5 border border-white/5 text-xs text-slate-400 hover:bg-white/10 transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                    {lang === 'he' ? `עוד ${Math.min(10, valuations.length - scansVisible)} מתוך ${valuations.length - scansVisible} נותרים` : `Show ${Math.min(10, valuations.length - scansVisible)} more of ${valuations.length - scansVisible} remaining`}
+                  </button>
+                )}
+                {scansVisible > 5 && valuations.length <= scansVisible && (
+                  <button
+                    onClick={() => setScansVisible(5)}
+                    className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                  >
+                    {lang === 'he' ? 'הצג פחות' : 'Show less'}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!valuationsLoading && valuations.length === 0 && (
+              <p className="text-center text-xs text-slate-500 py-3">{lang === 'he' ? 'אין סריקות עדיין' : 'No scans yet'}</p>
+            )}
+          </>
         )}
       </FadeIn>
 

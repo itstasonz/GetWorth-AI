@@ -1073,6 +1073,34 @@ export function AppProvider({ children }) {
     }
   }, [user]);
 
+  // ── Delete a single valuation ──
+  const deleteValuation = useCallback(async (id) => {
+    if (!user || !id) return;
+    try {
+      const { error } = await supabase.from('valuations').delete().eq('id', id).eq('user_id', user.id);
+      if (error) throw error;
+      setValuations(prev => prev.filter(v => v.id !== id));
+      showToastMsg(lang === 'he' ? 'הסריקה נמחקה' : 'Scan deleted');
+    } catch (e) {
+      if (DEV) console.warn('[Valuation] Delete error:', e.message);
+      showToastMsg(lang === 'he' ? 'שגיאה במחיקה' : 'Delete failed');
+    }
+  }, [user, lang, showToastMsg]);
+
+  // ── Clear all valuations ──
+  const clearAllValuations = useCallback(async () => {
+    if (!user) return;
+    try {
+      const { error } = await supabase.from('valuations').delete().eq('user_id', user.id);
+      if (error) throw error;
+      setValuations([]);
+      showToastMsg(lang === 'he' ? 'כל הסריקות נמחקו' : 'All scans cleared');
+    } catch (e) {
+      if (DEV) console.warn('[Valuations] Clear error:', e.message);
+      showToastMsg(lang === 'he' ? 'שגיאה במחיקה' : 'Clear failed');
+    }
+  }, [user, lang, showToastMsg]);
+
   // ── Main pipeline: compress → analyze ──
   const runPipeline = useCallback(async (rawDataUrl) => {
     // Cancel any in-flight pipeline
@@ -1948,7 +1976,7 @@ export function AppProvider({ children }) {
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
     // Recognition refinement
     refineResult, confirmResult, correctResult,
-    valuations, valuationsLoading, loadValuations,
+    valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
     // Torch
     torchSupported, torchOn, toggleTorch,
     showFlash, capturedImageRef,
