@@ -82,6 +82,7 @@ export function AppProvider({ children }) {
   const [publishing, setPublishing] = useState(false);
   const capturedImageRef = useRef(null);
   const [showFlash, setShowFlash] = useState(false);
+  const loadRequestIdRef = useRef(0); // Race-condition guard for tab/filter switching
 
   // ─── Pipeline state machine ───
   // idle → compressing → analyzing → success
@@ -164,6 +165,13 @@ export function AppProvider({ children }) {
 
   const showToastMsg = (msg) => setToast(msg);
 
+  // ─── Refresh current user's profile from DB ───
+  const refreshProfile = useCallback(async () => {
+    if (!user) return;
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    if (data) setProfile(data);
+  }, [user]);
+
   // ─── Helper: get profile with in-memory cache ───
   const getCachedProfile = async (userId) => {
     if (!userId) return null;
@@ -236,6 +244,7 @@ export function AppProvider({ children }) {
   useEffect(() => {
     setListingsPage(0);
     setHasMore(true);
+    setListings([]); // Clear immediately — prevents stale items from previous tab showing during load
     loadListings(true);
   }, [category, filterCondition, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
 
@@ -373,6 +382,7 @@ export function AppProvider({ children }) {
   // ─── DATA LOADING ───────────────────────────────────
 
   const loadListings = async (reset = false) => {
+    const thisRequestId = ++loadRequestIdRef.current; // Increment request ID
     const page = reset ? 0 : listingsPage;
     const offset = page * PAGE_SIZE;
     let query = supabase
@@ -390,15 +400,23 @@ export function AppProvider({ children }) {
       if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%,description.ilike.%${safe}%,category.ilike.%${safe}%`);
     }
     const { data } = await query;
+    // Stale response guard: if another request fired while we were waiting, discard this result
+    if (thisRequestId !== loadRequestIdRef.current) return;
     if (data) {
-      if (reset || page === 0) { setListings(data); } else { setListings((prev) => [...prev, ...data]); }
-      setHasMore(data.length === PAGE_SIZE);
+      // Normalize category on read — trim whitespace to match tab IDs exactly
+      const normalized = data.map(item => ({
+        ...item,
+        category: item.category ? item.category.trim() : 'Other'
+      }));
+      if (reset || page === 0) { setListings(normalized); } else { setListings((prev) => [...prev, ...normalized]); }
+      setHasMore(normalized.length === PAGE_SIZE);
     }
   };
 
   const loadMoreListings = async () => {
     if (loadingMore || !hasMore) return;
     setLoadingMore(true);
+    const thisRequestId = ++loadRequestIdRef.current;
     const nextPage = listingsPage + 1;
     setListingsPage(nextPage);
     const offset = nextPage * PAGE_SIZE;
@@ -417,9 +435,14 @@ export function AppProvider({ children }) {
       if (safe) query = query.or(`title.ilike.%${safe}%,title_hebrew.ilike.%${safe}%,description.ilike.%${safe}%,category.ilike.%${safe}%`);
     }
     const { data } = await query;
+    if (thisRequestId !== loadRequestIdRef.current) { setLoadingMore(false); return; }
     if (data) {
-      setListings((prev) => [...prev, ...data]);
-      setHasMore(data.length === PAGE_SIZE);
+      const normalized = data.map(item => ({
+        ...item,
+        category: item.category ? item.category.trim() : 'Other'
+      }));
+      setListings((prev) => [...prev, ...normalized]);
+      setHasMore(normalized.length === PAGE_SIZE);
     }
     setLoadingMore(false);
   };
@@ -1300,23 +1323,33 @@ export function AppProvider({ children }) {
         imageUrls = images.length > 0 ? images : [];
         if (imageUrls.length === 0) throw new Error(lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required');
       }
+      const VALID_CATEGORIES = ['Electronics', 'Furniture', 'Vehicles', 'Watches', 'Clothing', 'Sports', 'Beauty', 'Books', 'Toys', 'Home', 'Tools', 'Music', 'Food', 'Other'];
+      const rawCategory = (result?.category || 'Other').trim();
+      const normalizedCategory = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'Other';
       const qualityScore = computeQualityScore({
         title: listingData.title, description: listingData.desc,
         images: imageUrls, condition, price: listingData.price,
-        category: result?.category,
+        category: normalizedCategory,
       });
       const listingRow = {
         seller_id: user.id, title: listingData.title, title_hebrew: result?.nameHebrew || '',
-        description: listingData.desc || '', category: result?.category || 'Other',
+        description: listingData.desc || '', category: normalizedCategory,
         condition, price: listingData.price, images: imageUrls,
         location: listingData.location, contact_phone: listingData.phone, status: 'active',
-        quality_score: qualityScore
+        quality_score: qualityScore,
+        attributes: Object.keys(answers).length > 0 ? answers : {},
       };
       let insertResult = await supabase.from('listings').insert(listingRow).select();
       // Fallback: if quality_score column doesn't exist, retry without it
       if (insertResult.error && insertResult.error.message?.includes('quality_score')) {
         if (DEV) console.warn('[Publish] quality_score column missing, retrying without it');
         delete listingRow.quality_score;
+        insertResult = await supabase.from('listings').insert(listingRow).select();
+      }
+      // Fallback: if attributes column doesn't exist yet, retry without it
+      if (insertResult.error && insertResult.error.message?.includes('attributes')) {
+        if (DEV) console.warn('[Publish] attributes column missing, retrying without it');
+        delete listingRow.attributes;
         insertResult = await supabase.from('listings').insert(listingRow).select();
       }
       if (insertResult.error) throw insertResult.error;
@@ -1593,7 +1626,7 @@ export function AppProvider({ children }) {
     else if (newTab === 'sell') setView('myListings');
     else if (newTab === 'saved') setView('saved');
     else if (newTab === 'messages') { setView('inbox'); loadConversations(); }
-    else if (newTab === 'profile') setView(user ? 'profile' : 'auth');
+    else if (newTab === 'profile') { setView(user ? 'profile' : 'auth'); if (user) refreshProfile(); }
   };
 
   const viewItem = (item) => { setSelected(item); setView('detail'); };
@@ -1611,15 +1644,16 @@ export function AppProvider({ children }) {
 
   const selectCondition = (c) => {
     setCondition(c);
-    setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, c, answers) }));
-    setListingStep(c === 'used' ? 1 : 2);
+    setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, c, answers, result?.category) }));
+    // Show category-specific questions for used/poor; skip for new/likeNew
+    setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
   };
 
   const value = {
     lang, setLang, t, rtl,
     user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading,
     signInGoogle, signInEmail, signOut,
-    uploadAvatar, avatarUploading,
+    uploadAvatar, avatarUploading, refreshProfile,
     requestVerification, verificationUploading,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,
     tab, setTab, view, setView, goTab, reset,

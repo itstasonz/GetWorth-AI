@@ -108,6 +108,80 @@ export function ListingFlowView() {
 
   const fileInputRef = useRef(null);
 
+  // ─── Category-Aware Question Schema ───
+  // Returns the right questions based on item category.
+  // Battery ONLY appears for electronics with batteries (phone/laptop/tablet).
+  const itemCategory = (result?.category || 'Other').trim();
+
+  const getQuestionsForCategory = () => {
+    const base = [
+      { key: 'scratches', opts: ['yes', 'no'] },
+      { key: 'issues', opts: ['yes', 'no'] },
+    ];
+
+    switch (itemCategory) {
+      case 'Electronics': {
+        // If user hasn't picked device type yet, show the chooser first
+        const hasBattery = ['devicePhone', 'deviceLaptop', 'deviceTablet'].includes(answers.deviceType);
+        const questions = [
+          { key: 'deviceType', opts: ['devicePhone', 'deviceLaptop', 'deviceTablet', 'deviceConsole', 'deviceCamera', 'deviceTV', 'deviceOther'], multi: true },
+          ...base,
+        ];
+        // Only add battery for phone/laptop/tablet
+        if (hasBattery) {
+          questions.push({ key: 'battery', opts: ['good', 'degraded', 'poor'] });
+        }
+        return questions;
+      }
+      case 'Furniture':
+        return [
+          { key: 'material', opts: ['wood', 'metal', 'fabric', 'plastic', 'leather'] },
+          { key: 'dimensions', opts: ['small', 'medium', 'large'] },
+          { key: 'assembly', opts: ['yes', 'no'] },
+          ...base,
+        ];
+      case 'Watches':
+        return [
+          { key: 'authenticity', opts: ['original', 'replica', 'unknown'] },
+          { key: 'boxPapers', opts: ['yes', 'no'] },
+          ...base,
+        ];
+      case 'Clothing':
+        return [
+          { key: 'size', opts: ['small', 'medium', 'large'] },
+          { key: 'materialType', opts: ['cotton', 'leather', 'synthetic', 'fabric'] },
+          ...base,
+        ];
+      case 'Sports':
+        return [
+          { key: 'sportType', opts: ['gym', 'cycling', 'water', 'ball', 'outdoor', 'other'] },
+          ...base,
+        ];
+      case 'Beauty':
+        // Covers jewelry, cosmetics, skincare, accessories
+        return [
+          { key: 'beautyType', opts: ['jewelry', 'cosmetics', 'skincare', 'accessory', 'other'] },
+          { key: 'authenticity', opts: ['original', 'replica', 'unknown'] },
+          ...base,
+        ];
+      case 'Vehicles':
+        return [
+          { key: 'vehicleType', opts: ['car', 'motorcycle', 'bicycle', 'scooter', 'other'] },
+          ...base,
+        ];
+      case 'Books':
+        return [
+          { key: 'bookCondition', opts: ['likeNew', 'good', 'worn'] },
+          ...base,
+        ];
+      default:
+        // Toys, Home, Tools, Music, Food, Other — generic questions only
+        return [...base];
+    }
+  };
+
+  const categoryQuestions = getQuestionsForCategory();
+
   const addMoreImages = (e) => {
     const files = Array.from(e.target.files || []);
     files.forEach((file) => {
@@ -159,25 +233,24 @@ export function ListingFlowView() {
         </>
       )}
 
-      {/* Step 1: Used condition details */}
+      {/* Step 1: Used condition details — CATEGORY-AWARE */}
       {listingStep === 1 && (
         <>
           <BackButton onClick={() => setListingStep(0)} rtl={rtl} label={t.back} />
-          <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.more}</h2></FadeIn>
+          <FadeIn className="text-center">
+            <h2 className="text-2xl font-bold">{t.more}</h2>
+            <p className="text-xs text-slate-500 mt-1">{itemCategory}</p>
+          </FadeIn>
           <div className="space-y-4">
-            {[
-              { key: 'scratches', opts: ['yes', 'no'] },
-              { key: 'battery', opts: ['good', 'degraded', 'poor'] },
-              { key: 'issues', opts: ['yes', 'no'] }
-            ].map((q, i) => (
+            {categoryQuestions.map((q, i) => (
               <FadeIn key={q.key} delay={i * 50}>
                 <Card className="p-5">
-                  <p className="font-medium mb-3">{t[q.key]}</p>
-                  <div className="flex gap-2">
+                  <p className="font-medium mb-3">{t[q.key] || q.key}</p>
+                  <div className={`flex gap-2 ${q.multi ? 'flex-wrap' : ''}`}>
                     {q.opts.map((o) => (
                       <button key={o} onClick={() => setAnswers({ ...answers, [q.key]: o })}
-                        className={`flex-1 py-3 rounded-xl text-sm font-medium transition-all ${answers[q.key] === o ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/5 hover:bg-white/10'}`}>
-                        {t[o]}
+                        className={`${q.multi ? 'px-3' : 'flex-1'} py-3 rounded-xl text-sm font-medium transition-all ${answers[q.key] === o ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/5 hover:bg-white/10'}`}>
+                        {t[o] || o}
                       </button>
                     ))}
                   </div>
@@ -189,12 +262,12 @@ export function ListingFlowView() {
             <Card className="p-5 text-center" gradient="linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))" glow>
               <p className="text-sm text-emerald-300 mb-1">{t.yourPrice}</p>
               <p className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
-                {formatPrice(calcPrice(result?.marketValue?.mid, 'used', answers))}
+                {formatPrice(calcPrice(result?.marketValue?.mid, 'used', answers, itemCategory))}
               </p>
             </Card>
           </FadeIn>
           <FadeIn delay={200}>
-            <Btn primary className="w-full py-4" onClick={() => { setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, 'used', answers) })); setListingStep(2); }}>
+            <Btn primary className="w-full py-4" onClick={() => { setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, condition, answers, itemCategory) })); setListingStep(2); }}>
               {t.continue}
             </Btn>
           </FadeIn>
@@ -204,7 +277,7 @@ export function ListingFlowView() {
       {/* Step 2: Review */}
       {listingStep === 2 && (
         <>
-          <BackButton onClick={() => setListingStep(condition === 'used' ? 1 : 0)} rtl={rtl} label={t.back} />
+          <BackButton onClick={() => setListingStep((condition === 'used' || condition === 'poor') ? 1 : 0)} rtl={rtl} label={t.back} />
           <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.review}</h2></FadeIn>
 
           {/* Image management strip */}
