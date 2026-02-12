@@ -11,6 +11,24 @@ const T = {
     tagline: 'Discover what your stuff is worth',
     welcome: 'Welcome',
 
+    // Home Hero
+    aiPowered: 'AI-Powered',
+    heroTitle1: 'Know Your',
+    heroTitle2: "Item's Value",
+    heroSub: 'Snap or upload any item for instant AI valuation.',
+    upload: 'Upload',
+    drop: 'Drop image here',
+    orButtons: 'or use buttons below',
+    hotItems: 'Hot Items',
+    seeAll: 'See All',
+    sellBanner: 'Have something to sell?',
+    sellBannerSub: 'Scan your item and get instant valuation',
+
+    // Nav
+    home: 'Home',
+    sell: 'Sell',
+    profile: 'Profile',
+
     // Bottom Nav
     browse: 'Browse',
     scan: 'Scan',
@@ -99,6 +117,31 @@ const T = {
     myListings: 'My Listings',
     noListings: 'No listings yet. Scan an item to start!',
 
+    // Auth (extended)
+    signInReq: 'Sign In Required',
+    signInContact: 'Sign in to contact',
+    name: 'Full Name',
+    email: 'Email',
+    createAcc: 'Create account',
+    join: 'Join GetWorth',
+    cancel: 'Cancel',
+
+    // Contact / Seller
+    contact: 'Contact',
+    call: 'Call',
+    whatsapp: 'WhatsApp',
+    seller: 'Seller',
+    views: 'views',
+
+    // Sort options
+    newest: 'Newest',
+    lowHigh: 'Low-High',
+    highLow: 'High-Low',
+
+    // Errors
+    failed: 'Analysis failed',
+    cameraDenied: 'Camera access denied',
+
     // ─── Category-Aware Question Labels ───
     // Generic (all categories)
     scratches: 'Any scratches or cosmetic damage?',
@@ -173,6 +216,24 @@ const T = {
     appName: 'GetWorth',
     tagline: 'גלו כמה שווים הדברים שלכם',
     welcome: 'ברוכים הבאים',
+
+    // Home Hero
+    aiPowered: 'AI',
+    heroTitle1: 'גלה את',
+    heroTitle2: 'שווי הפריט',
+    heroSub: 'צלם או העלה תמונה לקבלת הערכה.',
+    upload: 'העלאה',
+    drop: 'גרור תמונה',
+    orButtons: 'או לחץ למטה',
+    hotItems: 'פריטים חמים',
+    seeAll: 'הצג הכל',
+    sellBanner: 'יש לכם משהו למכור?',
+    sellBannerSub: 'סרקו את הפריט וקבלו הערכה מיידית',
+
+    // Nav
+    home: 'בית',
+    sell: 'מכירה',
+    profile: 'פרופיל',
 
     // Bottom Nav
     browse: 'גלישה',
@@ -260,6 +321,31 @@ const T = {
     listItem: 'פרסם למכירה',
     myListings: 'המודעות שלי',
     noListings: 'אין מודעות עדיין. סרקו פריט כדי להתחיל!',
+
+    // Auth (extended)
+    signInReq: 'נדרשת התחברות',
+    signInContact: 'התחבר ליצירת קשר',
+    name: 'שם',
+    email: 'אימייל',
+    createAcc: 'צור חשבון',
+    join: 'הצטרף',
+    cancel: 'ביטול',
+
+    // Contact / Seller
+    contact: 'צור קשר',
+    call: 'התקשר',
+    whatsapp: 'וואטסאפ',
+    seller: 'מוכר',
+    views: 'צפיות',
+
+    // Sort options
+    newest: 'חדש',
+    lowHigh: 'מחיר ↑',
+    highLow: 'מחיר ↓',
+
+    // Errors
+    failed: 'הניתוח נכשל',
+    cameraDenied: 'הגישה למצלמה נדחתה',
 
     // ─── Category-Aware Question Labels ───
     scratches: 'שריטות או נזק חיצוני?',
