@@ -75,6 +75,8 @@ export function AppProvider({ children }) {
   // Scan/listing flow state
   const [images, setImages] = useState([]);
   const [result, setResult] = useState(null);
+  const [valuations, setValuations] = useState([]);
+  const [valuationsLoading, setValuationsLoading] = useState(false);
   const [listingStep, setListingStep] = useState(0);
   const [condition, setCondition] = useState(null);
   const [answers, setAnswers] = useState({});
@@ -908,6 +910,12 @@ export function AppProvider({ children }) {
       setResult(analysisResult);
       setView('results');
       playSound('success');
+
+      // Store valuation in DB (async, non-blocking)
+      storeValuation(analysisResult).then(vid => {
+        if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
+      });
+
       if (DEV) console.log(`[Pipeline] Complete in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
 
     } catch (e) {
@@ -924,7 +932,7 @@ export function AppProvider({ children }) {
       playSound('error');
       // Stay on 'analyzing' view — it now shows error UI with Retry
     }
-  }, [analyzeWithRetry, playSound, lang]);
+  }, [analyzeWithRetry, storeValuation, playSound, lang]);
 
   // ── Retry from the failed step ──
   const retryPipeline = useCallback(() => {
@@ -964,6 +972,17 @@ export function AppProvider({ children }) {
       setResult(refined);
       setView('results');
       playSound('success');
+
+      // Store correction on old valuation, create new one for refined result
+      const oldValuationId = result?.valuation_id;
+      if (oldValuationId) {
+        supabase.from('valuations').update({ user_confirmed: false, user_correction: modelName })
+          .eq('id', oldValuationId).then(() => {});
+      }
+      storeValuation(refined).then(vid => {
+        if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
+      });
+
       if (DEV) console.log('[Refine] Complete:', refined.name);
     } catch (e) {
       if (e.name === 'AbortError') return;
@@ -972,13 +991,75 @@ export function AppProvider({ children }) {
       setView('results');
       showToastMsg(lang === 'he' ? 'שגיאה בעדכון, מחירים מקוריים נשמרו' : 'Update failed, original prices kept');
     }
-  }, [images, analyzeWithRetry, playSound, lang, showToastMsg]);
+  }, [images, result, analyzeWithRetry, storeValuation, playSound, lang, showToastMsg]);
 
   // ── Confirm: user says the identification is correct ──
+  // ── Store valuation in DB (non-blocking, best-effort) ──
+  const storeValuation = useCallback(async (aiResult) => {
+    if (!user) return null;
+    try {
+      const row = {
+        user_id: user.id,
+        ai_name: aiResult.name || 'Unknown',
+        ai_name_hebrew: aiResult.nameHebrew || '',
+        ai_category: aiResult.category || 'Other',
+        ai_confidence: aiResult.confidence || 0,
+        ai_raw_response: aiResult,
+        ocr_text: aiResult.recognition?.ocrText || null,
+        model_number: aiResult.recognition?.modelNumber || null,
+        identified_by: aiResult.recognition?.identifiedBy || 'visual',
+        alternatives: aiResult.recognition?.alternatives || [],
+        price_low: aiResult.marketValue?.low || null,
+        price_mid: aiResult.marketValue?.mid || null,
+        price_high: aiResult.marketValue?.high || null,
+        new_retail: aiResult.marketValue?.newRetailPrice || null,
+        price_method: 'ai_estimate',
+        lang,
+      };
+      const { data, error } = await supabase.from('valuations').insert(row).select('id').single();
+      if (error) {
+        if (DEV) console.warn('[Valuation] Store failed:', error.message);
+        return null;
+      }
+      if (DEV) console.log('[Valuation] Stored:', data.id);
+      return data.id;
+    } catch (e) {
+      if (DEV) console.warn('[Valuation] Store error:', e.message);
+      return null;
+    }
+  }, [user, lang]);
+
+  // ── Load user's valuation history ──
+  const loadValuations = useCallback(async () => {
+    if (!user) return;
+    setValuationsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('valuations')
+        .select('id, ai_name, ai_name_hebrew, ai_category, ai_confidence, price_mid, price_method, user_confirmed, user_correction, created_at')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      setValuations(data || []);
+    } catch (e) {
+      if (DEV) console.warn('[Valuations] Load error:', e.message);
+    } finally {
+      setValuationsLoading(false);
+    }
+  }, [user]);
+
   const confirmResult = useCallback(() => {
     if (!result) return;
     setResult(prev => ({ ...prev, userConfirmed: true, needsConfirmation: false }));
     playSound('tap');
+    // Persist confirmation to valuations table
+    if (result.valuation_id) {
+      supabase.from('valuations').update({ user_confirmed: true, identified_by: 'user_confirmed' })
+        .eq('id', result.valuation_id).then(() => {
+          if (DEV) console.log('[Confirm] Stored in DB');
+        });
+    }
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
   }, [result, playSound]);
 
@@ -1337,6 +1418,9 @@ export function AppProvider({ children }) {
         location: listingData.location, contact_phone: listingData.phone, status: 'active',
         quality_score: qualityScore,
         attributes: Object.keys(answers).length > 0 ? answers : {},
+        // Link to valuation system
+        ...(result?.valuation_id && { valuation_id: result.valuation_id }),
+        ...(result?.confidence && { ai_confidence: result.confidence }),
       };
       let insertResult = await supabase.from('listings').insert(listingRow).select();
       // Fallback: if quality_score column doesn't exist, retry without it
@@ -1351,7 +1435,24 @@ export function AppProvider({ children }) {
         delete listingRow.attributes;
         insertResult = await supabase.from('listings').insert(listingRow).select();
       }
+      // Fallback: if valuation_id column doesn't exist yet, retry without it
+      if (insertResult.error && (insertResult.error.message?.includes('valuation_id') || insertResult.error.message?.includes('ai_confidence'))) {
+        if (DEV) console.warn('[Publish] valuation columns missing, retrying without them');
+        delete listingRow.valuation_id;
+        delete listingRow.ai_confidence;
+        insertResult = await supabase.from('listings').insert(listingRow).select();
+      }
       if (insertResult.error) throw insertResult.error;
+
+      // Link valuation → listing (back-reference for feedback loop)
+      const newListingId = insertResult.data?.[0]?.id;
+      if (newListingId && result?.valuation_id) {
+        supabase.from('valuations').update({ listing_id: newListingId })
+          .eq('id', result.valuation_id).then(() => {
+            if (DEV) console.log('[Publish] Valuation linked to listing:', newListingId);
+          });
+      }
+
       await loadUserData();
       await loadListings(true);
       setListingStep(3);
@@ -1681,6 +1782,7 @@ export function AppProvider({ children }) {
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
     // Recognition refinement
     refineResult, confirmResult, correctResult,
+    valuations, valuationsLoading, loadValuations,
     // Torch
     torchSupported, torchOn, toggleTorch,
     showFlash, capturedImageRef,

@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload, Package } from 'lucide-react';
+import { User, LogOut, Heart, ShoppingBag, TrendingUp, BarChart3, Loader2, Camera, Shield, CheckCircle, Clock, XCircle, Upload, Package, Scan } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, InputField } from '../components/ui';
 import { STAT_COLORS } from '../lib/utils';
@@ -68,6 +68,7 @@ export function ProfileView() {
     uploadAvatar, avatarUploading,
     requestVerification, verificationUploading,
     loadOrders,
+    valuations, valuationsLoading, loadValuations,
   } = useApp();
 
   const avatarInputRef = useRef(null);
@@ -269,6 +270,57 @@ export function ProfileView() {
             <p className="text-xs text-slate-400">{lang === 'he' ? 'קניות ומכירות' : 'Purchases & sales'}</p>
           </div>
         </button>
+      </FadeIn>
+
+      {/* My Scans — Valuation History */}
+      <FadeIn delay={175}>
+        <button onClick={loadValuations} className="w-full p-4 rounded-3xl bg-gradient-to-r from-blue-500/10 to-cyan-500/10 border border-blue-500/20 flex items-center gap-4 hover:bg-blue-500/20 transition-all active:scale-[0.98]">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/30 to-cyan-500/30 flex items-center justify-center">
+            <Scan className="w-6 h-6 text-blue-400" />
+          </div>
+          <div className="flex-1 text-left">
+            <p className="font-bold text-white">{lang === 'he' ? 'הסריקות שלי' : 'My Scans'}</p>
+            <p className="text-xs text-slate-400">{lang === 'he' ? 'היסטוריית הערכות AI' : 'AI valuation history'}</p>
+          </div>
+        </button>
+
+        {/* Inline valuation list (shown after load) */}
+        {valuationsLoading && (
+          <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
+        )}
+        {!valuationsLoading && valuations.length > 0 && (
+          <div className="mt-3 space-y-2">
+            {valuations.slice(0, 10).map((v) => (
+              <Card key={v.id} className="p-3 flex items-center gap-3">
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold ${
+                  v.ai_confidence >= 0.9 ? 'bg-green-500/20 text-green-300' :
+                  v.ai_confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' :
+                  'bg-amber-500/20 text-amber-300'
+                }`}>
+                  {Math.round((v.ai_confidence || 0) * 100)}%
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{lang === 'he' && v.ai_name_hebrew ? v.ai_name_hebrew : v.ai_name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-[10px] text-slate-500">{v.ai_category}</span>
+                    {v.user_confirmed && <CheckCircle className="w-3 h-3 text-green-400" />}
+                    {v.user_correction && <span className="text-[10px] text-amber-400">→ {v.user_correction}</span>}
+                  </div>
+                </div>
+                <div className="text-right">
+                  {v.price_mid > 0 && <p className="text-sm font-bold text-blue-400">₪{v.price_mid.toLocaleString()}</p>}
+                  <p className="text-[10px] text-slate-600">{new Date(v.created_at).toLocaleDateString()}</p>
+                </div>
+              </Card>
+            ))}
+            {valuations.length > 10 && (
+              <p className="text-center text-xs text-slate-500 py-1">{lang === 'he' ? `+${valuations.length - 10} נוספים` : `+${valuations.length - 10} more`}</p>
+            )}
+          </div>
+        )}
+        {!valuationsLoading && valuations.length === 0 && valuations !== null && (
+          <p className="text-center text-xs text-slate-500 py-3">{lang === 'he' ? 'אין סריקות עדיין' : 'No scans yet'}</p>
+        )}
       </FadeIn>
 
       {/* Admin-only Panel */}

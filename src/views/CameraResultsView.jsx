@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Gem, Database } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice } from '../lib/utils';
@@ -338,6 +338,12 @@ export function ResultsView() {
           <div className="absolute bottom-0 left-0 right-0 p-5">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge color="blue">{result.category}</Badge>
+              {result.subcategory && result.subcategory !== 'Other' && (
+                <Badge color="purple">{result.subcategory}</Badge>
+              )}
+              {result.is_collectible && (
+                <Badge color="amber"><Gem className="w-3 h-3 mr-1" />{lang === 'he' ? 'אספנות' : 'Collectible'}</Badge>
+              )}
               {/* Confidence badge */}
               <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md ${confidence >= 0.9 ? 'bg-green-500/20 text-green-300' : confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' : 'bg-amber-500/20 text-amber-300'}`}>
                 {isConfirmed ? <Check className="w-3 h-3" /> : <Search className="w-3 h-3" />}
@@ -454,6 +460,20 @@ export function ResultsView() {
             <p className="text-[11px] text-slate-500 mt-1.5">
               {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
             </p>
+          )}
+          {/* Price method indicator — shows data source */}
+          {result.valuation_id && (
+            <div className="flex items-center justify-center gap-1.5 mt-3 pt-3 border-t border-white/5">
+              <Database className="w-3 h-3 text-slate-600" />
+              <span className="text-[10px] text-slate-600">
+                {result.price_method === 'comp_median'
+                  ? (lang === 'he' ? `מבוסס ${result.comp_count} מכירות` : `Based on ${result.comp_count} sales`)
+                  : result.price_method === 'hybrid'
+                    ? (lang === 'he' ? `AI + ${result.comp_count} מכירות` : `AI + ${result.comp_count} sales`)
+                    : (lang === 'he' ? 'הערכת AI' : 'AI estimate')
+                }
+              </span>
+            </div>
           )}
         </Card>
       </FadeIn>
