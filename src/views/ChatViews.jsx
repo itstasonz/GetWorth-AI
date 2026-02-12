@@ -71,9 +71,17 @@ export function InboxView() {
 }
 
 export function ChatView() {
-  const { lang, rtl, user, activeChat, setActiveChat, setView, messages, newMessage, setNewMessage, sendMessage, sendingMessage, messagesEndRef } = useApp();
+  const { lang, rtl, user, activeChat, setActiveChat, setView, setSelected, messages, newMessage, setNewMessage, sendMessage, sendingMessage, messagesEndRef } = useApp();
 
   if (!activeChat) return null;
+
+  // Navigate to listing detail page
+  const goToListing = () => {
+    if (activeChat.listing) {
+      setSelected(activeChat.listing);
+      setView('detail');
+    }
+  };
 
   return (
     <div className="flex flex-col h-[calc(100vh-180px)] -mx-5">
@@ -82,9 +90,15 @@ export function ChatView() {
         <button onClick={() => { setActiveChat(null); setView('inbox'); }} className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center">
           {rtl ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
-        <div className="w-10 h-10 rounded-xl overflow-hidden">
+        {/* Thumbnail — tapping opens the listing detail */}
+        <button
+          type="button"
+          aria-label="Open listing"
+          onClick={goToListing}
+          className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 cursor-pointer active:scale-95 transition-transform"
+        >
           <img src={activeChat.listing?.images?.[0]} alt="" className="w-full h-full object-cover" />
-        </div>
+        </button>
         <div className="flex-1 min-w-0">
           <p className="font-semibold truncate">{activeChat.otherUser?.full_name || activeChat.seller?.full_name || 'User'}</p>
           <p className="text-xs text-slate-400 truncate">{activeChat.listing?.title}</p>
