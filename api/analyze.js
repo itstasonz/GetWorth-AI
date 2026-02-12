@@ -2,6 +2,31 @@ export const config = {
   runtime: 'edge',
 };
 
+/**
+ * Build a "KNOWN CORRECTIONS" block for the system prompt.
+ * Each correction is a compact line Claude can reference during identification.
+ * 
+ * Example output:
+ *   ⚠ "MSI GeForce RTX 4070 SUPRIM X" → actually "MSI GeForce RTX 4080 SUPRIM X 16GB GDDR6X" (corrected 12×). Cue: Look for "4080" and "16G" on packaging.
+ *   ⚠ "iPhone 14 Pro Max" → actually "iPhone 15 Pro Max" (corrected 8×). Cue: Check for Dynamic Island shape and USB-C port.
+ */
+function buildCorrectionsPrompt(corrections) {
+  if (!corrections || corrections.length === 0) return '';
+
+  const lines = corrections.map(c => {
+    let line = `⚠ "${c.original_name}" → actually "${c.corrected_name}" (corrected ${c.times_corrected}×)`;
+    if (c.visual_cue) line += `. Cue: ${c.visual_cue}`;
+    return line;
+  });
+
+  return `
+
+KNOWN MISIDENTIFICATIONS (from user corrections — avoid these mistakes!):
+${lines.join('\n')}
+
+Use the above corrections as reference. If the item in the image matches any of these patterns, prefer the corrected identification. Pay extra attention to the visual cues listed.`;
+}
+
 export default async function handler(req) {
   if (req.method === 'OPTIONS') {
     return new Response(null, {
@@ -15,7 +40,7 @@ export default async function handler(req) {
   }
 
   try {
-    const { imageData, lang = 'he', refineModel = null } = await req.json();
+    const { imageData, lang = 'he', refineModel = null, corrections = [] } = await req.json();
 
     if (!imageData) {
       return new Response(JSON.stringify({ error: 'No image data provided' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -27,6 +52,9 @@ export default async function handler(req) {
     }
 
     const isHebrew = lang === 'he';
+
+    // ── Build the corrections block for prompt injection ──
+    const correctionsBlock = buildCorrectionsPrompt(corrections);
 
     const systemPrompt = `You are GetWorth AI — a pricing expert specializing in Israeli second-hand marketplaces (Yad2, Facebook Marketplace Israel, and ZAP used listings).
 
@@ -60,6 +88,7 @@ E) ALTERNATIVES:
 - Each alternative has its own name, confidence, and estimated mid price
 - Alternatives should be meaningfully different (not just color variants)
 ${refineModel ? `\nIMPORTANT: The user has confirmed this is "${refineModel}". Use this to provide accurate pricing. Set confidence to 0.95+.` : ''}
+${correctionsBlock}
 
 STEP 2 — PRICE IT FOR ISRAELI SECOND-HAND MARKET:
 
@@ -91,6 +120,14 @@ PlayStation 4 Pro: 600-900 | PS4 Slim: 400-600
 Xbox Series X: 1,400-1,800 | Xbox Series S: 700-1,000
 Nintendo Switch OLED: 1,000-1,300 | Switch V2: 700-900 | Switch Lite: 400-600
 Steam Deck 512GB: 1,800-2,400 | Meta Quest 3: 1,500-2,000
+
+GPU — Second-hand (₪, Good):
+NVIDIA RTX 4090: 6,000-8,000 | RTX 4080 SUPER: 3,500-4,500 | RTX 4080: 3,000-4,000
+RTX 4070 Ti SUPER: 2,500-3,200 | RTX 4070 Ti: 2,200-2,800 | RTX 4070 SUPER: 2,000-2,600 | RTX 4070: 1,800-2,200
+RTX 4060 Ti: 1,400-1,800 | RTX 4060: 1,100-1,400
+RTX 3090: 2,500-3,500 | RTX 3080: 1,500-2,200 | RTX 3070: 1,000-1,500 | RTX 3060: 700-1,000
+AMD RX 7900 XTX: 3,000-4,000 | RX 7900 XT: 2,200-3,000 | RX 7800 XT: 1,600-2,200
+MSI SUPRIM X models: ALWAYS read the full model number on the box/card (e.g., "RTX 4080 SUPRIM X 16G" vs "RTX 4070 Ti SUPRIM X")
 
 AUDIO — Second-hand (₪, Good):
 AirPods Pro 2: 550-750 | AirPods 3: 300-400 | AirPods Max: 1,400-1,800
@@ -143,7 +180,9 @@ CRITICAL RULES:
 - Prices in ₪ (ILS) only — NEVER USD
 - NEVER return 0 for sellable items
 - These are SECOND-HAND prices, not new retail
-- Be honest about confidence`;
+- Be honest about confidence
+- When you see a GPU box: read the FULL model name including memory size (e.g., "16G GDDR6X")
+- For products with many variants (GPUs, phones), the EXACT model number matters for pricing`;
 
     const alternativesSchema = `,"recognition":{"ocrText":"all visible text extracted","modelNumber":"specific model number if found","identifiedBy":"ocr/visual/both","alternatives":[{"name":"Alternative name","nameHebrew":"שם חלופי","confidence":0.7,"estimatedMid":0}]}`;
 
@@ -154,14 +193,14 @@ CRITICAL RULES:
 ${refineModel ? `המשתמש ציין שזה "${refineModel}". תמחר בהתאם.` : 'אם לא בטוח 100%, ציין חלופות אפשריות.'}
 
 ענה אך ורק ב-JSON תקין (ללא markdown, ללא backticks):
-{"name":"שם באנגלית (מותג + דגם)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","subcategory":"Phones/Laptops/Tablets/Consoles/Cameras/TVs/Audio/Sofas/Tables/Luxury/Smart/Shoes/Streetwear/Designer/Jewelry/Fragrances/Cars/Bicycles/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"יד2 / פייסבוק מרקטפלייס"},"details":{"description":"תיאור (2-3 משפטים)","brand":"מותג","model":"דגם מדויק","year":"שנה","identificationNotes":"מה בתמונה עזר לזהות","additionalInfo":"מידע נוסף"},"priceFactors":[{"factor":"גורם","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"טיפ למכירה","whereToBuy":"איפה למכור","israeliMarketNotes":"הערות"${alternativesSchema}}`
+{"name":"שם באנגלית (מותג + דגם מלא כולל מפרט)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","subcategory":"Phones/Laptops/Tablets/Consoles/Cameras/TVs/Audio/GPUs/Sofas/Tables/Luxury/Smart/Shoes/Streetwear/Designer/Jewelry/Fragrances/Cars/Bicycles/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"יד2 / פייסבוק מרקטפלייס"},"details":{"description":"תיאור (2-3 משפטים)","brand":"מותג","model":"דגם מדויק כולל מפרט (למשל: RTX 4080 SUPRIM X 16G GDDR6X)","year":"שנה","identificationNotes":"מה בתמונה עזר לזהות","additionalInfo":"מידע נוסף"},"priceFactors":[{"factor":"גורם","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"טיפ למכירה","whereToBuy":"איפה למכור","israeliMarketNotes":"הערות"${alternativesSchema}}`
       : `Identify this item and price it for the Israeli second-hand market.
 
 IMPORTANT: Read ALL visible text — model numbers, labels, logos, serial numbers. Use them for precise identification.
 ${refineModel ? `The user confirmed this is "${refineModel}". Price accordingly.` : 'If not 100% certain, provide possible alternatives.'}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
-{"name":"English name (Brand + Exact Model)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","subcategory":"Phones/Laptops/Tablets/Consoles/Cameras/TVs/Audio/Sofas/Tables/Luxury/Smart/Shoes/Streetwear/Designer/Jewelry/Fragrances/Cars/Bicycles/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"Yad2 / Facebook Marketplace"},"details":{"description":"Description (2-3 sentences)","brand":"Brand","model":"Exact Model","year":"Year","identificationNotes":"What in the image helped identify","additionalInfo":"Additional info"},"priceFactors":[{"factor":"Factor","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"Tip for quick sale","whereToBuy":"Where to sell","israeliMarketNotes":"Notes"${alternativesSchema}}`;
+{"name":"English name (Brand + Full Model including specs)","nameHebrew":"שם בעברית","category":"Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Beauty/Books/Toys/Home/Tools/Music/Food/Other","subcategory":"Phones/Laptops/Tablets/Consoles/Cameras/TVs/Audio/GPUs/Sofas/Tables/Luxury/Smart/Shoes/Streetwear/Designer/Jewelry/Fragrances/Cars/Bicycles/Other","confidence":0.85,"isSellable":true,"condition":"New Sealed/Like New/Excellent/Good/Fair/Poor","marketValue":{"low":0,"mid":0,"high":0,"currency":"ILS","newRetailPrice":0,"priceSource":"Yad2 / Facebook Marketplace"},"details":{"description":"Description (2-3 sentences)","brand":"Brand","model":"Exact Model including full specs (e.g., RTX 4080 SUPRIM X 16G GDDR6X)","year":"Year","identificationNotes":"What in the image helped identify","additionalInfo":"Additional info"},"priceFactors":[{"factor":"Factor","impact":"+/- ₪X","direction":"up/down"}],"marketTrend":"up/down/stable","demandLevel":"high/moderate/low","sellingTips":"Tip for quick sale","whereToBuy":"Where to sell","israeliMarketNotes":"Notes"${alternativesSchema}}`;
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',

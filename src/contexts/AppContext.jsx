@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useRef, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
@@ -169,7 +169,7 @@ export function AppProvider({ children }) {
     }
   }, [soundEnabled]);
 
-  const showToastMsg = (msg) => setToast(msg);
+  const showToastMsg = useCallback((msg) => setToast(msg), []);
 
   // ─── Refresh current user's profile from DB ───
   const refreshProfile = useCallback(async () => {
@@ -461,7 +461,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  const dismissNotification = () => setMsgNotification(null);
+  const dismissNotification = useCallback(() => setMsgNotification(null), []);
 
   // ─── DATA LOADING ───────────────────────────────────
 
@@ -564,7 +564,7 @@ export function AppProvider({ children }) {
 
   // ─── CHAT ───────────────────────────────────────────
 
-  const loadConversations = async () => {
+  const loadConversations = useCallback(async () => {
     if (!user) return;
     const { data } = await supabase
       .from('conversations')
@@ -578,7 +578,7 @@ export function AppProvider({ children }) {
       }, 0);
       setUnreadCount(unread);
     }
-  };
+  }, [user]);
 
   const loadMessages = async (conversationId) => {
     const { data } = await supabase
@@ -842,7 +842,7 @@ export function AppProvider({ children }) {
 
   // ─── ITEM ACTIONS ───────────────────────────────────
 
-  const toggleSave = async (item) => {
+  const toggleSave = useCallback(async (item) => {
     if (!user) { setSignInAction('save'); setShowSignInModal(true); return; }
     setHeartAnim(item.id);
     setTimeout(() => setHeartAnim(null), 800);
@@ -857,7 +857,7 @@ export function AppProvider({ children }) {
       setSavedItems((prev) => [...prev, item]);
       showToastMsg('Saved!');
     }
-  };
+  }, [user, savedIds, showToastMsg]);
 
   const deleteListing = async (id) => {
     await supabase.from('listings').update({ status: 'deleted' }).eq('id', id);
@@ -878,8 +878,66 @@ export function AppProvider({ children }) {
   //  • Error UI stays on analyzing screen with Retry button
   // ═══════════════════════════════════════════════════════
 
+  // ── Fetch recognition hints (corrections) from DB for prompt injection ──
+  // Queries aggregated correction patterns so Claude avoids repeat mistakes.
+  // Called before every analysis. Returns top patterns by relevance.
+  const fetchRecognitionHints = useCallback(async () => {
+    try {
+      const { data, error } = await supabase.rpc('get_recognition_hints', { p_limit: 15 });
+      if (error) {
+        if (DEV) console.warn('[Hints] Fetch failed:', error.message);
+        return [];
+      }
+      if (DEV && data?.length) console.log(`[Hints] Loaded ${data.length} correction patterns`);
+      return data || [];
+    } catch (e) {
+      if (DEV) console.warn('[Hints] Error:', e.message);
+      return [];
+    }
+  }, []);
+
+  // ── Store a correction pattern (user said Claude was wrong) ──
+  const storeCorrection = useCallback(async (originalName, correctedName, category, brand, ocrText, modelNumber, confidence, valuationId) => {
+    try {
+      const { error } = await supabase.rpc('upsert_correction', {
+        p_original_name: originalName,
+        p_corrected_name: correctedName,
+        p_category: category || null,
+        p_brand: brand || null,
+        p_visual_cue: ocrText ? `OCR found: "${ocrText.slice(0, 100)}"` : null,
+        p_user_id: user?.id || null,
+        p_valuation_id: valuationId || null,
+        p_ocr_text: ocrText || null,
+        p_model_number: modelNumber || null,
+        p_confidence: confidence || null,
+      });
+      if (error) {
+        if (DEV) console.warn('[Correction] Store failed:', error.message);
+      } else {
+        if (DEV) console.log(`[Correction] Stored: "${originalName}" → "${correctedName}"`);
+      }
+    } catch (e) {
+      if (DEV) console.warn('[Correction] Error:', e.message);
+    }
+  }, [user]);
+
+  // ── Store a confirmation (user said Claude was right) ──
+  const storeConfirmation = useCallback(async (aiName, category, brand) => {
+    try {
+      const { error } = await supabase.rpc('upsert_confirmation', {
+        p_ai_name: aiName,
+        p_category: category || null,
+        p_brand: brand || null,
+      });
+      if (error && DEV) console.warn('[Confirm] Store failed:', error.message);
+      else if (DEV) console.log(`[Confirm] Stored confirmation for "${aiName}"`);
+    } catch (e) {
+      if (DEV) console.warn('[Confirm] Error:', e.message);
+    }
+  }, []);
+
   // ── Internal: call /api/analyze with retry + timeout ──
-  const analyzeWithRetry = useCallback(async (compressedDataUrl, pipelineSignal, maxRetries = 1, refineModel = null) => {
+  const analyzeWithRetry = useCallback(async (compressedDataUrl, pipelineSignal, maxRetries = 1, refineModel = null, corrections = []) => {
     const base64 = compressedDataUrl.split(',')[1];
     let lastError;
 
@@ -903,7 +961,7 @@ export function AppProvider({ children }) {
 
       const t0 = performance.now();
       try {
-        const body = { imageData: base64, lang };
+        const body = { imageData: base64, lang, corrections };
         if (refineModel) body.refineModel = refineModel;
 
         const res = await fetch('/api/analyze', {
@@ -1036,10 +1094,14 @@ export function AppProvider({ children }) {
 
       if (abortCtrl.signal.aborted) return;
 
-      // ── Step 2: Analyze ──
+      // ── Step 2: Fetch correction hints + Analyze ──
       setPipelineState('analyzing');
-      if (DEV) console.log('[Pipeline] Analyzing...');
-      const analysisResult = await analyzeWithRetry(compressed, abortCtrl.signal);
+      if (DEV) console.log('[Pipeline] Fetching hints & analyzing...');
+      
+      // Fetch past correction patterns (non-blocking — if it fails, analyze without hints)
+      const hints = await fetchRecognitionHints().catch(() => []);
+      
+      const analysisResult = await analyzeWithRetry(compressed, abortCtrl.signal, 1, null, hints);
 
       if (abortCtrl.signal.aborted) return;
 
@@ -1070,7 +1132,7 @@ export function AppProvider({ children }) {
       playSound('error');
       // Stay on 'analyzing' view — it now shows error UI with Retry
     }
-  }, [analyzeWithRetry, storeValuation, playSound, lang]);
+  }, [analyzeWithRetry, fetchRecognitionHints, storeValuation, playSound, lang]);
 
   // ── Retry from the failed step ──
   const retryPipeline = useCallback(() => {
@@ -1113,9 +1175,24 @@ export function AppProvider({ children }) {
 
       // Store correction on old valuation, create new one for refined result
       const oldValuationId = result?.valuation_id;
+      const oldName = result?.name;
       if (oldValuationId) {
         supabase.from('valuations').update({ user_confirmed: false, user_correction: modelName })
           .eq('id', oldValuationId).then(() => {});
+      }
+      
+      // ── LEARNING: Store correction pattern so future scans benefit ──
+      if (oldName && oldName !== refined.name) {
+        storeCorrection(
+          oldName,                                    // what Claude said (wrong)
+          refined.name,                               // what it actually is (right)
+          result?.category || refined.category,       // category
+          result?.details?.brand || refined.details?.brand, // brand
+          result?.recognition?.ocrText,               // OCR text (visual cues)
+          result?.recognition?.modelNumber,           // model number
+          result?.confidence,                         // original confidence
+          oldValuationId                              // link to valuation
+        );
       }
       storeValuation(refined).then(vid => {
         if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
@@ -1129,7 +1206,7 @@ export function AppProvider({ children }) {
       setView('results');
       showToastMsg(lang === 'he' ? 'שגיאה בעדכון, מחירים מקוריים נשמרו' : 'Update failed, original prices kept');
     }
-  }, [images, result, analyzeWithRetry, storeValuation, playSound, lang, showToastMsg]);
+  }, [images, result, analyzeWithRetry, storeValuation, storeCorrection, playSound, lang, showToastMsg]);
 
   // ── Confirm: user says the identification is correct ──
   const confirmResult = useCallback(() => {
@@ -1143,8 +1220,14 @@ export function AppProvider({ children }) {
           if (DEV) console.log('[Confirm] Stored in DB');
         });
     }
+    // ── LEARNING: Store positive confirmation so we know Claude got it right ──
+    storeConfirmation(
+      result.name,
+      result.category,
+      result.details?.brand
+    );
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
-  }, [result, playSound]);
+  }, [result, playSound, storeConfirmation]);
 
   // ── Correct: user types the correct model manually ──
   const correctResult = useCallback(async (userInput) => {
@@ -1797,7 +1880,7 @@ export function AppProvider({ children }) {
     setSellerProfile(null); setSellerListings([]);
   };
 
-  const goTab = (newTab) => {
+  const goTab = useCallback((newTab) => {
     setTab(newTab);
     setSelected(null);
     setActiveChat(null);
@@ -1807,14 +1890,14 @@ export function AppProvider({ children }) {
     else if (newTab === 'saved') setView('saved');
     else if (newTab === 'messages') { setView('inbox'); loadConversations(); }
     else if (newTab === 'profile') { setView(user ? 'profile' : 'auth'); if (user) refreshProfile(); }
-  };
+  }, [user, loadConversations, refreshProfile]);
 
-  const viewItem = (item) => { setSelected(item); setView('detail'); };
+  const viewItem = useCallback((item) => { setSelected(item); setView('detail'); }, []);
 
-  const contactSeller = () => {
+  const contactSeller = useCallback(() => {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
     setShowContact(true);
-  };
+  }, [user]);
 
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
