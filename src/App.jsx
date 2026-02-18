@@ -164,8 +164,8 @@ const SoundEffects = {
 };
 
 const T = {
-  en: { appName: "GetWorth", tagline: "AI Valuation", aiPowered: "AI-Powered", heroTitle1: "Know Your", heroTitle2: "Item's Value", heroSub: "Snap or upload any item for instant AI valuation.", drop: "Drop image here", orButtons: "or use buttons below", scan: "Scan", upload: "Upload", analyzing: "Analyzing...", marketValue: "Market Value", range: "Range", listItem: "List This Item", scanAnother: "Scan Another", welcome: "Welcome back", createAcc: "Create account", signInAccess: "Sign in to access", join: "Join GetWorth", google: "Continue with Google", or: "or", name: "Full Name", email: "Email", password: "Password", signIn: "Sign In", signUp: "Sign Up", noAcc: "No account?", haveAcc: "Have account?", back: "Back", myListings: "My Listings", noListings: "No listings yet", home: "Home", browse: "Browse", sell: "Sell", saved: "Saved", profile: "Profile", condition: "Select Condition", newSealed: "New", likeNew: "Like New", used: "Used", poor: "Poor", yourPrice: "Your Price", more: "Tell Us More", scratches: "Scratches?", battery: "Battery?", issues: "Issues?", yes: "Yes", no: "No", good: "Good", degraded: "Degraded", continue: "Continue", review: "Review Listing", title: "Title", desc: "Description", phone: "Phone", location: "Location", publish: "Publish", publishing: "Publishing...", published: "Listed!", live: "Your item is live", view: "View", share: "Share", seller: "Seller", contact: "Contact", call: "Call", whatsapp: "WhatsApp", today: "today", yesterday: "yesterday", daysAgo: "d ago", noSaved: "No saved items", signInReq: "Sign In Required", signInSave: "Sign in to save", signInContact: "Sign in to contact", signInList: "Sign in to list", cancel: "Cancel", all: "All", phones: "Phones", watches: "Watches", clothing: "Clothing", furniture: "Furniture", sports: "Sports", filters: "Filters", clear: "Clear", min: "Min", max: "Max", results: "results", newest: "Newest", lowHigh: "Low-High", highLow: "High-Low", noResults: "No items found", failed: "Analysis failed", cameraDenied: "Camera access denied", verified: "Verified", views: "views", sales: "Sales" },
-  he: { appName: "GetWorth", tagline: "הערכת שווי", aiPowered: "AI", heroTitle1: "גלה את", heroTitle2: "שווי הפריט", heroSub: "צלם או העלה תמונה לקבלת הערכה.", drop: "גרור תמונה", orButtons: "או לחץ למטה", scan: "סרוק", upload: "העלה", analyzing: "מנתח...", marketValue: "שווי שוק", range: "טווח", listItem: "פרסם", scanAnother: "סרוק עוד", welcome: "שלום", createAcc: "צור חשבון", signInAccess: "התחבר", join: "הצטרף", google: "המשך עם Google", or: "או", name: "שם", email: "אימייל", password: "סיסמה", signIn: "התחבר", signUp: "הירשם", noAcc: "אין חשבון?", haveAcc: "יש חשבון?", back: "חזור", myListings: "המודעות שלי", noListings: "אין מודעות", home: "בית", browse: "חיפוש", sell: "מכירה", saved: "שמורים", profile: "פרופיל", condition: "בחר מצב", newSealed: "חדש", likeNew: "כמו חדש", used: "משומש", poor: "גרוע", yourPrice: "מחיר", more: "פרטים נוספים", scratches: "שריטות?", battery: "סוללה?", issues: "בעיות?", yes: "כן", no: "לא", good: "טוב", degraded: "בינוני", continue: "המשך", review: "סקירה", title: "כותרת", desc: "תיאור", phone: "טלפון", location: "מיקום", publish: "פרסם", publishing: "מפרסם...", published: "פורסם!", live: "המודעה באוויר", view: "צפה", share: "שתף", seller: "מוכר", contact: "צור קשר", call: "התקשר", whatsapp: "וואטסאפ", today: "היום", yesterday: "אתמול", daysAgo: "ימים", noSaved: "אין שמורים", signInReq: "נדרשת התחברות", signInSave: "התחבר לשמירה", signInContact: "התחבר ליצירת קשר", signInList: "התחבר לפרסום", cancel: "ביטול", all: "הכל", phones: "טלפונים", watches: "שעונים", clothing: "ביגוד", furniture: "ריהוט", sports: "ספורט", filters: "סינון", clear: "נקה", min: "מינ׳", max: "מקס׳", results: "תוצאות", newest: "חדש", lowHigh: "מחיר ↑", highLow: "מחיר ↓", noResults: "לא נמצאו פריטים", failed: "הניתוח נכשל", cameraDenied: "הגישה למצלמה נדחתה", verified: "מאומת", views: "צפיות", sales: "מכירות" }
+  en: { appName: "GetWorth", tagline: "AI Valuation", aiPowered: "AI-Powered", heroTitle1: "Know Your", heroTitle2: "Item's Value", heroSub: "Snap or upload any item for instant AI valuation.", drop: "Drop image here", orButtons: "or use buttons below", scan: "Scan", upload: "Upload", analyzing: "Analyzing...", marketValue: "Market Value", range: "Range", listItem: "List This Item", scanAnother: "Scan Another", welcome: "Welcome back", createAcc: "Create account", signInAccess: "Sign in to access", join: "Join GetWorth", google: "Continue with Google", or: "or", name: "Full Name", email: "Email", password: "Password", signIn: "Sign In", signUp: "Sign Up", noAcc: "No account?", haveAcc: "Have account?", back: "Back", myListings: "My Listings", noListings: "No listings yet", home: "Home", browse: "Browse", sell: "Sell", saved: "Saved", profile: "Profile", condition: "Select Condition", newSealed: "New", likeNew: "Like New", used: "Used", poor: "Poor", yourPrice: "Your Price", more: "Tell Us More", scratches: "Scratches?", battery: "Battery?", issues: "Issues?", yes: "Yes", no: "No", good: "Good", degraded: "Degraded", continue: "Continue", review: "Review Listing", title: "Title", desc: "Description", phone: "Phone", location: "Location", publish: "Publish", publishing: "Publishing...", published: "Listed!", live: "Your item is live", view: "View", share: "Share", seller: "Seller", contact: "Contact", call: "Call", whatsapp: "WhatsApp", today: "today", yesterday: "yesterday", daysAgo: "d ago", noSaved: "No saved items", signInReq: "Sign In Required", signInSave: "Sign in to save", signInContact: "Sign in to contact", signInList: "Sign in to list", cancel: "Cancel", all: "All", phones: "Phones", watches: "Watches", clothing: "Clothing", furniture: "Furniture", sports: "Sports", filters: "Filters", clear: "Clear", min: "Min", max: "Max", results: "results", newest: "Newest", lowHigh: "Low-High", highLow: "High-Low", noResults: "No items found", failed: "Analysis failed", cameraDenied: "Camera access denied", verified: "Verified", views: "views", sales: "Sales", verifiedSeller: "Verified Seller", profileVerified: "Your profile has been verified", myOrders: "My Orders", purchasesAndSales: "Purchases & sales", myScans: "My Scans", aiValuationHistory: "AI valuation history", noScansYet: "No scans yet", adminPanel: "Admin Panel", adminDesc: "Verifications, reports, orders, users" },
+  he: { appName: "GetWorth", tagline: "הערכת שווי", aiPowered: "AI", heroTitle1: "גלה את", heroTitle2: "שווי הפריט", heroSub: "צלם או העלה תמונה לקבלת הערכה.", drop: "גרור תמונה", orButtons: "או לחץ למטה", scan: "סרוק", upload: "העלה", analyzing: "מנתח...", marketValue: "שווי שוק", range: "טווח", listItem: "פרסם", scanAnother: "סרוק עוד", welcome: "שלום", createAcc: "צור חשבון", signInAccess: "התחבר", join: "הצטרף", google: "המשך עם Google", or: "או", name: "שם", email: "אימייל", password: "סיסמה", signIn: "התחבר", signUp: "הירשם", noAcc: "אין חשבון?", haveAcc: "יש חשבון?", back: "חזור", myListings: "המודעות שלי", noListings: "אין מודעות", home: "בית", browse: "חיפוש", sell: "מכירה", saved: "שמורים", profile: "פרופיל", condition: "בחר מצב", newSealed: "חדש", likeNew: "כמו חדש", used: "משומש", poor: "גרוע", yourPrice: "מחיר", more: "פרטים נוספים", scratches: "שריטות?", battery: "סוללה?", issues: "בעיות?", yes: "כן", no: "לא", good: "טוב", degraded: "בינוני", continue: "המשך", review: "סקירה", title: "כותרת", desc: "תיאור", phone: "טלפון", location: "מיקום", publish: "פרסם", publishing: "מפרסם...", published: "פורסם!", live: "המודעה באוויר", view: "צפה", share: "שתף", seller: "מוכר", contact: "צור קשר", call: "התקשר", whatsapp: "וואטסאפ", today: "היום", yesterday: "אתמול", daysAgo: "ימים", noSaved: "אין שמורים", signInReq: "נדרשת התחברות", signInSave: "התחבר לשמירה", signInContact: "התחבר ליצירת קשר", signInList: "התחבר לפרסום", cancel: "ביטול", all: "הכל", phones: "טלפונים", watches: "שעונים", clothing: "ביגוד", furniture: "ריהוט", sports: "ספורט", filters: "סינון", clear: "נקה", min: "מינ׳", max: "מקס׳", results: "תוצאות", newest: "חדש", lowHigh: "מחיר ↑", highLow: "מחיר ↓", noResults: "לא נמצאו פריטים", failed: "הניתוח נכשל", cameraDenied: "הגישה למצלמה נדחתה", verified: "מאומת", views: "צפיות", sales: "מכירות", verifiedSeller: "מוכר מאומת", profileVerified: "הפרופיל שלך אומת", myOrders: "ההזמנות שלי", purchasesAndSales: "רכישות ומכירות", myScans: "הסריקות שלי", aiValuationHistory: "היסטוריית הערכות AI", noScansYet: "אין סריקות עדיין", adminPanel: "פאנל ניהול", adminDesc: "אימותים, דוחות, הזמנות, משתמשים" }
 };
 
 // Animated components
@@ -2090,18 +2090,26 @@ export default function GetWorth() {
 
           {/* PROFILE */}
           {view === 'profile' && user && (
-            <div className="space-y-5">
+            <div className="space-y-4">
+              {/* Profile Header Card */}
               <FadeIn>
                 <Card className="p-6">
                   <div className="flex items-center gap-5">
                     <div className="relative">
-                      <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-3xl font-bold shadow-xl shadow-blue-500/30">
-                        {profile?.full_name?.charAt(0) || user.email?.charAt(0) || 'U'}
-                      </div>
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt="" className="w-20 h-20 rounded-3xl object-cover shadow-xl shadow-blue-500/20" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-3xl font-bold shadow-xl shadow-blue-500/30">
+                          {profile?.full_name?.charAt(0) || user.email?.charAt(0) || 'U'}
+                        </div>
+                      )}
                       <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-green-500 border-2 border-[#060a14]" />
                     </div>
                     <div className="flex-1">
-                      <h3 className="text-xl font-bold">{profile?.full_name || user.email?.split('@')[0]}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-xl font-bold">{profile?.full_name || user.email?.split('@')[0]}</h3>
+                        {profile?.is_verified && <CheckCircle className="w-5 h-5 text-blue-400" />}
+                      </div>
                       <p className="text-sm text-slate-400">{user.email}</p>
                       {profile?.badge && (
                         <Badge color="blue" className="mt-2">{profile.badge}</Badge>
@@ -2114,6 +2122,24 @@ export default function GetWorth() {
                 </Card>
               </FadeIn>
 
+              {/* Verified Seller Card */}
+              {profile?.is_verified && (
+                <FadeIn delay={50}>
+                  <Card className="p-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-green-500/15 flex items-center justify-center">
+                        <CheckCircle className="w-6 h-6 text-green-400" />
+                      </div>
+                      <div>
+                        <h4 className="font-semibold text-green-400">✔ {t.verifiedSeller}</h4>
+                        <p className="text-sm text-slate-400">{t.profileVerified}</p>
+                      </div>
+                    </div>
+                  </Card>
+                </FadeIn>
+              )}
+
+              {/* Stats Grid */}
               <FadeIn delay={100} className="grid grid-cols-3 gap-3">
                 {[
                   { value: myListings.length, label: t.myListings, color: 'blue', icon: ShoppingBag },
@@ -2127,6 +2153,57 @@ export default function GetWorth() {
                   </Card>
                 ))}
               </FadeIn>
+
+              {/* My Orders */}
+              <FadeIn delay={150}>
+                <Card className="p-4 active:scale-[0.98] transition-transform cursor-pointer" onClick={() => showToastMsg(lang === 'he' ? 'בקרוב!' : 'Coming soon!')}>
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/15 flex items-center justify-center">
+                      <Package className="w-6 h-6 text-emerald-400" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold">{t.myOrders}</h4>
+                      <p className="text-sm text-slate-400">{t.purchasesAndSales}</p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-slate-500" />
+                  </div>
+                </Card>
+              </FadeIn>
+
+              {/* My Scans */}
+              <FadeIn delay={200}>
+                <Card className="p-4">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-2xl bg-purple-500/15 flex items-center justify-center">
+                      <Scan className="w-6 h-6 text-purple-400" />
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="font-semibold">{t.myScans}</h4>
+                      <p className="text-sm text-slate-400">{t.aiValuationHistory}</p>
+                    </div>
+                    <ChevronRight className="w-5 h-5 text-slate-500" />
+                  </div>
+                  <p className="text-center text-sm text-slate-500 mt-4 pb-1">{t.noScansYet}</p>
+                </Card>
+              </FadeIn>
+
+              {/* Admin Panel */}
+              {profile?.is_admin && (
+                <FadeIn delay={250}>
+                  <Card className="p-4 active:scale-[0.98] transition-transform cursor-pointer" onClick={() => showToastMsg(lang === 'he' ? 'בקרוב!' : 'Coming soon!')}>
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-rose-500/15 flex items-center justify-center">
+                        <Shield className="w-6 h-6 text-rose-400" />
+                      </div>
+                      <div className="flex-1">
+                        <h4 className="font-semibold">{t.adminPanel}</h4>
+                        <p className="text-sm text-slate-400">{t.adminDesc}</p>
+                      </div>
+                      <ChevronRight className="w-5 h-5 text-slate-500" />
+                    </div>
+                  </Card>
+                </FadeIn>
+              )}
             </div>
           )}
 
