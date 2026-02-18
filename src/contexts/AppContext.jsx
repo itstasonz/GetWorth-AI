@@ -426,6 +426,18 @@ export function AppProvider({ children }) {
           setActiveOrder(prev => prev?.id === updated.id ? { ...prev, ...updated } : prev);
         }
       )
+      // New order created → refresh orders (seller sees new requests immediately)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'orders' },
+        (payload) => {
+          const newOrder = payload.new;
+          if (newOrder.seller_id === user.id || newOrder.buyer_id === user.id) {
+            if (DEV) console.log('[Realtime] New order detected, refreshing orders');
+            loadOrders();
+          }
+        }
+      )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED' && DEV) console.log('✅ Notifs realtime connected');
       });
@@ -1914,11 +1926,11 @@ export function AppProvider({ children }) {
     setActiveChat(null);
     if (newTab === 'home') setView('home');
     else if (newTab === 'browse') setView('browse');
-    else if (newTab === 'sell') setView('myListings');
+    else if (newTab === 'sell') { setView('myListings'); loadOrders(); }
     else if (newTab === 'saved') setView('saved');
     else if (newTab === 'messages') { setView('inbox'); loadConversations(); }
     else if (newTab === 'profile') { setView(user ? 'profile' : 'auth'); if (user) refreshProfile(); }
-  }, [user, loadConversations, refreshProfile]);
+  }, [user, loadConversations, loadOrders, refreshProfile]);
 
   const viewItem = useCallback((item) => { setSelected(item); setView('detail'); }, []);
 

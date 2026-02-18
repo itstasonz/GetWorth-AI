@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, AlertTriangle, CheckCircle, Circle, Check, Share2, Loader2, Phone, Plus, X, Camera } from 'lucide-react';
+import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, AlertTriangle, CheckCircle, Circle, Check, Share2, Loader2, Phone, Plus, X, Camera, Bell, ChevronRight } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, ScaleIn, InputField, BackButton } from '../components/ui';
 import ListingCard from '../components/ListingCard';
@@ -8,7 +8,11 @@ import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
 
 export function MyListingsView() {
   // [FIX] Added viewItem to open listing details when tapped
-  const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset } = useApp();
+  const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
+
+  // Pending requests for seller
+  const pendingRequests = orders.filter(o => o.seller_id === user?.id && o.status === 'pending');
+  const activeOrders = orders.filter(o => (o.seller_id === user?.id || o.buyer_id === user?.id) && !['completed', 'cancelled', 'declined'].includes(o.status));
 
   return (
     <div className="space-y-5">
@@ -16,6 +20,46 @@ export function MyListingsView() {
         <h2 className="text-2xl font-bold">{t.myListings}</h2>
         {myListings.length > 0 && <Badge>{myListings.length} {lang === 'he' ? 'פעילים' : 'active'}</Badge>}
       </FadeIn>
+
+      {/* ── Orders & Requests Button ── */}
+      {user && (
+        <FadeIn delay={50}>
+          <button
+            onClick={() => { setView('orders'); loadOrders(); }}
+            className="w-full p-4 rounded-3xl flex items-center gap-4 transition-all active:scale-[0.98]"
+            style={{
+              background: pendingRequests.length > 0
+                ? 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(217,119,6,0.1) 100%)'
+                : 'linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(37,99,235,0.05) 100%)',
+              border: pendingRequests.length > 0
+                ? '1px solid rgba(245,158,11,0.3)'
+                : '1px solid rgba(59,130,246,0.15)',
+            }}
+          >
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center relative ${pendingRequests.length > 0 ? 'bg-amber-500/20' : 'bg-blue-500/20'}`}>
+              <Package className={`w-6 h-6 ${pendingRequests.length > 0 ? 'text-amber-400' : 'text-blue-400'}`} />
+              {pendingRequests.length > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-500 text-[10px] font-bold text-black flex items-center justify-center animate-pulse">
+                  {pendingRequests.length}
+                </span>
+              )}
+            </div>
+            <div className="flex-1 text-left">
+              <p className="font-bold text-white">
+                {lang === 'he' ? 'הזמנות ובקשות' : 'Orders & Requests'}
+              </p>
+              <p className="text-xs text-slate-400">
+                {pendingRequests.length > 0
+                  ? (lang === 'he' ? `${pendingRequests.length} בקשות ממתינות לאישור!` : `${pendingRequests.length} pending request${pendingRequests.length > 1 ? 's' : ''}!`)
+                  : activeOrders.length > 0
+                    ? (lang === 'he' ? `${activeOrders.length} הזמנות פעילות` : `${activeOrders.length} active order${activeOrders.length > 1 ? 's' : ''}`)
+                    : (lang === 'he' ? 'צפה בקניות ומכירות' : 'View purchases & sales')}
+              </p>
+            </div>
+            <ChevronRight className="w-5 h-5 text-slate-400" />
+          </button>
+        </FadeIn>
+      )}
 
       {!user ? (
         <FadeIn className="text-center py-16">

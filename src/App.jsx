@@ -93,7 +93,7 @@ function AppShell() {
     showSignInModal, setShowSignInModal, signInAction,
     showContact, setShowContact, selected, startConversation,
     // Misc
-    myListings, unreadCount, notifUnreadCount, fileRef,
+    myListings, unreadCount, notifUnreadCount, fileRef, orders,
   } = useApp();
 
   // Loading screen
@@ -289,9 +289,16 @@ function AppShell() {
                 {tab === n.id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" />}
                 <div className={`relative transition-transform ${tab === n.id ? 'scale-110' : ''}`}>
                   <n.icon className={`w-6 h-6 ${n.id === 'messages' && unreadCount > 0 && tab !== 'messages' ? 'text-blue-400' : ''}`} />
-                  {n.id === 'sell' && myListings.length > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-blue-400 text-[9px] flex items-center justify-center font-bold">{myListings.length}</span>
-                  )}
+                  {n.id === 'sell' && (() => {
+                    const pendingCount = orders.filter(o => o.seller_id === user?.id && o.status === 'pending').length;
+                    if (pendingCount > 0) return (
+                      <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold text-black animate-pulse">{pendingCount}</span>
+                    );
+                    if (myListings.length > 0) return (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-blue-400 text-[9px] flex items-center justify-center font-bold">{myListings.length}</span>
+                    );
+                    return null;
+                  })()}
                   {n.id === 'messages' && unreadCount > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
                   )}
