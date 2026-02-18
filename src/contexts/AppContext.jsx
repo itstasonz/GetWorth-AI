@@ -1794,73 +1794,115 @@ export function AppProvider({ children }) {
   }, [user, lang, showToastMsg, playSound, loadOrders, fetchOrderById]);
 
   // Update order status via server-side RPC (validates transitions)
+  // OPTIMISTIC: updates local state FIRST, then calls backend. Rolls back on error.
   const updateOrderStatus = useCallback(async (orderId, newStatus) => {
     if (!user || !orderId) return false;
+
+    // ── Step 1: Optimistic local update (instant UI feedback) ──
+    const prevOrders = [...orders];
+    const prevActiveOrder = activeOrder;
+
+    const timestamps = {};
+    const now = new Date().toISOString();
+    if (newStatus === 'accepted') timestamps.accepted_at = now;
+    if (newStatus === 'declined') timestamps.declined_at = now;
+    if (newStatus === 'shipped' || newStatus === 'ready_pickup') timestamps.shipped_at = now;
+    if (newStatus === 'delivered') { timestamps.delivered_at = now; timestamps.buyer_confirmed_at = now; }
+    if (newStatus === 'completed') timestamps.completed_at = now;
+    if (newStatus === 'cancelled') { timestamps.cancelled_at = now; timestamps.cancelled_by = user.id; }
+
+    // Update orders list optimistically
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus, updated_at: now, ...timestamps } : o));
+    // Update activeOrder optimistically
+    setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus, updated_at: now, ...timestamps } : prev);
+
+    const statusLabels = {
+      accepted: lang === 'he' ? 'ההזמנה אושרה!' : 'Order accepted!',
+      declined: lang === 'he' ? 'ההזמנה נדחתה' : 'Order declined',
+      shipped: lang === 'he' ? 'המוצר נשלח!' : 'Item shipped!',
+      ready_pickup: lang === 'he' ? 'המוצר מוכן לאיסוף!' : 'Ready for pickup!',
+      delivered: lang === 'he' ? 'המוצר התקבל!' : 'Item received!',
+      completed: lang === 'he' ? 'העסקה הושלמה!' : 'Transaction complete!',
+      cancelled: lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled',
+    };
+
+    // ── Step 2: Backend call (RPC with fallback to direct update) ──
     try {
-      const { data: rpcResult, error: rpcErr } = await supabase.rpc('transition_order', {
-        p_order_id: orderId,
-        p_new_status: newStatus,
-        p_meta: {},
-      });
+      let success = false;
 
-      if (rpcErr) throw rpcErr;
-      if (rpcResult?.error) {
-        showToastMsg(rpcResult.error);
-        return false;
-      }
+      // Try RPC first
+      try {
+        const { data: rpcResult, error: rpcErr } = await supabase.rpc('transition_order', {
+          p_order_id: orderId,
+          p_new_status: newStatus,
+          p_meta: {},
+        });
 
-      const statusLabels = {
-        accepted: lang === 'he' ? 'ההזמנה אושרה!' : 'Order accepted!',
-        declined: lang === 'he' ? 'ההזמנה נדחתה' : 'Order declined',
-        shipped: lang === 'he' ? 'המוצר נשלח!' : 'Item shipped!',
-        ready_pickup: lang === 'he' ? 'המוצר מוכן לאיסוף!' : 'Ready for pickup!',
-        delivered: lang === 'he' ? 'המוצר התקבל!' : 'Item received!',
-        completed: lang === 'he' ? 'העסקה הושלמה!' : 'Transaction complete!',
-        cancelled: lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled',
-      };
-      showToastMsg(statusLabels[newStatus] || 'Updated');
-      playSound(newStatus === 'completed' ? 'coin' : 'tap');
+        if (rpcErr) throw rpcErr;
 
-      // Refresh
-      await loadOrders();
-      setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus } : prev);
-
-      return true;
-    } catch (e) {
-      console.error('[Orders] Transition error:', e);
-      // Fallback: try direct update if RPC doesn't exist yet
-      if (e.message?.includes('function') || e.code === '42883') {
-        if (DEV) console.warn('[Orders] RPC not found, falling back to direct update');
-        const timestamps = {};
-        if (newStatus === 'accepted') timestamps.accepted_at = new Date().toISOString();
-        if (newStatus === 'declined') timestamps.declined_at = new Date().toISOString();
-        if (newStatus === 'shipped' || newStatus === 'ready_pickup') timestamps.shipped_at = new Date().toISOString();
-        if (newStatus === 'delivered') timestamps.delivered_at = new Date().toISOString();
-        if (newStatus === 'completed') timestamps.completed_at = new Date().toISOString();
-        if (newStatus === 'cancelled') { timestamps.cancelled_at = new Date().toISOString(); timestamps.cancelled_by = user.id; }
-
-        const { error: directErr } = await supabase
-          .from('orders')
-          .update({ status: newStatus, ...timestamps })
-          .eq('id', orderId);
-
-        if (directErr) throw directErr;
-
-        if (newStatus === 'completed' && activeOrder) {
-          await supabase.from('listings').update({ status: 'sold', sold_to: activeOrder.buyer_id, sold_at: new Date().toISOString() })
-            .eq('id', activeOrder.listing_id);
+        if (rpcResult?.error) {
+          // RPC returned a business logic error (e.g., invalid transition)
+          throw new Error(rpcResult.error);
         }
 
-        showToastMsg(lang === 'he' ? 'עודכן' : 'Updated');
-        playSound('tap');
-        await loadOrders();
-        setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus } : prev);
+        success = true;
+        if (DEV) console.log(`[Orders] RPC transition OK: ${newStatus}`, rpcResult);
+      } catch (rpcE) {
+        // RPC not found → fallback to direct update
+        if (rpcE.message?.includes('function') || rpcE.code === '42883') {
+          if (DEV) console.warn('[Orders] RPC not found, using direct update');
+          const { error: directErr } = await supabase
+            .from('orders')
+            .update({ status: newStatus, updated_at: now, ...timestamps })
+            .eq('id', orderId);
+
+          if (directErr) throw directErr;
+
+          // Mark listing as sold on completion
+          if (newStatus === 'completed' && activeOrder) {
+            supabase.from('listings').update({ status: 'sold', sold_to: activeOrder.buyer_id, sold_at: now })
+              .eq('id', activeOrder.listing_id).then(() => {});
+          }
+
+          // Create notification manually (since RPC trigger didn't fire)
+          const notifTargetId = newStatus === 'delivered' || newStatus === 'completed'
+            ? (activeOrder?.seller_id || prevActiveOrder?.seller_id)
+            : (activeOrder?.buyer_id || prevActiveOrder?.buyer_id);
+          if (notifTargetId && notifTargetId !== user.id) {
+            supabase.from('notifications').insert({
+              user_id: notifTargetId,
+              type: `ORDER_${newStatus.toUpperCase()}`,
+              title: statusLabels[newStatus] || 'Order updated',
+              body: '',
+              data: { order_id: orderId, new_status: newStatus },
+            }).then(() => {});
+          }
+
+          success = true;
+        } else {
+          throw rpcE;
+        }
+      }
+
+      if (success) {
+        showToastMsg(statusLabels[newStatus] || (lang === 'he' ? 'עודכן' : 'Updated'));
+        playSound(newStatus === 'completed' ? 'coin' : 'tap');
+
+        // Background refresh (non-blocking) — realtime will also sync
+        loadOrders().catch(() => {});
         return true;
       }
-      setError(lang === 'he' ? 'שגיאה בעדכון ההזמנה' : 'Failed to update order');
+    } catch (e) {
+      // ── Step 3: ROLLBACK optimistic update on any error ──
+      console.error('[Orders] Transition FAILED:', e);
+      setOrders(prevOrders);
+      setActiveOrder(prevActiveOrder);
+      showToastMsg(lang === 'he' ? `שגיאה: ${e.message || 'עדכון נכשל'}` : `Error: ${e.message || 'Update failed'}`);
       return false;
     }
-  }, [user, lang, activeOrder, showToastMsg, playSound, loadOrders]);
+
+    return false;
+  }, [user, lang, orders, activeOrder, showToastMsg, playSound, loadOrders]);
 
   // Cancel order (via RPC or direct fallback)
   const cancelOrder = useCallback(async (orderId, reason) => {

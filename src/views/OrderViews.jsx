@@ -294,8 +294,18 @@ export function OrderDetailView() {
   const currentStepIndex = steps.indexOf(order.status);
   const isTerminal = ['completed', 'cancelled', 'disputed', 'declined'].includes(order.status);
 
-  const handleAction = async (s) => { setUpdating(true); await updateOrderStatus(order.id, s); setUpdating(false); };
-  const handleCancel = async () => { setUpdating(true); await cancelOrder(order.id, cancelReason); setShowCancel(false); setUpdating(false); };
+  const handleAction = async (s) => {
+    setUpdating(true);
+    try { await updateOrderStatus(order.id, s); }
+    catch (e) { console.error('[OrderDetail] handleAction error:', e); }
+    finally { setUpdating(false); }
+  };
+  const handleCancel = async () => {
+    setUpdating(true);
+    try { await cancelOrder(order.id, cancelReason); setShowCancel(false); }
+    catch (e) { console.error('[OrderDetail] handleCancel error:', e); }
+    finally { setUpdating(false); }
+  };
   const handleContact = async () => {
     if (!listing) return;
     isBuyer ? await startConversation(listing) : await startConversation({ ...listing, seller_id: order.buyer_id, seller: order.buyer });
