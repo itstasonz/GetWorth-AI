@@ -1699,13 +1699,26 @@ export function AppProvider({ children }) {
     if (!user) return;
     setOrdersLoading(true);
     try {
-      const { data, error: err } = await supabase
+      // Try full query with profile joins (requires FK constraints to profiles)
+      let { data, error: err } = await supabase
         .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_id_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_id_fkey(id, full_name, avatar_url, is_verified)')
+        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_profile_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_profile_fkey(id, full_name, avatar_url, is_verified)')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
-      if (err) throw err;
+
+      // If FK join fails (constraint doesn't exist yet), fallback to simpler query
+      if (err) {
+        if (DEV) console.warn('[Orders] Profile join failed, trying without:', err.message);
+        ({ data, error: err } = await supabase
+          .from('orders')
+          .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id)')
+          .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
+          .order('created_at', { ascending: false }));
+        if (err) throw err;
+      }
+
       const newOrders = data || [];
+      if (DEV) console.log(`[Orders] Loaded ${newOrders.length} orders`);
       setOrders(newOrders);
 
       // Keep activeOrder in sync with fresh data (preserve joined relations)
@@ -1725,12 +1738,24 @@ export function AppProvider({ children }) {
   const fetchOrderById = useCallback(async (orderId) => {
     if (!user || !orderId) return null;
     try {
-      const { data, error } = await supabase
+      // Try full query with profile joins
+      let { data, error } = await supabase
         .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_id_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_id_fkey(id, full_name, avatar_url, is_verified)')
+        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_profile_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_profile_fkey(id, full_name, avatar_url, is_verified)')
         .eq('id', orderId)
         .single();
-      if (error) throw error;
+
+      // Fallback without profile joins
+      if (error) {
+        if (DEV) console.warn('[Orders] fetchById profile join failed, trying without:', error.message);
+        ({ data, error } = await supabase
+          .from('orders')
+          .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id)')
+          .eq('id', orderId)
+          .single());
+        if (error) throw error;
+      }
+
       return data;
     } catch (e) {
       if (DEV) console.warn('[Orders] fetchById error:', e.message);
