@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, Loader2, Flag } from 'lucide-react';
+import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, CheckCircle, Loader2, Flag, Car, Gem, BookOpen, Gift, Home as HomeIcon, Wrench } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp } from '../components/ui';
 import ListingCard from '../components/ListingCard';
@@ -17,11 +17,17 @@ export function BrowseView() {
 
   const categories = [
     { id: 'all', label: t.all, icon: Grid },
-    { id: 'Electronics', label: t.phones, icon: Smartphone },
+    { id: 'Electronics', label: t.electronics, icon: Smartphone },
     { id: 'Furniture', label: t.furniture, icon: Box },
     { id: 'Watches', label: t.watches, icon: Watch },
     { id: 'Clothing', label: t.clothing, icon: Shirt },
-    { id: 'Sports', label: t.sports, icon: Dumbbell }
+    { id: 'Sports', label: t.sports, icon: Dumbbell },
+    { id: 'Vehicles', label: t.vehicles, icon: Car },
+    { id: 'Home', label: t.home, icon: HomeIcon },
+    { id: 'Beauty', label: t.beauty, icon: Gem },
+    { id: 'Books', label: t.books, icon: BookOpen },
+    { id: 'Toys', label: t.toys, icon: Gift },
+    { id: 'Tools', label: t.tools, icon: Wrench },
   ];
 
   const conditions = [
@@ -164,12 +170,29 @@ export function BrowseView() {
 // DETAIL VIEW — with report + quality badge + seller trust
 // ═══════════════════════════════════════════════════════
 export function DetailView() {
-  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing, setShowCheckout } = useApp();
+  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing, setShowCheckout, orders, viewOrder } = useApp();
   const [showReport, setShowReport] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reporting, setReporting] = useState(false);
 
   if (!selected) return null;
+
+  // Check if user already has an active order for this listing
+  const existingOrder = user ? orders.find(o =>
+    o.listing_id === selected.id &&
+    o.buyer_id === user.id &&
+    !['cancelled', 'declined'].includes(o.status)
+  ) : null;
+  const existingStatus = existingOrder?.status;
+
+  const orderStatusLabels = {
+    pending:      { en: 'Request Sent',       he: 'בקשה נשלחה',      color: 'amber' },
+    accepted:     { en: 'Accepted',            he: 'אושר',            color: 'blue' },
+    ready_pickup: { en: 'Ready for Pickup',    he: 'מוכן לאיסוף',     color: 'blue' },
+    shipped:      { en: 'Shipped',             he: 'נשלח',            color: 'blue' },
+    delivered:    { en: 'Received',            he: 'התקבל',           color: 'emerald' },
+    completed:    { en: 'Completed',           he: 'הושלם',           color: 'emerald' },
+  };
 
   const quality = selected.quality_score != null ? getQualityBadge(selected.quality_score, lang) : null;
   const sellerTrust = selected.seller ? computeSellerTrust(selected.seller) : null;
@@ -303,8 +326,36 @@ export function DetailView() {
 
         {/* Buy + Contact + Save */}
         <FadeIn delay={150} className="space-y-3">
-          {/* Buy Now — only show if not own listing */}
-          {user && selected.seller_id !== user?.id && !selected.id?.toString().startsWith('s') && (
+          {/* Already ordered — show status */}
+          {user && existingOrder && (() => {
+            const sl = orderStatusLabels[existingStatus] || { en: existingStatus, he: existingStatus, color: 'slate' };
+            const colorMap = {
+              amber: 'bg-amber-500/15 border-amber-500/30 text-amber-300',
+              blue: 'bg-blue-500/15 border-blue-500/30 text-blue-300',
+              emerald: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
+              slate: 'bg-white/5 border-white/10 text-slate-300',
+            };
+            return (
+              <button onClick={() => viewOrder(existingOrder)} className={`w-full py-4 rounded-2xl border font-semibold flex items-center justify-center gap-2 transition-all active:scale-[0.98] ${colorMap[sl.color]}`}>
+                {existingStatus === 'pending' && <Clock className="w-5 h-5" />}
+                {existingStatus === 'accepted' && <Check className="w-5 h-5" />}
+                {(existingStatus === 'ready_pickup' || existingStatus === 'shipped') && <MapPin className="w-5 h-5" />}
+                {existingStatus === 'delivered' && <Package className="w-5 h-5" />}
+                {existingStatus === 'completed' && <CheckCircle className="w-5 h-5" />}
+                {lang === 'he' ? sl.he : sl.en}
+              </button>
+            );
+          })()}
+
+          {/* Buy Now — only show if not own listing AND no active order */}
+          {user && selected.seller_id !== user?.id && !selected.id?.toString().startsWith('s') && !existingOrder && (
+            <Btn primary className="w-full py-4" onClick={() => setShowCheckout(true)}>
+              <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
+            </Btn>
+          )}
+
+          {/* Not logged in — show Buy that triggers sign-in */}
+          {!user && !selected.id?.toString().startsWith('s') && (
             <Btn primary className="w-full py-4" onClick={() => setShowCheckout(true)}>
               <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
             </Btn>

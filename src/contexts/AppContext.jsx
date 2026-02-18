@@ -138,6 +138,7 @@ export function AppProvider({ children }) {
   // Orders state
   const [orders, setOrders] = useState([]);
   const [activeOrder, setActiveOrder] = useState(null);
+  const [activeOrderId, setActiveOrderId] = useState(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
 
   // Notifications state (order events)
@@ -1704,11 +1705,37 @@ export function AppProvider({ children }) {
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
       if (err) throw err;
-      setOrders(data || []);
+      const newOrders = data || [];
+      setOrders(newOrders);
+
+      // Keep activeOrder in sync with fresh data (preserve joined relations)
+      setActiveOrder(prev => {
+        if (!prev) return prev;
+        const fresh = newOrders.find(o => o.id === prev.id);
+        return fresh || prev; // Keep previous if not found (don't null it out)
+      });
     } catch (e) {
       console.error('[Orders] Load error:', e);
+      // Don't clear orders on error — keep stale data visible
     }
     setOrdersLoading(false);
+  }, [user]);
+
+  // Fetch a single order by ID (with full joins) — used to keep OrderDetail stable
+  const fetchOrderById = useCallback(async (orderId) => {
+    if (!user || !orderId) return null;
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_id_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_id_fkey(id, full_name, avatar_url, is_verified)')
+        .eq('id', orderId)
+        .single();
+      if (error) throw error;
+      return data;
+    } catch (e) {
+      if (DEV) console.warn('[Orders] fetchById error:', e.message);
+      return null;
+    }
   }, [user]);
 
   // Create a new order (buyer initiates)
@@ -1725,7 +1752,7 @@ export function AppProvider({ children }) {
         .select('id, status')
         .eq('listing_id', listingId)
         .eq('buyer_id', user.id)
-        .not('status', 'in', '("cancelled","completed")')
+        .not('status', 'in', '("cancelled","completed","declined")')
         .limit(1);
       if (existing?.length > 0) {
         showToastMsg(lang === 'he' ? 'כבר יש לך הזמנה פעילה למוצר הזה' : 'You already have an active order for this item');
@@ -1748,16 +1775,23 @@ export function AppProvider({ children }) {
       showToastMsg(lang === 'he' ? 'ההזמנה נשלחה למוכר!' : 'Order sent to seller!');
       playSound('coin');
       setShowCheckout(false);
-      await loadOrders();
+
+      // Fetch the full order with joins BEFORE navigating
+      const fullOrder = await fetchOrderById(data.id);
+      setActiveOrder(fullOrder || data);
+      setActiveOrderId(data.id);
       setView('orderDetail');
-      setActiveOrder(data);
+
+      // Also refresh orders list in the background
+      loadOrders();
+
       return data;
     } catch (e) {
       console.error('[Orders] Create error:', e);
       setError(lang === 'he' ? 'שגיאה ביצירת הזמנה' : 'Failed to create order');
       return null;
     }
-  }, [user, lang, showToastMsg, playSound, loadOrders]);
+  }, [user, lang, showToastMsg, playSound, loadOrders, fetchOrderById]);
 
   // Update order status via server-side RPC (validates transitions)
   const updateOrderStatus = useCallback(async (orderId, newStatus) => {
@@ -1837,6 +1871,7 @@ export function AppProvider({ children }) {
   // View an order's detail
   const viewOrder = useCallback((order) => {
     setActiveOrder(order);
+    setActiveOrderId(order?.id || null);
     setView('orderDetail');
   }, []);
 
@@ -1975,9 +2010,9 @@ export function AppProvider({ children }) {
     publishing, publishListing, startListing, selectCondition,
     reportListing,
     // Orders / Checkout
-    orders, activeOrder, setActiveOrder, ordersLoading,
+    orders, activeOrder, setActiveOrder, activeOrderId, ordersLoading,
     showCheckout, setShowCheckout,
-    loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder,
+    loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder, fetchOrderById,
     // Order notifications
     orderNotifications, notifUnreadCount,
     loadNotifications, markNotifRead, markAllNotifsRead,

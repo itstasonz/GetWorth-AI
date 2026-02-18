@@ -245,7 +245,7 @@ export function OrdersView() {
 // ORDER DETAIL — timeline + actions for BOTH sides
 // ═══════════════════════════════════════════════════════
 export function OrderDetailView() {
-  const { lang, user, activeOrder, updateOrderStatus, cancelOrder, setView, startConversation, submitReview, loadOrders } = useApp();
+  const { lang, user, activeOrder, activeOrderId, updateOrderStatus, cancelOrder, setView, startConversation, submitReview, loadOrders, fetchOrderById, setActiveOrder } = useApp();
   const [updating, setUpdating] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -253,6 +253,33 @@ export function OrderDetailView() {
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewDone, setReviewDone] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  // If we have an activeOrderId but no activeOrder (or stale), fetch the full order
+  useEffect(() => {
+    if (activeOrderId && !activeOrder) {
+      setLoading(true);
+      fetchOrderById(activeOrderId).then(data => {
+        if (data) setActiveOrder(data);
+        setLoading(false);
+      });
+    }
+  }, [activeOrderId, activeOrder, fetchOrderById, setActiveOrder]);
+
+  // Show loading if we're fetching the order
+  if (loading || (!activeOrder && activeOrderId)) {
+    return (
+      <div className="space-y-5">
+        <FadeIn>
+          <div className="flex items-center gap-3">
+            <button onClick={() => { setView('orders'); loadOrders(); }} className="p-2 rounded-xl bg-white/5 hover:bg-white/10"><ArrowLeft className="w-5 h-5" /></button>
+            <h2 className="text-xl font-bold">{lang === 'he' ? 'פרטי הזמנה' : 'Order Details'}</h2>
+          </div>
+        </FadeIn>
+        <div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin text-blue-400 mx-auto" /></div>
+      </div>
+    );
+  }
 
   if (!activeOrder || !user) return null;
 
@@ -520,7 +547,7 @@ export function OrderDetailView() {
 // NOTIFICATIONS INBOX
 // ═══════════════════════════════════════════════════════
 export function NotificationsView() {
-  const { lang, user, setView, orderNotifications, notifUnreadCount, loadNotifications, markNotifRead, markAllNotifsRead, loadOrders, viewOrder, orders } = useApp();
+  const { lang, user, setView, orderNotifications, notifUnreadCount, loadNotifications, markNotifRead, markAllNotifsRead, loadOrders, viewOrder, fetchOrderById } = useApp();
   useEffect(() => { loadNotifications(); }, [loadNotifications]);
 
   if (!user) return null;
@@ -540,12 +567,15 @@ export function NotificationsView() {
     if (!notif.read_at) await markNotifRead(notif.id);
     const oid = notif.data?.order_id;
     if (oid) {
-      await loadOrders();
-      // Need fresh orders — wait a tick
-      setTimeout(() => {
-        const found = orders.find(o => o.id === oid);
-        if (found) { viewOrder(found); } else { setView('orders'); }
-      }, 200);
+      // Fetch the specific order by ID (avoids stale closure on orders array)
+      const order = await fetchOrderById(oid);
+      if (order) {
+        viewOrder(order);
+      } else {
+        // Order not found — go to orders list
+        await loadOrders();
+        setView('orders');
+      }
       return;
     }
     setView('orders');
