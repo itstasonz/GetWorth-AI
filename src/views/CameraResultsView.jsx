@@ -1,8 +1,35 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Gem, Database } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice } from '../lib/utils';
+
+// ═══════════════════════════════════════════════════════
+// POPULAR BRANDS PER CATEGORY — for quick-select chips
+// ═══════════════════════════════════════════════════════
+const BRAND_SUGGESTIONS = {
+  Electronics: ['Apple', 'Samsung', 'Sony', 'LG', 'Xiaomi', 'Huawei', 'Google', 'Dyson', 'JBL', 'Bose'],
+  Smoking:     ['Amy Deluxe', 'Khalil Mamoon', 'Mya', 'Adalya', 'Al Fakher', 'Fumari'],
+  Clothing:    ['Nike', 'Adidas', 'Zara', 'H&M', 'The North Face', 'New Balance', 'Puma'],
+  Furniture:   ['IKEA', 'Natuzzi', 'Keter', 'Aminach', 'Hagit', 'BoConcept'],
+  Sports:      ['Nike', 'Adidas', 'Under Armour', 'Puma', 'Reebok', 'Decathlon'],
+  Toys:        ['LEGO', 'Playmobil', 'Fisher-Price', 'Mattel', 'Hasbro', 'Melissa & Doug'],
+  Home:        ['Dyson', 'De\'Longhi', 'Kenwood', 'Philips', 'Breville', 'iRobot'],
+  Beauty:      ['Dyson', 'GHD', 'Revlon', 'BaByliss', 'Braun', 'Philips'],
+  Tools:       ['Bosch', 'Makita', 'DeWalt', 'Black+Decker', 'Milwaukee', 'Stanley'],
+  Vehicles:    ['Micro', 'Xiaomi', 'Segway', 'Razor', 'iNokim'],
+  Watches:     ['Casio', 'Seiko', 'Citizen', 'Orient', 'Tissot', 'Fossil', 'Apple'],
+  Books:       [],
+  Other:       [],
+};
+
+function getBrandSuggestions(category) {
+  if (!category) return [];
+  // Exact match first, then partial match
+  if (BRAND_SUGGESTIONS[category]) return BRAND_SUGGESTIONS[category];
+  const key = Object.keys(BRAND_SUGGESTIONS).find(k => category.toLowerCase().includes(k.toLowerCase()));
+  return key ? BRAND_SUGGESTIONS[key] : [];
+}
 
 // ═══════════════════════════════════════════════════════
 // CAMERA VIEW — with real torch toggle
@@ -11,11 +38,11 @@ export function CameraView() {
   const {
     videoRef, canvasRef, capture, stopCamera, showFlash,
     torchSupported, torchOn, toggleTorch, lang, releaseCamera,
+    addPhotoMode,
   } = useApp();
 
   const [cameraReady, setCameraReady] = React.useState(false);
 
-  // Track when video starts producing frames
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -26,14 +53,12 @@ export function CameraView() {
       }
     };
 
-    // Check immediately and on events
     checkReady();
     video.addEventListener('loadeddata', checkReady);
     video.addEventListener('playing', checkReady);
 
-    // Fallback polling for iOS
     const interval = setInterval(checkReady, 200);
-    const timeout = setTimeout(() => { setCameraReady(true); }, 5000); // Safety: enable after 5s
+    const timeout = setTimeout(() => { setCameraReady(true); }, 5000);
 
     return () => {
       video.removeEventListener('loadeddata', checkReady);
@@ -43,7 +68,6 @@ export function CameraView() {
     };
   }, [videoRef]);
 
-  // Release camera on unmount — but do NOT navigate (capture already handles navigation)
   useEffect(() => {
     return () => releaseCamera();
   }, [releaseCamera]);
@@ -58,16 +82,26 @@ export function CameraView() {
       <div className="absolute inset-0 pointer-events-none">
         <div className="absolute inset-8 rounded-3xl border-2 border-white/30" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' }} />
         <div className="absolute top-10 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm text-sm text-white">
-          {lang === 'he' ? 'מקם את הפריט במסגרת' : 'Position item in frame'}
+          {addPhotoMode
+            ? (lang === 'he' ? 'צלם את התווית או הלוגו' : 'Take a photo of the label or logo')
+            : (lang === 'he' ? 'מקם את הפריט במסגרת' : 'Position item in frame')
+          }
         </div>
       </div>
+
+      {/* Add-photo indicator */}
+      {addPhotoMode && (
+        <div className="absolute top-20 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-xs text-blue-300 flex items-center gap-1.5">
+          <Camera className="w-3 h-3" />
+          {lang === 'he' ? 'תמונה נוספת' : 'Additional photo'}
+        </div>
+      )}
+
       <div className="absolute bottom-0 inset-x-0 p-8 flex justify-center gap-6 bg-gradient-to-t from-black via-black/80 to-transparent">
-        {/* Close button */}
         <button onClick={stopCamera} className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center hover:bg-white/20 transition-all">
           <X className="w-6 h-6 text-white" />
         </button>
 
-        {/* Capture button — disabled until camera ready */}
         <button onClick={capture} disabled={!cameraReady}
           className={`w-20 h-20 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-all ${cameraReady ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-blue-500/50' : 'bg-white/10 opacity-50'}`}>
           {cameraReady ? (
@@ -77,24 +111,18 @@ export function CameraView() {
           )}
         </button>
 
-        {/* Torch button — only shown if device supports it */}
         {torchSupported ? (
           <button
             onClick={toggleTorch}
             className={`w-14 h-14 rounded-2xl backdrop-blur flex items-center justify-center transition-all ${
-              torchOn
-                ? 'bg-yellow-500/30 border border-yellow-400/50'
-                : 'bg-white/10 hover:bg-white/20'
+              torchOn ? 'bg-yellow-500/30 border border-yellow-400/50' : 'bg-white/10 hover:bg-white/20'
             }`}
             title={torchOn ? (lang === 'he' ? 'כבה פלאש' : 'Turn off flash') : (lang === 'he' ? 'הדלק פלאש' : 'Turn on flash')}
           >
-            {torchOn
-              ? <Zap className="w-6 h-6 text-yellow-300" />
-              : <ZapOff className="w-6 h-6 text-white/60" />
-            }
+            {torchOn ? <Zap className="w-6 h-6 text-yellow-300" /> : <ZapOff className="w-6 h-6 text-white/70" />}
           </button>
         ) : (
-          <div className="w-14" /> // Spacer when torch unavailable
+          <div className="w-14 h-14" />
         )}
       </div>
     </div>
@@ -102,7 +130,7 @@ export function CameraView() {
 }
 
 // ═══════════════════════════════════════════════════════
-// ANALYZING VIEW — pipeline-state-aware with error/retry UI
+// ANALYZING VIEW — with pipeline progress
 // ═══════════════════════════════════════════════════════
 export function AnalyzingView() {
   const {
@@ -115,11 +143,9 @@ export function AnalyzingView() {
   const isCompressing = pipelineState === 'compressing';
   const isAnalyzing = pipelineState === 'analyzing';
 
-  // ─── Error state ───
   if (isError) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
-        {/* Image preview */}
         <div className="relative w-48 h-48 rounded-3xl overflow-hidden shadow-2xl mb-8 opacity-60">
           {(capturedImageRef.current || images[0]) && (
             <img src={capturedImageRef.current || images[0]} className="w-full h-full object-cover" alt="" />
@@ -127,7 +153,6 @@ export function AnalyzingView() {
           <div className="absolute inset-0 bg-red-900/30" />
         </div>
 
-        {/* Error icon + message */}
         <div className="text-center space-y-4 max-w-xs">
           <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center mx-auto">
             <AlertTriangle className="w-8 h-8 text-red-400" />
@@ -144,7 +169,6 @@ export function AnalyzingView() {
             {pipelineError || (lang === 'he' ? 'משהו השתבש, נסה שוב' : 'Something went wrong, please try again')}
           </p>
 
-          {/* Which step failed */}
           <div className="flex items-center justify-center gap-3 text-xs">
             <div className={`flex items-center gap-1.5 ${pipelineState === 'compress_error' ? 'text-red-400' : 'text-green-400'}`}>
               <div className={`w-2 h-2 rounded-full ${pipelineState === 'compress_error' ? 'bg-red-400' : 'bg-green-400'}`} />
@@ -157,19 +181,14 @@ export function AnalyzingView() {
             </div>
           </div>
 
-          {/* Action buttons */}
           <div className="flex gap-3 pt-2">
-            <button
-              onClick={cancelPipeline}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-all flex items-center justify-center gap-2"
-            >
+            <button onClick={cancelPipeline}
+              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-all flex items-center justify-center gap-2">
               <ArrowLeft className="w-4 h-4" />
               {lang === 'he' ? 'חזור' : 'Back'}
             </button>
-            <button
-              onClick={retryPipeline}
-              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.97]"
-            >
+            <button onClick={retryPipeline}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.97]">
               <RefreshCw className="w-4 h-4" />
               {lang === 'he' ? 'נסה שוב' : 'Retry'}
             </button>
@@ -179,7 +198,6 @@ export function AnalyzingView() {
     );
   }
 
-  // ─── Loading state (compressing or analyzing) ───
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
       <div className="relative">
@@ -204,6 +222,13 @@ export function AnalyzingView() {
           </div>
           <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer-fast" />
         </div>
+
+        {/* Multi-photo indicator */}
+        {images.length > 1 && (
+          <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-600 text-xs font-bold text-white shadow-lg">
+            {images.length} {lang === 'he' ? 'תמונות' : 'photos'}
+          </div>
+        )}
         
         <div className="absolute -inset-8 pointer-events-none">
           {[...Array(6)].map((_, i) => (
@@ -230,7 +255,7 @@ export function AnalyzingView() {
           <p className="text-sm text-slate-400">
             {isCompressing
               ? (lang === 'he' ? 'מכווץ ומכין לניתוח...' : 'Compressing and preparing...')
-              : (lang === 'he' ? 'מזהה פריט וחוקר שוק...' : 'Identifying item & researching market...')
+              : (lang === 'he' ? 'קורא טקסט, מזהה מותג ומעריך שווי...' : 'Reading text, identifying brand & estimating value...')
             }
           </p>
         </div>
@@ -240,7 +265,6 @@ export function AnalyzingView() {
           </div>
         </div>
 
-        {/* Step indicators */}
         <div className="flex items-center justify-center gap-6 text-xs text-slate-500">
           <div className={`flex items-center gap-1.5 ${isCompressing ? 'animate-pulse text-blue-400' : (isAnalyzing ? 'text-green-400' : 'text-slate-500')}`}>
             <div className={`w-2 h-2 rounded-full ${isCompressing ? 'bg-blue-400 animate-pulse' : (isAnalyzing ? 'bg-green-400' : 'bg-slate-600')}`} />
@@ -259,11 +283,7 @@ export function AnalyzingView() {
           </div>
         </div>
 
-        {/* Cancel button */}
-        <button
-          onClick={cancelPipeline}
-          className="text-slate-500 text-xs hover:text-slate-300 transition-colors mt-2"
-        >
+        <button onClick={cancelPipeline} className="text-slate-500 text-xs hover:text-slate-300 transition-colors mt-2">
           {lang === 'he' ? 'ביטול' : 'Cancel'}
         </button>
       </div>
@@ -272,13 +292,234 @@ export function AnalyzingView() {
 }
 
 // ═══════════════════════════════════════════════════════
-// RESULTS VIEW — with multi-stage recognition UI
+// CONFIDENCE TIER HELPERS
+// ═══════════════════════════════════════════════════════
+
+function getConfidenceTier(confidence) {
+  if (confidence >= 0.80) return 'high';
+  if (confidence >= 0.60) return 'moderate';
+  if (confidence >= 0.40) return 'low';
+  return 'very_low';
+}
+
+function getConfidenceStyles(tier) {
+  switch (tier) {
+    case 'high':
+      return { color: 'text-green-400', barColor: 'bg-green-500', badgeBg: 'bg-green-500/20 text-green-300', gradient: 'linear-gradient(135deg, rgba(34,197,94,0.08), rgba(34,197,94,0.02))' };
+    case 'moderate':
+      return { color: 'text-amber-400', barColor: 'bg-amber-500', badgeBg: 'bg-amber-500/20 text-amber-300', gradient: 'linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.02))' };
+    case 'low':
+      return { color: 'text-orange-400', barColor: 'bg-orange-500', badgeBg: 'bg-orange-500/20 text-orange-300', gradient: 'linear-gradient(135deg, rgba(249,115,22,0.1), rgba(249,115,22,0.02))' };
+    case 'very_low':
+    default:
+      return { color: 'text-red-400', barColor: 'bg-red-500', badgeBg: 'bg-red-500/20 text-red-300', gradient: 'linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.02))' };
+  }
+}
+
+function getConfidenceLabel(tier, lang) {
+  const labels = {
+    high:     { en: 'High confidence', he: 'ביטחון גבוה' },
+    moderate: { en: 'Verify identification', he: 'אמת את הזיהוי' },
+    low:      { en: 'Low confidence', he: 'ביטחון נמוך' },
+    very_low: { en: 'Rough estimate', he: 'הערכה גסה' },
+  };
+  return labels[tier]?.[lang === 'he' ? 'he' : 'en'] || labels.moderate.en;
+}
+
+// ═══════════════════════════════════════════════════════
+// HELP IDENTIFY MODAL — brand picker + text input + photo
+// ═══════════════════════════════════════════════════════
+function HelpIdentifyModal() {
+  const {
+    lang, result, images,
+    helpModalOpen, setHelpModalOpen,
+    addPhoto, submitBrandHint, handleAdditionalFile,
+    fileRef,
+  } = useApp();
+
+  const [brandInput, setBrandInput] = React.useState('');
+  const [showAllBrands, setShowAllBrands] = React.useState(false);
+
+  if (!helpModalOpen || !result) return null;
+
+  const category = result.category || result.classification?.category || 'Other';
+  const suggestions = getBrandSuggestions(category);
+  const visibleSuggestions = showAllBrands ? suggestions : suggestions.slice(0, 6);
+  const canAddPhoto = images.length < 3;
+
+  const handleBrandChip = (brand) => {
+    submitBrandHint(brand);
+  };
+
+  const handleSubmit = () => {
+    if (brandInput.trim()) {
+      submitBrandHint(brandInput.trim());
+      setBrandInput('');
+    }
+  };
+
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleAdditionalFile(file);
+      setHelpModalOpen(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setHelpModalOpen(false)}>
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+      <div className="relative w-full max-w-lg mx-4 mb-4 rounded-3xl overflow-hidden bg-[#0f1729] border border-white/10 shadow-2xl"
+           onClick={(e) => e.stopPropagation()}>
+        
+        {/* Header */}
+        <div className="p-5 pb-3">
+          <div className="flex items-center justify-between mb-1">
+            <h3 className="text-lg font-bold">
+              {lang === 'he' ? 'עזור לנו לזהות' : 'Help us identify'}
+            </h3>
+            <button onClick={() => setHelpModalOpen(false)} className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
+              <X className="w-4 h-4 text-slate-400" />
+            </button>
+          </div>
+          <p className="text-sm text-slate-400">
+            {lang === 'he'
+              ? `אנחנו רואים שזה ${result.nameHebrew || result.category} אבל לא הצלחנו לקרוא את המותג`
+              : `We can see this is a ${result.name || result.category} but couldn't read the brand clearly`}
+          </p>
+        </div>
+
+        <div className="px-5 pb-5 space-y-4">
+          {/* Option 1: Photo of label */}
+          {canAddPhoto && (
+            <div>
+              <p className="text-xs text-slate-500 font-medium mb-2 uppercase tracking-wider">
+                {lang === 'he' ? 'אפשרות 1: צלם תווית' : 'Option 1: Photo of label'}
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => { setHelpModalOpen(false); addPhoto('camera'); }}
+                  className="flex-1 py-3 rounded-xl bg-blue-600/20 border border-blue-500/30 text-sm font-medium text-blue-300 flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-all active:scale-[0.97]">
+                  <Camera className="w-4 h-4" />
+                  {lang === 'he' ? 'צלם תווית' : 'Take photo'}
+                </button>
+                <button onClick={() => fileRef.current?.click()}
+                  className="py-3 px-4 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 flex items-center justify-center gap-2 hover:bg-white/10 transition-all">
+                  <Upload className="w-4 h-4" />
+                  {lang === 'he' ? 'העלה' : 'Upload'}
+                </button>
+                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
+              </div>
+              <p className="text-[10px] text-slate-600 mt-1.5">
+                {lang === 'he'
+                  ? `${images.length}/3 תמונות — צלם את התווית, הלוגו או מספר הדגם`
+                  : `${images.length}/3 photos — capture the label, logo, or model number`}
+              </p>
+            </div>
+          )}
+
+          {/* Option 2: Brand quick-select */}
+          {suggestions.length > 0 && (
+            <div>
+              <p className="text-xs text-slate-500 font-medium mb-2 uppercase tracking-wider">
+                {lang === 'he' ? 'אפשרות 2: בחר מותג' : 'Option 2: Select brand'}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {visibleSuggestions.map((brand) => (
+                  <button key={brand} onClick={() => handleBrandChip(brand)}
+                    className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/15 hover:border-blue-500/30 transition-all active:scale-95">
+                    {brand}
+                  </button>
+                ))}
+                {suggestions.length > 6 && !showAllBrands && (
+                  <button onClick={() => setShowAllBrands(true)}
+                    className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-xs text-slate-500 hover:text-slate-300 transition-all">
+                    +{suggestions.length - 6} {lang === 'he' ? 'עוד' : 'more'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Option 3: Type manually */}
+          <div>
+            <p className="text-xs text-slate-500 font-medium mb-2 uppercase tracking-wider">
+              {suggestions.length > 0
+                ? (lang === 'he' ? 'אפשרות 3: הקלד ידנית' : 'Option 3: Type manually')
+                : (lang === 'he' ? 'הקלד מותג ודגם' : 'Type brand & model')}
+            </p>
+            <div className="flex gap-2">
+              <input type="text" value={brandInput} onChange={(e) => setBrandInput(e.target.value)}
+                placeholder={lang === 'he' ? 'מותג ודגם...' : 'Brand & model...'}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+              />
+              <button onClick={handleSubmit} disabled={!brandInput.trim()}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all active:scale-95">
+                {lang === 'he' ? 'עדכן' : 'Update'}
+              </button>
+            </div>
+          </div>
+
+          {/* Skip */}
+          <button onClick={() => setHelpModalOpen(false)}
+            className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+            {lang === 'he' ? 'דלג — הצג הערכה בלבד' : 'Skip — show estimate only'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════
+// MULTI-PHOTO THUMBNAIL STRIP
+// ═══════════════════════════════════════════════════════
+function PhotoStrip({ images, canAdd, onAddPhoto, lang }) {
+  if (images.length <= 1 && !canAdd) return null;
+
+  return (
+    <div className="flex items-center gap-2 px-1">
+      {images.map((img, i) => (
+        <div key={i} className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-white/20 flex-shrink-0">
+          <img src={img} className="w-full h-full object-cover" alt={`Photo ${i + 1}`} />
+          <div className="absolute bottom-0 right-0 bg-black/60 text-[8px] text-white px-1 rounded-tl">
+            {i + 1}
+          </div>
+        </div>
+      ))}
+      {canAdd && (
+        <button onClick={onAddPhoto}
+          className="w-14 h-14 rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center hover:border-blue-500/50 hover:bg-blue-500/10 transition-all flex-shrink-0">
+          <Plus className="w-5 h-5 text-slate-500" />
+        </button>
+      )}
+      {images.length > 1 && (
+        <span className="text-[10px] text-slate-500 ml-1">
+          {images.length}/3 {lang === 'he' ? 'תמונות' : 'photos'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+
+// ═══════════════════════════════════════════════════════
+// RESULTS VIEW — confidence-tiered UI + multi-photo + help
 // ═══════════════════════════════════════════════════════
 export function ResultsView() {
-  const { lang, t, images, result, startListing, reset, refineResult, confirmResult, correctResult } = useApp();
+  const {
+    lang, t, images, result, startListing, reset,
+    refineResult, confirmResult, correctResult,
+    addPhoto, setHelpModalOpen, helpModalOpen, fileRef,
+    handleAdditionalFile,
+  } = useApp();
+
   const [showCorrection, setShowCorrection] = React.useState(false);
   const [correctionInput, setCorrectionInput] = React.useState('');
   const [refining, setRefining] = React.useState(false);
+  const [showDetails, setShowDetails] = React.useState(false);
+  const addPhotoFileRef = React.useRef(null);
 
   if (!result) return null;
 
@@ -286,18 +527,23 @@ export function ResultsView() {
   const confidencePercent = Math.round(confidence * 100);
   const recognition = result.recognition || {};
   const alternatives = recognition.alternatives || [];
-  const needsConfirmation = result.needsConfirmation && !result.userConfirmed;
   const isConfirmed = result.userConfirmed;
 
-  const confidenceColor = confidence >= 0.9 ? 'text-green-400' : confidence >= 0.75 ? 'text-blue-400' : confidence >= 0.5 ? 'text-amber-400' : 'text-red-400';
-  const confidenceBarColor = confidence >= 0.9 ? 'bg-green-500' : confidence >= 0.75 ? 'bg-blue-500' : confidence >= 0.5 ? 'bg-amber-500' : 'bg-red-500';
-  const confidenceLabel = confidence >= 0.9
-    ? (lang === 'he' ? 'זיהוי מדויק' : 'Exact match')
-    : confidence >= 0.75
-      ? (lang === 'he' ? 'ביטחון גבוה' : 'High confidence')
-      : confidence >= 0.5
-        ? (lang === 'he' ? 'ביטחון בינוני' : 'Moderate confidence')
-        : (lang === 'he' ? 'ביטחון נמוך' : 'Low confidence');
+  // Confidence tier system
+  const tier = getConfidenceTier(confidence);
+  const styles = getConfidenceStyles(tier);
+  const needsConfirmation = result.needsConfirmation && !isConfirmed;
+
+  // Structured data from improved pipeline
+  const identification = result.identification || {};
+  const ocr = result.ocr || {};
+  const classification = result.classification || {};
+  const confidenceReasoning = result.confidence_reasoning || '';
+  const priceMethod = result.marketValue?.price_method || '';
+  const brandConf = classification.brand_confidence || recognition.brandConfidence || 'unidentified';
+
+  // Multi-photo
+  const canAddPhoto = images.length < 3 && !isConfirmed;
 
   const handleSelectAlternative = async (alt) => {
     setRefining(true);
@@ -314,7 +560,15 @@ export function ResultsView() {
     setRefining(false);
   };
 
-  // Show refining state
+  const handleAddPhotoClick = () => {
+    addPhoto('camera');
+  };
+
+  const handleAddPhotoFile = (e) => {
+    const file = e.target.files?.[0];
+    if (file) handleAdditionalFile(file);
+  };
+
   if (refining) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center py-20">
@@ -328,6 +582,12 @@ export function ResultsView() {
 
   return (
     <div className="space-y-5 pb-4">
+      {/* Help modal */}
+      <HelpIdentifyModal />
+
+      {/* Hidden file input for add-photo from results */}
+      <input ref={addPhotoFileRef} type="file" accept="image/*" className="hidden" onChange={handleAddPhotoFile} />
+
       {/* Item image + name */}
       <FadeIn>
         <div className="relative rounded-3xl overflow-hidden shadow-2xl">
@@ -338,65 +598,181 @@ export function ResultsView() {
           <div className="absolute bottom-0 left-0 right-0 p-5">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge color="blue">{result.category}</Badge>
-              {result.subcategory && result.subcategory !== 'Other' && (
-                <Badge color="purple">{result.subcategory}</Badge>
-              )}
-              {result.is_collectible && (
-                <Badge color="amber"><Gem className="w-3 h-3 mr-1" />{lang === 'he' ? 'אספנות' : 'Collectible'}</Badge>
-              )}
-              {/* Confidence badge */}
-              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md ${confidence >= 0.9 ? 'bg-green-500/20 text-green-300' : confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                {isConfirmed ? <Check className="w-3 h-3" /> : <Search className="w-3 h-3" />}
+              {/* Confidence badge — tier-colored */}
+              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md ${styles.badgeBg}`}>
+                {isConfirmed || tier === 'high' ? <Check className="w-3 h-3" /> : <Search className="w-3 h-3" />}
                 {confidencePercent}%
               </div>
+              {/* Multi-photo badge */}
+              {images.length > 1 && (
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-purple-500/15 text-purple-400 backdrop-blur-md">
+                  <Camera className="w-2.5 h-2.5" />
+                  {images.length}
+                </div>
+              )}
+              {/* Brand confidence indicator */}
+              {brandConf === 'confirmed_by_text' && (
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-green-500/15 text-green-400 backdrop-blur-md">
+                  <Eye className="w-2.5 h-2.5" />
+                  OCR
+                </div>
+              )}
+              {brandConf === 'inferred_from_visuals' && (
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-500/15 text-blue-400 backdrop-blur-md">
+                  <Eye className="w-2.5 h-2.5" />
+                  {lang === 'he' ? 'חזותי' : 'Visual'}
+                </div>
+              )}
             </div>
             <h2 className="text-2xl font-bold mt-2">{lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}</h2>
-            {/* Model / OCR info */}
-            {(recognition.modelNumber || result.details?.model) && (
+            {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
               <p className="text-xs text-slate-400 mt-1">
-                {lang === 'he' ? 'דגם: ' : 'Model: '}{recognition.modelNumber || result.details?.model}
-                {recognition.identifiedBy === 'ocr' || recognition.identifiedBy === 'both' ? ' 📷' : ''}
+                {lang === 'he' ? 'דגם: ' : 'Model: '}{recognition.modelNumber || identification.model}
+                {brandConf === 'confirmed_by_text' ? ' ✓' : ''}
               </p>
             )}
           </div>
         </div>
       </FadeIn>
 
+      {/* Multi-photo thumbnail strip */}
+      {(images.length > 1 || (canAddPhoto && confidence < 0.80)) && (
+        <FadeIn delay={30}>
+          <PhotoStrip
+            images={images}
+            canAdd={canAddPhoto}
+            onAddPhoto={handleAddPhotoClick}
+            lang={lang}
+          />
+        </FadeIn>
+      )}
+
       {/* Confidence bar */}
       <FadeIn delay={50}>
         <div className="px-1">
           <div className="flex items-center justify-between mb-1.5">
-            <span className={`text-xs font-semibold ${confidenceColor}`}>{confidenceLabel}</span>
+            <span className={`text-xs font-semibold ${styles.color}`}>{getConfidenceLabel(tier, lang)}</span>
             <span className="text-xs text-slate-500">{confidencePercent}%</span>
           </div>
           <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full transition-all duration-700 ${confidenceBarColor}`} style={{ width: `${confidencePercent}%` }} />
+            <div className={`h-full rounded-full transition-all duration-700 ${styles.barColor}`} style={{ width: `${confidencePercent}%` }} />
           </div>
         </div>
       </FadeIn>
 
-      {/* Confirmation prompt — shown when AI isn't sure */}
-      {needsConfirmation && (
+      {/* Confidence reasoning */}
+      {confidenceReasoning && (
+        <FadeIn delay={60}>
+          <div className="px-1 flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
+            <p className="text-[11px] text-slate-500 leading-relaxed">{confidenceReasoning}</p>
+          </div>
+        </FadeIn>
+      )}
+
+      {/* ═══ "ADD PHOTO" PROMPT — shown for <80% confidence ═══ */}
+      {confidence < 0.80 && canAddPhoto && !isConfirmed && (
+        <FadeIn delay={65}>
+          <button onClick={handleAddPhotoClick}
+            className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/15 transition-all active:scale-[0.98]">
+            <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+              <Camera className="w-4 h-4 text-blue-400" />
+            </div>
+            <div className="text-left flex-1 min-w-0">
+              <p className="text-sm font-medium text-blue-300">
+                {lang === 'he' ? 'הוסף תמונה של התווית' : 'Add photo of the label'}
+              </p>
+              <p className="text-[10px] text-slate-500">
+                {lang === 'he' ? 'צלם את הלוגו או מספר הדגם לזיהוי מדויק יותר' : 'Capture the logo or model number for better identification'}
+              </p>
+            </div>
+            <ChevronRight className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          </button>
+        </FadeIn>
+      )}
+
+      {/* ═══ TIER: Very Low (<40%) — Broad estimate, need help ═══ */}
+      {tier === 'very_low' && !isConfirmed && (
         <FadeIn delay={75}>
-          <Card className="p-4 space-y-3" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.02))">
+          <Card className="p-4 space-y-3" gradient={styles.gradient}>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
               </div>
               <div>
-                <p className="text-sm font-semibold">{lang === 'he' ? 'האם הזיהוי נכון?' : 'Is this identification correct?'}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'בחר את המוצר הנכון לקבלת מחיר מדויק' : 'Select the correct product for accurate pricing'}</p>
+                <p className="text-sm font-semibold">
+                  {lang === 'he'
+                    ? `זה נראה כמו ${identification.generic_name_hebrew || result.category}, אבל לא הצלחנו לזהות את המותג`
+                    : `This looks like a ${identification.generic_name || result.category}, but we couldn't identify the brand`}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {lang === 'he' ? 'המחירים הם הערכה גסה — עזור לנו לדייק' : 'Prices are a rough estimate — help us be more accurate'}
+                </p>
               </div>
             </div>
 
-            {/* Yes button */}
+            <div className="flex gap-2">
+              <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
+                placeholder={lang === 'he' ? 'הקלד מותג ודגם...' : 'Type brand & model...'}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
+                autoFocus
+              />
+              <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                {lang === 'he' ? 'עדכן' : 'Update'}
+              </button>
+            </div>
+
+            {/* Brand quick-select chips */}
+            {getBrandSuggestions(result.category).length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {getBrandSuggestions(result.category).slice(0, 4).map((brand) => (
+                  <button key={brand} onClick={() => { setCorrectionInput(brand); }}
+                    className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-slate-400 hover:bg-white/10 hover:text-white transition-all">
+                    {brand}
+                  </button>
+                ))}
+                <button onClick={() => setHelpModalOpen(true)}
+                  className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-blue-400 hover:bg-blue-500/10 transition-all">
+                  {lang === 'he' ? 'עוד...' : 'More...'}
+                </button>
+              </div>
+            )}
+
+            <button onClick={confirmResult} className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+              {lang === 'he' ? 'דלג — הצג הערכה בלבד' : 'Skip — show estimate only'}
+            </button>
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* ═══ TIER: Low (40-59%) — Help needed ═══ */}
+      {tier === 'low' && !isConfirmed && (
+        <FadeIn delay={75}>
+          <Card className="p-4 space-y-3" gradient={styles.gradient}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                <Search className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">
+                  {lang === 'he'
+                    ? `אנחנו חושבים שזה ${result.nameHebrew || result.name} — נכון?`
+                    : `We think this might be ${result.name} — is that right?`}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {lang === 'he' ? 'אשר או תקן לקבלת מחיר מדויק יותר' : 'Confirm or correct for more accurate pricing'}
+                </p>
+              </div>
+            </div>
+
             <button onClick={confirmResult}
               className="w-full py-2.5 rounded-xl bg-green-600/20 border border-green-500/30 text-sm font-semibold text-green-300 flex items-center justify-center gap-2 hover:bg-green-600/30 transition-all">
               <Check className="w-4 h-4" />
               {lang === 'he' ? 'כן, זה נכון' : 'Yes, this is correct'}
             </button>
 
-            {/* Alternatives */}
             {alternatives.length > 0 && (
               <div className="space-y-2">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider">{lang === 'he' ? 'או שזה...' : 'Or is it...'}</p>
@@ -413,7 +789,70 @@ export function ResultsView() {
               </div>
             )}
 
-            {/* Manual correction */}
+            {!showCorrection ? (
+              <div className="flex items-center gap-3">
+                <button onClick={() => setShowCorrection(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                  {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
+                </button>
+                <span className="text-slate-700">|</span>
+                <button onClick={() => setHelpModalOpen(true)} className="text-xs text-purple-400 hover:text-purple-300 transition-colors">
+                  {lang === 'he' ? 'עזרה בזיהוי' : 'Help identify'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
+                  placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
+                  autoFocus
+                />
+                <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                  {lang === 'he' ? 'עדכן' : 'Update'}
+                </button>
+              </div>
+            )}
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* ═══ TIER: Moderate (60-79%) — Soft confirmation ═══ */}
+      {tier === 'moderate' && !isConfirmed && (
+        <FadeIn delay={75}>
+          <Card className="p-4 space-y-3" gradient={styles.gradient}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{lang === 'he' ? 'האם הזיהוי נכון?' : 'Is this identification correct?'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'בחר את המוצר הנכון לקבלת מחיר מדויק' : 'Confirm for accurate pricing'}</p>
+              </div>
+            </div>
+
+            <button onClick={confirmResult}
+              className="w-full py-2.5 rounded-xl bg-green-600/20 border border-green-500/30 text-sm font-semibold text-green-300 flex items-center justify-center gap-2 hover:bg-green-600/30 transition-all">
+              <Check className="w-4 h-4" />
+              {lang === 'he' ? 'כן, זה נכון' : 'Yes, this is correct'}
+            </button>
+
+            {alternatives.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider">{lang === 'he' ? 'או שזה...' : 'Or is it...'}</p>
+                {alternatives.map((alt, i) => (
+                  <button key={i} onClick={() => handleSelectAlternative(alt)}
+                    className="w-full py-2.5 px-3 rounded-xl bg-white/5 border border-white/10 text-sm flex items-center justify-between hover:bg-white/10 transition-all">
+                    <div className="text-left">
+                      <span className="font-medium">{lang === 'he' && alt.nameHebrew ? alt.nameHebrew : alt.name}</span>
+                      {alt.estimatedMid > 0 && <span className="text-xs text-slate-400 ml-2">~₪{alt.estimatedMid.toLocaleString()}</span>}
+                    </div>
+                    <span className="text-[10px] text-slate-500">{Math.round(alt.confidence * 100)}%</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {!showCorrection ? (
               <button onClick={() => setShowCorrection(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
                 {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
@@ -449,7 +888,11 @@ export function ResultsView() {
       {/* Price card */}
       <FadeIn delay={100}>
         <Card className="p-6 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.15), rgba(139,92,246,0.1))" glow>
-          <p className="text-sm text-blue-300 font-medium mb-2">{t.marketValue}</p>
+          <p className="text-sm text-blue-300 font-medium mb-2">
+            {tier === 'very_low'
+              ? (lang === 'he' ? 'טווח מחירים משוער' : 'Estimated Price Range')
+              : t.marketValue}
+          </p>
           <p className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
             {formatPrice(result.marketValue?.mid)}
           </p>
@@ -461,30 +904,86 @@ export function ResultsView() {
               {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
             </p>
           )}
-          {/* Price method indicator — shows data source */}
-          {result.valuation_id && (
-            <div className="flex items-center justify-center gap-1.5 mt-3 pt-3 border-t border-white/5">
-              <Database className="w-3 h-3 text-slate-600" />
-              <span className="text-[10px] text-slate-600">
-                {result.price_method === 'comp_median'
-                  ? (lang === 'he' ? `מבוסס ${result.comp_count} מכירות` : `Based on ${result.comp_count} sales`)
-                  : result.price_method === 'hybrid'
-                    ? (lang === 'he' ? `AI + ${result.comp_count} מכירות` : `AI + ${result.comp_count} sales`)
-                    : (lang === 'he' ? 'הערכת AI' : 'AI estimate')
-                }
-              </span>
-            </div>
+          {priceMethod && (
+            <p className="text-[10px] text-slate-600 mt-1">
+              {priceMethod === 'comp_based'
+                ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
+                : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
+            </p>
           )}
         </Card>
       </FadeIn>
 
-      {/* OCR extracted text (when relevant) */}
-      {recognition.ocrText && recognition.identifiedBy !== 'visual' && (
+      {/* OCR extracted text — pill tags */}
+      {ocr.text_found && ocr.text_found.length > 0 && (
+        <FadeIn delay={150}>
+          <Card className="p-3">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Tag className="w-3 h-3 text-slate-500" />
+              <p className="text-[10px] text-slate-500 font-medium">{lang === 'he' ? 'טקסט שזוהה בתמונה' : 'Text detected in image'}</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {ocr.text_found.map((text, i) => (
+                <span key={i} className="inline-block px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-slate-300 font-mono">
+                  {text}
+                </span>
+              ))}
+            </div>
+            {ocr.logos_found && ocr.logos_found.length > 0 && (
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                {lang === 'he' ? 'לוגו: ' : 'Logo: '}{ocr.logos_found.join(', ')}
+              </p>
+            )}
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Backward-compat: old OCR text fallback */}
+      {!ocr.text_found?.length && recognition.ocrText && recognition.identifiedBy !== 'visual' && (
         <FadeIn delay={150}>
           <Card className="p-3">
             <p className="text-[10px] text-slate-500 mb-1">{lang === 'he' ? 'טקסט שזוהה בתמונה' : 'Text extracted from image'}</p>
             <p className="text-xs text-slate-300 font-mono break-all">{recognition.ocrText}</p>
           </Card>
+        </FadeIn>
+      )}
+
+      {/* Expandable details */}
+      {(result.details?.description || result.israeliMarketNotes || result.sellingTips) && (
+        <FadeIn delay={175}>
+          <button onClick={() => setShowDetails(!showDetails)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white/5 hover:bg-white/8 transition-all text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5" />
+              {lang === 'he' ? 'פרטים נוספים' : 'More details'}
+            </span>
+            <span className="text-[10px]">{showDetails ? '▲' : '▼'}</span>
+          </button>
+          {showDetails && (
+            <Card className="p-3 space-y-2 mt-1">
+              {result.details?.description && <p className="text-xs text-slate-300">{result.details.description}</p>}
+              {result.sellingTips && (
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-0.5">{lang === 'he' ? 'טיפ למכירה' : 'Selling tip'}</p>
+                  <p className="text-xs text-slate-400">{result.sellingTips}</p>
+                </div>
+              )}
+              {result.israeliMarketNotes && (
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-0.5">{lang === 'he' ? 'שוק ישראלי' : 'Israeli market'}</p>
+                  <p className="text-xs text-slate-400">{result.israeliMarketNotes}</p>
+                </div>
+              )}
+              {result.priceFactors && result.priceFactors.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-0.5">{lang === 'he' ? 'גורמי מחיר' : 'Price factors'}</p>
+                  {result.priceFactors.map((pf, i) => (
+                    <p key={i} className="text-xs text-slate-400">{pf.factor}: {pf.impact}</p>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
         </FadeIn>
       )}
 
