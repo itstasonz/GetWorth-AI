@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from 'react';
-import { ChevronLeft, ChevronRight, Camera } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Camera, ImageOff } from 'lucide-react';
 
 /**
  * ImageGallery — swipeable image carousel for mobile
@@ -11,12 +11,15 @@ import { ChevronLeft, ChevronRight, Camera } from 'lucide-react';
  */
 export default function ImageGallery({ images = [], aspectRatio = 'aspect-square', overlay, className = '' }) {
   const [current, setCurrent] = useState(0);
+  const [brokenImages, setBrokenImages] = useState(new Set());
   const touchStartX = useRef(0);
   const touchDeltaX = useRef(0);
   const containerRef = useRef(null);
   const isDragging = useRef(false);
 
-  const count = images.length;
+  // Filter out empty/null entries
+  const validImages = images.filter(img => img && typeof img === 'string' && img.length > 10);
+  const count = validImages.length;
   if (count === 0) return null;
 
   const goTo = useCallback((idx) => {
@@ -25,6 +28,11 @@ export default function ImageGallery({ images = [], aspectRatio = 'aspect-square
 
   const next = useCallback(() => goTo(current + 1), [current, goTo]);
   const prev = useCallback(() => goTo(current - 1), [current, goTo]);
+
+  // Mark image as broken so we show placeholder
+  const handleImageError = (index) => {
+    setBrokenImages(prev => new Set([...prev, index]));
+  };
 
   // Touch handlers for swipe
   const onTouchStart = (e) => {
@@ -61,14 +69,23 @@ export default function ImageGallery({ images = [], aspectRatio = 'aspect-square
           className="flex h-full transition-transform duration-300 ease-out"
           style={{ transform: `translateX(-${current * 100}%)`, width: `${count * 100}%` }}
         >
-          {images.map((src, i) => (
+          {validImages.map((src, i) => (
             <div key={i} className="h-full flex-shrink-0" style={{ width: `${100 / count}%` }}>
-              <img
-                src={src}
-                alt=""
-                className="w-full h-full object-cover"
-                loading={i === 0 ? 'eager' : 'lazy'}
-              />
+              {brokenImages.has(i) ? (
+                /* Placeholder for broken/failed images */
+                <div className="w-full h-full flex flex-col items-center justify-center bg-white/5">
+                  <ImageOff className="w-10 h-10 text-slate-600 mb-2" />
+                  <p className="text-xs text-slate-600">Image unavailable</p>
+                </div>
+              ) : (
+                <img
+                  src={src}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  loading={i === 0 ? 'eager' : 'lazy'}
+                  onError={() => handleImageError(i)}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -110,7 +127,7 @@ export default function ImageGallery({ images = [], aspectRatio = 'aspect-square
       {/* Dot indicators */}
       {count > 1 && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
-          {images.map((_, i) => (
+          {validImages.map((_, i) => (
             <button
               key={i}
               onClick={(e) => { e.stopPropagation(); goTo(i); }}

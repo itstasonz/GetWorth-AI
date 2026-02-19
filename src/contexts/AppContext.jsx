@@ -1236,7 +1236,7 @@ export function AppProvider({ children }) {
     setView('home');
   }, []);
 
-  // ── Camera release (must be before captureAdditionalPhoto which references it) ──
+  // ── Camera release (MUST be before captureAdditionalPhoto to avoid TDZ crash) ──
   const cameraStartingRef = useRef(false);
   const releaseCamera = useCallback(() => {
     if (DEV) console.log('[Camera] releaseCamera called');
@@ -1445,7 +1445,7 @@ export function AppProvider({ children }) {
   }, [runPipeline, playSound, lang, addPhotoMode]);
 
   // ═══════════════════════════════════════════════════════
-  // CAMERA + TORCH
+  // CAMERA + TORCH (releaseCamera moved above for TDZ safety)
   // ═══════════════════════════════════════════════════════
 
   // Detect torch capability on the current video track
@@ -1743,19 +1743,33 @@ export function AppProvider({ children }) {
       let imageUrls = [];
       for (let i = 0; i < images.length; i++) {
         const img = images[i];
+        if (!img || typeof img !== 'string' || img.length < 100) continue; // Skip empty/broken images
         if (img.startsWith('data:')) {
-          const response = await fetch(img);
-          const blob = await response.blob();
-          const fileName = `${user.id}/${Date.now()}-${i}.jpg`;
           try {
-            const { error: uploadError } = await supabase.storage.from('listings').upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
-            if (uploadError) { imageUrls.push(img); }
-            else {
-              const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
-              imageUrls.push(publicUrl);
+            const response = await fetch(img);
+            const blob = await response.blob();
+            // Skip tiny blobs (likely blank/black captures from camera issues)
+            if (blob.size < 1000) {
+              if (DEV) console.warn(`[Publish] Skipping image ${i}: too small (${blob.size} bytes)`);
+              continue;
             }
-          } catch { imageUrls.push(img); }
-        } else { imageUrls.push(img); }
+            const fileName = `${user.id}/${Date.now()}-${i}.jpg`;
+            const { error: uploadError } = await supabase.storage.from('listings').upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
+            if (uploadError) {
+              if (DEV) console.warn(`[Publish] Upload failed for image ${i}:`, uploadError.message);
+              // Don't store base64 in DB — it's too large and causes rendering issues
+              continue;
+            }
+            const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
+            imageUrls.push(publicUrl);
+          } catch (err) {
+            if (DEV) console.warn(`[Publish] Image ${i} processing error:`, err);
+            continue; // Skip broken images instead of storing base64
+          }
+        } else {
+          // Already a URL (not base64)
+          imageUrls.push(img);
+        }
       }
       if (imageUrls.length === 0) {
         imageUrls = images.length > 0 ? images : [];
