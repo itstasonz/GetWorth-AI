@@ -1236,6 +1236,32 @@ export function AppProvider({ children }) {
     setView('home');
   }, []);
 
+  // ── Camera release (moved up so captureAdditionalPhoto can reference it) ──
+  const cameraStartingRef = useRef(false); // Prevent double getUserMedia
+
+  const releaseCamera = useCallback(() => {
+    if (DEV) console.log('[Camera] releaseCamera called');
+    if (cameraStreamRef.current) {
+      try {
+        const vt = cameraStreamRef.current.getVideoTracks()[0];
+        if (vt && typeof vt.applyConstraints === 'function') {
+          vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+        }
+      } catch {}
+      cameraStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch {}
+      });
+      cameraStreamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.pause();
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+    setTorchOn(false);
+    setTorchSupported(false);
+    cameraStartingRef.current = false;
+  }, []);
+
   // ── Add another photo (multi-photo: append + re-analyze) ──
   const addPhoto = useCallback((source = 'camera') => {
     setAddPhotoMode(true);
@@ -1422,35 +1448,6 @@ export function AppProvider({ children }) {
   // ═══════════════════════════════════════════════════════
   // CAMERA + TORCH
   // ═══════════════════════════════════════════════════════
-
-  const cameraStartingRef = useRef(false); // Prevent double getUserMedia
-
-  // ── Kill all tracks, release hardware, clear video element ──
-  const releaseCamera = useCallback(() => {
-    if (DEV) console.log('[Camera] releaseCamera called');
-    // Turn off torch first
-    if (cameraStreamRef.current) {
-      try {
-        const vt = cameraStreamRef.current.getVideoTracks()[0];
-        if (vt && typeof vt.applyConstraints === 'function') {
-          vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
-        }
-      } catch {}
-      // Stop every track
-      cameraStreamRef.current.getTracks().forEach(track => {
-        try { track.stop(); } catch {}
-      });
-      cameraStreamRef.current = null;
-    }
-    // Clear video element
-    if (videoRef.current) {
-      videoRef.current.pause();
-      try { videoRef.current.srcObject = null; } catch {}
-    }
-    setTorchOn(false);
-    setTorchSupported(false);
-    cameraStartingRef.current = false;
-  }, []);
 
   // Detect torch capability on the current video track
   const detectTorch = useCallback((stream) => {
