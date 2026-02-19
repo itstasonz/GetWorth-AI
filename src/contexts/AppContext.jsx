@@ -93,6 +93,10 @@ export function AppProvider({ children }) {
   const [pipelineError, setPipelineError] = useState(null);
   const pipelineAbortRef = useRef(null);
 
+  // ─── Multi-photo + Help modal ───
+  const [addPhotoMode, setAddPhotoMode] = useState(false); // true = appending photo to existing scan
+  const [helpModalOpen, setHelpModalOpen] = useState(false);
+
   // ─── Torch (flash) state ───
   const [torchSupported, setTorchSupported] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
@@ -950,8 +954,12 @@ export function AppProvider({ children }) {
   }, []);
 
   // ── Internal: call /api/analyze with retry + timeout ──
-  const analyzeWithRetry = useCallback(async (compressedDataUrl, pipelineSignal, maxRetries = 1, refineModel = null, corrections = []) => {
-    const base64 = compressedDataUrl.split(',')[1];
+  const analyzeWithRetry = useCallback(async (compressedDataUrlOrArray, pipelineSignal, maxRetries = 1, refineModel = null, corrections = []) => {
+    // Support both single image (string) and multiple images (array)
+    const imageArray = Array.isArray(compressedDataUrlOrArray)
+      ? compressedDataUrlOrArray
+      : [compressedDataUrlOrArray];
+    const base64Array = imageArray.map(img => img.split(',')[1]);
     let lastError;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -974,7 +982,10 @@ export function AppProvider({ children }) {
 
       const t0 = performance.now();
       try {
-        const body = { imageData: base64, lang, corrections };
+        // Send images[] array for multi-photo, imageData for single (backward compat)
+        const body = base64Array.length > 1
+          ? { images: base64Array, lang, corrections }
+          : { imageData: base64Array[0], lang, corrections };
         if (refineModel) body.refineModel = refineModel;
 
         const res = await fetch('/api/analyze', {
@@ -1050,7 +1061,7 @@ export function AppProvider({ children }) {
         price_mid: aiResult.marketValue?.mid || null,
         price_high: aiResult.marketValue?.high || null,
         new_retail: aiResult.marketValue?.newRetailPrice || null,
-        price_method: 'ai_estimate',
+        price_method: aiResult.marketValue?.price_method || 'ai_estimate',
         lang,
       };
       const { data, error } = await supabase.from('valuations').insert(row).select('id').single();
@@ -1115,7 +1126,8 @@ export function AppProvider({ children }) {
   }, [user, lang, showToastMsg]);
 
   // ── Main pipeline: compress → analyze ──
-  const runPipeline = useCallback(async (rawDataUrl) => {
+  // appendMode: if true, appends new image to existing images[] and re-analyzes all
+  const runPipeline = useCallback(async (rawDataUrl, appendMode = false) => {
     // Cancel any in-flight pipeline
     if (pipelineAbortRef.current) {
       pipelineAbortRef.current.abort();
@@ -1129,9 +1141,18 @@ export function AppProvider({ children }) {
     try {
       // ── Step 1: Compress ──
       setPipelineState('compressing');
-      if (DEV) console.log('[Pipeline] Compressing...');
+      if (DEV) console.log(`[Pipeline] Compressing... (append=${appendMode})`);
       const compressed = await compressImage(rawDataUrl);
-      setImages([compressed]); // Show compressed version in preview
+
+      if (appendMode) {
+        // Append to existing images (max 3 total)
+        setImages(prev => {
+          const updated = [...prev, compressed].slice(-3); // keep last 3
+          return updated;
+        });
+      } else {
+        setImages([compressed]); // Fresh scan — single image
+      }
 
       if (abortCtrl.signal.aborted) return;
 
@@ -1142,7 +1163,24 @@ export function AppProvider({ children }) {
       // Fetch past correction patterns (non-blocking — if it fails, analyze without hints)
       const hints = await fetchRecognitionHints().catch(() => []);
       
-      const analysisResult = await analyzeWithRetry(compressed, abortCtrl.signal, 1, null, hints);
+      // Send ALL images when in append mode
+      let analyzeInput;
+      if (appendMode) {
+        // Get the current images + the new compressed one
+        // We need to read state synchronously — use a ref trick
+        const allImages = await new Promise(resolve => {
+          setImages(prev => {
+            resolve(prev);
+            return prev;
+          });
+        });
+        analyzeInput = allImages.length > 1 ? allImages : compressed;
+        if (DEV) console.log(`[Pipeline] Sending ${Array.isArray(analyzeInput) ? analyzeInput.length : 1} image(s)`);
+      } else {
+        analyzeInput = compressed;
+      }
+
+      const analysisResult = await analyzeWithRetry(analyzeInput, abortCtrl.signal, 1, null, hints);
 
       if (abortCtrl.signal.aborted) return;
 
@@ -1150,7 +1188,13 @@ export function AppProvider({ children }) {
       setPipelineState('success');
       setResult(analysisResult);
       setView('results');
+      setAddPhotoMode(false); // Reset add-photo mode
       playSound('success');
+
+      // Auto-open help modal for very low confidence
+      if (analysisResult.confidence < 0.40 && !analysisResult.userConfirmed) {
+        setHelpModalOpen(true);
+      }
 
       // Store valuation in DB (async, non-blocking)
       storeValuation(analysisResult).then(vid => {
@@ -1187,8 +1231,74 @@ export function AppProvider({ children }) {
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
     setPipelineState('idle');
     setPipelineError(null);
+    setAddPhotoMode(false);
+    setHelpModalOpen(false);
     setView('home');
   }, []);
+
+  // ── Add another photo (multi-photo: append + re-analyze) ──
+  const addPhoto = useCallback((source = 'camera') => {
+    setAddPhotoMode(true);
+    setHelpModalOpen(false);
+    if (source === 'camera') {
+      setView('camera');
+    }
+    // If source === 'file', the caller should trigger fileRef.current.click()
+  }, []);
+
+  // ── Handle the added photo from camera ──
+  const captureAdditionalPhoto = useCallback(() => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    if (!video || !canvas) return;
+
+    if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+      showToastMsg(lang === 'he' ? 'המצלמה עדיין נטענת' : 'Camera still loading');
+      return;
+    }
+
+    playSound('shutter');
+    setShowFlash(true);
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+
+    try {
+      const rawImg = canvas.toDataURL('image/jpeg', 0.85);
+      if (rawImg && rawImg.length > 100) {
+        setTimeout(() => {
+          setShowFlash(false);
+          setView('analyzing');
+          releaseCamera();
+          runPipeline(rawImg, true); // appendMode = true
+        }, 150);
+      } else {
+        setShowFlash(false);
+        showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture failed');
+      }
+    } catch (e) {
+      setShowFlash(false);
+      showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture error');
+    }
+  }, [runPipeline, playSound, releaseCamera, lang, showToastMsg]);
+
+  // ── Handle added photo from file picker ──
+  const handleAdditionalFile = useCallback((file) => {
+    if (!file?.type.startsWith('image/')) return;
+    playSound('tap');
+    setView('analyzing');
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      runPipeline(e.target.result, true); // appendMode = true
+    };
+    reader.onerror = () => {
+      setPipelineState('compress_error');
+      setPipelineError(lang === 'he' ? 'שגיאה בקריאת הקובץ' : 'Failed to read file');
+    };
+    reader.readAsDataURL(file);
+  }, [runPipeline, playSound, lang]);
 
   // ── Refine: re-analyze with a confirmed model name ──
   const refineResult = useCallback(async (modelName) => {
@@ -1276,6 +1386,13 @@ export function AppProvider({ children }) {
     await refineResult(userInput.trim());
   }, [refineResult]);
 
+  // ── Submit brand hint from help modal (text input) ──
+  const submitBrandHint = useCallback(async (brandText) => {
+    if (!brandText?.trim() || !images[0]) return;
+    await refineResult(brandText.trim());
+    setHelpModalOpen(false);
+  }, [images, refineResult]);
+
   // ── handleFile: user picks image from gallery ──
   const handleFile = useCallback((file) => {
     if (!file?.type.startsWith('image/')) return;
@@ -1286,15 +1403,21 @@ export function AppProvider({ children }) {
     reader.onload = (e) => {
       const rawData = e.target.result;
       capturedImageRef.current = rawData;
-      setImages([rawData]); // Show original while compressing
-      runPipeline(rawData);
+      if (addPhotoMode) {
+        // Multi-photo: append and re-analyze
+        runPipeline(rawData, true);
+      } else {
+        // Normal: single image scan
+        setImages([rawData]); // Show original while compressing
+        runPipeline(rawData);
+      }
     };
     reader.onerror = () => {
       setPipelineState('compress_error');
       setPipelineError(lang === 'he' ? 'שגיאה בקריאת הקובץ' : 'Failed to read file');
     };
     reader.readAsDataURL(file);
-  }, [runPipeline, playSound, lang]);
+  }, [runPipeline, playSound, lang, addPhotoMode]);
 
   // ═══════════════════════════════════════════════════════
   // CAMERA + TORCH
@@ -1525,13 +1648,21 @@ export function AppProvider({ children }) {
         return;
       }
       capturedImageRef.current = rawImg;
-      if (DEV) console.log('[Camera] Capture success');
+      if (DEV) console.log(`[Camera] Capture success (addPhoto=${addPhotoMode})`);
       setTimeout(() => {
         setShowFlash(false);
-        setImages([rawImg]);
-        setView('analyzing');
-        releaseCamera();
-        runPipeline(rawImg);
+        if (addPhotoMode) {
+          // Multi-photo: append and re-analyze
+          setView('analyzing');
+          releaseCamera();
+          runPipeline(rawImg, true);
+        } else {
+          // Normal: single image scan
+          setImages([rawImg]);
+          setView('analyzing');
+          releaseCamera();
+          runPipeline(rawImg);
+        }
       }, 150);
     };
 
@@ -1548,7 +1679,7 @@ export function AppProvider({ children }) {
       setShowFlash(false);
       showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture error');
     }
-  }, [runPipeline, playSound, releaseCamera, lang, showToastMsg]);
+  }, [runPipeline, playSound, releaseCamera, lang, showToastMsg, addPhotoMode]);
 
   const stopCamera = useCallback(() => {
     if (DEV) console.log('[Camera] Stop requested');
@@ -2016,6 +2147,8 @@ export function AppProvider({ children }) {
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
     setPipelineState('idle');
     setPipelineError(null);
+    setAddPhotoMode(false);
+    setHelpModalOpen(false);
     setImages([]); setResult(null); setView('home'); setError(null);
     setCondition(null); setListingStep(0); setSelected(null);
     setActiveChat(null); capturedImageRef.current = null;
@@ -2088,6 +2221,10 @@ export function AppProvider({ children }) {
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline,
+    // Multi-photo + Help modal
+    addPhoto, addPhotoMode, setAddPhotoMode,
+    captureAdditionalPhoto, handleAdditionalFile, submitBrandHint,
+    helpModalOpen, setHelpModalOpen,
     // Recognition refinement
     refineResult, confirmResult, correctResult,
     valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
