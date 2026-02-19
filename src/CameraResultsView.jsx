@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice } from '../lib/utils';
@@ -15,7 +15,6 @@ export function CameraView() {
 
   const [cameraReady, setCameraReady] = React.useState(false);
 
-  // Track when video starts producing frames
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -26,14 +25,12 @@ export function CameraView() {
       }
     };
 
-    // Check immediately and on events
     checkReady();
     video.addEventListener('loadeddata', checkReady);
     video.addEventListener('playing', checkReady);
 
-    // Fallback polling for iOS
     const interval = setInterval(checkReady, 200);
-    const timeout = setTimeout(() => { setCameraReady(true); }, 5000); // Safety: enable after 5s
+    const timeout = setTimeout(() => { setCameraReady(true); }, 5000);
 
     return () => {
       video.removeEventListener('loadeddata', checkReady);
@@ -43,7 +40,6 @@ export function CameraView() {
     };
   }, [videoRef]);
 
-  // Release camera on unmount — but do NOT navigate (capture already handles navigation)
   useEffect(() => {
     return () => releaseCamera();
   }, [releaseCamera]);
@@ -62,12 +58,10 @@ export function CameraView() {
         </div>
       </div>
       <div className="absolute bottom-0 inset-x-0 p-8 flex justify-center gap-6 bg-gradient-to-t from-black via-black/80 to-transparent">
-        {/* Close button */}
         <button onClick={stopCamera} className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center hover:bg-white/20 transition-all">
           <X className="w-6 h-6 text-white" />
         </button>
 
-        {/* Capture button — disabled until camera ready */}
         <button onClick={capture} disabled={!cameraReady}
           className={`w-20 h-20 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-all ${cameraReady ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-blue-500/50' : 'bg-white/10 opacity-50'}`}>
           {cameraReady ? (
@@ -77,24 +71,18 @@ export function CameraView() {
           )}
         </button>
 
-        {/* Torch button — only shown if device supports it */}
         {torchSupported ? (
           <button
             onClick={toggleTorch}
             className={`w-14 h-14 rounded-2xl backdrop-blur flex items-center justify-center transition-all ${
-              torchOn
-                ? 'bg-yellow-500/30 border border-yellow-400/50'
-                : 'bg-white/10 hover:bg-white/20'
+              torchOn ? 'bg-yellow-500/30 border border-yellow-400/50' : 'bg-white/10 hover:bg-white/20'
             }`}
             title={torchOn ? (lang === 'he' ? 'כבה פלאש' : 'Turn off flash') : (lang === 'he' ? 'הדלק פלאש' : 'Turn on flash')}
           >
-            {torchOn
-              ? <Zap className="w-6 h-6 text-yellow-300" />
-              : <ZapOff className="w-6 h-6 text-white/60" />
-            }
+            {torchOn ? <Zap className="w-6 h-6 text-yellow-300" /> : <ZapOff className="w-6 h-6 text-white/60" />}
           </button>
         ) : (
-          <div className="w-14" /> // Spacer when torch unavailable
+          <div className="w-14" />
         )}
       </div>
     </div>
@@ -115,11 +103,9 @@ export function AnalyzingView() {
   const isCompressing = pipelineState === 'compressing';
   const isAnalyzing = pipelineState === 'analyzing';
 
-  // ─── Error state ───
   if (isError) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
-        {/* Image preview */}
         <div className="relative w-48 h-48 rounded-3xl overflow-hidden shadow-2xl mb-8 opacity-60">
           {(capturedImageRef.current || images[0]) && (
             <img src={capturedImageRef.current || images[0]} className="w-full h-full object-cover" alt="" />
@@ -127,7 +113,6 @@ export function AnalyzingView() {
           <div className="absolute inset-0 bg-red-900/30" />
         </div>
 
-        {/* Error icon + message */}
         <div className="text-center space-y-4 max-w-xs">
           <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center mx-auto">
             <AlertTriangle className="w-8 h-8 text-red-400" />
@@ -144,7 +129,6 @@ export function AnalyzingView() {
             {pipelineError || (lang === 'he' ? 'משהו השתבש, נסה שוב' : 'Something went wrong, please try again')}
           </p>
 
-          {/* Which step failed */}
           <div className="flex items-center justify-center gap-3 text-xs">
             <div className={`flex items-center gap-1.5 ${pipelineState === 'compress_error' ? 'text-red-400' : 'text-green-400'}`}>
               <div className={`w-2 h-2 rounded-full ${pipelineState === 'compress_error' ? 'bg-red-400' : 'bg-green-400'}`} />
@@ -157,19 +141,14 @@ export function AnalyzingView() {
             </div>
           </div>
 
-          {/* Action buttons */}
           <div className="flex gap-3 pt-2">
-            <button
-              onClick={cancelPipeline}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-all flex items-center justify-center gap-2"
-            >
+            <button onClick={cancelPipeline}
+              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-all flex items-center justify-center gap-2">
               <ArrowLeft className="w-4 h-4" />
               {lang === 'he' ? 'חזור' : 'Back'}
             </button>
-            <button
-              onClick={retryPipeline}
-              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.97]"
-            >
+            <button onClick={retryPipeline}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.97]">
               <RefreshCw className="w-4 h-4" />
               {lang === 'he' ? 'נסה שוב' : 'Retry'}
             </button>
@@ -179,7 +158,6 @@ export function AnalyzingView() {
     );
   }
 
-  // ─── Loading state (compressing or analyzing) ───
   return (
     <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
       <div className="relative">
@@ -230,7 +208,7 @@ export function AnalyzingView() {
           <p className="text-sm text-slate-400">
             {isCompressing
               ? (lang === 'he' ? 'מכווץ ומכין לניתוח...' : 'Compressing and preparing...')
-              : (lang === 'he' ? 'מזהה פריט וחוקר שוק...' : 'Identifying item & researching market...')
+              : (lang === 'he' ? 'קורא טקסט, מזהה מותג ומעריך שווי...' : 'Reading text, identifying brand & estimating value...')
             }
           </p>
         </div>
@@ -240,7 +218,6 @@ export function AnalyzingView() {
           </div>
         </div>
 
-        {/* Step indicators */}
         <div className="flex items-center justify-center gap-6 text-xs text-slate-500">
           <div className={`flex items-center gap-1.5 ${isCompressing ? 'animate-pulse text-blue-400' : (isAnalyzing ? 'text-green-400' : 'text-slate-500')}`}>
             <div className={`w-2 h-2 rounded-full ${isCompressing ? 'bg-blue-400 animate-pulse' : (isAnalyzing ? 'bg-green-400' : 'bg-slate-600')}`} />
@@ -259,11 +236,7 @@ export function AnalyzingView() {
           </div>
         </div>
 
-        {/* Cancel button */}
-        <button
-          onClick={cancelPipeline}
-          className="text-slate-500 text-xs hover:text-slate-300 transition-colors mt-2"
-        >
+        <button onClick={cancelPipeline} className="text-slate-500 text-xs hover:text-slate-300 transition-colors mt-2">
           {lang === 'he' ? 'ביטול' : 'Cancel'}
         </button>
       </div>
@@ -272,13 +245,49 @@ export function AnalyzingView() {
 }
 
 // ═══════════════════════════════════════════════════════
-// RESULTS VIEW — with multi-stage recognition UI
+// CONFIDENCE TIER HELPERS
+// ═══════════════════════════════════════════════════════
+
+function getConfidenceTier(confidence) {
+  if (confidence >= 0.80) return 'high';
+  if (confidence >= 0.60) return 'moderate';
+  if (confidence >= 0.40) return 'low';
+  return 'very_low';
+}
+
+function getConfidenceStyles(tier) {
+  switch (tier) {
+    case 'high':
+      return { color: 'text-green-400', barColor: 'bg-green-500', badgeBg: 'bg-green-500/20 text-green-300', gradient: 'linear-gradient(135deg, rgba(34,197,94,0.08), rgba(34,197,94,0.02))' };
+    case 'moderate':
+      return { color: 'text-amber-400', barColor: 'bg-amber-500', badgeBg: 'bg-amber-500/20 text-amber-300', gradient: 'linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.02))' };
+    case 'low':
+      return { color: 'text-orange-400', barColor: 'bg-orange-500', badgeBg: 'bg-orange-500/20 text-orange-300', gradient: 'linear-gradient(135deg, rgba(249,115,22,0.1), rgba(249,115,22,0.02))' };
+    case 'very_low':
+    default:
+      return { color: 'text-red-400', barColor: 'bg-red-500', badgeBg: 'bg-red-500/20 text-red-300', gradient: 'linear-gradient(135deg, rgba(239,68,68,0.1), rgba(239,68,68,0.02))' };
+  }
+}
+
+function getConfidenceLabel(tier, lang) {
+  const labels = {
+    high:     { en: 'High confidence', he: 'ביטחון גבוה' },
+    moderate: { en: 'Verify identification', he: 'אמת את הזיהוי' },
+    low:      { en: 'Low confidence', he: 'ביטחון נמוך' },
+    very_low: { en: 'Rough estimate', he: 'הערכה גסה' },
+  };
+  return labels[tier]?.[lang === 'he' ? 'he' : 'en'] || labels.moderate.en;
+}
+
+// ═══════════════════════════════════════════════════════
+// RESULTS VIEW — confidence-tiered UI
 // ═══════════════════════════════════════════════════════
 export function ResultsView() {
   const { lang, t, images, result, startListing, reset, refineResult, confirmResult, correctResult } = useApp();
   const [showCorrection, setShowCorrection] = React.useState(false);
   const [correctionInput, setCorrectionInput] = React.useState('');
   const [refining, setRefining] = React.useState(false);
+  const [showDetails, setShowDetails] = React.useState(false);
 
   if (!result) return null;
 
@@ -286,18 +295,20 @@ export function ResultsView() {
   const confidencePercent = Math.round(confidence * 100);
   const recognition = result.recognition || {};
   const alternatives = recognition.alternatives || [];
-  const needsConfirmation = result.needsConfirmation && !result.userConfirmed;
   const isConfirmed = result.userConfirmed;
 
-  const confidenceColor = confidence >= 0.9 ? 'text-green-400' : confidence >= 0.75 ? 'text-blue-400' : confidence >= 0.5 ? 'text-amber-400' : 'text-red-400';
-  const confidenceBarColor = confidence >= 0.9 ? 'bg-green-500' : confidence >= 0.75 ? 'bg-blue-500' : confidence >= 0.5 ? 'bg-amber-500' : 'bg-red-500';
-  const confidenceLabel = confidence >= 0.9
-    ? (lang === 'he' ? 'זיהוי מדויק' : 'Exact match')
-    : confidence >= 0.75
-      ? (lang === 'he' ? 'ביטחון גבוה' : 'High confidence')
-      : confidence >= 0.5
-        ? (lang === 'he' ? 'ביטחון בינוני' : 'Moderate confidence')
-        : (lang === 'he' ? 'ביטחון נמוך' : 'Low confidence');
+  // Confidence tier system
+  const tier = getConfidenceTier(confidence);
+  const styles = getConfidenceStyles(tier);
+  const needsConfirmation = result.needsConfirmation && !isConfirmed;
+
+  // Structured data from improved pipeline
+  const identification = result.identification || {};
+  const ocr = result.ocr || {};
+  const classification = result.classification || {};
+  const confidenceReasoning = result.confidence_reasoning || '';
+  const priceMethod = result.marketValue?.price_method || '';
+  const brandConf = classification.brand_confidence || recognition.brandConfidence || 'unidentified';
 
   const handleSelectAlternative = async (alt) => {
     setRefining(true);
@@ -314,7 +325,6 @@ export function ResultsView() {
     setRefining(false);
   };
 
-  // Show refining state
   if (refining) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center py-20">
@@ -338,18 +348,30 @@ export function ResultsView() {
           <div className="absolute bottom-0 left-0 right-0 p-5">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge color="blue">{result.category}</Badge>
-              {/* Confidence badge */}
-              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md ${confidence >= 0.9 ? 'bg-green-500/20 text-green-300' : confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' : 'bg-amber-500/20 text-amber-300'}`}>
-                {isConfirmed ? <Check className="w-3 h-3" /> : <Search className="w-3 h-3" />}
+              {/* Confidence badge — tier-colored */}
+              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md ${styles.badgeBg}`}>
+                {isConfirmed || tier === 'high' ? <Check className="w-3 h-3" /> : <Search className="w-3 h-3" />}
                 {confidencePercent}%
               </div>
+              {/* Brand confidence indicator */}
+              {brandConf === 'confirmed_by_text' && (
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-green-500/15 text-green-400 backdrop-blur-md">
+                  <Eye className="w-2.5 h-2.5" />
+                  OCR
+                </div>
+              )}
+              {brandConf === 'inferred_from_visuals' && (
+                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-500/15 text-blue-400 backdrop-blur-md">
+                  <Eye className="w-2.5 h-2.5" />
+                  {lang === 'he' ? 'חזותי' : 'Visual'}
+                </div>
+              )}
             </div>
             <h2 className="text-2xl font-bold mt-2">{lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}</h2>
-            {/* Model / OCR info */}
-            {(recognition.modelNumber || result.details?.model) && (
+            {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
               <p className="text-xs text-slate-400 mt-1">
-                {lang === 'he' ? 'דגם: ' : 'Model: '}{recognition.modelNumber || result.details?.model}
-                {recognition.identifiedBy === 'ocr' || recognition.identifiedBy === 'both' ? ' 📷' : ''}
+                {lang === 'he' ? 'דגם: ' : 'Model: '}{recognition.modelNumber || identification.model}
+                {brandConf === 'confirmed_by_text' ? ' ✓' : ''}
               </p>
             )}
           </div>
@@ -360,37 +382,91 @@ export function ResultsView() {
       <FadeIn delay={50}>
         <div className="px-1">
           <div className="flex items-center justify-between mb-1.5">
-            <span className={`text-xs font-semibold ${confidenceColor}`}>{confidenceLabel}</span>
+            <span className={`text-xs font-semibold ${styles.color}`}>{getConfidenceLabel(tier, lang)}</span>
             <span className="text-xs text-slate-500">{confidencePercent}%</span>
           </div>
           <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full transition-all duration-700 ${confidenceBarColor}`} style={{ width: `${confidencePercent}%` }} />
+            <div className={`h-full rounded-full transition-all duration-700 ${styles.barColor}`} style={{ width: `${confidencePercent}%` }} />
           </div>
         </div>
       </FadeIn>
 
-      {/* Confirmation prompt — shown when AI isn't sure */}
-      {needsConfirmation && (
+      {/* Confidence reasoning */}
+      {confidenceReasoning && (
+        <FadeIn delay={60}>
+          <div className="px-1 flex items-start gap-2">
+            <Info className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
+            <p className="text-[11px] text-slate-500 leading-relaxed">{confidenceReasoning}</p>
+          </div>
+        </FadeIn>
+      )}
+
+      {/* ═══ TIER: Very Low (<40%) — Broad estimate, need help ═══ */}
+      {tier === 'very_low' && !isConfirmed && (
         <FadeIn delay={75}>
-          <Card className="p-4 space-y-3" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.02))">
+          <Card className="p-4 space-y-3" gradient={styles.gradient}>
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              <div className="w-10 h-10 rounded-xl bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-red-400" />
               </div>
               <div>
-                <p className="text-sm font-semibold">{lang === 'he' ? 'האם הזיהוי נכון?' : 'Is this identification correct?'}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'בחר את המוצר הנכון לקבלת מחיר מדויק' : 'Select the correct product for accurate pricing'}</p>
+                <p className="text-sm font-semibold">
+                  {lang === 'he'
+                    ? `זה נראה כמו ${identification.generic_name_hebrew || result.category}, אבל לא הצלחנו לזהות את המותג`
+                    : `This looks like a ${identification.generic_name || result.category}, but we couldn't identify the brand`}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {lang === 'he' ? 'המחירים הם הערכה גסה — עזור לנו לדייק' : 'Prices are a rough estimate — help us be more accurate'}
+                </p>
               </div>
             </div>
 
-            {/* Yes button */}
+            <div className="flex gap-2">
+              <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
+                placeholder={lang === 'he' ? 'הקלד מותג ודגם...' : 'Type brand & model...'}
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
+                autoFocus
+              />
+              <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
+                className="px-4 py-2.5 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                {lang === 'he' ? 'עדכן' : 'Update'}
+              </button>
+            </div>
+
+            <button onClick={confirmResult} className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+              {lang === 'he' ? 'דלג — הצג הערכה בלבד' : 'Skip — show estimate only'}
+            </button>
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* ═══ TIER: Low (40-59%) — Help needed ═══ */}
+      {tier === 'low' && !isConfirmed && (
+        <FadeIn delay={75}>
+          <Card className="p-4 space-y-3" gradient={styles.gradient}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center flex-shrink-0">
+                <Search className="w-5 h-5 text-orange-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">
+                  {lang === 'he'
+                    ? `אנחנו חושבים שזה ${result.nameHebrew || result.name} — נכון?`
+                    : `We think this might be ${result.name} — is that right?`}
+                </p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {lang === 'he' ? 'אשר או תקן לקבלת מחיר מדויק יותר' : 'Confirm or correct for more accurate pricing'}
+                </p>
+              </div>
+            </div>
+
             <button onClick={confirmResult}
               className="w-full py-2.5 rounded-xl bg-green-600/20 border border-green-500/30 text-sm font-semibold text-green-300 flex items-center justify-center gap-2 hover:bg-green-600/30 transition-all">
               <Check className="w-4 h-4" />
               {lang === 'he' ? 'כן, זה נכון' : 'Yes, this is correct'}
             </button>
 
-            {/* Alternatives */}
             {alternatives.length > 0 && (
               <div className="space-y-2">
                 <p className="text-[10px] text-slate-500 uppercase tracking-wider">{lang === 'he' ? 'או שזה...' : 'Or is it...'}</p>
@@ -407,7 +483,64 @@ export function ResultsView() {
               </div>
             )}
 
-            {/* Manual correction */}
+            {!showCorrection ? (
+              <button onClick={() => setShowCorrection(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
+                  placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
+                  autoFocus
+                />
+                <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                  {lang === 'he' ? 'עדכן' : 'Update'}
+                </button>
+              </div>
+            )}
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* ═══ TIER: Moderate (60-79%) — Soft confirmation ═══ */}
+      {tier === 'moderate' && !isConfirmed && (
+        <FadeIn delay={75}>
+          <Card className="p-4 space-y-3" gradient={styles.gradient}>
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-5 h-5 text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold">{lang === 'he' ? 'האם הזיהוי נכון?' : 'Is this identification correct?'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'בחר את המוצר הנכון לקבלת מחיר מדויק' : 'Confirm for accurate pricing'}</p>
+              </div>
+            </div>
+
+            <button onClick={confirmResult}
+              className="w-full py-2.5 rounded-xl bg-green-600/20 border border-green-500/30 text-sm font-semibold text-green-300 flex items-center justify-center gap-2 hover:bg-green-600/30 transition-all">
+              <Check className="w-4 h-4" />
+              {lang === 'he' ? 'כן, זה נכון' : 'Yes, this is correct'}
+            </button>
+
+            {alternatives.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-[10px] text-slate-500 uppercase tracking-wider">{lang === 'he' ? 'או שזה...' : 'Or is it...'}</p>
+                {alternatives.map((alt, i) => (
+                  <button key={i} onClick={() => handleSelectAlternative(alt)}
+                    className="w-full py-2.5 px-3 rounded-xl bg-white/5 border border-white/10 text-sm flex items-center justify-between hover:bg-white/10 transition-all">
+                    <div className="text-left">
+                      <span className="font-medium">{lang === 'he' && alt.nameHebrew ? alt.nameHebrew : alt.name}</span>
+                      {alt.estimatedMid > 0 && <span className="text-xs text-slate-400 ml-2">~₪{alt.estimatedMid.toLocaleString()}</span>}
+                    </div>
+                    <span className="text-[10px] text-slate-500">{Math.round(alt.confidence * 100)}%</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {!showCorrection ? (
               <button onClick={() => setShowCorrection(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
                 {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
@@ -443,7 +576,11 @@ export function ResultsView() {
       {/* Price card */}
       <FadeIn delay={100}>
         <Card className="p-6 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.15), rgba(139,92,246,0.1))" glow>
-          <p className="text-sm text-blue-300 font-medium mb-2">{t.marketValue}</p>
+          <p className="text-sm text-blue-300 font-medium mb-2">
+            {tier === 'very_low'
+              ? (lang === 'he' ? 'טווח מחירים משוער' : 'Estimated Price Range')
+              : t.marketValue}
+          </p>
           <p className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
             {formatPrice(result.marketValue?.mid)}
           </p>
@@ -455,16 +592,86 @@ export function ResultsView() {
               {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
             </p>
           )}
+          {priceMethod && (
+            <p className="text-[10px] text-slate-600 mt-1">
+              {priceMethod === 'comp_based'
+                ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
+                : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
+            </p>
+          )}
         </Card>
       </FadeIn>
 
-      {/* OCR extracted text (when relevant) */}
-      {recognition.ocrText && recognition.identifiedBy !== 'visual' && (
+      {/* OCR extracted text — pill tags */}
+      {ocr.text_found && ocr.text_found.length > 0 && (
+        <FadeIn delay={150}>
+          <Card className="p-3">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <Tag className="w-3 h-3 text-slate-500" />
+              <p className="text-[10px] text-slate-500 font-medium">{lang === 'he' ? 'טקסט שזוהה בתמונה' : 'Text detected in image'}</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {ocr.text_found.map((text, i) => (
+                <span key={i} className="inline-block px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-xs text-slate-300 font-mono">
+                  {text}
+                </span>
+              ))}
+            </div>
+            {ocr.logos_found && ocr.logos_found.length > 0 && (
+              <p className="text-[10px] text-slate-500 mt-1.5">
+                {lang === 'he' ? 'לוגו: ' : 'Logo: '}{ocr.logos_found.join(', ')}
+              </p>
+            )}
+          </Card>
+        </FadeIn>
+      )}
+
+      {/* Backward-compat: old OCR text fallback */}
+      {!ocr.text_found?.length && recognition.ocrText && recognition.identifiedBy !== 'visual' && (
         <FadeIn delay={150}>
           <Card className="p-3">
             <p className="text-[10px] text-slate-500 mb-1">{lang === 'he' ? 'טקסט שזוהה בתמונה' : 'Text extracted from image'}</p>
             <p className="text-xs text-slate-300 font-mono break-all">{recognition.ocrText}</p>
           </Card>
+        </FadeIn>
+      )}
+
+      {/* Expandable details */}
+      {(result.details?.description || result.israeliMarketNotes || result.sellingTips) && (
+        <FadeIn delay={175}>
+          <button onClick={() => setShowDetails(!showDetails)}
+            className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-white/5 hover:bg-white/8 transition-all text-xs text-slate-400">
+            <span className="flex items-center gap-1.5">
+              <Info className="w-3.5 h-3.5" />
+              {lang === 'he' ? 'פרטים נוספים' : 'More details'}
+            </span>
+            <span className="text-[10px]">{showDetails ? '▲' : '▼'}</span>
+          </button>
+          {showDetails && (
+            <Card className="p-3 space-y-2 mt-1">
+              {result.details?.description && <p className="text-xs text-slate-300">{result.details.description}</p>}
+              {result.sellingTips && (
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-0.5">{lang === 'he' ? 'טיפ למכירה' : 'Selling tip'}</p>
+                  <p className="text-xs text-slate-400">{result.sellingTips}</p>
+                </div>
+              )}
+              {result.israeliMarketNotes && (
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-0.5">{lang === 'he' ? 'שוק ישראלי' : 'Israeli market'}</p>
+                  <p className="text-xs text-slate-400">{result.israeliMarketNotes}</p>
+                </div>
+              )}
+              {result.priceFactors && result.priceFactors.length > 0 && (
+                <div>
+                  <p className="text-[10px] text-slate-500 mb-0.5">{lang === 'he' ? 'גורמי מחיר' : 'Price factors'}</p>
+                  {result.priceFactors.map((pf, i) => (
+                    <p key={i} className="text-xs text-slate-400">{pf.factor}: {pf.impact}</p>
+                  ))}
+                </div>
+              )}
+            </Card>
+          )}
         </FadeIn>
       )}
 
