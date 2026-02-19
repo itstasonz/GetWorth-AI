@@ -475,18 +475,23 @@ function HelpIdentifyModal() {
 // ═══════════════════════════════════════════════════════
 // MULTI-PHOTO THUMBNAIL STRIP
 // ═══════════════════════════════════════════════════════
-function PhotoStrip({ images, canAdd, onAddPhoto, lang }) {
+function PhotoStrip({ images, canAdd, onAddPhoto, lang, activeIndex = 0, onSelect }) {
   if (images.length <= 1 && !canAdd) return null;
 
   return (
     <div className="flex items-center gap-2 px-1">
       {images.map((img, i) => (
-        <div key={i} className="relative w-14 h-14 rounded-xl overflow-hidden border-2 border-white/20 flex-shrink-0">
+        <button key={i} onClick={() => onSelect?.(i)}
+          className={`relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 transition-all ${
+            i === activeIndex
+              ? 'border-2 border-blue-400 ring-2 ring-blue-400/30 scale-105'
+              : 'border-2 border-white/20 opacity-60 hover:opacity-90'
+          }`}>
           <img src={img} className="w-full h-full object-cover" alt={`Photo ${i + 1}`} />
           <div className="absolute bottom-0 right-0 bg-black/60 text-[8px] text-white px-1 rounded-tl">
             {i + 1}
           </div>
-        </div>
+        </button>
       ))}
       {canAdd && (
         <button onClick={onAddPhoto}
@@ -519,7 +524,17 @@ export function ResultsView() {
   const [correctionInput, setCorrectionInput] = React.useState('');
   const [refining, setRefining] = React.useState(false);
   const [showDetails, setShowDetails] = React.useState(false);
+  const [activePhotoIndex, setActivePhotoIndex] = React.useState(0);
   const addPhotoFileRef = React.useRef(null);
+
+  // Auto-select newest photo when images array grows; clamp if shrinks
+  React.useEffect(() => {
+    if (images.length > 0) {
+      setActivePhotoIndex(images.length - 1);
+    } else {
+      setActivePhotoIndex(0);
+    }
+  }, [images.length]);
 
   if (!result) return null;
 
@@ -588,12 +603,31 @@ export function ResultsView() {
       {/* Hidden file input for add-photo from results */}
       <input ref={addPhotoFileRef} type="file" accept="image/*" className="hidden" onChange={handleAddPhotoFile} />
 
-      {/* Item image + name */}
+      {/* Item image + name — swipeable when multiple photos */}
       <FadeIn>
-        <div className="relative rounded-3xl overflow-hidden shadow-2xl">
+        <div className="relative rounded-3xl overflow-hidden shadow-2xl"
+          onTouchStart={(e) => { e.currentTarget._touchX = e.touches[0].clientX; }}
+          onTouchEnd={(e) => {
+            const dx = e.changedTouches[0].clientX - (e.currentTarget._touchX || 0);
+            if (Math.abs(dx) > 50 && images.length > 1) {
+              if (dx < 0) setActivePhotoIndex(prev => Math.min(prev + 1, images.length - 1));
+              else setActivePhotoIndex(prev => Math.max(prev - 1, 0));
+            }
+          }}>
           <div className="aspect-[4/3]">
-            <img src={images[0]} className="w-full h-full object-cover" />
+            <img src={images[activePhotoIndex] || images[0]} className="w-full h-full object-cover" />
           </div>
+          {/* Photo counter dots — only when multiple photos */}
+          {images.length > 1 && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+              {images.map((_, i) => (
+                <button key={i} onClick={() => setActivePhotoIndex(i)}
+                  className={`w-2 h-2 rounded-full transition-all ${
+                    i === activePhotoIndex ? 'bg-white scale-125' : 'bg-white/40'
+                  }`} />
+              ))}
+            </div>
+          )}
           <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 p-5">
             <div className="flex items-center gap-2 flex-wrap">
@@ -643,6 +677,8 @@ export function ResultsView() {
             canAdd={canAddPhoto}
             onAddPhoto={handleAddPhotoClick}
             lang={lang}
+            activeIndex={activePhotoIndex}
+            onSelect={setActivePhotoIndex}
           />
         </FadeIn>
       )}
