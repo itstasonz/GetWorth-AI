@@ -1236,32 +1236,6 @@ export function AppProvider({ children }) {
     setView('home');
   }, []);
 
-  // ── Camera release (moved up so captureAdditionalPhoto can reference it) ──
-  const cameraStartingRef = useRef(false); // Prevent double getUserMedia
-
-  const releaseCamera = useCallback(() => {
-    if (DEV) console.log('[Camera] releaseCamera called');
-    if (cameraStreamRef.current) {
-      try {
-        const vt = cameraStreamRef.current.getVideoTracks()[0];
-        if (vt && typeof vt.applyConstraints === 'function') {
-          vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
-        }
-      } catch {}
-      cameraStreamRef.current.getTracks().forEach(track => {
-        try { track.stop(); } catch {}
-      });
-      cameraStreamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.pause();
-      try { videoRef.current.srcObject = null; } catch {}
-    }
-    setTorchOn(false);
-    setTorchSupported(false);
-    cameraStartingRef.current = false;
-  }, []);
-
   // ── Add another photo (multi-photo: append + re-analyze) ──
   const addPhoto = useCallback((source = 'camera') => {
     setAddPhotoMode(true);
@@ -1449,6 +1423,35 @@ export function AppProvider({ children }) {
   // CAMERA + TORCH
   // ═══════════════════════════════════════════════════════
 
+  const cameraStartingRef = useRef(false); // Prevent double getUserMedia
+
+  // ── Kill all tracks, release hardware, clear video element ──
+  const releaseCamera = useCallback(() => {
+    if (DEV) console.log('[Camera] releaseCamera called');
+    // Turn off torch first
+    if (cameraStreamRef.current) {
+      try {
+        const vt = cameraStreamRef.current.getVideoTracks()[0];
+        if (vt && typeof vt.applyConstraints === 'function') {
+          vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {});
+        }
+      } catch {}
+      // Stop every track
+      cameraStreamRef.current.getTracks().forEach(track => {
+        try { track.stop(); } catch {}
+      });
+      cameraStreamRef.current = null;
+    }
+    // Clear video element
+    if (videoRef.current) {
+      videoRef.current.pause();
+      try { videoRef.current.srcObject = null; } catch {}
+    }
+    setTorchOn(false);
+    setTorchSupported(false);
+    cameraStartingRef.current = false;
+  }, []);
+
   // Detect torch capability on the current video track
   const detectTorch = useCallback((stream) => {
     try {
@@ -1613,6 +1616,15 @@ export function AppProvider({ children }) {
     cameraStartingRef.current = false;
   }, [releaseCamera, attachStreamToVideo, waitForVideoElement, detectTorch, lang, setError]);
 
+  // ── Auto-start camera when view transitions to 'camera' without a stream ──
+  // Fixes: addPhoto('camera') sets view but doesn't acquire camera hardware
+  useEffect(() => {
+    if (view === 'camera' && !cameraStreamRef.current && !cameraStartingRef.current) {
+      if (DEV) console.log('[Camera] Auto-starting: view=camera but no stream');
+      startCamera();
+    }
+  }, [view, startCamera]);
+
   // ── Capture — waits for video readyState, validates frame ──
   const capture = useCallback(() => {
     const video = videoRef.current;
@@ -1649,7 +1661,8 @@ export function AppProvider({ children }) {
       setTimeout(() => {
         setShowFlash(false);
         if (addPhotoMode) {
-          // Multi-photo: append and re-analyze
+          // Multi-photo: append and re-analyze, then exit addPhotoMode
+          setAddPhotoMode(false);
           setView('analyzing');
           releaseCamera();
           runPipeline(rawImg, true);
@@ -1679,10 +1692,18 @@ export function AppProvider({ children }) {
   }, [runPipeline, playSound, releaseCamera, lang, showToastMsg, addPhotoMode]);
 
   const stopCamera = useCallback(() => {
-    if (DEV) console.log('[Camera] Stop requested');
+    if (DEV) console.log('[Camera] Stop requested, addPhotoMode=', addPhotoMode);
     releaseCamera();
-    setView('home');
-  }, [releaseCamera]);
+    if (addPhotoMode) {
+      // Was adding a photo — go back to results, keep the existing scan
+      setAddPhotoMode(false);
+      setView('results');
+    } else {
+      // Normal cancel — go home
+      setAddPhotoMode(false);
+      setView('home');
+    }
+  }, [releaseCamera, addPhotoMode]);
 
   // Release camera when app goes to background (iOS Safari PWA)
   useEffect(() => {
@@ -1690,12 +1711,18 @@ export function AppProvider({ children }) {
       if (document.hidden && cameraStreamRef.current) {
         if (DEV) console.log('[Camera] App hidden — releasing camera');
         releaseCamera();
-        setView(prev => prev === 'camera' ? 'home' : prev);
+        setView(prev => {
+          if (prev === 'camera') {
+            setAddPhotoMode(false);
+            return addPhotoMode ? 'results' : 'home';
+          }
+          return prev;
+        });
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [releaseCamera]);
+  }, [releaseCamera, addPhotoMode]);
 
   // Safety: release camera on provider unmount
   useEffect(() => {
