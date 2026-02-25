@@ -4,7 +4,6 @@ export const config = {
 
 // ═══════════════════════════════════════════════════════
 // Stage A+C Combined Prompt — OCR-first identification + Israeli market pricing
-// Week 1: Single call. Week 3 will split into separate Stage A → Stage B (DB) → Stage C calls.
 // ═══════════════════════════════════════════════════════
 
 function buildPrompt(lang, hints = []) {
@@ -124,8 +123,6 @@ Respond ONLY with valid JSON (no markdown, no backticks, no explanation outside 
 
 // ═══════════════════════════════════════════════════════
 // Confidence calibration — hard rules enforced server-side
-// Overrides the model's self-reported confidence based on
-// what it actually found (OCR text, brand status, etc.)
 // ═══════════════════════════════════════════════════════
 
 function calibrateConfidence(result) {
@@ -134,57 +131,36 @@ function calibrateConfidence(result) {
   const ocr = result.ocr || {};
   const cls = result.classification || {};
 
-  // Access brand_confidence from classification (primary) or identification
   const brandConf = cls.brand_confidence || 'unidentified';
   const brand = id.brand || result.details?.brand || 'unidentified';
   const model = id.model || result.details?.model || 'unidentified';
   const idMethod = cls.identification_method || 'generic_only';
 
-  // RULE 1: No brand identified → cap at 60%
   if (brand.toLowerCase() === 'unidentified' || brand.toLowerCase() === 'unknown' || brandConf === 'unidentified') {
     confidence = Math.min(confidence, 0.60);
   }
-
-  // RULE 2: Brand inferred visually (not from readable text) → cap at 75%
   if (brandConf === 'inferred_from_visuals') {
     confidence = Math.min(confidence, 0.75);
   }
-
-  // RULE 3: No OCR text found at all → reduce by 15 percentage points
   if (!ocr.readable_text_on_item && (!ocr.text_found || ocr.text_found.length === 0)) {
     confidence = Math.max(confidence - 0.15, 0.10);
   }
-
-  // RULE 4: Generic-only identification → cap at 50%
   if (idMethod === 'generic_only') {
     confidence = Math.min(confidence, 0.50);
   }
-
-  // RULE 5: Brand AND model confirmed by OCR text → floor at 80%
   if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') {
     confidence = Math.max(confidence, 0.80);
   }
 
-  // RULE 6: Hard ceiling at 95% (always leave room for error)
   confidence = Math.min(confidence, 0.95);
-
-  // RULE 7: Hard floor at 10%
   confidence = Math.max(confidence, 0.10);
-
-  // Round to 2 decimals
   confidence = Math.round(confidence * 100) / 100;
 
-  return {
-    ...result,
-    raw_confidence: result.confidence,
-    confidence,
-    confidence_calibrated: true,
-  };
+  return { ...result, raw_confidence: result.confidence, confidence, confidence_calibrated: true };
 }
 
 // ═══════════════════════════════════════════════════════
-// Derive backward-compatible fields + recognition object
-// so existing UI code doesn't break
+// Normalize result for backward-compatible UI
 // ═══════════════════════════════════════════════════════
 
 function normalizeResult(result) {
@@ -192,7 +168,6 @@ function normalizeResult(result) {
   const ocr = result.ocr || {};
   const cls = result.classification || {};
 
-  // Build the recognition object that CameraResultsView expects
   const recognition = {
     identifiedBy: cls.identification_method === 'ocr_confirmed' ? 'ocr'
       : cls.identification_method === 'visual_match' ? 'visual'
@@ -204,17 +179,13 @@ function normalizeResult(result) {
     alternatives: result.alternatives || [],
   };
 
-  // Determine needsConfirmation based on calibrated confidence
   const needsConfirmation = result.confidence < 0.80;
 
-  // Use full_name if available, fallback to name
   const displayName = id.full_name && id.full_name !== id.generic_name
-    ? id.full_name
-    : (result.name || id.generic_name || 'Unknown Item');
+    ? id.full_name : (result.name || id.generic_name || 'Unknown Item');
 
   const displayNameHebrew = id.full_name_hebrew && id.full_name_hebrew !== id.generic_name_hebrew
-    ? id.full_name_hebrew
-    : (result.nameHebrew || id.generic_name_hebrew || '');
+    ? id.full_name_hebrew : (result.nameHebrew || id.generic_name_hebrew || '');
 
   return {
     ...result,
@@ -223,7 +194,6 @@ function normalizeResult(result) {
     category: result.category || cls.category || 'Other',
     recognition,
     needsConfirmation,
-    // Keep identification/ocr/classification for new UI features
     identification: id,
     ocr,
     classification: cls,
@@ -231,11 +201,53 @@ function normalizeResult(result) {
 }
 
 // ═══════════════════════════════════════════════════════
+// Retry helper — exponential backoff for transient errors
+// Retries on 529 (overloaded), 500, 502, 503
+// ═══════════════════════════════════════════════════════
+
+async function fetchWithRetry(url, options, maxRetries = 3) {
+  const delays = [1000, 2500, 5000];
+  let lastResponse;
+  let lastError;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (attempt > 0) {
+      const delay = delays[Math.min(attempt - 1, delays.length - 1)];
+      console.log(`[analyze] Retry ${attempt}/${maxRetries} after ${delay}ms...`);
+      await new Promise(r => setTimeout(r, delay));
+    }
+
+    try {
+      lastResponse = await fetch(url, options);
+
+      if (lastResponse.ok) return lastResponse;
+
+      if ([529, 500, 502, 503].includes(lastResponse.status)) {
+        lastError = await lastResponse.json().catch(() => ({}));
+        console.warn(`[analyze] Attempt ${attempt + 1} got ${lastResponse.status}:`, lastError.error?.message || '');
+        if (attempt < maxRetries) continue;
+      } else {
+        return lastResponse;
+      }
+    } catch (err) {
+      lastError = { error: { message: err.message } };
+      console.warn(`[analyze] Attempt ${attempt + 1} network error:`, err.message);
+      if (attempt < maxRetries) continue;
+    }
+  }
+
+  console.error('[analyze] All retries exhausted:', lastError);
+  return new Response(JSON.stringify({
+    error: 'Service temporarily overloaded. Please try again in a moment.',
+    retryable: true,
+  }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+}
+
+// ═══════════════════════════════════════════════════════
 // Main handler
 // ═══════════════════════════════════════════════════════
 
 export default async function handler(req) {
-  // CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response(null, {
       status: 200,
@@ -249,56 +261,44 @@ export default async function handler(req) {
 
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
+      status: 405, headers: { 'Content-Type': 'application/json' },
     });
   }
 
   try {
     const { imageData, images, lang = 'he', hints = [] } = await req.json();
-
-    // Support both single imageData and images[] array
     const imageList = images && images.length > 0 ? images : (imageData ? [imageData] : []);
 
     if (imageList.length === 0) {
       return new Response(JSON.stringify({ error: 'No image data provided' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
+        status: 400, headers: { 'Content-Type': 'application/json' },
       });
     }
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return new Response(JSON.stringify({ error: 'API key not configured' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
+        status: 500, headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Build prompt with optional recognition hints (past corrections)
     const prompt = buildPrompt(lang, hints);
 
-    // Build message content: all images + prompt text
     const content = [
-      // All images (supports multi-photo — Week 2 will add UI for this)
       ...imageList.map((img) => ({
         type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: img,
-        },
+        source: { type: 'base64', media_type: 'image/jpeg', data: img },
       })),
-      // Prompt text
       {
         type: 'text',
         text: imageList.length > 1
-          ? `${prompt}\n\nNOTE: ${imageList.length} images provided. Use ALL images together for identification. Look for brand/model text in each image.`
+          ? `${prompt}\n\nNOTE: ${imageList.length} images provided. Use ALL images together for identification.`
           : prompt,
       },
     ];
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // ── Call Anthropic with automatic retry on overload ──
+    const response = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -314,33 +314,27 @@ export default async function handler(req) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      console.error('Anthropic API error:', response.status, errorData);
+      console.error('Anthropic API error after retries:', response.status, errorData);
       return new Response(JSON.stringify({
-        error: errorData.error?.message || `API error: ${response.status}`,
+        error: errorData.error?.message || errorData.error || `API error: ${response.status}`,
+        retryable: [529, 500, 502, 503].includes(response.status),
       }), {
         status: response.status,
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
       });
     }
 
     const data = await response.json();
 
-    // Extract and parse the JSON from the response
     let parsed = null;
     const textContent = data.content?.find(c => c.type === 'text')?.text || '';
 
     try {
-      // Try direct parse first
       parsed = JSON.parse(textContent.trim());
     } catch {
-      // Try extracting JSON from possible markdown wrapper
       const jsonMatch = textContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        try {
-          parsed = JSON.parse(jsonMatch[0]);
-        } catch {
-          // Fall through to error
-        }
+        try { parsed = JSON.parse(jsonMatch[0]); } catch {}
       }
     }
 
@@ -358,14 +352,9 @@ export default async function handler(req) {
       });
     }
 
-    // Apply confidence calibration (hard rules override model self-report)
     const calibrated = calibrateConfidence(parsed);
-
-    // Normalize for backward compatibility with existing UI
     const normalized = normalizeResult(calibrated);
 
-    // Return the processed result wrapped in Anthropic-like format
-    // (so the client-side parsing in AppContext still works)
     return new Response(JSON.stringify({
       content: [{ type: 'text', text: JSON.stringify(normalized) }],
     }), {
@@ -381,7 +370,7 @@ export default async function handler(req) {
     console.error('Server error:', error);
     return new Response(JSON.stringify({ error: 'Internal server error' }), {
       status: 500,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   }
 }
