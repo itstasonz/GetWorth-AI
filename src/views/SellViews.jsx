@@ -50,96 +50,465 @@ export function MyListingsView() {
               </p>
               <p className="text-xs text-slate-400">
                 {pendingRequests.length > 0
-                  ? (lang === 'he' ? `${pendingRequests.length} בקשות ממתינות לאישור!` : `${pendingRequests.length} pending request${pendingRequests.length > 1 ? 's' : ''}!`)
-                  : activeOrders.length > 0
-                    ? (lang === 'he' ? `${activeOrders.length} הזמנות פעילות` : `${activeOrders.length} active order${activeOrders.length > 1 ? 's' : ''}`)
-                    : (lang === 'he' ? 'צפה בקניות ומכירות' : 'View purchases & sales')}
+                  ? (lang === 'he' ? `${pendingRequests.length} בקשות ממתינות` : `${pendingRequests.length} pending requests`)
+                  : (lang === 'he' ? 'הצג היסטוריית עסקאות' : 'View transaction history')
+                }
               </p>
             </div>
-            <ChevronRight className="w-5 h-5 text-slate-400" />
+            {pendingRequests.length > 0 && (
+              <div className="w-3 h-3 rounded-full bg-amber-500 animate-pulse" />
+            )}
+            <ChevronRight className="w-5 h-5 text-slate-500" />
           </button>
         </FadeIn>
       )}
 
-      {!user ? (
-        <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4"><ShoppingBag className="w-10 h-10 text-slate-600" /></div>
-          <p className="text-slate-400 mb-5">{t.signInList}</p>
-          <Btn primary onClick={() => goTab('profile')}>{t.signIn}</Btn>
+      {/* Active orders summary */}
+      {activeOrders.length > 0 && (
+        <FadeIn delay={75}>
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500 font-medium">{lang === 'he' ? 'עסקאות פעילות' : 'Active transactions'}</p>
+            {activeOrders.slice(0, 3).map((order) => (
+              <button key={order.id} onClick={() => viewOrder(order.id)}
+                className="w-full p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3 hover:bg-white/10 transition-all">
+                <div className={`w-2 h-2 rounded-full ${order.status === 'pending' ? 'bg-amber-400 animate-pulse' : 'bg-blue-400'}`} />
+                <span className="text-sm flex-1 text-left truncate">{order.listing?.title || order.listing?.title_hebrew || 'Order'}</span>
+                <Badge color={order.status === 'pending' ? 'amber' : 'blue'} className="text-[9px]">{order.status}</Badge>
+              </button>
+            ))}
+          </div>
         </FadeIn>
-      ) : myListings.length === 0 ? (
-        <FadeIn>
-          <Card className="p-10 text-center">
-            <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4"><ShoppingBag className="w-10 h-10 text-slate-600" /></div>
-            <p className="text-slate-400 mb-5">{t.noListings}</p>
-            <Btn primary onClick={() => { reset(); goTab('home'); }}><Scan className="w-4 h-4" />{t.scan}</Btn>
-          </Card>
-        </FadeIn>
-      ) : (
+      )}
+
+      {myListings.length > 0 ? (
         <div className="space-y-4">
           {myListings.map((item, i) => (
             <FadeIn key={item.id} delay={i * 50}>
-              {/* [FIX] Added onClick + cursor-pointer so tapping opens the detail view */}
-              <Card className="p-4 group cursor-pointer active:scale-[0.98] transition-transform" onClick={() => viewItem(item)}>
-                <div className="flex gap-4">
-                  <div className="w-24 h-24 rounded-2xl overflow-hidden flex-shrink-0">
-                    <img src={item.images?.[0]} className="w-full h-full object-cover" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-start">
-                      <h3 className="font-semibold truncate">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</h3>
-                      {/* [FIX] stopPropagation so delete doesn't trigger card click */}
-                      <button onClick={(e) => { e.stopPropagation(); deleteListing(item.id); }} className="p-2 rounded-xl opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all">
-                        <Trash2 className="w-4 h-4 text-red-400" />
-                      </button>
-                    </div>
-                    <p className="text-xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent mt-1">{formatPrice(item.price)}</p>
-                    <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
-                      <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{item.views || 0}</span>
-                      <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{timeAgo(item.created_at, t)}</span>
-                      {item.condition && (
-                        <Badge color="blue" className="text-[9px]">{item.condition}</Badge>
-                      )}
-                    </div>
-                  </div>
+              <div className="relative">
+                <ListingCard item={item} onClick={() => viewItem(item)} />
+                <div className="absolute top-3 right-3 flex gap-2">
+                  {item.condition && (
+                    <Badge color="blue" className="text-[9px]">{item.condition}</Badge>
+                  )}
                 </div>
-              </Card>
+                <button onClick={() => deleteListing(item.id)}
+                  className="absolute top-3 left-3 w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center backdrop-blur-md hover:bg-red-500/30 transition-all">
+                  <Trash2 className="w-4 h-4 text-red-400" />
+                </button>
+              </div>
             </FadeIn>
           ))}
         </div>
+      ) : (
+        <FadeIn delay={100}>
+          <Card className="p-10 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.02))">
+            <div className="w-20 h-20 rounded-3xl bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
+              <ShoppingBag className="w-10 h-10 text-blue-400" />
+            </div>
+            <p className="text-slate-400 mb-4">{t.noListings}</p>
+            <Btn primary onClick={() => goTab('home')}><Scan className="w-5 h-5" />{lang === 'he' ? 'סרוק פריט' : 'Scan an item'}</Btn>
+          </Card>
+        </FadeIn>
       )}
     </div>
   );
 }
 
 export function SavedView() {
-  const { t, lang, rtl, user, savedItems, savedIds, heartAnim, toggleSave, viewItem, goTab } = useApp();
-
+  const { t, lang, rtl, savedItems, viewItem, toggleSave, user } = useApp();
   return (
     <div className="space-y-5">
       <FadeIn><h2 className="text-2xl font-bold">{t.saved}</h2></FadeIn>
-      {!user ? (
-        <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-red-500/10 flex items-center justify-center mx-auto mb-4"><Heart className="w-10 h-10 text-red-400" /></div>
-          <p className="text-slate-400 mb-5">{t.signInSave}</p>
-          <Btn primary onClick={() => goTab('profile')}>{t.signIn}</Btn>
-        </FadeIn>
-      ) : savedItems.length === 0 ? (
-        <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4"><Heart className="w-10 h-10 text-slate-600" /></div>
-          <p className="text-slate-400 mb-5">{t.noSaved}</p>
-          <Btn primary onClick={() => goTab('browse')}>{t.browse}</Btn>
-        </FadeIn>
-      ) : (
-        <div className="grid grid-cols-2 gap-4">
+      {savedItems.length > 0 ? (
+        <div className="space-y-4">
           {savedItems.map((item, i) => (
-            <ListingCard key={item.id} item={item} index={i} lang={lang} t={t} rtl={rtl} savedIds={savedIds} heartAnim={heartAnim} toggleSave={toggleSave} viewItem={viewItem} />
+            <FadeIn key={item.id} delay={i * 50}>
+              <ListingCard item={item} onClick={() => viewItem(item)} />
+            </FadeIn>
           ))}
         </div>
+      ) : (
+        <FadeIn delay={100}>
+          <Card className="p-10 text-center" gradient="linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))">
+            <div className="w-20 h-20 rounded-3xl bg-pink-500/10 flex items-center justify-center mx-auto mb-4">
+              <Heart className="w-10 h-10 text-pink-400" />
+            </div>
+            <p className="text-slate-400">{t.noSaved}</p>
+          </Card>
+        </FadeIn>
       )}
     </div>
   );
 }
+
+// ═══════════════════════════════════════════════════════
+// CATEGORY-SPECIFIC QUESTION DEFINITIONS
+// Each question has: key, label (en/he), options with labels
+// ═══════════════════════════════════════════════════════
+
+const QUESTION_LABELS = {
+  // ─── Common ───
+  scratches:     { en: 'Any scratches or scuffs?', he: 'יש שריטות או פגמים?' },
+  issues:        { en: 'Any functional issues?', he: 'יש בעיות תפקוד?' },
+  accessories:   { en: 'Original accessories included?', he: 'אביזרים מקוריים כלולים?' },
+
+  // ─── Electronics ───
+  deviceType:    { en: 'What type of device?', he: 'איזה סוג מכשיר?' },
+  battery:       { en: 'Battery health?', he: 'מצב סוללה?' },
+  screenCond:    { en: 'Screen condition?', he: 'מצב מסך?' },
+  charger:       { en: 'Charger included?', he: 'מטען כלול?' },
+  storage:       { en: 'Storage capacity?', he: 'נפח אחסון?' },
+
+  // ─── Furniture ───
+  material:      { en: 'Main material?', he: 'חומר עיקרי?' },
+  dimensions:    { en: 'Size?', he: 'גודל?' },
+  assembly:      { en: 'Disassembly needed for pickup?', he: 'צריך פירוק לאיסוף?' },
+  stains:        { en: 'Any stains or damage?', he: 'יש כתמים או נזק?' },
+
+  // ─── Watches ───
+  authenticity:  { en: 'Authenticity?', he: 'מקוריות?' },
+  boxPapers:     { en: 'Original box & papers?', he: 'קופסה ומסמכים מקוריים?' },
+  bracelet:      { en: 'Bracelet/strap condition?', he: 'מצב רצועה/צמיד?' },
+  service:       { en: 'Recently serviced?', he: 'טופל לאחרונה?' },
+
+  // ─── Clothing ───
+  clothingSize:  { en: 'Size?', he: 'מידה?' },
+  fabricType:    { en: 'Fabric type?', he: 'סוג בד?' },
+  worn:          { en: 'How many times worn?', he: 'כמה פעמים נלבש?' },
+  washed:        { en: 'Has been washed?', he: 'נשטף?' },
+  defects:       { en: 'Any defects (holes, stains, fading)?', he: 'יש פגמים (חורים, כתמים, דהייה)?' },
+
+  // ─── Sports ───
+  sportType:     { en: 'Sport category?', he: 'סוג ספורט?' },
+  usage:         { en: 'How much was it used?', he: 'כמה השתמשו?' },
+
+  // ─── Beauty ───
+  beautyType:    { en: 'Product type?', he: 'סוג מוצר?' },
+  opened:        { en: 'Has it been opened/used?', he: 'נפתח/שומש?' },
+  expiry:        { en: 'Within expiry date?', he: 'בתוקף?' },
+
+  // ─── Vehicles ───
+  vehicleType:   { en: 'Vehicle type?', he: 'סוג רכב?' },
+  mileage:       { en: 'Usage level?', he: 'רמת שימוש?' },
+  tires:         { en: 'Tires/wheels condition?', he: 'מצב צמיגים/גלגלים?' },
+
+  // ─── Books ───
+  bookCondition: { en: 'Book condition?', he: 'מצב הספר?' },
+  pages:         { en: 'Pages condition?', he: 'מצב דפים?' },
+  cover:         { en: 'Cover type?', he: 'סוג כריכה?' },
+
+  // ─── Toys ───
+  completeness:  { en: 'All pieces included?', he: 'כל החלקים כלולים?' },
+  ageGroup:      { en: 'Age group?', he: 'קבוצת גיל?' },
+
+  // ─── Home / Appliances ───
+  workingCond:   { en: 'Working condition?', he: 'מצב עבודה?' },
+  warranty:      { en: 'Under warranty?', he: 'באחריות?' },
+
+  // ─── Tools ───
+  powerSource:   { en: 'Power source?', he: 'מקור כוח?' },
+  toolCondition: { en: 'Tool condition?', he: 'מצב הכלי?' },
+
+  // ─── Smoking ───
+  smokingType:   { en: 'Type?', he: 'סוג?' },
+  cleanness:     { en: 'Cleanliness?', he: 'ניקיון?' },
+};
+
+const OPTION_LABELS = {
+  // Common
+  yes: { en: 'Yes', he: 'כן' },
+  no: { en: 'No', he: 'לא' },
+  some: { en: 'Minor', he: 'מעט' },
+  none: { en: 'None', he: 'אין' },
+  all: { en: 'All included', he: 'הכל כלול' },
+  partial: { en: 'Some', he: 'חלק' },
+  missing: { en: 'None', he: 'חסר' },
+
+  // Battery
+  good: { en: 'Good', he: 'טוב' },
+  degraded: { en: 'Degraded', he: 'ירוד' },
+  poor: { en: 'Poor', he: 'גרוע' },
+  excellent: { en: 'Excellent', he: 'מצוין' },
+
+  // Screen
+  perfect: { en: 'Perfect', he: 'מושלם' },
+  minorScratches: { en: 'Minor scratches', he: 'שריטות קלות' },
+  cracked: { en: 'Cracked', he: 'סדוק' },
+
+  // Device types
+  phone:   { en: 'Phone', he: 'טלפון' },
+  laptop:  { en: 'Laptop', he: 'מחשב נייד' },
+  tablet:  { en: 'Tablet', he: 'טאבלט' },
+  console: { en: 'Console', he: 'קונסולה' },
+  tv:      { en: 'TV/Monitor', he: 'טלויזיה/מסך' },
+  audio:   { en: 'Audio/Speaker', he: 'שמע/רמקול' },
+  other:   { en: 'Other', he: 'אחר' },
+
+  // Materials
+  wood:     { en: 'Wood', he: 'עץ' },
+  metal:    { en: 'Metal', he: 'מתכת' },
+  fabric:   { en: 'Fabric', he: 'בד' },
+  plastic:  { en: 'Plastic', he: 'פלסטיק' },
+  leather:  { en: 'Leather', he: 'עור' },
+  glass:    { en: 'Glass', he: 'זכוכית' },
+
+  // Sizes
+  xs:     { en: 'XS', he: 'XS' },
+  small:  { en: 'S', he: 'S' },
+  medium: { en: 'M', he: 'M' },
+  large:  { en: 'L', he: 'L' },
+  xl:     { en: 'XL', he: 'XL' },
+  xxl:    { en: 'XXL', he: 'XXL' },
+
+  // Dimensions
+  compact: { en: 'Compact', he: 'קומפקטי' },
+  standard: { en: 'Standard', he: 'סטנדרטי' },
+  oversized: { en: 'Oversized', he: 'גדול' },
+
+  // Fabric
+  cotton:    { en: 'Cotton', he: 'כותנה' },
+  synthetic: { en: 'Synthetic', he: 'סינתטי' },
+  denim:     { en: 'Denim', he: 'ג\'ינס' },
+  wool:      { en: 'Wool', he: 'צמר' },
+  silk:      { en: 'Silk', he: 'משי' },
+
+  // Authenticity
+  original: { en: 'Original', he: 'מקורי' },
+  replica:  { en: 'Replica', he: 'העתק' },
+  unknown:  { en: 'Unknown', he: 'לא ידוע' },
+
+  // Bracelet
+  mint:     { en: 'Mint', he: 'כחדש' },
+  wornLight: { en: 'Light wear', he: 'שחיקה קלה' },
+  wornHeavy: { en: 'Heavy wear', he: 'שחיקה רבה' },
+
+  // Wearing
+  once:     { en: 'Once', he: 'פעם אחת' },
+  few:      { en: 'A few times', he: 'כמה פעמים' },
+  many:     { en: 'Many times', he: 'הרבה פעמים' },
+
+  // Sport types
+  gym:     { en: 'Gym/Fitness', he: 'חדר כושר' },
+  cycling: { en: 'Cycling', he: 'רכיבה' },
+  water:   { en: 'Water sports', he: 'ספורט מים' },
+  ball:    { en: 'Ball sports', he: 'ספורט כדור' },
+  outdoor: { en: 'Outdoor', he: 'חוץ' },
+  running: { en: 'Running', he: 'ריצה' },
+
+  // Usage
+  light:  { en: 'Light use', he: 'שימוש קל' },
+  moderate: { en: 'Moderate use', he: 'שימוש בינוני' },
+  heavy:  { en: 'Heavy use', he: 'שימוש רב' },
+
+  // Beauty types
+  jewelry:   { en: 'Jewelry', he: 'תכשיטים' },
+  cosmetics: { en: 'Cosmetics', he: 'קוסמטיקה' },
+  skincare:  { en: 'Skincare', he: 'טיפוח עור' },
+  haircare:  { en: 'Haircare', he: 'טיפוח שיער' },
+  accessory: { en: 'Accessory', he: 'אביזר' },
+
+  // Vehicle types
+  car:        { en: 'Car', he: 'רכב' },
+  motorcycle: { en: 'Motorcycle', he: 'אופנוע' },
+  bicycle:    { en: 'Bicycle', he: 'אופניים' },
+  scooter:    { en: 'Scooter', he: 'קורקינט' },
+  skateboard: { en: 'Skateboard', he: 'סקייטבורד' },
+
+  // Book condition
+  likeNew:  { en: 'Like new', he: 'כחדש' },
+  worn:     { en: 'Worn', he: 'שחוק' },
+  damaged:  { en: 'Damaged', he: 'פגום' },
+
+  // Pages
+  clean:    { en: 'Clean', he: 'נקי' },
+  marked:   { en: 'Some markings', he: 'סימונים' },
+  yellowed: { en: 'Yellowed', he: 'מצהיב' },
+
+  // Cover
+  hardcover:  { en: 'Hardcover', he: 'כריכה קשה' },
+  softcover:  { en: 'Softcover', he: 'כריכה רכה' },
+
+  // Toys
+  complete:   { en: 'Complete', he: 'שלם' },
+  mostParts:  { en: 'Most parts', he: 'רוב החלקים' },
+  incomplete: { en: 'Incomplete', he: 'חסר חלקים' },
+  toddler:    { en: '0-3', he: '0-3' },
+  kids:       { en: '3-8', he: '3-8' },
+  older:      { en: '8+', he: '8+' },
+
+  // Power
+  electric:   { en: 'Electric', he: 'חשמלי' },
+  battery:    { en: 'Battery', he: 'סוללה' },
+  manual:     { en: 'Manual', he: 'ידני' },
+  cordless:   { en: 'Cordless', he: 'אלחוטי' },
+
+  // Working condition
+  fullyWorking:   { en: 'Fully working', he: 'עובד מלא' },
+  partiallyWorks: { en: 'Partially works', he: 'עובד חלקית' },
+  notWorking:     { en: 'Not working', he: 'לא עובד' },
+
+  // Storage
+  '16gb':  { en: '16GB', he: '16GB' },
+  '32gb':  { en: '32GB', he: '32GB' },
+  '64gb':  { en: '64GB', he: '64GB' },
+  '128gb': { en: '128GB', he: '128GB' },
+  '256gb': { en: '256GB', he: '256GB' },
+  '512gb': { en: '512GB', he: '512GB' },
+  '1tb':   { en: '1TB+', he: '1TB+' },
+
+  // Smoking
+  hookah:    { en: 'Hookah', he: 'נרגילה' },
+  vape:      { en: 'Vape', he: 'סיגריה אלקטרונית' },
+  pipe:      { en: 'Pipe', he: 'מקטרת' },
+  smokingOther: { en: 'Other', he: 'אחר' },
+  clean_:    { en: 'Clean', he: 'נקי' },
+  lightUse:  { en: 'Light residue', he: 'שאריות קלות' },
+  needsClean: { en: 'Needs cleaning', he: 'דורש ניקוי' },
+};
+
+// ═══════════════════════════════════════════════════════
+// CATEGORY → QUESTION SCHEMA
+// ═══════════════════════════════════════════════════════
+
+function getQuestionsForCategory(category, answers = {}) {
+  const base = [
+    { key: 'scratches', opts: ['none', 'some', 'yes'] },
+    { key: 'issues', opts: ['no', 'yes'] },
+  ];
+
+  switch (category) {
+    case 'Electronics': {
+      const deviceType = answers.deviceType;
+      const hasBattery = ['phone', 'laptop', 'tablet'].includes(deviceType);
+      const hasScreen = ['phone', 'laptop', 'tablet', 'tv'].includes(deviceType);
+      const questions = [
+        { key: 'deviceType', opts: ['phone', 'laptop', 'tablet', 'console', 'tv', 'audio', 'other'], wrap: true },
+      ];
+      if (hasScreen) {
+        questions.push({ key: 'screenCond', opts: ['perfect', 'minorScratches', 'cracked'] });
+      }
+      if (hasBattery) {
+        questions.push({ key: 'battery', opts: ['good', 'degraded', 'poor'] });
+      }
+      questions.push(
+        { key: 'accessories', opts: ['all', 'partial', 'missing'] },
+        { key: 'charger', opts: ['yes', 'no'] },
+        ...base,
+      );
+      return questions;
+    }
+
+    case 'Furniture':
+      return [
+        { key: 'material', opts: ['wood', 'metal', 'fabric', 'plastic', 'leather', 'glass'], wrap: true },
+        { key: 'dimensions', opts: ['compact', 'standard', 'oversized'] },
+        { key: 'stains', opts: ['none', 'some', 'yes'] },
+        { key: 'assembly', opts: ['yes', 'no'] },
+        ...base,
+      ];
+
+    case 'Watches':
+      return [
+        { key: 'authenticity', opts: ['original', 'replica', 'unknown'] },
+        { key: 'boxPapers', opts: ['yes', 'partial', 'no'] },
+        { key: 'bracelet', opts: ['mint', 'wornLight', 'wornHeavy'] },
+        { key: 'service', opts: ['yes', 'no', 'unknown'] },
+        ...base,
+      ];
+
+    case 'Clothing':
+      return [
+        { key: 'clothingSize', opts: ['xs', 'small', 'medium', 'large', 'xl', 'xxl'], wrap: true },
+        { key: 'fabricType', opts: ['cotton', 'synthetic', 'denim', 'wool', 'leather', 'silk'], wrap: true },
+        { key: 'worn', opts: ['once', 'few', 'many'] },
+        { key: 'washed', opts: ['yes', 'no'] },
+        { key: 'defects', opts: ['none', 'some', 'yes'] },
+      ];
+
+    case 'Sports':
+      return [
+        { key: 'sportType', opts: ['gym', 'cycling', 'water', 'ball', 'outdoor', 'running', 'other'], wrap: true },
+        { key: 'usage', opts: ['light', 'moderate', 'heavy'] },
+        ...base,
+      ];
+
+    case 'Beauty':
+      return [
+        { key: 'beautyType', opts: ['jewelry', 'cosmetics', 'skincare', 'haircare', 'accessory'], wrap: true },
+        { key: 'opened', opts: ['no', 'yes'] },
+        { key: 'expiry', opts: ['yes', 'no', 'unknown'] },
+        { key: 'authenticity', opts: ['original', 'replica', 'unknown'] },
+      ];
+
+    case 'Vehicles':
+      return [
+        { key: 'vehicleType', opts: ['car', 'motorcycle', 'bicycle', 'scooter', 'skateboard', 'other'], wrap: true },
+        { key: 'mileage', opts: ['light', 'moderate', 'heavy'] },
+        { key: 'tires', opts: ['good', 'degraded', 'poor'] },
+        ...base,
+      ];
+
+    case 'Books':
+      return [
+        { key: 'bookCondition', opts: ['likeNew', 'good', 'worn', 'damaged'] },
+        { key: 'pages', opts: ['clean', 'marked', 'yellowed'] },
+        { key: 'cover', opts: ['hardcover', 'softcover'] },
+      ];
+
+    case 'Toys':
+      return [
+        { key: 'completeness', opts: ['complete', 'mostParts', 'incomplete'] },
+        { key: 'ageGroup', opts: ['toddler', 'kids', 'older'] },
+        ...base,
+      ];
+
+    case 'Home':
+      return [
+        { key: 'workingCond', opts: ['fullyWorking', 'partiallyWorks', 'notWorking'] },
+        { key: 'warranty', opts: ['yes', 'no', 'unknown'] },
+        { key: 'accessories', opts: ['all', 'partial', 'missing'] },
+        ...base,
+      ];
+
+    case 'Tools':
+      return [
+        { key: 'powerSource', opts: ['electric', 'cordless', 'manual'] },
+        { key: 'toolCondition', opts: ['excellent', 'good', 'degraded'] },
+        { key: 'accessories', opts: ['all', 'partial', 'missing'] },
+        ...base,
+      ];
+
+    case 'Smoking':
+      return [
+        { key: 'smokingType', opts: ['hookah', 'vape', 'pipe', 'smokingOther'], wrap: true },
+        { key: 'cleanness', opts: ['clean_', 'lightUse', 'needsClean'] },
+        { key: 'accessories', opts: ['all', 'partial', 'missing'] },
+        ...base,
+      ];
+
+    default:
+      // Music, Food, Other — generic questions
+      return [...base];
+  }
+}
+
+// Helper: get localized label
+function qLabel(key, lang) {
+  const l = QUESTION_LABELS[key];
+  if (!l) return key;
+  return lang === 'he' ? l.he : l.en;
+}
+
+function oLabel(opt, lang) {
+  const l = OPTION_LABELS[opt];
+  if (!l) return opt;
+  return lang === 'he' ? l.he : l.en;
+}
+
+
+// ═══════════════════════════════════════════════════════
+// LISTING FLOW VIEW
+// ═══════════════════════════════════════════════════════
 
 export function ListingFlowView() {
   const {
@@ -152,79 +521,8 @@ export function ListingFlowView() {
 
   const fileInputRef = useRef(null);
 
-  // ─── Category-Aware Question Schema ───
-  // Returns the right questions based on item category.
-  // Battery ONLY appears for electronics with batteries (phone/laptop/tablet).
   const itemCategory = (result?.category || 'Other').trim();
-
-  const getQuestionsForCategory = () => {
-    const base = [
-      { key: 'scratches', opts: ['yes', 'no'] },
-      { key: 'issues', opts: ['yes', 'no'] },
-    ];
-
-    switch (itemCategory) {
-      case 'Electronics': {
-        // If user hasn't picked device type yet, show the chooser first
-        const hasBattery = ['devicePhone', 'deviceLaptop', 'deviceTablet'].includes(answers.deviceType);
-        const questions = [
-          { key: 'deviceType', opts: ['devicePhone', 'deviceLaptop', 'deviceTablet', 'deviceConsole', 'deviceCamera', 'deviceTV', 'deviceOther'], multi: true },
-          ...base,
-        ];
-        // Only add battery for phone/laptop/tablet
-        if (hasBattery) {
-          questions.push({ key: 'battery', opts: ['good', 'degraded', 'poor'] });
-        }
-        return questions;
-      }
-      case 'Furniture':
-        return [
-          { key: 'material', opts: ['wood', 'metal', 'fabric', 'plastic', 'leather'] },
-          { key: 'dimensions', opts: ['small', 'medium', 'large'] },
-          { key: 'assembly', opts: ['yes', 'no'] },
-          ...base,
-        ];
-      case 'Watches':
-        return [
-          { key: 'authenticity', opts: ['original', 'replica', 'unknown'] },
-          { key: 'boxPapers', opts: ['yes', 'no'] },
-          ...base,
-        ];
-      case 'Clothing':
-        return [
-          { key: 'size', opts: ['small', 'medium', 'large'] },
-          { key: 'materialType', opts: ['cotton', 'leather', 'synthetic', 'fabric'] },
-          ...base,
-        ];
-      case 'Sports':
-        return [
-          { key: 'sportType', opts: ['gym', 'cycling', 'water', 'ball', 'outdoor', 'other'] },
-          ...base,
-        ];
-      case 'Beauty':
-        // Covers jewelry, cosmetics, skincare, accessories
-        return [
-          { key: 'beautyType', opts: ['jewelry', 'cosmetics', 'skincare', 'accessory', 'other'] },
-          { key: 'authenticity', opts: ['original', 'replica', 'unknown'] },
-          ...base,
-        ];
-      case 'Vehicles':
-        return [
-          { key: 'vehicleType', opts: ['car', 'motorcycle', 'bicycle', 'scooter', 'other'] },
-          ...base,
-        ];
-      case 'Books':
-        return [
-          { key: 'bookCondition', opts: ['likeNew', 'good', 'worn'] },
-          ...base,
-        ];
-      default:
-        // Toys, Home, Tools, Music, Food, Other — generic questions only
-        return [...base];
-    }
-  };
-
-  const categoryQuestions = getQuestionsForCategory();
+  const categoryQuestions = getQuestionsForCategory(itemCategory, answers);
 
   const addMoreImages = (e) => {
     const files = Array.from(e.target.files || []);
@@ -233,7 +531,7 @@ export function ListingFlowView() {
       const reader = new FileReader();
       reader.onload = (ev) => {
         setImages((prev) => {
-          if (prev.length >= 6) return prev; // Max 6 images
+          if (prev.length >= 6) return prev;
           return [...prev, ev.target.result];
         });
       };
@@ -277,24 +575,30 @@ export function ListingFlowView() {
         </>
       )}
 
-      {/* Step 1: Used condition details — CATEGORY-AWARE */}
+      {/* Step 1: Category-specific condition questions */}
       {listingStep === 1 && (
         <>
           <BackButton onClick={() => setListingStep(0)} rtl={rtl} label={t.back} />
           <FadeIn className="text-center">
-            <h2 className="text-2xl font-bold">{t.more}</h2>
-            <p className="text-xs text-slate-500 mt-1">{itemCategory}</p>
+            <h2 className="text-2xl font-bold">{lang === 'he' ? 'ספר לנו עוד' : 'Tell us more'}</h2>
+            <p className="text-xs text-slate-500 mt-1">
+              {lang === 'he' ? `פרטים ספציפיים ל${itemCategory}` : `${itemCategory}-specific details`}
+            </p>
           </FadeIn>
           <div className="space-y-4">
             {categoryQuestions.map((q, i) => (
               <FadeIn key={q.key} delay={i * 50}>
                 <Card className="p-5">
-                  <p className="font-medium mb-3">{t[q.key] || q.key}</p>
-                  <div className={`flex gap-2 ${q.multi ? 'flex-wrap' : ''}`}>
+                  <p className="font-medium mb-3">{qLabel(q.key, lang)}</p>
+                  <div className={`flex gap-2 ${q.wrap ? 'flex-wrap' : ''}`}>
                     {q.opts.map((o) => (
                       <button key={o} onClick={() => setAnswers({ ...answers, [q.key]: o })}
-                        className={`${q.multi ? 'px-3' : 'flex-1'} py-3 rounded-xl text-sm font-medium transition-all ${answers[q.key] === o ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/5 hover:bg-white/10'}`}>
-                        {t[o] || o}
+                        className={`${q.wrap ? 'px-3' : 'flex-1'} py-3 rounded-xl text-sm font-medium transition-all ${
+                          answers[q.key] === o
+                            ? 'bg-blue-600 shadow-lg shadow-blue-500/30 text-white'
+                            : 'bg-white/5 hover:bg-white/10 text-slate-300'
+                        }`}>
+                        {oLabel(o, lang)}
                       </button>
                     ))}
                   </div>
@@ -306,19 +610,25 @@ export function ListingFlowView() {
             <Card className="p-5 text-center" gradient="linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))" glow>
               <p className="text-sm text-emerald-300 mb-1">{t.yourPrice}</p>
               <p className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
-                {formatPrice(calcPrice(result?.marketValue?.mid, 'used', answers, itemCategory))}
+                {formatPrice(calcPrice(result?.marketValue?.mid, condition, answers, itemCategory))}
               </p>
             </Card>
           </FadeIn>
           <FadeIn delay={200}>
-            <Btn primary className="w-full py-4" onClick={() => { setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, condition, answers, itemCategory) })); setListingStep(2); }}>
+            <Btn primary className="w-full py-4" onClick={() => {
+              setListingData((prev) => ({
+                ...prev,
+                price: calcPrice(result?.marketValue?.mid, condition, answers, itemCategory),
+              }));
+              setListingStep(2);
+            }}>
               {t.continue}
             </Btn>
           </FadeIn>
         </>
       )}
 
-      {/* Step 2: Review */}
+      {/* Step 2: Review listing */}
       {listingStep === 2 && (
         <>
           <BackButton onClick={() => setListingStep((condition === 'used' || condition === 'poor') ? 1 : 0)} rtl={rtl} label={t.back} />
