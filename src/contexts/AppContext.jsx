@@ -166,7 +166,7 @@ export function AppProvider({ children }) {
   // Profile cache for notification banners
   const profileCacheRef = useRef({});
 
-  const t = T[lang];
+  const t = T[lang] || T.he || {};
   const rtl = lang === 'he';
 
   const playSound = useCallback((soundName) => {

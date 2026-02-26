@@ -1299,15 +1299,15 @@ export function ListingFlowView() {
     setImages((prev) => prev.filter((_, i) => i !== index));
   };
 
-  if (!result) return null;
+  if (!result || !t) return null;
 
   return (
     <div className="space-y-5">
       {/* Step 0: Condition */}
       {listingStep === 0 && (
         <>
-          <BackButton onClick={() => setView('results')} rtl={rtl} label={t.back} />
-          <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.condition}</h2></FadeIn>
+          <BackButton onClick={() => setView('results')} rtl={rtl} label={t.back || 'Back'} />
+          <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.condition || 'Condition'}</h2></FadeIn>
           <div className="space-y-3">
             {[
               { id: 'newSealed', icon: Box, gradient: 'from-emerald-500 to-green-500' },
@@ -1321,7 +1321,7 @@ export function ListingFlowView() {
                   <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${c.gradient} flex items-center justify-center shadow-lg`}>
                     <c.icon className="w-7 h-7 text-white" />
                   </div>
-                  <span className="flex-1 font-semibold text-lg text-left">{t[c.id]}</span>
+                  <span className="flex-1 font-semibold text-lg text-left">{t?.[c.id] || c.id}</span>
                   {condition === c.id ? <CheckCircle className="w-6 h-6 text-blue-400" /> : <Circle className="w-6 h-6 text-slate-600" />}
                 </button>
               </FadeIn>
@@ -1333,7 +1333,7 @@ export function ListingFlowView() {
       {/* Step 1: Category-specific condition questions */}
       {listingStep === 1 && (
         <>
-          <BackButton onClick={() => setListingStep(0)} rtl={rtl} label={t.back} />
+          <BackButton onClick={() => setListingStep(0)} rtl={rtl} label={t?.back || 'Back'} />
           <FadeIn className="text-center">
             <h2 className="text-2xl font-bold">{lang === 'he' ? 'ספר לנו עוד' : 'Tell us more'}</h2>
             <p className="text-xs text-slate-500 mt-1">
@@ -1363,7 +1363,7 @@ export function ListingFlowView() {
           </div>
           <FadeIn delay={150}>
             <Card className="p-5 text-center" gradient="linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))" glow>
-              <p className="text-sm text-emerald-300 mb-1">{t.yourPrice}</p>
+              <p className="text-sm text-emerald-300 mb-1">{t?.yourPrice || 'Your Price'}</p>
               <p className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
                 {formatPrice(calcPrice(result?.marketValue?.mid, condition, answers, itemCategory))}
               </p>
@@ -1386,7 +1386,7 @@ export function ListingFlowView() {
       {/* Step 2: Review listing */}
       {listingStep === 2 && (
         <>
-          <BackButton onClick={() => setListingStep((condition === 'used' || condition === 'poor') ? 1 : 0)} rtl={rtl} label={t.back} />
+          <BackButton onClick={() => setListingStep((condition === 'used' || condition === 'poor') ? 1 : 0)} rtl={rtl} label={t?.back || 'Back'} />
           <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.review}</h2></FadeIn>
 
           {/* Image management strip */}
