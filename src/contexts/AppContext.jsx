@@ -863,7 +863,7 @@ export function AppProvider({ children }) {
     if (!user) { setSignInAction('save'); setShowSignInModal(true); return; }
     setHeartAnim(item.id);
     setTimeout(() => setHeartAnim(null), 800);
-    if (savedIds.has(item.id)) {
+    if (savedIds?.has(item.id)) {
       await supabase.from('saved_items').delete().eq('user_id', user.id).eq('listing_id', item.id);
       setSavedIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
       setSavedItems((prev) => prev.filter((i) => i.id !== item.id));
