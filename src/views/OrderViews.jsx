@@ -202,7 +202,7 @@ export function OrdersView() {
     <div className="space-y-5">
       <FadeIn>
         <div className="flex items-center gap-3 mb-2">
-          <button onClick={() => setView('profile')} className="p-2 rounded-xl bg-white/5 hover:bg-white/10"><ArrowLeft className="w-5 h-5" /></button>
+          <button onClick={() => setView('myListings')} className="p-2 rounded-xl bg-white/5 hover:bg-white/10"><ArrowLeft className="w-5 h-5" /></button>
           <h2 className="text-xl font-bold flex-1">{lang === 'he' ? 'ההזמנות שלי' : 'My Orders'}</h2>
           <button onClick={() => setView('notifications')} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 relative">
             <Bell className="w-5 h-5" />

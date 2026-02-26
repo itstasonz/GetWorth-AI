@@ -125,6 +125,7 @@ export function AppProvider({ children }) {
   // Chat state
   const [conversations, setConversations] = useState([]);
   const [conversationsLoading, setConversationsLoading] = useState(false);
+  const conversationsLastLoadRef = useRef(0);
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -145,6 +146,7 @@ export function AppProvider({ children }) {
   const [activeOrder, setActiveOrder] = useState(null);
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  const ordersLastLoadRef = useRef(0);
 
   // Notifications state (order events)
   const [orderNotifications, setOrderNotifications] = useState([]);
@@ -262,7 +264,7 @@ export function AppProvider({ children }) {
   // Load user data when auth changes
   useEffect(() => {
     if (user) loadUserData();
-    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); }
+    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; }
   }, [user]);
 
   // Auto-dismiss errors
@@ -341,7 +343,7 @@ export function AppProvider({ children }) {
               });
             }
           }
-          loadConversations();
+          loadConversations(true);
         }
       )
       .on(
@@ -416,7 +418,7 @@ export function AppProvider({ children }) {
 
           // Auto-refresh orders when order-related notification arrives
           if (notif.type?.startsWith('ORDER_')) {
-            loadOrders();
+            loadOrders(true);
           }
         }
       )
@@ -440,7 +442,7 @@ export function AppProvider({ children }) {
           const newOrder = payload.new;
           if (newOrder.seller_id === user.id || newOrder.buyer_id === user.id) {
             if (DEV) console.log('[Realtime] New order detected, refreshing orders');
-            loadOrders();
+            loadOrders(true);
           }
         }
       )
@@ -475,7 +477,7 @@ export function AppProvider({ children }) {
       loadMessages(data.id);
       setView('chat');
       setTab('messages');
-      loadConversations();
+      loadConversations(true);
     }
   };
 
@@ -560,8 +562,8 @@ export function AppProvider({ children }) {
       setSavedItems(savedData.map((s) => s.listing).filter(Boolean));
       setSavedIds(new Set(savedData.map((s) => s.listing_id)));
     }
-    loadConversations();
-    loadOrders();
+    loadConversations(true);
+    loadOrders(true);
   };
 
   // ─── SELLER PROFILE ──────────────────────────────────
@@ -583,8 +585,10 @@ export function AppProvider({ children }) {
 
   // ─── CHAT ───────────────────────────────────────────
 
-  const loadConversations = useCallback(async () => {
+  const loadConversations = useCallback(async (force = false) => {
     if (!user) return;
+    // Skip if loaded recently (unless forced by realtime/explicit)
+    if (!force && conversationsLastLoadRef.current > 0 && (Date.now() - conversationsLastLoadRef.current < 15000)) return;
     setConversationsLoading(true);
     const { data } = await supabase
       .from('conversations')
@@ -593,6 +597,7 @@ export function AppProvider({ children }) {
       .order('updated_at', { ascending: false });
     if (data) {
       setConversations(data);
+      conversationsLastLoadRef.current = Date.now();
       const unread = data.reduce((count, conv) => {
         return count + (conv.messages?.filter((m) => !m.is_read && m.sender_id !== user.id)?.length || 0);
       }, 0);
@@ -611,7 +616,7 @@ export function AppProvider({ children }) {
       const unreadIds = data.filter((m) => !m.is_read && m.sender_id !== user.id).map((m) => m.id);
       if (unreadIds.length > 0) {
         await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
-        loadConversations();
+        loadConversations(true);
       }
     }
   };
@@ -654,7 +659,7 @@ export function AppProvider({ children }) {
     }
     if (newConv) {
       setActiveChat({ ...newConv, listing: item, seller: item.seller, otherUser: item.seller });
-      setMessages([]); setView('chat'); loadConversations();
+      setMessages([]); setView('chat'); loadConversations(true);
     }
   };
 
@@ -1864,8 +1869,10 @@ export function AppProvider({ children }) {
   // ─── ORDERS / CHECKOUT ─────────────────────────────
 
   // Load all orders for current user (as buyer or seller)
-  const loadOrders = useCallback(async () => {
+  const loadOrders = useCallback(async (force = false) => {
     if (!user) return;
+    // Skip if loaded recently (unless forced by realtime/explicit)
+    if (!force && ordersLastLoadRef.current > 0 && (Date.now() - ordersLastLoadRef.current < 15000)) return;
     setOrdersLoading(true);
     try {
       // Try full query with profile joins (requires FK constraints to profiles)
@@ -1889,6 +1896,7 @@ export function AppProvider({ children }) {
       const newOrders = data || [];
       if (DEV) console.log(`[Orders] Loaded ${newOrders.length} orders`);
       setOrders(newOrders);
+      ordersLastLoadRef.current = Date.now();
 
       // Keep activeOrder in sync with fresh data (preserve joined relations)
       setActiveOrder(prev => {
@@ -1977,7 +1985,7 @@ export function AppProvider({ children }) {
       setView('orderDetail');
 
       // Also refresh orders list in the background
-      loadOrders();
+      loadOrders(true);
 
       return data;
     } catch (e) {
@@ -2083,7 +2091,7 @@ export function AppProvider({ children }) {
         playSound(newStatus === 'completed' ? 'coin' : 'tap');
 
         // Background refresh (non-blocking) — realtime will also sync
-        loadOrders().catch(() => {});
+        loadOrders(true).catch(() => {});
         return true;
       }
     } catch (e) {
