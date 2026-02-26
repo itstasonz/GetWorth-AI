@@ -13,8 +13,10 @@ export const sanitizeSearch = (input) => {
 export const formatPrice = (p) => p ? `₪${p.toLocaleString()}` : '';
 
 export const timeAgo = (d, t) => {
+  if (!d) return '';
   const days = Math.floor((Date.now() - new Date(d)) / 86400000);
-  return days === 0 ? t.today : days === 1 ? t.yesterday : `${days}${t.daysAgo}`;
+  if (!t) return `${days}d`;
+  return days === 0 ? (t.today || 'today') : days === 1 ? (t.yesterday || 'yesterday') : `${days}${t.daysAgo || 'd ago'}`;
 };
 
 export const calcPrice = (base, cond, ans, category) => {
