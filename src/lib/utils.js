@@ -17,14 +17,17 @@ export const timeAgo = (d, t) => {
   return days === 0 ? t.today : days === 1 ? t.yesterday : `${days}${t.daysAgo}`;
 };
 
-export const calcPrice = (base, cond, ans) => {
+export const calcPrice = (base, cond, ans, category) => {
   if (!base) return 0;
   const disc = { newSealed: 0, likeNew: 0.15, used: 0.3, poor: 0.7 }[cond] || 0;
   let extra = 0;
-  if (cond === 'used') {
+  if (cond === 'used' || cond === 'poor') {
     if (ans.scratches === 'yes') extra += 0.02;
-    if (ans.battery === 'poor') extra += 0.02;
     if (ans.issues === 'yes') extra += 0.03;
+    // Battery penalty ONLY for electronics with battery (phone/laptop/tablet)
+    const hasBattery = category === 'Electronics' && ['devicePhone', 'deviceLaptop', 'deviceTablet'].includes(ans.deviceType);
+    if (hasBattery && ans.battery === 'poor') extra += 0.02;
+    if (hasBattery && ans.battery === 'degraded') extra += 0.01;
   }
   return Math.round(base * (1 - disc - extra));
 };
@@ -40,12 +43,12 @@ export const formatMessageTime = (date, lang) => {
 
 // [IMPORTANT FIX #2] Condition label lookup - uses translations instead of hardcoded English
 export const getConditionLabel = (condition, lang) => {
-  const t = T[lang];
+  const t = T?.[lang] || T?.he || {};
   const labels = {
-    newSealed: { text: t.newSealed, emoji: '✨' },
-    likeNew: { text: t.likeNew, emoji: '' },
-    used: { text: t.used, emoji: '' },
-    poor: { text: t.poor, emoji: '' },
+    newSealed: { text: t?.newSealed || 'New', emoji: '✨' },
+    likeNew: { text: t?.likeNew || 'Like New', emoji: '' },
+    used: { text: t?.used || 'Used', emoji: '' },
+    poor: { text: t?.poor || 'Poor', emoji: '' },
   };
   const entry = labels[condition];
   if (!entry) return '';
