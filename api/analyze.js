@@ -190,8 +190,8 @@ export const VERIFICATION_SCHEMA = {
     match_confidence:      { type: 'number', minimum: 0, maximum: 1 },
     confidence_reasoning:  { type: 'string' },
     matched_product_ids:   { type: 'array', items: { type: 'string' } },
-    identification_method: { type: 'string', enum: ['ocr_confirmed', 'visual_match', 'db_match', 'generic_only'] },
-    brand_confidence:      { type: 'string', enum: ['confirmed_by_text', 'inferred_from_visuals', 'db_matched', 'unidentified'] },
+    identification_method: { type: 'string', enum: ['ocr_confirmed', 'visual_match', 'packaging_recognized', 'db_match', 'generic_only'] },
+    brand_confidence:      { type: 'string', enum: ['confirmed_by_text', 'inferred_from_visuals', 'packaging_recognized', 'db_matched', 'unidentified'] },
     price_estimate_low:    { type: 'number' },
     price_estimate_mid:    { type: 'number' },
     price_estimate_high:   { type: 'number' },
@@ -220,6 +220,21 @@ You are part of a product identification pipeline for an Israeli marketplace app
 TASK: Extract ALL identifying information from this image. Do NOT guess — report only what you can see.
 
 EXTRACTION STEPS (follow in order):
+
+0. PACKAGING / BOX DETECTION — Check FIRST before anything else:
+   - Is this a RETAIL BOX, product packaging, or marketing photo on a box?
+   - Key indicators: clean studio-quality product render, cardboard/glossy box edges visible, retail shelf-ready appearance, cellophane wrap, barcode/label areas
+   - If YES → identify the PRODUCT INSIDE the box, not "a box"
+   - Common packaging you MUST recognize by visual design alone:
+     • Apple products: Minimalist white/dark box with centered product silhouette = iPhone/iPad/MacBook/AirPods (infer generation from device shape: camera layout, bezels, notch vs Dynamic Island)
+     • Samsung Galaxy: Device photo on dark gradient = Galaxy phone/tablet/watch
+     • Sony PlayStation: Blue/white angular box = PS5/PS4 console or controller
+     • Nintendo Switch: Red/white box with product shot
+     • Dyson: Purple/grey clean box = vacuum/hair tool
+   - For packaging: set brand_confidence evidence to "packaging_design" and confidence 0.60-0.80 (you're sure it's the brand but may be uncertain about exact model)
+   - IMPORTANT: Even a partial/corner view of iconic packaging is enough if the design language is unmistakable (e.g., corner of iPhone box with titanium phone silhouette = iPhone 15 Pro or 16 Pro)
+   - If you can see the product marketing image but NO text → still identify the product, set evidence to "packaging_visual"
+   - suggested_followup: "Photograph the back of the box or the label for exact model confirmation"
 
 1. OCR SCAN — Read every piece of visible text:
    - Brand names (printed, embossed, engraved, stamped, on tags/labels)
@@ -256,10 +271,12 @@ EXTRACTION STEPS (follow in order):
 CONFIDENCE RULES:
 - 0.90-1.00: Brand AND model text clearly readable
 - 0.75-0.89: Brand text readable OR logo confirmed, model inferred
-- 0.50-0.74: Visual match only, no confirming text
+- 0.65-0.79: Product packaging recognized by visual design (no readable text required if design is iconic/unmistakable)
+- 0.50-0.64: Visual match only, no confirming text, non-iconic design
 - 0.30-0.49: Generic category, no brand clues
 - 0.10-0.29: Uncertain even about category
 - NEVER output 0.90+ without citing specific readable text
+- Packaging with recognizable design language should be 0.65-0.79 even without text
 
 Language: ${language === 'he' ? 'Include Hebrew names where relevant' : 'English only'}
 
@@ -323,6 +340,7 @@ RECOGNITION DATA FROM STAGE 1:
 - Top model: ${recognition.model_candidates?.[0]?.model || 'unidentified'} (${Math.round((recognition.model_candidates?.[0]?.confidence || 0) * 100)}%)
 - OCR text: ${recognition.ocr_text?.raw_texts?.join(', ') || 'none'}
 - Logos: ${recognition.ocr_text?.logos_detected?.join(', ') || 'none'}
+- Brand evidence: ${recognition.brand_candidates?.[0]?.evidence || 'none'}${recognition.brand_candidates?.[0]?.evidence?.includes('packaging') ? ' (RETAIL PACKAGING DETECTED — identify the product inside the box)' : ''}
 - Condition: ${recognition.visual_features?.condition || 'unknown'}
 - Materials: ${recognition.visual_features?.materials?.join(', ') || 'unknown'}
 - Colors: ${recognition.visual_features?.colors?.join(', ') || 'unknown'}
@@ -334,6 +352,7 @@ VERIFICATION RULES:
 - If DB candidates exist but weak match → use as loose anchor, widen range → price_method = "ai_estimate"
 - If no DB match → pure AI estimate → flag clearly → price_method = "ai_estimate"
 - If Stage 1 and DB disagree on brand → prefer OCR text evidence over everything
+- If brand evidence is "packaging_design" or "packaging_visual" → the item is in retail packaging. Identify the product inside. Set identification_method = "packaging_recognized" and brand_confidence = "packaging_recognized". Price should reflect NEW/SEALED condition since it's in a box.
 - NEVER exceed 95% final confidence
 - NEVER fabricate a brand that wasn't found in OCR or DB
 
@@ -696,6 +715,7 @@ function calibrateRecognition(recognition) {
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
   const ocr = recognition.ocr_text || {};
+  const isPackaging = topBrand?.evidence === 'packaging_design' || topBrand?.evidence === 'packaging_visual';
 
   // RULE 1: No brand candidates → cap at 55%
   if (!recognition.brand_candidates?.length) conf = Math.min(conf, 0.55);
@@ -703,8 +723,17 @@ function calibrateRecognition(recognition) {
   // RULE 2: Top brand low confidence → cap at 65%
   if (topBrand && topBrand.confidence < 0.50) conf = Math.min(conf, 0.65);
 
-  // RULE 3: No readable text → reduce by 15%
-  if (!ocr.has_readable_text && !ocr.raw_texts?.length) conf = Math.max(conf - 0.15, 0.10);
+  // RULE 3: No readable text → reduce by 15% UNLESS packaging was recognized
+  // Packaging detection bypasses the OCR penalty because iconic box designs are reliable
+  if (!ocr.has_readable_text && !ocr.raw_texts?.length && !isPackaging) {
+    conf = Math.max(conf - 0.15, 0.10);
+  }
+
+  // RULE 3b: Packaging recognized → floor at 60%, allow up to 79%
+  if (isPackaging && topBrand?.confidence >= 0.60) {
+    conf = Math.max(conf, 0.60);
+    conf = Math.min(conf, 0.79); // Cap below text-confirmed tier
+  }
 
   // RULE 4: Brand + model both high confidence → floor at 80%
   if (topBrand?.confidence >= 0.85 && topModel?.confidence >= 0.75) conf = Math.max(conf, 0.80);
@@ -721,6 +750,7 @@ function calibrateVerification(verification, recognition, dbMatches) {
   const model = verification.final_model || '';
   const brandConf = verification.brand_confidence || 'unidentified';
   const method = verification.identification_method || 'generic_only';
+  const isPackaging = brandConf === 'packaging_recognized' || method === 'packaging_recognized';
 
   // RULE 1: Brand unidentified → cap 60%
   if (brand.toLowerCase() === 'unidentified' || brandConf === 'unidentified') conf = Math.min(conf, 0.60);
@@ -728,11 +758,20 @@ function calibrateVerification(verification, recognition, dbMatches) {
   // RULE 2: Visual inference only → cap 75%
   if (brandConf === 'inferred_from_visuals') conf = Math.min(conf, 0.75);
 
+  // RULE 2b: Packaging recognized → allow up to 79% (stronger than generic visual, weaker than text)
+  if (isPackaging && brand.toLowerCase() !== 'unidentified') {
+    conf = Math.max(conf, 0.60);
+    conf = Math.min(conf, 0.79);
+  }
+
   // RULE 3: Generic-only → cap 50%
   if (method === 'generic_only') conf = Math.min(conf, 0.50);
 
   // RULE 4: DB match found → boost by 10% (max 90%)
   if (dbMatches.length > 0 && (method === 'db_match' || brandConf === 'db_matched')) conf = Math.min(conf + 0.10, 0.90);
+
+  // RULE 4b: Packaging + DB match → strong signal, allow up to 85%
+  if (isPackaging && dbMatches.length > 0) conf = Math.min(conf + 0.10, 0.85);
 
   // RULE 5: OCR confirmed + model known → floor at 80%
   if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
@@ -1024,10 +1063,11 @@ function round(n) {
 
 function mapMethod(m) {
   switch (m) {
-    case 'ocr_confirmed': return 'ocr';
-    case 'visual_match':  return 'visual';
-    case 'db_match':      return 'both';
-    default:              return 'generic';
+    case 'ocr_confirmed':        return 'ocr';
+    case 'visual_match':         return 'visual';
+    case 'packaging_recognized': return 'visual';
+    case 'db_match':             return 'both';
+    default:                     return 'generic';
   }
 }
 
