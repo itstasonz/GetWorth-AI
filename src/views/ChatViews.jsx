@@ -5,7 +5,7 @@ import { Card, Btn, FadeIn } from '../components/ui';
 import { formatPrice, formatMessageTime } from '../lib/utils';
 
 export function InboxView() {
-  const { t, lang, rtl, user, conversations, setActiveChat, loadMessages, setView, goTab, unreadCount } = useApp();
+  const { t, lang, rtl, user, conversations, conversationsLoading, setActiveChat, loadMessages, setView, goTab, unreadCount } = useApp();
 
   if (!user) {
     return (
@@ -24,7 +24,23 @@ export function InboxView() {
     <div className="space-y-4">
       <FadeIn><h2 className="text-2xl font-bold">{lang === 'he' ? 'הודעות' : 'Messages'}</h2></FadeIn>
       
-      {conversations.length === 0 ? (
+      {conversationsLoading && conversations.length === 0 ? (
+        /* Loading skeleton — shown only on first load, not on refresh */
+        <div className="space-y-3">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="p-4 rounded-3xl bg-white/[0.03] border border-white/5 animate-pulse">
+              <div className="flex items-center gap-4">
+                <div className="w-16 h-16 rounded-xl bg-white/5" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-white/5 rounded w-1/3" />
+                  <div className="h-3 bg-white/5 rounded w-2/3" />
+                  <div className="h-3 bg-white/5 rounded w-1/2" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : conversations.length === 0 ? (
         <FadeIn className="text-center py-16">
           <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4"><MessageCircle className="w-10 h-10 text-slate-600" /></div>
           <p className="text-slate-400 mb-2">{lang === 'he' ? 'אין הודעות עדיין' : 'No messages yet'}</p>
@@ -35,7 +51,7 @@ export function InboxView() {
         <div className="space-y-3">
           {conversations.map((conv, i) => {
             const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
-            const lastMessage = conv.messages?.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+            const lastMessage = [...(conv.messages || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
             const convUnread = conv.messages?.filter((m) => !m.is_read && m.sender_id !== user.id).length || 0;
             
             return (

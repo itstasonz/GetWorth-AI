@@ -10,9 +10,9 @@ export function MyListingsView() {
   // [FIX] Added viewItem to open listing details when tapped
   const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
 
-  // Pending requests for seller
-  const pendingRequests = orders.filter(o => o.seller_id === user?.id && o.status === 'pending');
-  const activeOrders = orders.filter(o => (o.seller_id === user?.id || o.buyer_id === user?.id) && !['completed', 'cancelled', 'declined'].includes(o.status));
+  // Pending requests for seller — guard against orders being undefined during init
+  const pendingRequests = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending');
+  const activeOrders = (orders || []).filter(o => (o.seller_id === user?.id || o.buyer_id === user?.id) && !['completed', 'cancelled', 'declined'].includes(o.status));
 
   return (
     <div className="space-y-5">

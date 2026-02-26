@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Heart, MapPin, Clock, CheckCircle, Camera } from 'lucide-react';
-import { Card, FadeIn } from './ui';
+import { Card } from './ui';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getQualityBadge } from '../lib/utils';
 
 const QUALITY_COLORS = {
@@ -9,24 +9,70 @@ const QUALITY_COLORS = {
   red: { bg: 'bg-red-500/70', text: 'text-white' },
 };
 
-const ListingCard = ({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggleSave, viewItem }) => {
+// ─── Lazy Image with skeleton placeholder ───
+// Only loads when card enters viewport (IntersectionObserver)
+// Shows shimmer skeleton until loaded, then fades in
+const LazyImage = React.memo(({ src, alt, className }) => {
+  const [loaded, setLoaded] = useState(false);
+  const [inView, setInView] = useState(false);
+  const imgRef = useRef(null);
+
+  useEffect(() => {
+    const el = imgRef.current;
+    if (!el || typeof IntersectionObserver === 'undefined') {
+      setInView(true); // Fallback: load immediately
+      return;
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) { setInView(true); observer.disconnect(); } },
+      { rootMargin: '200px' } // Start loading 200px before visible
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={imgRef} className="w-full h-full relative">
+      {/* Skeleton shimmer — visible until image loads */}
+      {!loaded && (
+        <div className="absolute inset-0 bg-white/5">
+          <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent" />
+        </div>
+      )}
+      {inView && (
+        <img
+          src={src}
+          alt={alt}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          className={`${className} transition-opacity duration-300 ${loaded ? 'opacity-100' : 'opacity-0'}`}
+        />
+      )}
+    </div>
+  );
+});
+LazyImage.displayName = 'LazyImage';
+
+const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggleSave, viewItem }) => {
   const quality = item.quality_score != null ? getQualityBadge(item.quality_score, lang) : null;
   const qColor = quality ? QUALITY_COLORS[quality.color] : null;
   const imageCount = item.images?.length || 0;
+  const isSaved = savedIds?.has(item.id) ?? false;
 
   return (
-    <FadeIn delay={index * 50}>
+    <div className="animate-fadeIn">
       <Card className="overflow-hidden group" onClick={() => viewItem(item)}>
         <div className="relative aspect-square overflow-hidden">
-          <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+          <LazyImage src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
           
           {/* Save button */}
           <button 
             onClick={(e) => { e.stopPropagation(); toggleSave(item); }} 
-            className={`absolute top-3 ${rtl ? 'left-3' : 'right-3'} w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 backdrop-blur-md ${savedIds.has(item.id) ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'} ${heartAnim === item.id ? 'animate-heartPop' : ''}`}
+            className={`absolute top-3 ${rtl ? 'left-3' : 'right-3'} w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 backdrop-blur-md ${isSaved ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'} ${heartAnim === item.id ? 'animate-heartPop' : ''}`}
           >
-            <Heart className={`w-5 h-5 transition-all ${savedIds.has(item.id) ? 'fill-current scale-110' : ''}`} />
+            <Heart className={`w-5 h-5 transition-all ${isSaved ? 'fill-current scale-110' : ''}`} />
           </button>
 
           {/* Quality badge — top-left */}
@@ -72,8 +118,25 @@ const ListingCard = ({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggl
           </div>
         </div>
       </Card>
-    </FadeIn>
+    </div>
   );
-};
+}, (prev, next) => {
+  // Custom comparator — only rerender when THIS card's data actually changed
+  // This is the KEY optimization: when context triggers parent rerender,
+  // this prevents all 20-50 cards from rerendering
+  return (
+    prev.item.id === next.item.id &&
+    prev.item.price === next.item.price &&
+    prev.item.title === next.item.title &&
+    prev.item.images?.[0] === next.item.images?.[0] &&
+    prev.lang === next.lang &&
+    (prev.savedIds?.has(prev.item.id) ?? false) === (next.savedIds?.has(next.item.id) ?? false) &&
+    prev.heartAnim === next.heartAnim &&
+    prev.toggleSave === next.toggleSave &&
+    prev.viewItem === next.viewItem
+  );
+});
+
+ListingCard.displayName = 'ListingCard';
 
 export default ListingCard;

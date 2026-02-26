@@ -141,8 +141,8 @@ export function OrdersView() {
 
   if (!user) return null;
 
-  const buyOrders       = orders.filter(o => o.buyer_id === user.id);
-  const sellOrders      = orders.filter(o => o.seller_id === user.id);
+  const buyOrders       = (orders || []).filter(o => o.buyer_id === user.id);
+  const sellOrders      = (orders || []).filter(o => o.seller_id === user.id);
   const pendingRequests = sellOrders.filter(o => o.status === 'pending');
   const otherSellOrders = sellOrders.filter(o => o.status !== 'pending');
 
@@ -518,7 +518,14 @@ export function OrderDetailView() {
             {reviewRating > 0 && <p className="text-center text-sm font-medium text-yellow-300">{[,'גרוע','לא טוב','בסדר','טוב','מעולה!'][reviewRating]}</p>}
             <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} placeholder={lang === 'he' ? 'ספר על החוויה...' : 'Tell about your experience...'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-yellow-500/50" rows={2} />
             <Btn primary className="w-full py-3.5" disabled={reviewRating === 0 || reviewSubmitting}
-              onClick={async () => { setReviewSubmitting(true); const ok = await submitReview(order.id, order.listing_id, order.seller_id, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller'); setReviewSubmitting(false); if (ok) setReviewDone(true); }}>
+              onClick={async () => {
+                setReviewSubmitting(true);
+                // reviewedUserId = the OTHER party (the person being rated)
+                const reviewedUserId = isBuyer ? order.seller_id : order.buyer_id;
+                const ok = await submitReview(order.id, order.listing_id, order.seller_id, reviewedUserId, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
+                setReviewSubmitting(false);
+                if (ok) setReviewDone(true);
+              }}>
               {reviewSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Submitting...'}</> : <><Star className="w-4 h-4" />{lang === 'he' ? 'שלח ביקורת' : 'Submit Review'}</>}
             </Btn>
           </Card>

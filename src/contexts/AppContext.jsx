@@ -124,6 +124,7 @@ export function AppProvider({ children }) {
 
   // Chat state
   const [conversations, setConversations] = useState([]);
+  const [conversationsLoading, setConversationsLoading] = useState(false);
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
@@ -261,7 +262,7 @@ export function AppProvider({ children }) {
   // Load user data when auth changes
   useEffect(() => {
     if (user) loadUserData();
-    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setUnreadCount(0); }
+    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); }
   }, [user]);
 
   // Auto-dismiss errors
@@ -560,6 +561,7 @@ export function AppProvider({ children }) {
       setSavedIds(new Set(savedData.map((s) => s.listing_id)));
     }
     loadConversations();
+    loadOrders();
   };
 
   // ─── SELLER PROFILE ──────────────────────────────────
@@ -583,6 +585,7 @@ export function AppProvider({ children }) {
 
   const loadConversations = useCallback(async () => {
     if (!user) return;
+    setConversationsLoading(true);
     const { data } = await supabase
       .from('conversations')
       .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url), messages(id, content, created_at, sender_id, is_read)`)
@@ -595,6 +598,7 @@ export function AppProvider({ children }) {
       }, 0);
       setUnreadCount(unread);
     }
+    setConversationsLoading(false);
   }, [user]);
 
   const loadMessages = async (conversationId) => {
@@ -2265,7 +2269,7 @@ export function AppProvider({ children }) {
     // Torch
     torchSupported, torchOn, toggleTorch,
     showFlash, capturedImageRef,
-    conversations, activeChat, setActiveChat,
+    conversations, conversationsLoading, activeChat, setActiveChat,
     messages, setMessages, newMessage, setNewMessage,
     sendingMessage, sendMessage, unreadCount,
     loadMessages, startConversation, loadConversations,

@@ -178,8 +178,8 @@ export function DetailView() {
   if (!selected) return null;
 
   // Check if user already has an active order for this listing
-  const existingOrder = user ? orders.find(o =>
-    o.listing_id === selected.id &&
+  const existingOrder = user ? (orders || []).find(o =>
+    o.listing_id === selected?.id &&
     o.buyer_id === user.id &&
     !['cancelled', 'declined'].includes(o.status)
   ) : null;
@@ -227,8 +227,8 @@ export function DetailView() {
             </button>
 
             <button onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)}
-              className={`absolute top-4 ${rtl ? 'left-4' : 'right-4'} w-12 h-12 rounded-2xl flex items-center justify-center transition-all backdrop-blur-md z-20 ${savedIds.has(selected.id) ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'}`}>
-              <Heart className={`w-6 h-6 ${savedIds.has(selected.id) ? 'fill-current' : ''}`} />
+              className={`absolute top-4 ${rtl ? 'left-4' : 'right-4'} w-12 h-12 rounded-2xl flex items-center justify-center transition-all backdrop-blur-md z-20 ${savedIds?.has(selected?.id) ?? false ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'}`}>
+              <Heart className={`w-6 h-6 ${savedIds?.has(selected?.id) ?? false ? 'fill-current' : ''}`} />
             </button>
 
             {selected.condition && (
@@ -365,7 +365,7 @@ export function DetailView() {
               <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
             </Btn>
             <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="px-5">
-              <Heart className={`w-5 h-5 ${savedIds.has(selected.id) ? 'fill-current text-red-400' : ''}`} />
+              <Heart className={`w-5 h-5 ${savedIds?.has(selected?.id) ?? false ? 'fill-current text-red-400' : ''}`} />
             </Btn>
           </div>
         </FadeIn>
