@@ -1,376 +1,1070 @@
-export const config = {
-  runtime: 'edge',
-};
+// ═══════════════════════════════════════════════════════════════════════════
+// GetWorth V2 Pipeline — Vision + Retrieval + Verification
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// ARCHITECTURE:
+//
+//   ┌─────────────┐     ┌──────────────┐     ┌────────────────┐
+//   │   IMAGE(S)   │────▶│  STAGE 1:    │────▶│  EMBEDDING     │
+//   │  (base64)    │     │  RECOGNIZE   │     │  GENERATION    │
+//   └─────────────┘     │  Claude      │     │  (Voyage AI)   │
+//                       │  Sonnet      │     └───────┬────────┘
+//                       └──────┬───────┘             │
+//                              │                     │
+//                     Recognition Result      text + image
+//                     (OCR, brand, model,      embeddings
+//                      visual features)              │
+//                              │                     ▼
+//                              │            ┌────────────────┐
+//                     ┌────────▼───────┐    │  SUPABASE      │
+//                     │  CONFIDENCE    │    │  VECTOR SEARCH │
+//                     │  GATE          │    │  (pgvector)    │
+//                     │  calibrate()   │    └───────┬────────┘
+//                     └────────┬───────┘            │
+//                              │              Top K candidates
+//                              │            with price data
+//                              │                    │
+//                              ▼                    ▼
+//                     ┌─────────────────────────────────────┐
+//                     │         STAGE 2: VERIFY + PRICE     │
+//                     │         Claude Sonnet                │
+//                     │                                      │
+//                     │  Inputs:                              │
+//                     │  • Recognition result                 │
+//                     │  • DB candidates + real prices        │
+//                     │  • Past user corrections              │
+//                     │  • Israeli market context             │
+//                     │                                      │
+//                     │  Output:                              │
+//                     │  • Verified identity                  │
+//                     │  • Price range (ILS)                  │
+//                     │  • Confidence (calibrated)            │
+//                     │  • Price method (comp/ai)             │
+//                     └──────────┬──────────────────────────┘
+//                                │
+//                                ▼
+//                     ┌─────────────────────┐
+//                     │  NORMALIZE + TIER   │
+//                     │  Map to UI format   │
+//                     │  Set confidence     │
+//                     │  tier behavior      │
+//                     └──────────┬──────────┘
+//                                │
+//                                ▼
+//                     ┌─────────────────────┐
+//                     │  WRITE-BACK         │
+//                     │  Auto-learn:        │
+//                     │  • Upsert product   │
+//                     │  • Store embedding  │
+//                     │  • Price observation │
+//                     └─────────────────────┘
+//
+// CONFIDENCE TIERS → UI BEHAVIOR:
+//   ≥80%  →  Green bar, show result normally
+//   60-79 →  Amber bar, "Is this correct?" prompt
+//   40-59 →  Orange bar, request another photo or brand input
+//   <40   →  Red bar, broad "rough estimate", auto-open help modal
+//
+// ═══════════════════════════════════════════════════════════════════════════
+
+export const config = { runtime: 'edge' };
+
+import { createClient } from '@supabase/supabase-js';
 
 // ═══════════════════════════════════════════════════════
-// Stage A+C Combined Prompt — OCR-first identification + Israeli market pricing
-// ═══════════════════════════════════════════════════════
-
-function buildPrompt(lang, hints = []) {
-  const isHebrew = lang === 'he';
-
-  const hintsBlock = hints.length > 0
-    ? `\nPAST CORRECTIONS (learn from these — users corrected previous misidentifications):
-${hints.map(h => `- "${h.original}" was actually "${h.corrected}" (corrected ${h.count}x)`).join('\n')}
-If you see a similar item, prefer the corrected identification.\n`
-    : '';
-
-  return `You are an expert item identification and valuation system with OCR capability, specializing in the ISRAELI MARKET.
-
-TASK: Analyze this image using a 2-step process: FIRST identify, THEN price.
-
-═══ STEP 1: FORENSIC IDENTIFICATION ═══
-
-1. OCR FIRST — Before identifying the item, read ALL visible text in the image:
-   - Brand logos (embossed, printed, engraved, stamped)
-   - Model numbers / serial numbers / part numbers
-   - Tags, stickers, labels, packaging text
-   - Any Hebrew text (תוויות, מדבקות)
-   Report EXACTLY what you can read. Do NOT guess text you cannot see clearly.
-
-2. VISUAL FEATURES — Describe:
-   - Materials (metal, plastic, glass, wood, fabric, etc.)
-   - Colors and finish
-   - Distinctive design elements, shape, size clues
-   - Visible wear, damage, or condition indicators
-
-3. IDENTIFICATION — Based on OCR text + visual features:
-   - Generic category (what TYPE of item is this)
-   - Brand: ONLY state a brand if text/logo confirms it. Otherwise say "unidentified"
-   - Model: ONLY state a model if text confirms it. Otherwise say "unidentified"
-   - If you RECOGNIZE the item visually but cannot read confirming text, say:
-     "Visually resembles [Brand X] but no readable text confirms this"
-
-4. CONFIDENCE RULES — you MUST follow these strictly:
-   - 90-100%: Brand AND model clearly readable in text/logo on the item
-   - 75-89%:  Brand readable/confirmed, model inferred from visual features
-   - 50-74%:  Item type clear, brand GUESSED from visual similarity (NOT confirmed by text)
-   - 30-49%:  Generic identification only, no brand confirmation at all
-   - Below 30%: Cannot identify reliably
-   ⚠️ NEVER report 90%+ unless you can cite specific readable text from the image.
-   ⚠️ If brand is "unidentified", confidence MUST be below 65%.
-
-═══ STEP 2: ISRAELI MARKET PRICING ═══
-
-${isHebrew ? 'כל המחירים בשקלים חדשים (₪).' : 'All prices in Israeli New Shekel (₪).'}
-- Base valuations on Israeli market: Yad2, Facebook Marketplace Israel, KSP, Zap, Bug
-- Electronics are typically 20-40% more expensive in Israel than US
-- Consider Israeli import taxes and local availability
-- Used items: typically 40-70% of new retail price in Israel
-- If brand is "unidentified": give a WIDE price range (±50% from mid)
-- If brand is confirmed by text: give a NARROW range (±20% from mid)
-${hintsBlock}
-Respond ONLY with valid JSON (no markdown, no backticks, no explanation outside the JSON):
-{
-  "identification": {
-    "generic_name": "Item type in English (e.g., Hookah, Smartphone, Wristwatch)",
-    "generic_name_hebrew": "שם סוג הפריט בעברית",
-    "brand": "Brand name OR 'unidentified'",
-    "model": "Model name/number OR 'unidentified'",
-    "full_name": "Brand + Model if known, otherwise just generic name",
-    "full_name_hebrew": "שם מלא בעברית"
-  },
-  "ocr": {
-    "text_found": ["exact text 1", "exact text 2"],
-    "logos_found": ["logo description 1"],
-    "readable_text_on_item": true
-  },
-  "visual_features": {
-    "materials": ["material 1"],
-    "colors": ["color 1"],
-    "distinctive_features": ["feature 1"],
-    "condition_visual": "New/Like New/Good/Fair/Poor"
-  },
-  "classification": {
-    "category": "Electronics/Furniture/Vehicles/Watches/Clothing/Sports/Smoking/Home/Beauty/Books/Toys/Tools/Food/Other",
-    "subcategory": "specific subcategory",
-    "identification_method": "ocr_confirmed/visual_match/pattern_recognition/generic_only",
-    "brand_confidence": "confirmed_by_text/inferred_from_visuals/unidentified",
-    "needs_more_info": false,
-    "suggested_followup": "null OR a specific question like 'Can you photograph the label on the bottom?'"
-  },
-  "confidence": 0.72,
-  "confidence_reasoning": "1-2 sentence explanation citing what text/features led to this confidence level",
-  "name": "Full item name in English",
-  "nameHebrew": "שם הפריט בעברית",
-  "category": "Category",
-  "isSellable": true,
-  "condition": "${isHebrew ? 'מצב בעברית' : 'Condition in English'}",
-  "marketValue": {
-    "low": 0,
-    "mid": 0,
-    "high": 0,
-    "currency": "ILS",
-    "newRetailPrice": 0,
-    "price_method": "comp_based OR ai_estimate"
-  },
-  "details": {
-    "description": "${isHebrew ? 'תיאור קצר' : 'Brief description'}",
-    "brand": "Brand or unidentified",
-    "model": "Model or unidentified",
-    "additionalInfo": "${isHebrew ? 'מידע נוסף' : 'Additional info'}"
-  },
-  "priceFactors": [
-    {"factor": "Factor", "impact": "+/-₪X"}
-  ],
-  "marketTrend": "up/down/stable/not-applicable",
-  "demandLevel": "high/moderate/low/not-applicable",
-  "sellingTips": "${isHebrew ? 'טיפ למכירה בישראל' : 'Selling tip for Israel'}",
-  "whereToBuy": "Yad2, KSP, etc.",
-  "israeliMarketNotes": "${isHebrew ? 'הערות לשוק הישראלי' : 'Israeli market notes'}"
-}`;
-}
-
-// ═══════════════════════════════════════════════════════
-// Confidence calibration — hard rules enforced server-side
-// ═══════════════════════════════════════════════════════
-
-function calibrateConfidence(result) {
-  let confidence = result.confidence ?? 0.5;
-  const id = result.identification || {};
-  const ocr = result.ocr || {};
-  const cls = result.classification || {};
-
-  const brandConf = cls.brand_confidence || 'unidentified';
-  const brand = id.brand || result.details?.brand || 'unidentified';
-  const model = id.model || result.details?.model || 'unidentified';
-  const idMethod = cls.identification_method || 'generic_only';
-
-  if (brand.toLowerCase() === 'unidentified' || brand.toLowerCase() === 'unknown' || brandConf === 'unidentified') {
-    confidence = Math.min(confidence, 0.60);
-  }
-  if (brandConf === 'inferred_from_visuals') {
-    confidence = Math.min(confidence, 0.75);
-  }
-  if (!ocr.readable_text_on_item && (!ocr.text_found || ocr.text_found.length === 0)) {
-    confidence = Math.max(confidence - 0.15, 0.10);
-  }
-  if (idMethod === 'generic_only') {
-    confidence = Math.min(confidence, 0.50);
-  }
-  if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') {
-    confidence = Math.max(confidence, 0.80);
-  }
-
-  confidence = Math.min(confidence, 0.95);
-  confidence = Math.max(confidence, 0.10);
-  confidence = Math.round(confidence * 100) / 100;
-
-  return { ...result, raw_confidence: result.confidence, confidence, confidence_calibrated: true };
-}
-
-// ═══════════════════════════════════════════════════════
-// Normalize result for backward-compatible UI
-// ═══════════════════════════════════════════════════════
-
-function normalizeResult(result) {
-  const id = result.identification || {};
-  const ocr = result.ocr || {};
-  const cls = result.classification || {};
-
-  const recognition = {
-    identifiedBy: cls.identification_method === 'ocr_confirmed' ? 'ocr'
-      : cls.identification_method === 'visual_match' ? 'visual'
-      : cls.identification_method === 'pattern_recognition' ? 'both'
-      : 'generic',
-    ocrText: (ocr.text_found || []).join(' | '),
-    modelNumber: id.model !== 'unidentified' ? id.model : null,
-    brandConfidence: cls.brand_confidence || 'unidentified',
-    alternatives: result.alternatives || [],
-  };
-
-  const needsConfirmation = result.confidence < 0.80;
-
-  const displayName = id.full_name && id.full_name !== id.generic_name
-    ? id.full_name : (result.name || id.generic_name || 'Unknown Item');
-
-  const displayNameHebrew = id.full_name_hebrew && id.full_name_hebrew !== id.generic_name_hebrew
-    ? id.full_name_hebrew : (result.nameHebrew || id.generic_name_hebrew || '');
-
-  return {
-    ...result,
-    name: displayName,
-    nameHebrew: displayNameHebrew,
-    category: result.category || cls.category || 'Other',
-    recognition,
-    needsConfirmation,
-    identification: id,
-    ocr,
-    classification: cls,
-  };
-}
-
-// ═══════════════════════════════════════════════════════
-// Retry helper — exponential backoff for transient errors
-// Retries on 529 (overloaded), 500, 502, 503
+// RETRY HELPER — exponential backoff for 529/500/502/503
 // ═══════════════════════════════════════════════════════
 
 async function fetchWithRetry(url, options, maxRetries = 3) {
   const delays = [1000, 2500, 5000];
-  let lastResponse;
-  let lastError;
+  let lastResponse, lastError;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
       const delay = delays[Math.min(attempt - 1, delays.length - 1)];
-      console.log(`[analyze] Retry ${attempt}/${maxRetries} after ${delay}ms...`);
+      console.log(`[Pipeline] Retry ${attempt}/${maxRetries} after ${delay}ms...`);
       await new Promise(r => setTimeout(r, delay));
     }
-
     try {
       lastResponse = await fetch(url, options);
-
       if (lastResponse.ok) return lastResponse;
-
       if ([529, 500, 502, 503].includes(lastResponse.status)) {
         lastError = await lastResponse.json().catch(() => ({}));
-        console.warn(`[analyze] Attempt ${attempt + 1} got ${lastResponse.status}:`, lastError.error?.message || '');
+        console.warn(`[Pipeline] Attempt ${attempt + 1} got ${lastResponse.status}:`, lastError.error?.message || '');
         if (attempt < maxRetries) continue;
       } else {
-        return lastResponse;
+        return lastResponse; // Non-retryable
       }
     } catch (err) {
       lastError = { error: { message: err.message } };
-      console.warn(`[analyze] Attempt ${attempt + 1} network error:`, err.message);
+      console.warn(`[Pipeline] Attempt ${attempt + 1} network error:`, err.message);
       if (attempt < maxRetries) continue;
     }
   }
-
-  console.error('[analyze] All retries exhausted:', lastError);
+  console.error('[Pipeline] All retries exhausted:', lastError);
   return new Response(JSON.stringify({
-    error: 'Service temporarily overloaded. Please try again in a moment.',
+    error: 'Service temporarily overloaded. Please try again.',
     retryable: true,
   }), { status: 503, headers: { 'Content-Type': 'application/json' } });
 }
 
 // ═══════════════════════════════════════════════════════
-// Main handler
+// §1  JSON SCHEMAS
 // ═══════════════════════════════════════════════════════
 
-export default async function handler(req) {
-  if (req.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 200,
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type',
+export const RECOGNITION_SCHEMA = {
+  $id: 'RecognitionOutput',
+  type: 'object',
+  required: ['category', 'category_confidence', 'brand_candidates', 'model_candidates', 'ocr_text', 'visual_features'],
+  properties: {
+    category:            { type: 'string', description: 'Primary item category' },
+    category_hebrew:     { type: 'string' },
+    category_confidence: { type: 'number', minimum: 0, maximum: 1 },
+    subcategory:         { type: 'string' },
+    brand_candidates: {
+      type: 'array', maxItems: 5,
+      items: {
+        type: 'object',
+        required: ['brand', 'confidence', 'evidence'],
+        properties: {
+          brand:      { type: 'string' },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          evidence:   { type: 'string', description: 'How brand was identified: readable_text | logo_match | design_pattern | packaging' },
+        },
       },
-    });
+    },
+    model_candidates: {
+      type: 'array', maxItems: 5,
+      items: {
+        type: 'object',
+        required: ['model', 'confidence'],
+        properties: {
+          model:      { type: 'string' },
+          confidence: { type: 'number', minimum: 0, maximum: 1 },
+          evidence:   { type: 'string' },
+        },
+      },
+    },
+    ocr_text: {
+      type: 'object',
+      required: ['raw_texts', 'has_readable_text'],
+      properties: {
+        raw_texts:         { type: 'array', items: { type: 'string' }, description: 'Every piece of text found on the item' },
+        logos_detected:    { type: 'array', items: { type: 'string' } },
+        labels_detected:   { type: 'array', items: { type: 'string' } },
+        serial_numbers:    { type: 'array', items: { type: 'string' } },
+        has_readable_text: { type: 'boolean' },
+      },
+    },
+    visual_features: {
+      type: 'object',
+      required: ['materials', 'colors', 'condition'],
+      properties: {
+        materials:            { type: 'array', items: { type: 'string' } },
+        colors:               { type: 'array', items: { type: 'string' } },
+        finish:               { type: 'string' },
+        shape:                { type: 'string' },
+        distinctive_elements: { type: 'array', items: { type: 'string' } },
+        wear_level:           { type: 'string' },
+        condition:            { type: 'string', enum: ['New', 'Like New', 'Good', 'Fair', 'Poor'] },
+        size_estimate:        { type: 'string' },
+      },
+    },
+    embedding_text: { type: 'string', description: 'Concatenated text for embedding generation: brand + model + category + features' },
+    needs_more_info: { type: 'boolean' },
+    suggested_followup: { type: ['string', 'null'] },
+  },
+};
+
+export const VERIFICATION_SCHEMA = {
+  $id: 'VerificationOutput',
+  type: 'object',
+  required: ['final_category', 'final_brand', 'final_model', 'match_confidence', 'price_estimate_low', 'price_estimate_mid', 'price_estimate_high', 'price_method'],
+  properties: {
+    final_category:        { type: 'string' },
+    final_category_hebrew: { type: 'string' },
+    final_brand:           { type: 'string' },
+    final_model:           { type: 'string' },
+    full_name:             { type: 'string' },
+    full_name_hebrew:      { type: 'string' },
+    match_confidence:      { type: 'number', minimum: 0, maximum: 1 },
+    confidence_reasoning:  { type: 'string' },
+    matched_product_ids:   { type: 'array', items: { type: 'string' } },
+    identification_method: { type: 'string', enum: ['ocr_confirmed', 'visual_match', 'db_match', 'generic_only'] },
+    brand_confidence:      { type: 'string', enum: ['confirmed_by_text', 'inferred_from_visuals', 'db_matched', 'unidentified'] },
+    price_estimate_low:    { type: 'number' },
+    price_estimate_mid:    { type: 'number' },
+    price_estimate_high:   { type: 'number' },
+    new_retail_price_ils:  { type: 'number' },
+    price_method:          { type: 'string', enum: ['comp_based', 'ai_estimate'] },
+    currency:              { type: 'string', const: 'ILS' },
+    condition:             { type: 'string' },
+    is_sellable:           { type: 'boolean' },
+    market_demand:         { type: 'string', enum: ['high', 'moderate', 'low'] },
+    selling_tips:          { type: 'string' },
+    israeli_market_notes:  { type: 'string' },
+    price_factors:         { type: 'array', items: { type: 'object', properties: { factor: { type: 'string' }, impact: { type: 'string' } } } },
+    comparable_items:      { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, price: { type: 'number' }, source: { type: 'string' } } } },
+  },
+};
+
+
+// ═══════════════════════════════════════════════════════
+// §2  PROMPTS
+// ═══════════════════════════════════════════════════════
+
+function buildRecognitionPrompt(language = 'he') {
+  return `You are an image understanding model that extracts visual attributes with forensic precision.
+You are part of a product identification pipeline for an Israeli marketplace app.
+
+TASK: Extract ALL identifying information from this image. Do NOT guess — report only what you can see.
+
+EXTRACTION STEPS (follow in order):
+
+1. OCR SCAN — Read every piece of visible text:
+   - Brand names (printed, embossed, engraved, stamped, on tags/labels)
+   - Model numbers, serial numbers, part numbers
+   - Any Hebrew text (תוויות, מדבקות, כיתוב)
+   - Packaging text, stickers, receipts visible
+   - Report EXACT text as-is. If partially visible, report what you can read + "[partial]"
+
+2. VISUAL ATTRIBUTES — Describe what you see:
+   - Materials (metal, plastic, glass, wood, leather, fabric, ceramic, etc.)
+   - Colors and finish (matte, glossy, brushed, polished)
+   - Shape, proportions, approximate dimensions
+   - Distinctive design elements (patterns, textures, hardware, knobs, buttons)
+   - Wear indicators (scratches, patina, fading, stains, dents, cracks)
+
+3. BRAND CANDIDATES — List possible brands (max 5):
+   - If text/logo CLEARLY confirms brand → confidence 0.85-1.0 + evidence "readable_text"
+   - If visual design STRONGLY suggests brand → confidence 0.50-0.84 + evidence "logo_match" or "design_pattern"
+   - If guessing from category/style → confidence 0.20-0.49 + evidence "style_inference"
+   - If unknown → empty array
+   - NEVER fabricate brand text that isn't visible
+
+4. MODEL CANDIDATES — List possible models (max 5):
+   - Same rules as brand. Only report what you can cite evidence for.
+
+5. CATEGORY — Classify the item (one of: Electronics, Furniture, Vehicles, Watches, Clothing, Sports, Smoking, Home, Beauty, Books, Toys, Tools, Food, Other)
+
+6. CONDITION — Assess from visual evidence only (New, Like New, Good, Fair, Poor)
+
+7. EMBEDDING TEXT — Produce a single string that captures the item's identity for vector search:
+   Format: "[brand] [model] [category] [subcategory] [material] [color] [distinctive features]"
+   Example: "Amy Deluxe hookah smoking stainless steel silver ornate engravings wide base"
+
+CONFIDENCE RULES:
+- 0.90-1.00: Brand AND model text clearly readable
+- 0.75-0.89: Brand text readable OR logo confirmed, model inferred
+- 0.50-0.74: Visual match only, no confirming text
+- 0.30-0.49: Generic category, no brand clues
+- 0.10-0.29: Uncertain even about category
+- NEVER output 0.90+ without citing specific readable text
+
+Language: ${language === 'he' ? 'Include Hebrew names where relevant' : 'English only'}
+
+Respond ONLY with valid JSON matching this structure (no markdown, no backticks):
+{
+  "category": "string",
+  "category_hebrew": "string",
+  "category_confidence": 0.85,
+  "subcategory": "string",
+  "brand_candidates": [{"brand":"string","confidence":0.82,"evidence":"readable_text"}],
+  "model_candidates": [{"model":"string","confidence":0.65,"evidence":"string"}],
+  "ocr_text": {
+    "raw_texts": ["exact text found"],
+    "logos_detected": ["logo description"],
+    "labels_detected": ["label text"],
+    "serial_numbers": [],
+    "has_readable_text": true
+  },
+  "visual_features": {
+    "materials": ["stainless steel"],
+    "colors": ["silver"],
+    "finish": "brushed",
+    "shape": "cylindrical",
+    "distinctive_elements": ["ornate engravings"],
+    "wear_level": "minimal",
+    "condition": "Good",
+    "size_estimate": "60cm tall"
+  },
+  "embedding_text": "brand model category features...",
+  "needs_more_info": false,
+  "suggested_followup": null
+}`;
+}
+
+
+function buildVerificationPrompt(recognition, candidates, corrections, language = 'he') {
+  const isHe = language === 'he';
+
+  const candidateBlock = candidates.length > 0
+    ? `\nMATCHED PRODUCTS FROM DATABASE (${candidates.length} results):
+${candidates.map((c, i) => `${i + 1}. [ID:${c.id}] ${c.brand} ${c.model || ''} — Category: ${c.category}
+     Retail: ₪${c.retail_price_ils ?? '?'} | Used avg: ₪${c.avg_used_price_ils ?? '?'} | Range: ₪${c.price_low_ils ?? '?'}-${c.price_high_ils ?? '?'}
+     Similarity: ${(c.similarity * 100).toFixed(1)}% | Scans: ${c.popularity_score || 0}
+     Aliases: ${(c.aliases || []).join(', ') || 'none'}
+     Keywords: ${(c.keywords || []).join(', ') || 'none'}`).join('\n')}`
+    : '\nNo matching products found in database. Use your own knowledge of Israeli market prices.';
+
+  const correctionBlock = corrections.length > 0
+    ? `\nPAST USER CORRECTIONS (learn from these):
+${corrections.map(c => `- AI said "${c.original}" → user corrected to "${c.corrected}" (happened ${c.count}x)`).join('\n')}`
+    : '';
+
+  return `You are a product verification and Israeli market pricing expert.
+You are the second stage of a pipeline. Stage 1 extracted visual attributes. Your job is to:
+1) Verify the identity using Stage 1 data + database matches
+2) Price the item for the Israeli used-goods market
+
+RECOGNITION DATA FROM STAGE 1:
+- Category: ${recognition.category} (${Math.round(recognition.category_confidence * 100)}% confident)
+- Top brand: ${recognition.brand_candidates?.[0]?.brand || 'unidentified'} (${Math.round((recognition.brand_candidates?.[0]?.confidence || 0) * 100)}%, evidence: ${recognition.brand_candidates?.[0]?.evidence || 'none'})
+- Top model: ${recognition.model_candidates?.[0]?.model || 'unidentified'} (${Math.round((recognition.model_candidates?.[0]?.confidence || 0) * 100)}%)
+- OCR text: ${recognition.ocr_text?.raw_texts?.join(', ') || 'none'}
+- Logos: ${recognition.ocr_text?.logos_detected?.join(', ') || 'none'}
+- Condition: ${recognition.visual_features?.condition || 'unknown'}
+- Materials: ${recognition.visual_features?.materials?.join(', ') || 'unknown'}
+- Colors: ${recognition.visual_features?.colors?.join(', ') || 'unknown'}
+${candidateBlock}
+${correctionBlock}
+
+VERIFICATION RULES:
+- If a DB candidate matches with >70% similarity AND brand/model aligns with Stage 1 → use its pricing → price_method = "comp_based"
+- If DB candidates exist but weak match → use as loose anchor, widen range → price_method = "ai_estimate"
+- If no DB match → pure AI estimate → flag clearly → price_method = "ai_estimate"
+- If Stage 1 and DB disagree on brand → prefer OCR text evidence over everything
+- NEVER exceed 95% final confidence
+- NEVER fabricate a brand that wasn't found in OCR or DB
+
+ISRAELI MARKET PRICING RULES:
+- All prices in Israeli New Shekel (₪)
+- Electronics typically 20-40% more than US retail
+- Import taxes, VAT (17%), and availability factor in
+- Used items: 40-70% of new Israeli retail depending on condition
+  New/Like New: 70-85% | Good: 50-65% | Fair: 35-50% | Poor: 20-35%
+- Price sources to consider: KSP, Zap, Yad2, Facebook Marketplace IL
+- If brand unidentified: WIDE range (±50% from mid)
+- If brand confirmed by text: NARROW range (±20% from mid)
+
+Respond ONLY with valid JSON:
+{
+  "final_category": "string",
+  "final_category_hebrew": "string",
+  "final_brand": "string or 'unidentified'",
+  "final_model": "string or 'unidentified'",
+  "full_name": "Brand Model Name",
+  "full_name_hebrew": "${isHe ? 'שם מלא' : ''}",
+  "match_confidence": 0.78,
+  "confidence_reasoning": "explanation",
+  "matched_product_ids": ["uuid-if-matched"],
+  "identification_method": "ocr_confirmed|visual_match|db_match|generic_only",
+  "brand_confidence": "confirmed_by_text|inferred_from_visuals|db_matched|unidentified",
+  "price_estimate_low": 200,
+  "price_estimate_mid": 350,
+  "price_estimate_high": 500,
+  "new_retail_price_ils": 700,
+  "price_method": "comp_based|ai_estimate",
+  "currency": "ILS",
+  "condition": "Good",
+  "is_sellable": true,
+  "market_demand": "moderate",
+  "selling_tips": "${isHe ? 'טיפ' : 'tip'}",
+  "israeli_market_notes": "notes",
+  "price_factors": [{"factor":"condition","impact":"-₪100"}],
+  "comparable_items": [{"name":"Similar Item","price":400,"source":"Yad2"}]
+}`;
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §3  STAGE 1 — RECOGNITION (Claude Vision)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Send image(s) to Claude Sonnet for forensic visual extraction.
+ * Returns structured recognition data with brand/model candidates.
+ *
+ * @param {string[]}  images   Base64-encoded JPEG images (1-3)
+ * @param {string}    language 'he' or 'en'
+ * @param {string}    apiKey   Anthropic API key
+ * @returns {object}  RecognitionOutput matching RECOGNITION_SCHEMA
+ */
+async function recognize(images, language, apiKey) {
+  const prompt = buildRecognitionPrompt(language);
+
+  const content = [
+    ...images.map((img) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/jpeg', data: img },
+    })),
+    {
+      type: 'text',
+      text: images.length > 1
+        ? `${prompt}\n\n[${images.length} images provided. Cross-reference ALL images for text/brand/model identification.]`
+        : prompt,
+    },
+  ];
+
+  const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content }],
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Recognition API ${res.status}: ${err.error?.message || 'Unknown'}`);
   }
 
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405, headers: { 'Content-Type': 'application/json' },
-    });
+  const data = await res.json();
+  const raw = data.content?.find((c) => c.type === 'text')?.text || '';
+  return parseJSON(raw, 'recognition');
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §4  EMBEDDING GENERATION
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Generate text embedding using Voyage AI (voyage-3) via their API.
+ * Voyage is recommended by Anthropic for use with Claude.
+ *
+ * If VOYAGE_API_KEY is not set, falls back to a simple text-based
+ * Supabase lookup (no vector search). This lets the pipeline work
+ * without embeddings during early development.
+ *
+ * @param {string} text  The embedding_text from recognition
+ * @returns {number[]|null} 1024-dim embedding vector, or null if unavailable
+ */
+async function generateEmbedding(text) {
+  const voyageKey = process.env.VOYAGE_API_KEY;
+  if (!voyageKey) {
+    // No embedding provider — return null, fall back to text search
+    return null;
   }
 
   try {
-    const { imageData, images, lang = 'he', hints = [] } = await req.json();
-    const imageList = images && images.length > 0 ? images : (imageData ? [imageData] : []);
-
-    if (imageList.length === 0) {
-      return new Response(JSON.stringify({ error: 'No image data provided' }), {
-        status: 400, headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return new Response(JSON.stringify({ error: 'API key not configured' }), {
-        status: 500, headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    const prompt = buildPrompt(lang, hints);
-
-    const content = [
-      ...imageList.map((img) => ({
-        type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: img },
-      })),
-      {
-        type: 'text',
-        text: imageList.length > 1
-          ? `${prompt}\n\nNOTE: ${imageList.length} images provided. Use ALL images together for identification.`
-          : prompt,
-      },
-    ];
-
-    // ── Call Anthropic with automatic retry on overload ──
-    const response = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('https://api.voyageai.com/v1/embeddings', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        Authorization: `Bearer ${voyageKey}`,
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        messages: [{ role: 'user', content }],
+        model: 'voyage-3',
+        input: [text],
+        input_type: 'document',
       }),
     });
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      console.error('Anthropic API error after retries:', response.status, errorData);
-      return new Response(JSON.stringify({
-        error: errorData.error?.message || errorData.error || `API error: ${response.status}`,
-        retryable: [529, 500, 502, 503].includes(response.status),
-      }), {
-        status: response.status,
-        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-      });
+    if (!res.ok) {
+      console.warn(`[Embedding] Voyage API ${res.status}`);
+      return null;
     }
 
-    const data = await response.json();
+    const data = await res.json();
+    return data.data?.[0]?.embedding || null;
+  } catch (err) {
+    console.warn('[Embedding] Generation failed:', err.message);
+    return null;
+  }
+}
 
-    let parsed = null;
-    const textContent = data.content?.find(c => c.type === 'text')?.text || '';
+/**
+ * Generate embedding optimized for search queries (shorter input).
+ */
+async function generateQueryEmbedding(text) {
+  const voyageKey = process.env.VOYAGE_API_KEY;
+  if (!voyageKey) return null;
 
+  try {
+    const res = await fetch('https://api.voyageai.com/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${voyageKey}`,
+      },
+      body: JSON.stringify({
+        model: 'voyage-3',
+        input: [text],
+        input_type: 'query',
+      }),
+    });
+
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.data?.[0]?.embedding || null;
+  } catch {
+    return null;
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §5  RETRIEVAL — Supabase Vector Search + Text Fallback
+// ═══════════════════════════════════════════════════════
+
+function getSupabase() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key);
+}
+
+/**
+ * Two-strategy retrieval:
+ * 1) Vector search using embedding (if available)
+ * 2) Text-based fallback using brand/model/category ILIKE + full-text search
+ *
+ * Returns merged, deduplicated candidates sorted by relevance.
+ */
+async function retrieveCandidates(recognition, queryEmbedding) {
+  const supa = getSupabase();
+  if (!supa) return [];
+
+  const topBrand = recognition.brand_candidates?.[0]?.brand;
+  const topModel = recognition.model_candidates?.[0]?.model;
+  const category = recognition.category;
+
+  let vectorResults = [];
+  let textResults = [];
+
+  // ── Strategy 1: Vector search ──
+  if (queryEmbedding) {
     try {
-      parsed = JSON.parse(textContent.trim());
-    } catch {
-      const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        try { parsed = JSON.parse(jsonMatch[0]); } catch {}
+      const { data, error } = await supa.rpc('match_products', {
+        query_embedding: queryEmbedding,
+        similarity_threshold: 0.60,
+        match_limit: 10,
+      });
+      if (!error && data) {
+        vectorResults = data.map((r) => ({ ...r, _source: 'vector', similarity: r.similarity }));
+      }
+    } catch (err) {
+      console.warn('[Retrieve] Vector search failed:', err.message);
+    }
+  }
+
+  // ── Strategy 2: Text search (always runs as supplement) ──
+  try {
+    // 2a. Exact brand + model
+    if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
+      let q = supa.from('products').select('*').ilike('brand', `%${topBrand}%`);
+      if (topModel && topModel.toLowerCase() !== 'unidentified') {
+        q = q.ilike('model', `%${topModel}%`);
+      }
+      const { data: exact } = await q.limit(5);
+      if (exact?.length) {
+        textResults.push(...exact.map((r) => ({ ...r, _source: 'text_exact', similarity: 0.85 })));
       }
     }
 
-    if (!parsed) {
-      return new Response(JSON.stringify({
-        error: 'Failed to parse AI response',
-        raw: textContent.slice(0, 500),
-      }), {
-        status: 500,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'no-store, no-cache, must-revalidate',
-        },
-      });
+    // 2b. Full-text search on name
+    const searchTerms = [topBrand, topModel, category].filter(Boolean).join(' ');
+    if (searchTerms.trim()) {
+      const { data: fts } = await supa
+        .from('products')
+        .select('*')
+        .textSearch('name', searchTerms, { type: 'websearch' })
+        .limit(5);
+      if (fts?.length) {
+        textResults.push(...fts.map((r) => ({ ...r, _source: 'text_fts', similarity: 0.70 })));
+      }
     }
 
-    const calibrated = calibrateConfidence(parsed);
-    const normalized = normalizeResult(calibrated);
+    // 2c. Category fallback (for price anchoring even without brand)
+    if (textResults.length === 0 && vectorResults.length === 0 && category) {
+      const { data: catFallback } = await supa
+        .from('products')
+        .select('*')
+        .ilike('category', `%${category}%`)
+        .order('popularity_score', { ascending: false })
+        .limit(5);
+      if (catFallback?.length) {
+        textResults.push(...catFallback.map((r) => ({ ...r, _source: 'category_fallback', similarity: 0.40 })));
+      }
+    }
+  } catch (err) {
+    console.warn('[Retrieve] Text search failed:', err.message);
+  }
 
-    return new Response(JSON.stringify({
-      content: [{ type: 'text', text: JSON.stringify(normalized) }],
-    }), {
-      status: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'no-store, no-cache, must-revalidate',
-      },
+  // ── Merge + deduplicate ──
+  const seen = new Set();
+  const merged = [];
+
+  // Vector results first (higher quality)
+  for (const r of [...vectorResults, ...textResults]) {
+    if (!seen.has(r.id)) {
+      seen.add(r.id);
+      merged.push(r);
+    }
+  }
+
+  // Sort by similarity descending
+  merged.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+
+  return merged.slice(0, 10);
+}
+
+/**
+ * Fetch past user corrections from the misidentifications table.
+ */
+async function fetchCorrections() {
+  const supa = getSupabase();
+  if (!supa) return [];
+
+  try {
+    const { data } = await supa
+      .from('misidentifications')
+      .select('ai_name, corrected_name')
+      .eq('resolved', false)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (!data?.length) return [];
+
+    const counts = {};
+    for (const row of data) {
+      const key = `${row.ai_name}|||${row.corrected_name}`;
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    return Object.entries(counts).map(([key, count]) => {
+      const [original, corrected] = key.split('|||');
+      return { original, corrected, count };
     });
+  } catch {
+    return [];
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §6  STAGE 2 — VERIFICATION + PRICING (Claude)
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Call Claude Sonnet with recognition data + DB candidates for final verdict.
+ */
+async function verifyAndPrice(recognition, candidates, corrections, language, apiKey) {
+  const prompt = buildVerificationPrompt(recognition, candidates, corrections, language);
+
+  const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1500,
+      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Verification API ${res.status}: ${err.error?.message || 'Unknown'}`);
+  }
+
+  const data = await res.json();
+  const raw = data.content?.find((c) => c.type === 'text')?.text || '';
+  return parseJSON(raw, 'verification');
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §7  CONFIDENCE CALIBRATION
+// ═══════════════════════════════════════════════════════
+
+/**
+ * Hard-coded rules that override model self-reported confidence.
+ * The model can be overconfident — these rules enforce honesty.
+ */
+function calibrateRecognition(recognition) {
+  let conf = recognition.category_confidence ?? 0.5;
+  const topBrand = recognition.brand_candidates?.[0];
+  const topModel = recognition.model_candidates?.[0];
+  const ocr = recognition.ocr_text || {};
+
+  // RULE 1: No brand candidates → cap at 55%
+  if (!recognition.brand_candidates?.length) conf = Math.min(conf, 0.55);
+
+  // RULE 2: Top brand low confidence → cap at 65%
+  if (topBrand && topBrand.confidence < 0.50) conf = Math.min(conf, 0.65);
+
+  // RULE 3: No readable text → reduce by 15%
+  if (!ocr.has_readable_text && !ocr.raw_texts?.length) conf = Math.max(conf - 0.15, 0.10);
+
+  // RULE 4: Brand + model both high confidence → floor at 80%
+  if (topBrand?.confidence >= 0.85 && topModel?.confidence >= 0.75) conf = Math.max(conf, 0.80);
+
+  // RULE 5: Hard ceiling 95%, floor 10%
+  conf = Math.min(Math.max(conf, 0.10), 0.95);
+
+  return { ...recognition, raw_category_confidence: recognition.category_confidence, category_confidence: round(conf), confidence_calibrated: true };
+}
+
+function calibrateVerification(verification, recognition, dbMatches) {
+  let conf = verification.match_confidence ?? 0.5;
+  const brand = verification.final_brand || '';
+  const model = verification.final_model || '';
+  const brandConf = verification.brand_confidence || 'unidentified';
+  const method = verification.identification_method || 'generic_only';
+
+  // RULE 1: Brand unidentified → cap 60%
+  if (brand.toLowerCase() === 'unidentified' || brandConf === 'unidentified') conf = Math.min(conf, 0.60);
+
+  // RULE 2: Visual inference only → cap 75%
+  if (brandConf === 'inferred_from_visuals') conf = Math.min(conf, 0.75);
+
+  // RULE 3: Generic-only → cap 50%
+  if (method === 'generic_only') conf = Math.min(conf, 0.50);
+
+  // RULE 4: DB match found → boost by 10% (max 90%)
+  if (dbMatches.length > 0 && (method === 'db_match' || brandConf === 'db_matched')) conf = Math.min(conf + 0.10, 0.90);
+
+  // RULE 5: OCR confirmed + model known → floor at 80%
+  if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
+
+  // Hard bounds
+  conf = Math.min(Math.max(conf, 0.10), 0.95);
+
+  return { ...verification, raw_match_confidence: verification.match_confidence, match_confidence: round(conf), confidence_calibrated: true };
+}
+
+/**
+ * Determine UI behavior based on final confidence.
+ */
+function getConfidenceTier(confidence) {
+  if (confidence >= 0.80) return { tier: 'high',      needsConfirmation: false, color: 'green',  behavior: 'Show normally' };
+  if (confidence >= 0.60) return { tier: 'moderate',   needsConfirmation: true,  color: 'amber',  behavior: 'Ask "Is this correct?"' };
+  if (confidence >= 0.40) return { tier: 'low',        needsConfirmation: true,  color: 'orange', behavior: 'Request photo/brand input' };
+  return                         { tier: 'very_low',   needsConfirmation: true,  color: 'red',    behavior: 'Broad estimate + help modal' };
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §8  WRITE-BACK — Auto-learn from scans
+// ═══════════════════════════════════════════════════════
+
+/**
+ * After a successful pipeline run:
+ * 1) Upsert product into catalog (so future scans find it)
+ * 2) Store embedding for vector search
+ * 3) Record price observation
+ */
+async function writeBack(recognition, verification, embedding) {
+  const supa = getSupabase();
+  if (!supa) return;
+
+  const brand = verification.final_brand;
+  const model = verification.final_model;
+
+  // Skip fully generic results
+  if (!brand || brand.toLowerCase() === 'unidentified') return;
+
+  try {
+    // Upsert product
+    const { data: existing } = await supa
+      .from('products')
+      .select('id, popularity_score')
+      .ilike('brand', brand)
+      .ilike('model', model || '')
+      .limit(1)
+      .maybeSingle();
+
+    let productId;
+
+    if (existing) {
+      productId = existing.id;
+      const updates = {
+        popularity_score: (existing.popularity_score || 0) + 1,
+        avg_used_price_ils: verification.price_estimate_mid,
+        price_updated_at: new Date().toISOString(),
+      };
+      // Update embedding if we have one and column exists
+      if (embedding) updates.text_embedding = embedding;
+      await supa.from('products').update(updates).eq('id', existing.id);
+    } else {
+      const row = {
+        name: verification.full_name || `${brand} ${model}`.trim(),
+        name_hebrew: verification.full_name_hebrew || null,
+        brand,
+        model: model !== 'unidentified' ? model : null,
+        category: verification.final_category,
+        retail_price_ils: verification.new_retail_price_ils || null,
+        avg_used_price_ils: verification.price_estimate_mid || null,
+        price_source: 'getworth_scan',
+        price_updated_at: new Date().toISOString(),
+        keywords: [
+          ...(recognition.ocr_text?.raw_texts || []),
+          recognition.category,
+          recognition.subcategory,
+        ].filter(Boolean),
+        popularity_score: 1,
+      };
+      if (embedding) row.text_embedding = embedding;
+      const { data: inserted } = await supa.from('products').insert(row).select('id').maybeSingle();
+      productId = inserted?.id;
+    }
+
+    // Record price observation
+    if (productId && verification.price_estimate_mid > 0) {
+      await supa.from('price_observations').insert({
+        product_id: productId,
+        price: verification.price_estimate_mid,
+        condition: verification.condition || 'unknown',
+        source: 'getworth_scan',
+      });
+    }
+  } catch (err) {
+    console.warn('[WriteBack] Failed:', err.message);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §9  NORMALIZE — Map to UI-compatible format
+// ═══════════════════════════════════════════════════════
+
+function normalizeForUI(recognition, verification, tierInfo) {
+  const ocr = recognition.ocr_text || {};
+  return {
+    // Legacy fields (backward compat with AppContext)
+    name: verification.full_name || (verification.final_brand !== 'unidentified'
+      ? `${verification.final_brand} ${verification.final_model}`.trim()
+      : recognition.category),
+    nameHebrew: verification.full_name_hebrew || recognition.category_hebrew || '',
+    category: verification.final_category || recognition.category,
+    confidence: verification.match_confidence,
+    isSellable: verification.is_sellable ?? true,
+    condition: verification.condition || recognition.visual_features?.condition || 'unknown',
+    marketValue: {
+      low: verification.price_estimate_low,
+      mid: verification.price_estimate_mid,
+      high: verification.price_estimate_high,
+      currency: 'ILS',
+      newRetailPrice: verification.new_retail_price_ils || 0,
+      price_method: verification.price_method || 'ai_estimate',
+    },
+    details: {
+      description: verification.israeli_market_notes || '',
+      brand: verification.final_brand || 'unidentified',
+      model: verification.final_model || 'unidentified',
+      additionalInfo: '',
+    },
+    priceFactors: verification.price_factors || [],
+    marketTrend: 'stable',
+    demandLevel: verification.market_demand || 'moderate',
+    sellingTips: verification.selling_tips || '',
+    israeliMarketNotes: verification.israeli_market_notes || '',
+
+    // New structured fields
+    recognition: {
+      identifiedBy: mapMethod(verification.identification_method),
+      ocrText: (ocr.raw_texts || []).join(' | '),
+      modelNumber: verification.final_model !== 'unidentified' ? verification.final_model : null,
+      brandConfidence: verification.brand_confidence || 'unidentified',
+      alternatives: [],
+    },
+    identification: {
+      generic_name: recognition.category,
+      generic_name_hebrew: recognition.category_hebrew || '',
+      brand: verification.final_brand,
+      model: verification.final_model,
+      full_name: verification.full_name || '',
+      full_name_hebrew: verification.full_name_hebrew || '',
+    },
+    ocr: {
+      text_found: ocr.raw_texts || [],
+      logos_found: ocr.logos_detected || [],
+      readable_text_on_item: ocr.has_readable_text || false,
+    },
+    classification: {
+      category: verification.final_category || recognition.category,
+      subcategory: recognition.subcategory || '',
+      identification_method: verification.identification_method || 'generic_only',
+      brand_confidence: verification.brand_confidence || 'unidentified',
+    },
+    confidence_reasoning: verification.confidence_reasoning || '',
+    confidence_calibrated: true,
+    raw_confidence: verification.raw_match_confidence ?? verification.match_confidence,
+    needsConfirmation: tierInfo.needsConfirmation,
+
+    // Comparables (if DB provided them)
+    comparable_items: verification.comparable_items || [],
+
+    // Pipeline metadata
+    _pipeline: {
+      version: 'v2',
+      stage1_confidence: recognition.category_confidence,
+      stage2_confidence: verification.match_confidence,
+      db_matches: verification.matched_product_ids?.length || 0,
+      tier: tierInfo.tier,
+      embedding_used: !!recognition._embedding_used,
+    },
+  };
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §10  MAIN HANDLER — Orchestrates the full pipeline
+// ═══════════════════════════════════════════════════════
+
+export default async function handler(req) {
+  // CORS
+  const cors = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+  };
+
+  if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: cors });
+  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405, cors);
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);
+
+  try {
+    const { imageData, images: imagesArr, lang = 'he', hints = [] } = await req.json();
+    const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
+    if (!imageList.length) return json({ error: 'No image data provided' }, 400, cors);
+
+    const t0 = Date.now();
+
+    // ── STAGE 1: RECOGNIZE ──
+    let recognition = await recognize(imageList, lang, apiKey);
+    recognition = calibrateRecognition(recognition);
+
+    const t1 = Date.now();
+    console.log(`[Pipeline] Stage 1 done in ${t1 - t0}ms — ${recognition.brand_candidates?.[0]?.brand || 'no brand'} (${round(recognition.category_confidence * 100)}%)`);
+
+    // ── GENERATE EMBEDDING ──
+    const embeddingText = recognition.embedding_text
+      || [recognition.brand_candidates?.[0]?.brand, recognition.model_candidates?.[0]?.model, recognition.category, ...(recognition.visual_features?.materials || [])].filter(Boolean).join(' ');
+
+    const queryEmbedding = await generateQueryEmbedding(embeddingText);
+    recognition._embedding_used = !!queryEmbedding;
+
+    const t2 = Date.now();
+    if (queryEmbedding) console.log(`[Pipeline] Embedding generated in ${t2 - t1}ms (${embeddingText.slice(0, 60)}...)`);
+
+    // ── RETRIEVE CANDIDATES ──
+    const candidates = await retrieveCandidates(recognition, queryEmbedding);
+
+    const t3 = Date.now();
+    console.log(`[Pipeline] Retrieved ${candidates.length} candidates in ${t3 - t2}ms`);
+
+    // ── FETCH CORRECTIONS ──
+    let corrections = hints;
+    if (!corrections.length) {
+      corrections = await fetchCorrections().catch(() => []);
+    }
+
+    // ── STAGE 2: VERIFY + PRICE ──
+    let verification;
+    try {
+      verification = await verifyAndPrice(recognition, candidates, corrections, lang, apiKey);
+    } catch (err) {
+      console.error('[Pipeline] Stage 2 failed:', err.message);
+      verification = buildFallback(recognition, lang);
+    }
+
+    verification = calibrateVerification(verification, recognition, candidates);
+    const tierInfo = getConfidenceTier(verification.match_confidence);
+
+    const t4 = Date.now();
+    console.log(`[Pipeline] Stage 2 done in ${t4 - t3}ms — ${verification.full_name || verification.final_brand} ₪${verification.price_estimate_mid} (${round(verification.match_confidence * 100)}% ${tierInfo.tier})`);
+    console.log(`[Pipeline] Total: ${t4 - t0}ms`);
+
+    // ── WRITE-BACK (async, don't block response) ──
+    const docEmbedding = queryEmbedding
+      ? await generateEmbedding(embeddingText).catch(() => null)
+      : null;
+    writeBack(recognition, verification, docEmbedding).catch((e) => console.warn('[WriteBack]', e.message));
+
+    // ── NORMALIZE + RESPOND ──
+    const result = normalizeForUI(recognition, verification, tierInfo);
+
+    return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
 
   } catch (error) {
-    console.error('Server error:', error);
-    return new Response(JSON.stringify({ error: 'Internal server error' }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
-    });
+    console.error('[Pipeline] Fatal:', error);
+    return json({ error: 'Internal server error' }, 500, cors);
   }
+}
+
+
+// ═══════════════════════════════════════════════════════
+// §11  UTILITIES
+// ═══════════════════════════════════════════════════════
+
+function json(body, status, headers) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...headers },
+  });
+}
+
+function round(n) {
+  return Math.round(n * 100) / 100;
+}
+
+function mapMethod(m) {
+  switch (m) {
+    case 'ocr_confirmed': return 'ocr';
+    case 'visual_match':  return 'visual';
+    case 'db_match':      return 'both';
+    default:              return 'generic';
+  }
+}
+
+function parseJSON(raw, stage) {
+  try {
+    return JSON.parse(raw.trim());
+  } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error(`Failed to parse ${stage} JSON response`);
+  }
+}
+
+function buildFallback(recognition, lang) {
+  const isHe = lang === 'he';
+  const brand = recognition.brand_candidates?.[0]?.brand || 'unidentified';
+  const model = recognition.model_candidates?.[0]?.model || 'unidentified';
+  return {
+    final_category: recognition.category,
+    final_category_hebrew: recognition.category_hebrew || '',
+    final_brand: brand,
+    final_model: model,
+    full_name: brand !== 'unidentified' ? `${brand} ${model}`.trim() : recognition.category,
+    full_name_hebrew: recognition.category_hebrew || '',
+    match_confidence: Math.min(recognition.category_confidence, 0.45),
+    confidence_reasoning: isHe ? 'שלב התמחור נכשל — הערכה ראשונית בלבד' : 'Pricing stage failed — rough estimate only',
+    matched_product_ids: [],
+    identification_method: brand !== 'unidentified' ? 'visual_match' : 'generic_only',
+    brand_confidence: 'unidentified',
+    price_estimate_low: 0, price_estimate_mid: 0, price_estimate_high: 0,
+    new_retail_price_ils: 0,
+    price_method: 'ai_estimate',
+    currency: 'ILS',
+    condition: recognition.visual_features?.condition || 'unknown',
+    is_sellable: true,
+    market_demand: 'moderate',
+    selling_tips: '', israeli_market_notes: '',
+    price_factors: [], comparable_items: [],
+  };
 }
