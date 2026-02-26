@@ -81,18 +81,13 @@ export function MyListingsView() {
       )}
 
       {myListings.length > 0 ? (
-        <div className="space-y-4">
+        <div className="grid grid-cols-2 gap-4">
           {myListings.map((item, i) => (
             <FadeIn key={item.id} delay={i * 50}>
               <div className="relative">
                 <ListingCard item={item} onClick={() => viewItem(item)} />
-                <div className="absolute top-3 right-3 flex gap-2">
-                  {item.condition && (
-                    <Badge color="blue" className="text-[9px]">{item.condition}</Badge>
-                  )}
-                </div>
                 <button onClick={() => deleteListing(item.id)}
-                  className="absolute top-3 left-3 w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center backdrop-blur-md hover:bg-red-500/30 transition-all">
+                  className="absolute top-3 left-3 w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center backdrop-blur-md hover:bg-red-500/30 transition-all z-10">
                   <Trash2 className="w-4 h-4 text-red-400" />
                 </button>
               </div>
