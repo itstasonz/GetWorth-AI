@@ -568,6 +568,10 @@ export function ResultsView() {
   // Multi-photo
   const canAddPhoto = images.length < 3 && !isConfirmed;
 
+  // Serial eligibility — resolve from multiple possible field locations
+  const resolvedSubcategory = classification.subcategory || result.subcategory || '';
+  const resolvedName = result.name || result.nameHebrew || identification.generic_name || '';
+
   const handleSelectAlternative = async (alt) => {
     setRefining(true);
     await refineResult(alt.name);
@@ -1032,7 +1036,7 @@ export function ResultsView() {
       )}
 
       {/* Serial/IMEI verification CTA — secondary optional, only for eligible categories */}
-      {isSerialEligible(result.category, result.classification?.subcategory, result.name) && (
+      {isSerialEligible(result.category, resolvedSubcategory, resolvedName) && (
         <FadeIn delay={150}>
           <input
             ref={serialFileRef}
