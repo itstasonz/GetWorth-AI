@@ -191,19 +191,23 @@ export const PAGE_SIZE = 20;
 
 // Categories where serial/IMEI verification adds buyer trust
 const SERIAL_ELIGIBLE = new Set([
-  'Electronics', 'Watches', 'Tools',
+  'electronics', 'watches', 'tools',
 ]);
 const SERIAL_SUBCATEGORIES = new Set([
-  'Smartphone', 'Tablet', 'Laptop', 'Camera', 'Smartwatch',
-  'Gaming Console', 'VR Headset', 'Drone', 'Monitor', 'TV',
-  'E-Reader', 'Action Camera', 'Digital Piano', 'Electric Guitar',
-  'Speaker', 'Headphones',
+  'smartphone', 'tablet', 'laptop', 'camera', 'smartwatch',
+  'gaming console', 'vr headset', 'drone', 'monitor', 'tv',
+  'e-reader', 'action camera', 'digital piano', 'electric guitar',
+  'speaker', 'headphones',
 ]);
+// Keyword fallback — catches items where category is generic but name reveals electronics
+const SERIAL_KEYWORDS = /\b(iphone|ipad|macbook|galaxy|pixel|xbox|playstation|ps5|nintendo|switch|airpods|gopro|dji|sony|canon|nikon|fuji|garmin|apple watch|meta quest)\b/i;
 
-export const isSerialEligible = (category, subcategory) => {
-  if (SERIAL_ELIGIBLE.has(category)) return true;
-  if (subcategory && SERIAL_SUBCATEGORIES.has(subcategory)) return true;
-  // Keyword match for result.name
+export const isSerialEligible = (category, subcategory, itemName) => {
+  const cat = (category || '').toLowerCase();
+  const sub = (subcategory || '').toLowerCase();
+  if (SERIAL_ELIGIBLE.has(cat)) return true;
+  if (sub && SERIAL_SUBCATEGORIES.has(sub)) return true;
+  if (itemName && SERIAL_KEYWORDS.test(itemName)) return true;
   return false;
 };
 

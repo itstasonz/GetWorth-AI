@@ -1032,7 +1032,7 @@ export function ResultsView() {
       )}
 
       {/* Serial/IMEI verification CTA — secondary optional, only for eligible categories */}
-      {isSerialEligible(result.category, result.subcategory) && (
+      {isSerialEligible(result.category, result.classification?.subcategory, result.name) && (
         <FadeIn delay={150}>
           <input
             ref={serialFileRef}
