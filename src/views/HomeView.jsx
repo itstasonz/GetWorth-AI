@@ -84,7 +84,7 @@ export default function HomeView() {
         <p className="text-slate-400 text-sm max-w-xs mx-auto">{t.heroSub}</p>
       </FadeIn>
 
-      {/* Action Buttons */}
+      {/* Action Buttons — primary scan + upload entry points (unchanged) */}
       <FadeIn delay={100} className="grid grid-cols-2 gap-4">
         <Btn primary onClick={startCamera} className="py-4"><Scan className="w-5 h-5" />{t.scan}</Btn>
         <Btn onClick={() => fileRef.current?.click()} className="py-4"><Upload className="w-5 h-5" />{t.upload}</Btn>
@@ -131,7 +131,16 @@ export default function HomeView() {
           ))}
         </div>
 
-        <div className="px-5 pt-2">
+        {/* Sell banner — secondary CTA that opens camera scan (same as main Scan button) */}
+        {/* No UI/styling changes — only added onClick + cursor + a11y attributes */}
+        <div
+          className="px-5 pt-2 cursor-pointer active:scale-[0.98] transition-transform"
+          onClick={startCamera}
+          role="button"
+          tabIndex={0}
+          aria-label={lang === 'he' ? 'סרוק פריט למכירה' : 'Scan an item to sell'}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startCamera(); } }}
+        >
           <Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1))">
             <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'יש לך משהו למכור?' : 'Have something to sell?'}</p>
             <p className="text-xs text-slate-500 mt-1">{lang === 'he' ? 'סרוק את הפריט וקבל הערכת מחיר מיידית' : 'Scan your item and get instant valuation'}</p>
