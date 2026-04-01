@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial } from '../lib/utils';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -81,6 +81,9 @@ export function AppProvider({ children }) {
 
   // Scan/listing flow state
   const [images, setImages] = useState([]);
+  // Perf: ref mirror of images state — safe to read in async code without setState tricks
+  const imagesRef = useRef([]);
+  useEffect(() => { imagesRef.current = images; }, [images]);
   const [result, setResult] = useState(null);
   const [valuations, setValuations] = useState([]);
   const [valuationsLoading, setValuationsLoading] = useState(false);
@@ -88,6 +91,10 @@ export function AppProvider({ children }) {
   const [condition, setCondition] = useState(null);
   const [answers, setAnswers] = useState({});
   const [listingData, setListingData] = useState({ title: '', desc: '', price: 0, phone: '', location: '' });
+  // Serial/IMEI verification state
+  const [serialData, setSerialData] = useState(null); // { photo, rawText, serial, masked, verified, type } | null
+  const [serialLoading, setSerialLoading] = useState(false);
+  const serialLoadingRef = useRef(false);
   const [publishing, setPublishing] = useState(false);
   const capturedImageRef = useRef(null);
   const [showFlash, setShowFlash] = useState(false);
@@ -1176,68 +1183,52 @@ export function AppProvider({ children }) {
     try {
       // ── Step 1: Compress + fetch hints IN PARALLEL ──
       setPipelineState('compressing');
-      if (DEV) console.log(`[Pipeline] Starting... (append=${appendMode})`);
 
-      // Perf: run compression and hints fetch concurrently — saves 200-500ms
+      // Perf: run compression and hints fetch concurrently
       const [compressed, hints] = await Promise.all([
         compressImage(rawDataUrl),
         fetchRecognitionHints().catch(() => []),
       ]);
 
       const t1 = performance.now();
-      if (DEV) console.log(`[Pipeline] Compress + hints done in ${(t1 - pipelineT0).toFixed(0)}ms`);
+      if (DEV) console.log(`[Pipeline] Compress+hints: ${(t1 - pipelineT0).toFixed(0)}ms (append=${appendMode})`);
 
+      // ── Build analysis input using ref (FIX: no setState trick) ──
+      let analyzeInput;
       if (appendMode) {
-        // Append to existing images (max 3 total)
-        setImages(prev => {
-          const updated = [...prev, compressed].slice(-3); // keep last 3
-          return updated;
-        });
+        // Perf fix: read current images from ref, build array locally, then set state once
+        const prev = imagesRef.current;
+        const updated = [...prev, compressed].slice(-3); // keep last 3
+        setImages(updated); // single state update
+        analyzeInput = updated.length > 1 ? updated : compressed;
+        if (DEV) console.log(`[Pipeline] Append mode: ${updated.length} image(s)`);
       } else {
-        setImages([compressed]); // Fresh scan — single image
+        setImages([compressed]);
+        analyzeInput = compressed;
       }
 
       if (abortCtrl.signal.aborted) return;
 
       // ── Step 2: Analyze (identifying) ──
       setPipelineState('identifying');
-      if (DEV) console.log('[Pipeline] Sending to AI...');
-      
-      // Send ALL images when in append mode
-      let analyzeInput;
-      if (appendMode) {
-        // Get the current images + the new compressed one
-        // We need to read state synchronously — use a ref trick
-        const allImages = await new Promise(resolve => {
-          setImages(prev => {
-            resolve(prev);
-            return prev;
-          });
-        });
-        analyzeInput = allImages.length > 1 ? allImages : compressed;
-        if (DEV) console.log(`[Pipeline] Sending ${Array.isArray(analyzeInput) ? analyzeInput.length : 1} image(s)`);
-      } else {
-        analyzeInput = compressed;
-      }
 
-      // Switch to pricing state after a delay (the API does identify then price)
-      const pricingTimer = setTimeout(() => {
-        setPipelineState('pricing');
-      }, 3000);
+      // Perf: switch to pricing indicator after 3s (API does identify→price internally)
+      const pricingTimer = setTimeout(() => setPipelineState('pricing'), 3000);
 
+      const tApi = performance.now();
       const analysisResult = await analyzeWithRetry(analyzeInput, abortCtrl.signal, 0, null, hints);
       clearTimeout(pricingTimer);
 
       if (abortCtrl.signal.aborted) return;
 
       const t2 = performance.now();
-      if (DEV) console.log(`[Pipeline] AI analysis done in ${(t2 - t1).toFixed(0)}ms`);
+      if (DEV) console.log(`[Pipeline] API: ${(t2 - tApi).toFixed(0)}ms | Total: ${(t2 - pipelineT0).toFixed(0)}ms`);
 
       // ── Success ──
       setPipelineState('success');
       setResult(analysisResult);
       setView('results');
-      setAddPhotoMode(false); // Reset add-photo mode
+      setAddPhotoMode(false);
       playSound('success');
 
       // Auto-open help modal for very low confidence
@@ -1250,21 +1241,19 @@ export function AppProvider({ children }) {
         if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
       });
 
-      if (DEV) console.log(`[Pipeline] ✅ Complete in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
+      if (DEV) console.log(`[Pipeline] ✅ Done in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
 
     } catch (e) {
-      // User cancelled — silent, no error UI
       if (e.name === 'AbortError' || abortCtrl.signal.aborted) {
-        if (DEV) console.log('[Pipeline] Cancelled by user');
+        if (DEV) console.log('[Pipeline] Cancelled');
         return;
       }
 
       console.error('[Pipeline] Failed:', e);
-      const failedAtCompress = !images.length || pipelineState === 'compressing';
+      const failedAtCompress = !imagesRef.current.length || pipelineState === 'compressing';
       setPipelineState(failedAtCompress ? 'compress_error' : 'analysis_error');
       setPipelineError(e.message || (lang === 'he' ? 'שגיאה' : 'An error occurred'));
       playSound('error');
-      // Stay on 'analyzing' view — it now shows error UI with Retry
     }
   }, [analyzeWithRetry, fetchRecognitionHints, storeValuation, playSound, lang]);
 
@@ -1684,6 +1673,7 @@ export function AppProvider({ children }) {
     }
 
     if (DEV) console.log(`[Camera] Capture: ${video.videoWidth}×${video.videoHeight}`);
+    const captureT0 = performance.now();
 
     playSound('shutter');
     setShowFlash(true);
@@ -1842,6 +1832,13 @@ export function AppProvider({ children }) {
         // Link to valuation system
         ...(result?.valuation_id && { valuation_id: result.valuation_id }),
         ...(result?.confidence && { ai_confidence: result.confidence }),
+        // Serial/IMEI verification data (masked for public, never full serial)
+        ...(serialData?.serial && {
+          serial_submitted: true,
+          serial_verified: serialData.verified || false,
+          serial_masked: serialData.masked || null,
+          serial_type: serialData.type || 'serial',
+        }),
       };
       let insertResult = await supabase.from('listings').insert(listingRow).select();
       // Fallback: if quality_score column doesn't exist, retry without it
@@ -1861,6 +1858,15 @@ export function AppProvider({ children }) {
         if (DEV) console.warn('[Publish] valuation columns missing, retrying without them');
         delete listingRow.valuation_id;
         delete listingRow.ai_confidence;
+        insertResult = await supabase.from('listings').insert(listingRow).select();
+      }
+      // Fallback: if serial columns don't exist yet, retry without them
+      if (insertResult.error && (insertResult.error.message?.includes('serial_submitted') || insertResult.error.message?.includes('serial_verified') || insertResult.error.message?.includes('serial_masked') || insertResult.error.message?.includes('serial_type'))) {
+        if (DEV) console.warn('[Publish] serial columns missing, retrying without them');
+        delete listingRow.serial_submitted;
+        delete listingRow.serial_verified;
+        delete listingRow.serial_masked;
+        delete listingRow.serial_type;
         insertResult = await supabase.from('listings').insert(listingRow).select();
       }
       if (insertResult.error) throw insertResult.error;
@@ -2263,7 +2269,7 @@ export function AppProvider({ children }) {
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
-    setCondition(null); setAnswers({}); setListingStep(0); setView('listing');
+    setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setView('listing');
   };
 
   const selectCondition = (c) => {
@@ -2272,6 +2278,78 @@ export function AppProvider({ children }) {
     // Show category-specific questions for used/poor; skip for new/likeNew
     setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
   };
+
+  // ── Serial/IMEI verification: OCR a label photo and extract serial ──
+  const submitSerialPhoto = useCallback(async (dataUrl) => {
+    // Guard: prevent duplicate calls while already processing
+    if (!dataUrl || serialLoadingRef.current) return;
+    serialLoadingRef.current = true;
+    setSerialLoading(true);
+    const t0 = performance.now();
+    try {
+      // Compress the serial label photo (small, high quality for OCR)
+      const compressed = await compressImage(dataUrl, 1024, 0.80);
+      const base64 = compressed.split(',')[1];
+      if (DEV) console.log(`[Serial] Compress: ${(performance.now() - t0).toFixed(0)}ms`);
+
+      // Use Claude to OCR the serial label
+      const tApi = performance.now();
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageData: base64,
+          lang,
+          serialOCR: true, // Signal to API to do OCR-only mode
+        }),
+      });
+
+      let rawText = '';
+      if (res.ok) {
+        if (DEV) console.log(`[Serial] API: ${(performance.now() - tApi).toFixed(0)}ms`);
+        const data = await res.json();
+        const text = data.content?.[0]?.text || '';
+        try {
+          const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
+          rawText = parsed.raw_texts?.join(' ') || parsed.ocrText || parsed.serial || text;
+        } catch {
+          rawText = text;
+        }
+      }
+
+      // Extract serial/IMEI from OCR text
+      const extracted = extractSerialFromOCR(rawText);
+      if (extracted) {
+        setSerialData({
+          photo: compressed,
+          rawText,
+          serial: extracted.value,
+          masked: maskSerial(extracted.value),
+          verified: extracted.verified,
+          type: extracted.type,
+        });
+        showToastMsg(lang === 'he' ? `${extracted.type === 'imei' ? 'IMEI' : 'מספר סידורי'} נמצא ✓` : `${extracted.type === 'imei' ? 'IMEI' : 'Serial'} found ✓`);
+      } else {
+        // Still store that user submitted the photo even if OCR couldn't extract
+        setSerialData({
+          photo: compressed,
+          rawText,
+          serial: null,
+          masked: null,
+          verified: false,
+          type: 'submitted',
+        });
+        showToastMsg(lang === 'he' ? 'תמונה נשמרה (לא נמצא מספר סידורי)' : 'Photo saved (no serial found)');
+      }
+    } catch (e) {
+      if (DEV) console.error('[Serial] OCR failed:', e);
+      showToastMsg(lang === 'he' ? 'שגיאה בקריאת המספר הסידורי' : 'Failed to read serial number');
+    }
+    serialLoadingRef.current = false;
+    setSerialLoading(false);
+  }, [lang, showToastMsg]);
+
+  const clearSerialData = useCallback(() => setSerialData(null), []);
 
   const value = {
     lang, setLang, t, rtl,
@@ -2295,6 +2373,8 @@ export function AppProvider({ children }) {
     answers, setAnswers, listingData, setListingData,
     publishing, publishListing, startListing, selectCondition,
     reportListing,
+    // Serial/IMEI verification
+    serialData, serialLoading, submitSerialPhoto, clearSerialData,
     // Orders / Checkout
     orders, activeOrder, setActiveOrder, activeOrderId, ordersLoading,
     showCheckout, setShowCheckout,

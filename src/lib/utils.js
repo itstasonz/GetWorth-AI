@@ -184,3 +184,71 @@ export const computeSellerTrust = (seller, listingsCount = 0) => {
 
 // Pagination constants
 export const PAGE_SIZE = 20;
+
+// ═══════════════════════════════════════════════════════
+// SERIAL / IMEI VERIFICATION HELPERS
+// ═══════════════════════════════════════════════════════
+
+// Categories where serial/IMEI verification adds buyer trust
+const SERIAL_ELIGIBLE = new Set([
+  'Electronics', 'Watches', 'Tools',
+]);
+const SERIAL_SUBCATEGORIES = new Set([
+  'Smartphone', 'Tablet', 'Laptop', 'Camera', 'Smartwatch',
+  'Gaming Console', 'VR Headset', 'Drone', 'Monitor', 'TV',
+  'E-Reader', 'Action Camera', 'Digital Piano', 'Electric Guitar',
+  'Speaker', 'Headphones',
+]);
+
+export const isSerialEligible = (category, subcategory) => {
+  if (SERIAL_ELIGIBLE.has(category)) return true;
+  if (subcategory && SERIAL_SUBCATEGORIES.has(subcategory)) return true;
+  // Keyword match for result.name
+  return false;
+};
+
+// Mask serial for public display: "ABCD1234EFGH" → "AB••••••GH"
+export const maskSerial = (serial) => {
+  if (!serial || serial.length < 6) return serial || '';
+  const show = Math.max(2, Math.floor(serial.length * 0.2));
+  return serial.slice(0, show) + '•'.repeat(serial.length - show * 2) + serial.slice(-show);
+};
+
+// Basic IMEI validation (15 digits, Luhn check)
+export const validateIMEI = (str) => {
+  const digits = str.replace(/\D/g, '');
+  if (digits.length !== 15) return false;
+  // Luhn algorithm
+  let sum = 0;
+  for (let i = 0; i < 15; i++) {
+    let d = parseInt(digits[i], 10);
+    if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+    sum += d;
+  }
+  return sum % 10 === 0;
+};
+
+// Extract likely serial/IMEI/model patterns from OCR text
+export const extractSerialFromOCR = (text) => {
+  if (!text) return null;
+  // IMEI: 15 consecutive digits (may have spaces/dashes)
+  const imeiMatch = text.match(/\b(\d[\d\s-]{13,17}\d)\b/);
+  if (imeiMatch) {
+    const clean = imeiMatch[1].replace(/[\s-]/g, '');
+    if (clean.length === 15 && /^\d+$/.test(clean)) {
+      return { type: 'imei', value: clean, verified: validateIMEI(clean) };
+    }
+  }
+  // Serial: alphanumeric 6-30 chars (common patterns: S/N, SN, Serial, IMEI label)
+  const serialMatch = text.match(/(?:S\/?N|Serial|IMEI|SN)[:\s]*([A-Z0-9]{6,30})/i);
+  if (serialMatch) {
+    return { type: 'serial', value: serialMatch[1].toUpperCase(), verified: true };
+  }
+  // Fallback: longest alphanumeric string that looks like a serial
+  const candidates = text.match(/\b[A-Z0-9]{8,30}\b/g);
+  if (candidates?.length) {
+    const best = candidates.sort((a, b) => b.length - a.length)[0];
+    return { type: 'serial', value: best, verified: false };
+  }
+  return null;
+};

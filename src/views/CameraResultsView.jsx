@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
-import { formatPrice } from '../lib/utils';
+import { formatPrice, isSerialEligible } from '../lib/utils';
 
 // ═══════════════════════════════════════════════════════
 // POPULAR BRANDS PER CATEGORY — for quick-select chips
@@ -141,7 +141,9 @@ export function AnalyzingView() {
 
   const isError = pipelineState === 'compress_error' || pipelineState === 'analysis_error';
   const isCompressing = pipelineState === 'compressing';
-  const isAnalyzing = pipelineState === 'analyzing';
+  const isIdentifying = pipelineState === 'identifying';
+  const isPricing = pipelineState === 'pricing';
+  const isAnalyzing = isIdentifying || isPricing;
 
   if (isError) {
     return (
@@ -244,7 +246,9 @@ export function AnalyzingView() {
           <span className="text-sm font-semibold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
             {isCompressing
               ? (lang === 'he' ? 'מכין תמונה' : 'Preparing Image')
-              : (lang === 'he' ? 'AI מנתח' : 'AI Analyzing')
+              : isPricing
+              ? (lang === 'he' ? 'מעריך מחיר' : 'Estimating Price')
+              : (lang === 'he' ? 'מזהה פריט' : 'Identifying Item')
             }
           </span>
         </div>
@@ -255,7 +259,9 @@ export function AnalyzingView() {
           <p className="text-sm text-slate-400">
             {isCompressing
               ? (lang === 'he' ? 'מכווץ ומכין לניתוח...' : 'Compressing and preparing...')
-              : (lang === 'he' ? 'קורא טקסט, מזהה מותג ומעריך שווי...' : 'Reading text, identifying brand & estimating value...')
+              : isPricing
+              ? (lang === 'he' ? 'בודק מחירים בשוק הישראלי...' : 'Checking Israeli market prices...')
+              : (lang === 'he' ? 'קורא טקסט, מזהה מותג ודגם...' : 'Reading text, identifying brand & model...')
             }
           </p>
         </div>
@@ -271,13 +277,13 @@ export function AnalyzingView() {
             <Scan className="w-3.5 h-3.5" />
             <span>{lang === 'he' ? 'עיבוד' : 'Processing'}</span>
           </div>
-          <div className={`flex items-center gap-1.5 ${isAnalyzing ? 'animate-pulse text-blue-400' : 'text-slate-500'}`}>
-            <div className={`w-2 h-2 rounded-full ${isAnalyzing ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'}`} />
+          <div className={`flex items-center gap-1.5 ${isIdentifying ? 'animate-pulse text-blue-400' : (isPricing ? 'text-green-400' : 'text-slate-500')}`}>
+            <div className={`w-2 h-2 rounded-full ${isIdentifying ? 'bg-blue-400 animate-pulse' : (isPricing ? 'bg-green-400' : 'bg-slate-600')}`} />
             <Search className="w-3.5 h-3.5" />
             <span>{lang === 'he' ? 'זיהוי' : 'Identifying'}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-slate-500">
-            <div className="w-2 h-2 rounded-full bg-slate-600" />
+          <div className={`flex items-center gap-1.5 ${isPricing ? 'animate-pulse text-blue-400' : 'text-slate-500'}`}>
+            <div className={`w-2 h-2 rounded-full ${isPricing ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'}`} />
             <TrendingUp className="w-3.5 h-3.5" />
             <span>{lang === 'he' ? 'הערכה' : 'Pricing'}</span>
           </div>
@@ -518,6 +524,7 @@ export function ResultsView() {
     refineResult, confirmResult, correctResult,
     addPhoto, setHelpModalOpen, helpModalOpen, fileRef,
     handleAdditionalFile,
+    serialData, serialLoading, submitSerialPhoto, clearSerialData,
   } = useApp();
 
   const [showCorrection, setShowCorrection] = React.useState(false);
@@ -526,6 +533,7 @@ export function ResultsView() {
   const [showDetails, setShowDetails] = React.useState(false);
   const [activePhotoIndex, setActivePhotoIndex] = React.useState(0);
   const addPhotoFileRef = React.useRef(null);
+  const serialFileRef = React.useRef(null);
 
   // Auto-select newest photo when images array grows; clamp if shrinks
   React.useEffect(() => {
@@ -1018,6 +1026,97 @@ export function ResultsView() {
                   ))}
                 </div>
               )}
+            </Card>
+          )}
+        </FadeIn>
+      )}
+
+      {/* Serial/IMEI verification CTA — secondary optional, only for eligible categories */}
+      {isSerialEligible(result.category, result.subcategory) && (
+        <FadeIn delay={150}>
+          <input
+            ref={serialFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => submitSerialPhoto(reader.result);
+              reader.readAsDataURL(file);
+              e.target.value = '';
+            }}
+          />
+          {serialData?.serial ? (
+            /* Serial already added — show confirmation badge */
+            <Card className="p-4" gradient="linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05))">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
+                  <Shield className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-emerald-300">
+                      {serialData.type === 'imei' ? 'IMEI' : (lang === 'he' ? 'מספר סידורי' : 'Serial')} {serialData.verified ? '✓' : ''}
+                    </span>
+                    {serialData.verified && (
+                      <Badge color="green" className="text-[9px]">{lang === 'he' ? 'פורמט תקין' : 'Format Valid'}</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5 font-mono">{serialData.masked}</p>
+                </div>
+                <button onClick={clearSerialData} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+            </Card>
+          ) : serialData?.type === 'submitted' ? (
+            /* Photo submitted but no serial extracted */
+            <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.03))">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                  <Shield className="w-5 h-5 text-blue-400" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'תמונת תווית נשמרה' : 'Label photo saved'}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">{lang === 'he' ? 'לא הצלחנו לקרוא מספר — נסה שוב או המשך' : "Couldn't read serial — retry or continue"}</p>
+                </div>
+                <button onClick={clearSerialData} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
+                  <X className="w-4 h-4 text-slate-500" />
+                </button>
+              </div>
+            </Card>
+          ) : (
+            /* No serial yet — show CTA to add one */
+            <Card
+              className="p-4 cursor-pointer active:scale-[0.98] transition-transform"
+              gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.05))"
+              onClick={() => serialFileRef.current?.click()}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
+                  {serialLoading
+                    ? <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
+                    : <Shield className="w-5 h-5 text-blue-400" />
+                  }
+                </div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-slate-300">
+                    {serialLoading
+                      ? (lang === 'he' ? 'קורא מספר סידורי...' : 'Reading serial number...')
+                      : (lang === 'he' ? 'הוסף תמונת מספר סידורי' : 'Add serial number photo')
+                    }
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {serialLoading
+                      ? (lang === 'he' ? 'מנתח תווית...' : 'Analyzing label...')
+                      : (lang === 'he' ? 'מגביר אמון קונים ואמינות המודעה' : 'Increases buyer trust & listing credibility')
+                    }
+                  </p>
+                </div>
+                {!serialLoading && <ChevronRight className="w-5 h-5 text-slate-600 flex-shrink-0" />}
+              </div>
             </Card>
           )}
         </FadeIn>
