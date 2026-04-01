@@ -15,10 +15,18 @@ export const useApp = () => {
 
 // ═══════════════════════════════════════════════════════
 // Image compression — run BEFORE sending to API
-// Resizes to max 1800px, JPEG quality 0.85
+// Resizes to max dimension, JPEG quality configurable (default 800px, 0.65)
+// Perf: skips decode+resize if raw image is already under 150KB
 // Modern browsers auto-handle EXIF orientation on canvas draw
 // ═══════════════════════════════════════════════════════
-function compressImage(dataUrl, maxDim = 1800, quality = 0.85) {
+function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
+  const t0 = performance.now();
+  // Perf: skip compression entirely if image is already small enough
+  const rawKB = Math.round(dataUrl.length * 0.75 / 1024);
+  if (rawKB < 150) {
+    if (DEV) console.log(`[Compress] Skip — already ${rawKB}KB (${(performance.now() - t0).toFixed(0)}ms)`);
+    return Promise.resolve(dataUrl);
+  }
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.onload = () => {
@@ -36,9 +44,8 @@ function compressImage(dataUrl, maxDim = 1800, quality = 0.85) {
         canvas.getContext('2d').drawImage(img, 0, 0, w, h);
         const compressed = canvas.toDataURL('image/jpeg', quality);
         if (DEV) {
-          const origKB = Math.round(dataUrl.length * 0.75 / 1024);
           const compKB = Math.round(compressed.length * 0.75 / 1024);
-          console.log(`[Compress] ${img.naturalWidth}×${img.naturalHeight} → ${w}×${h} | ${origKB}KB → ${compKB}KB (${Math.round(compKB / origKB * 100)}%)`);
+          console.log(`[Compress] ${img.naturalWidth}×${img.naturalHeight} → ${w}×${h} | ${rawKB}KB → ${compKB}KB (${(performance.now() - t0).toFixed(0)}ms)`);
         }
         resolve(compressed);
       } catch (e) {
@@ -92,6 +99,8 @@ export function AppProvider({ children }) {
   const [pipelineState, setPipelineState] = useState('idle');
   const [pipelineError, setPipelineError] = useState(null);
   const pipelineAbortRef = useRef(null);
+  // Perf: cache recognition hints in memory — refresh every 5 min, not every scan
+  const hintsCacheRef = useRef({ data: [], ts: 0 });
 
   // ─── Multi-photo + Help modal ───
   const [addPhotoMode, setAddPhotoMode] = useState(false); // true = appending photo to existing scan
@@ -897,7 +906,7 @@ export function AppProvider({ children }) {
   // Failure states: compress_error | analysis_error
   //
   // Features:
-  //  • Client-side compression (1800px max, JPEG 0.85)
+  //  • Client-side compression (800px max, JPEG 0.65)
   //  • Analysis API with retry (up to 2 attempts, exponential backoff)
   //  • AbortController cancellation (new image aborts old pipeline)
   //  • Instrumented dev logging
@@ -908,17 +917,26 @@ export function AppProvider({ children }) {
   // Queries aggregated correction patterns so Claude avoids repeat mistakes.
   // Called before every analysis. Returns top patterns by relevance.
   const fetchRecognitionHints = useCallback(async () => {
+    // Perf: return cached hints if refreshed within 5 minutes
+    const cache = hintsCacheRef.current;
+    if (cache.data.length > 0 && (Date.now() - cache.ts < 300000)) {
+      if (DEV) console.log(`[Hints] Using cache (${cache.data.length} hints, age ${Math.round((Date.now() - cache.ts) / 1000)}s)`);
+      return cache.data;
+    }
     try {
+      const t0 = performance.now();
       const { data, error } = await supabase.rpc('get_recognition_hints', { p_limit: 15 });
       if (error) {
         if (DEV) console.warn('[Hints] Fetch failed:', error.message);
-        return [];
+        return cache.data; // Return stale cache on error
       }
-      if (DEV && data?.length) console.log(`[Hints] Loaded ${data.length} correction patterns`);
-      return data || [];
+      const hints = data || [];
+      hintsCacheRef.current = { data: hints, ts: Date.now() };
+      if (DEV) console.log(`[Hints] Loaded ${hints.length} patterns in ${(performance.now() - t0).toFixed(0)}ms`);
+      return hints;
     } catch (e) {
       if (DEV) console.warn('[Hints] Error:', e.message);
-      return [];
+      return cache.data; // Return stale cache on error
     }
   }, []);
 
@@ -963,13 +981,21 @@ export function AppProvider({ children }) {
   }, []);
 
   // ── Internal: call /api/analyze with retry + timeout ──
-  const analyzeWithRetry = useCallback(async (compressedDataUrlOrArray, pipelineSignal, maxRetries = 1, refineModel = null, corrections = []) => {
+  // Perf: maxRetries=0 by default — no auto-retry on first scan (user can manually retry)
+  // Timeout reduced 35→25s — if API hasn't responded by then, it won't
+  const analyzeWithRetry = useCallback(async (compressedDataUrlOrArray, pipelineSignal, maxRetries = 0, refineModel = null, corrections = []) => {
     // Support both single image (string) and multiple images (array)
     const imageArray = Array.isArray(compressedDataUrlOrArray)
       ? compressedDataUrlOrArray
       : [compressedDataUrlOrArray];
     const base64Array = imageArray.map(img => img.split(',')[1]);
     let lastError;
+
+    // Perf: log payload size
+    if (DEV) {
+      const totalKB = Math.round(base64Array.reduce((sum, b) => sum + b.length, 0) * 0.75 / 1024);
+      console.log(`[Analyze] Payload: ${base64Array.length} image(s), ~${totalKB}KB total`);
+    }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       // Check if user cancelled before each attempt
@@ -985,7 +1011,7 @@ export function AppProvider({ children }) {
 
       // Create a per-attempt controller that aborts on timeout OR user cancel
       const attemptCtrl = new AbortController();
-      const timeoutId = setTimeout(() => attemptCtrl.abort(), 35000);
+      const timeoutId = setTimeout(() => attemptCtrl.abort(), 25000);
       const onPipelineAbort = () => { clearTimeout(timeoutId); attemptCtrl.abort(); };
       pipelineSignal.addEventListener('abort', onPipelineAbort);
 
@@ -1148,10 +1174,18 @@ export function AppProvider({ children }) {
     const pipelineT0 = performance.now();
 
     try {
-      // ── Step 1: Compress ──
+      // ── Step 1: Compress + fetch hints IN PARALLEL ──
       setPipelineState('compressing');
-      if (DEV) console.log(`[Pipeline] Compressing... (append=${appendMode})`);
-      const compressed = await compressImage(rawDataUrl);
+      if (DEV) console.log(`[Pipeline] Starting... (append=${appendMode})`);
+
+      // Perf: run compression and hints fetch concurrently — saves 200-500ms
+      const [compressed, hints] = await Promise.all([
+        compressImage(rawDataUrl),
+        fetchRecognitionHints().catch(() => []),
+      ]);
+
+      const t1 = performance.now();
+      if (DEV) console.log(`[Pipeline] Compress + hints done in ${(t1 - pipelineT0).toFixed(0)}ms`);
 
       if (appendMode) {
         // Append to existing images (max 3 total)
@@ -1165,12 +1199,9 @@ export function AppProvider({ children }) {
 
       if (abortCtrl.signal.aborted) return;
 
-      // ── Step 2: Fetch correction hints + Analyze ──
-      setPipelineState('analyzing');
-      if (DEV) console.log('[Pipeline] Fetching hints & analyzing...');
-      
-      // Fetch past correction patterns (non-blocking — if it fails, analyze without hints)
-      const hints = await fetchRecognitionHints().catch(() => []);
+      // ── Step 2: Analyze (identifying) ──
+      setPipelineState('identifying');
+      if (DEV) console.log('[Pipeline] Sending to AI...');
       
       // Send ALL images when in append mode
       let analyzeInput;
@@ -1189,9 +1220,18 @@ export function AppProvider({ children }) {
         analyzeInput = compressed;
       }
 
-      const analysisResult = await analyzeWithRetry(analyzeInput, abortCtrl.signal, 1, null, hints);
+      // Switch to pricing state after a delay (the API does identify then price)
+      const pricingTimer = setTimeout(() => {
+        setPipelineState('pricing');
+      }, 3000);
+
+      const analysisResult = await analyzeWithRetry(analyzeInput, abortCtrl.signal, 0, null, hints);
+      clearTimeout(pricingTimer);
 
       if (abortCtrl.signal.aborted) return;
+
+      const t2 = performance.now();
+      if (DEV) console.log(`[Pipeline] AI analysis done in ${(t2 - t1).toFixed(0)}ms`);
 
       // ── Success ──
       setPipelineState('success');
@@ -1210,7 +1250,7 @@ export function AppProvider({ children }) {
         if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
       });
 
-      if (DEV) console.log(`[Pipeline] Complete in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
+      if (DEV) console.log(`[Pipeline] ✅ Complete in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
 
     } catch (e) {
       // User cancelled — silent, no error UI
@@ -1299,14 +1339,14 @@ export function AppProvider({ children }) {
     canvas.getContext('2d').drawImage(video, 0, 0);
 
     try {
-      const rawImg = canvas.toDataURL('image/jpeg', 0.85);
+      const rawImg = canvas.toDataURL('image/jpeg', 0.70);
       if (rawImg && rawImg.length > 100) {
         setTimeout(() => {
           setShowFlash(false);
           setView('analyzing');
           releaseCamera();
           runPipeline(rawImg, true); // appendMode = true
-        }, 150);
+        }, 50);
       } else {
         setShowFlash(false);
         showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture failed');
@@ -1345,7 +1385,7 @@ export function AppProvider({ children }) {
       if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
       pipelineAbortRef.current = abortCtrl;
 
-      const refined = await analyzeWithRetry(images[0], abortCtrl.signal, 1, modelName);
+      const refined = await analyzeWithRetry(images[0], abortCtrl.signal, 0, modelName);
 
       if (abortCtrl.signal.aborted) return;
 
@@ -1678,12 +1718,12 @@ export function AppProvider({ children }) {
           releaseCamera();
           runPipeline(rawImg);
         }
-      }, 150);
+      }, 50);
     };
 
     // Use toDataURL (synchronous, reliable on all browsers)
     try {
-      const rawImg = canvas.toDataURL('image/jpeg', 0.85);
+      const rawImg = canvas.toDataURL('image/jpeg', 0.70);
       if (rawImg && rawImg.length > 100) {
         processCapture(rawImg);
       } else {
