@@ -87,7 +87,7 @@ export function InboxView() {
 }
 
 export function ChatView() {
-  const { lang, rtl, user, activeChat, setActiveChat, setView, setSelected, messages, newMessage, setNewMessage, sendMessage, sendingMessage, messagesEndRef } = useApp();
+  const { lang, rtl, user, activeChat, setActiveChat, setView, setSelected, messages, messagesLoading, newMessage, setNewMessage, sendMessage, sendingMessage, messagesEndRef } = useApp();
 
   if (!activeChat) return null;
 
@@ -126,9 +126,21 @@ export function ChatView() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-        {messages.length === 0 && (
+        {messagesLoading && messages.length === 0 ? (
+          /* Loading skeleton — only when no cached messages */
+          <div className="space-y-3 py-4">
+            {[0, 1, 2].map(i => (
+              <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
+                <div className={`rounded-2xl px-4 py-3 animate-pulse ${i % 2 === 0 ? 'bg-white/5 w-2/3' : 'bg-blue-600/20 w-1/2'}`}>
+                  <div className="h-3 bg-white/10 rounded w-full mb-2" />
+                  <div className="h-3 bg-white/10 rounded w-2/3" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : messages.length === 0 ? (
           <div className="text-center py-8"><p className="text-slate-500 text-sm">{lang === 'he' ? 'התחל את השיחה' : 'Start the conversation'}</p></div>
-        )}
+        ) : null}
         {messages.map((msg) => {
           const isMe = msg.sender_id === user.id;
           return (

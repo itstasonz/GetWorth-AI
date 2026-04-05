@@ -144,6 +144,7 @@ export function AppProvider({ children }) {
   const conversationsLastLoadRef = useRef(0);
   const [activeChat, setActiveChat] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
   const [newMessage, setNewMessage] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -604,7 +605,7 @@ export function AppProvider({ children }) {
   const loadConversations = useCallback(async (force = false) => {
     if (!user) return;
     // Skip if loaded recently (unless forced by realtime/explicit)
-    if (!force && conversationsLastLoadRef.current > 0 && (Date.now() - conversationsLastLoadRef.current < 15000)) return;
+    if (!force && conversationsLastLoadRef.current > 0 && (Date.now() - conversationsLastLoadRef.current < 30000)) return;
     setConversationsLoading(true);
     const { data } = await supabase
       .from('conversations')
@@ -623,6 +624,8 @@ export function AppProvider({ children }) {
   }, [user]);
 
   const loadMessages = async (conversationId) => {
+    // Perf: don't clear messages — keep cached ones visible while fetching fresh
+    setMessagesLoading(true);
     const { data } = await supabase
       .from('messages').select('*')
       .eq('conversation_id', conversationId)
@@ -635,6 +638,7 @@ export function AppProvider({ children }) {
         loadConversations(true);
       }
     }
+    setMessagesLoading(false);
   };
 
   // ─── START CONVERSATION ───
@@ -1212,8 +1216,8 @@ export function AppProvider({ children }) {
       // ── Step 2: Analyze (identifying) ──
       setPipelineState('identifying');
 
-      // Perf: switch to pricing indicator after 3s (API does identify→price internally)
-      const pricingTimer = setTimeout(() => setPipelineState('pricing'), 3000);
+      // Perf: switch to pricing indicator after 2s (API does identify→price internally)
+      const pricingTimer = setTimeout(() => setPipelineState('pricing'), 2000);
 
       const tApi = performance.now();
       const analysisResult = await analyzeWithRetry(analyzeInput, abortCtrl.signal, 0, null, hints);
@@ -1918,7 +1922,7 @@ export function AppProvider({ children }) {
   const loadOrders = useCallback(async (force = false) => {
     if (!user) return;
     // Skip if loaded recently (unless forced by realtime/explicit)
-    if (!force && ordersLastLoadRef.current > 0 && (Date.now() - ordersLastLoadRef.current < 15000)) return;
+    if (!force && ordersLastLoadRef.current > 0 && (Date.now() - ordersLastLoadRef.current < 30000)) return;
     setOrdersLoading(true);
     try {
       // Try full query with profile joins (requires FK constraints to profiles)
@@ -2398,7 +2402,7 @@ export function AppProvider({ children }) {
     torchSupported, torchOn, toggleTorch,
     showFlash, capturedImageRef,
     conversations, conversationsLoading, activeChat, setActiveChat,
-    messages, setMessages, newMessage, setNewMessage,
+    messages, setMessages, messagesLoading, newMessage, setNewMessage,
     sendingMessage, sendMessage, unreadCount,
     loadMessages, startConversation, loadConversations,
     messagesEndRef,
