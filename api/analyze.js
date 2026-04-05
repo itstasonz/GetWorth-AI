@@ -541,9 +541,10 @@ function getSupabase() {
 }
 
 /**
- * Two-strategy retrieval:
+ * Three-strategy retrieval:
  * 1) Vector search using embedding (if available)
  * 2) Text-based fallback using brand/model/category ILIKE + full-text search
+ * 3) OCR keyword match using match_products_by_ocr RPC (Phase 2)
  *
  * Returns merged, deduplicated candidates sorted by relevance.
  */
@@ -557,6 +558,7 @@ async function retrieveCandidates(recognition, queryEmbedding) {
 
   let vectorResults = [];
   let textResults = [];
+  let ocrResults = [];
 
   // ── Strategy 1: Vector search ──
   if (queryEmbedding) {
@@ -617,19 +619,54 @@ async function retrieveCandidates(recognition, queryEmbedding) {
     console.warn('[Retrieve] Text search failed:', err.message);
   }
 
-  // ── Merge + deduplicate ──
+  // ── Strategy 3: OCR keyword match (Phase 2 — uses product intelligence columns) ──
+  try {
+    const ocrTexts = recognition.ocr_text?.raw_texts || [];
+    const modelCandidates = recognition.model_candidates?.map(m => m.model) || [];
+    // Build keyword array: lowercase OCR fragments + model numbers + brand
+    const keywords = [
+      ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
+      ...modelCandidates.map(m => m.toLowerCase()),
+      ...(topBrand && topBrand.toLowerCase() !== 'unidentified' ? [topBrand.toLowerCase()] : []),
+    ].filter(Boolean);
+
+    if (keywords.length > 0) {
+      // Deduplicate and limit
+      const uniqueKeywords = [...new Set(keywords)].slice(0, 20);
+      const { data, error } = await supa.rpc('match_products_by_ocr', {
+        p_keywords: uniqueKeywords,
+        p_limit: 5,
+      });
+      if (!error && data?.length) {
+        ocrResults = data.map((r) => ({
+          ...r,
+          _source: 'ocr_' + r.match_type,
+          // OCR matches are high-trust: model_number match is strongest signal
+          similarity: r.match_type === 'model_number' ? 0.92
+                    : r.match_type === 'ocr_keyword' ? 0.80
+                    : 0.75,
+        }));
+        console.log(`[Retrieve] OCR matched ${ocrResults.length} products (keywords: ${uniqueKeywords.slice(0, 5).join(', ')})`);
+      }
+    }
+  } catch (err) {
+    console.warn('[Retrieve] OCR keyword search failed:', err.message);
+  }
+
+  // ── Merge + deduplicate (OCR matches first, then vector, then text) ──
   const seen = new Set();
   const merged = [];
 
-  // Vector results first (higher quality)
-  for (const r of [...vectorResults, ...textResults]) {
+  for (const r of [...ocrResults, ...vectorResults, ...textResults]) {
     if (!seen.has(r.id)) {
       seen.add(r.id);
-      merged.push(r);
+      // Apply confidence_weight from product intelligence (Phase 2)
+      const weight = r.confidence_weight ?? 1.0;
+      merged.push({ ...r, similarity: Math.min((r.similarity || 0) * weight, 1.0) });
     }
   }
 
-  // Sort by similarity descending
+  // Sort by weighted similarity descending
   merged.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
 
   return merged.slice(0, 10);
@@ -776,6 +813,30 @@ function calibrateVerification(verification, recognition, dbMatches) {
   // RULE 5: OCR confirmed + model known → floor at 80%
   if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
 
+  // RULE 6 (Phase 2): OCR keyword match from product intelligence → boost
+  // GUARD: only boost if brand is NOT unidentified (don't override RULE 1)
+  const ocrMatch = dbMatches.find(m => m._source?.startsWith('ocr_'));
+  if (ocrMatch && brand.toLowerCase() !== 'unidentified' && brandConf !== 'unidentified') {
+    if (ocrMatch._source === 'ocr_model_number') {
+      // Model number exact match is very strong — floor at 82%
+      conf = Math.max(conf, 0.82);
+      console.log(`[Calibrate] OCR model_number match boost → ${round(conf * 100)}%`);
+    } else {
+      // Keyword/alias match — boost by 8%
+      conf = Math.min(conf + 0.08, 0.88);
+    }
+  }
+
+  // RULE 7 (Phase 2): Apply product confidence_weight from learning loop
+  const topMatch = dbMatches[0];
+  if (topMatch?.confidence_weight && topMatch.confidence_weight !== 1.0) {
+    // Trusted products (confirmed often) nudge confidence up; suspicious ones down
+    const weightFactor = topMatch.confidence_weight > 1.0
+      ? Math.min(topMatch.confidence_weight, 1.15)  // max +15% boost
+      : Math.max(topMatch.confidence_weight, 0.85);  // max -15% penalty
+    conf *= weightFactor;
+  }
+
   // Hard bounds
   conf = Math.min(Math.max(conf, 0.10), 0.95);
 
@@ -817,7 +878,7 @@ async function writeBack(recognition, verification, embedding) {
     // Upsert product
     const { data: existing } = await supa
       .from('products')
-      .select('id, popularity_score')
+      .select('id, popularity_score, scan_count')
       .ilike('brand', brand)
       .ilike('model', model || '')
       .limit(1)
@@ -831,6 +892,9 @@ async function writeBack(recognition, verification, embedding) {
         popularity_score: (existing.popularity_score || 0) + 1,
         avg_used_price_ils: verification.price_estimate_mid,
         price_updated_at: new Date().toISOString(),
+        // Phase 2: learning loop counters
+        scan_count: (existing.scan_count || 0) + 1,
+        last_scanned_at: new Date().toISOString(),
       };
       // Update embedding if we have one and column exists
       if (embedding) updates.text_embedding = embedding;
@@ -977,15 +1041,29 @@ export default async function handler(req) {
   if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);
 
   try {
-    const { imageData, images: imagesArr, lang = 'he', hints = [] } = await req.json();
+    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [] } = await req.json();
+    // Frontend sends 'corrections', older clients may send 'hints' — accept both
+    const clientHints = clientCorrections.length > 0 ? clientCorrections : hints;
     const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
     if (!imageList.length) return json({ error: 'No image data provided' }, 400, cors);
 
     const t0 = Date.now();
 
     // ── STAGE 1: RECOGNIZE ──
-    let recognition = await recognize(imageList, lang, apiKey);
-    recognition = calibrateRecognition(recognition);
+    let recognition;
+    try {
+      recognition = await recognize(imageList, lang, apiKey);
+      recognition = calibrateRecognition(recognition);
+    } catch (stage1Err) {
+      console.error('[Pipeline] Stage 1 failed:', stage1Err.message);
+      // Minimal fallback recognition so Stage 2 can still attempt pricing
+      recognition = {
+        category: 'Other', category_hebrew: 'אחר', category_confidence: 0.20,
+        brand_candidates: [], model_candidates: [],
+        ocr_text: { raw_texts: [], logos_detected: [], has_readable_text: false },
+        visual_features: {}, subcategory: '', embedding_text: '',
+      };
+    }
 
     const t1 = Date.now();
     console.log(`[Pipeline] Stage 1 done in ${t1 - t0}ms — ${recognition.brand_candidates?.[0]?.brand || 'no brand'} (${round(recognition.category_confidence * 100)}%)`);
@@ -1007,7 +1085,7 @@ export default async function handler(req) {
     console.log(`[Pipeline] Retrieved ${candidates.length} candidates in ${t3 - t2}ms`);
 
     // ── FETCH CORRECTIONS ──
-    let corrections = hints;
+    let corrections = clientHints;
     if (!corrections.length) {
       corrections = await fetchCorrections().catch(() => []);
     }
@@ -1028,13 +1106,16 @@ export default async function handler(req) {
     console.log(`[Pipeline] Stage 2 done in ${t4 - t3}ms — ${verification.full_name || verification.final_brand} ₪${verification.price_estimate_mid} (${round(verification.match_confidence * 100)}% ${tierInfo.tier})`);
     console.log(`[Pipeline] Total: ${t4 - t0}ms`);
 
-    // ── WRITE-BACK (async, don't block response) ──
-    const docEmbedding = queryEmbedding
-      ? await generateEmbedding(embeddingText).catch(() => null)
-      : null;
-    writeBack(recognition, verification, docEmbedding).catch((e) => console.warn('[WriteBack]', e.message));
+    // ── WRITE-BACK (fully non-blocking — embedding + DB updates happen after response) ──
+    const writeBackAsync = async () => {
+      const docEmbedding = queryEmbedding
+        ? await generateEmbedding(embeddingText).catch(() => null)
+        : null;
+      await writeBack(recognition, verification, docEmbedding);
+    };
+    writeBackAsync().catch((e) => console.warn('[WriteBack]', e.message));
 
-    // ── NORMALIZE + RESPOND ──
+    // ── NORMALIZE + RESPOND (no longer blocked by embedding generation) ──
     const result = normalizeForUI(recognition, verification, tierInfo);
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
