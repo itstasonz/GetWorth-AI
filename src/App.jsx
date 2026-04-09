@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft } from 'lucide-react';
+import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn } from './components/ui';
@@ -87,7 +87,7 @@ function MessageNotificationBanner() {
 function AppShell() {
   const {
     lang, setLang, t, rtl,
-    user, loading,
+    user, profile, loading,
     tab, view, goTab, reset, handleFile,
     error, setError, toast, setToast,
     soundEnabled, setSoundEnabled,
@@ -132,7 +132,7 @@ function AppShell() {
   }
 
   return (
-    <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif', background: 'linear-gradient(180deg, #060a14 0%, #0a1020 50%, #060a14 100%)' }} dir={rtl ? 'rtl' : 'ltr'}>
+    <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif', background: '#131313' }} dir={rtl ? 'rtl' : 'ltr'}>
       
       {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -233,29 +233,77 @@ function AppShell() {
 
       <div className="relative flex-1 max-w-md mx-auto w-full flex flex-col pb-24">
         {/* Header */}
-        <header className="px-5 pt-12 pb-6 flex items-center justify-between">
-          <div className="flex items-center gap-4 cursor-pointer group" onClick={() => { reset(); goTab('home'); }}>
-            <div className="relative">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center shadow-lg shadow-blue-500/30 group-hover:shadow-blue-500/50 transition-all group-hover:scale-105">
-                <DollarSign className="w-6 h-6 text-white" />
-              </div>
-              <div className="absolute -inset-1 bg-blue-500/20 rounded-2xl blur-md opacity-0 group-hover:opacity-100 transition-opacity" />
+        {/* ═══ STITCH TOPBAR — faithful port of HTML header ═══ */}
+        <header
+          className="sticky top-0 w-full z-50"
+          style={{
+            background: 'rgba(19, 19, 19, 0.60)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+          }}
+        >
+          <div className="flex items-center justify-between px-6 h-16 w-full max-w-7xl mx-auto">
+            {/* Left: back arrow + Marketplace title */}
+            <div className="flex items-center gap-4 cursor-pointer" onClick={() => { reset(); goTab('home'); }}>
+              {rtl
+                ? <ChevronRight className="w-6 h-6 cursor-pointer hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} />
+                : <ArrowLeft className="w-6 h-6 cursor-pointer hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} />
+              }
+              <h1
+                className="text-lg font-semibold tracking-tight"
+                style={{ fontFamily: '"Manrope", system-ui, sans-serif', color: '#6FEEE1' }}
+              >
+                {lang === 'he' ? 'שוק' : 'Marketplace'}
+              </h1>
             </div>
-            <div>
-              <h1 className="text-xl font-bold bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">{t.appName}</h1>
-              <p className="text-[10px] text-slate-500 uppercase tracking-[0.2em] font-medium">{t.tagline}</p>
+
+            {/* Right: language toggle (subtle), sound toggle (subtle), bell, avatar */}
+            <div className="flex items-center gap-2">
+              {/* Language toggle — minimal icon-only button */}
+              <button
+                onClick={() => setLang(lang === 'en' ? 'he' : 'en')}
+                className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A]"
+                title={lang === 'en' ? 'עברית' : 'English'}
+              >
+                <Globe className="w-5 h-5" style={{ color: '#BBC9C7' }} />
+              </button>
+              {/* Sound toggle — minimal icon-only button */}
+              <button
+                onClick={() => setSoundEnabled(!soundEnabled)}
+                className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A]"
+                title={soundEnabled ? (lang === 'he' ? 'השתק' : 'Mute') : (lang === 'he' ? 'הפעל צליל' : 'Sound on')}
+              >
+                {soundEnabled
+                  ? <Volume2 className="w-5 h-5" style={{ color: '#BBC9C7' }} />
+                  : <VolumeX className="w-5 h-5" style={{ color: '#BBC9C7' }} />
+                }
+              </button>
+              {/* Notifications bell */}
+              <button
+                onClick={() => goTab('profile')}
+                className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A] relative"
+                title={lang === 'he' ? 'התראות' : 'Notifications'}
+              >
+                <Bell className="w-5 h-5" style={{ color: '#BBC9C7' }} />
+                {notifUnreadCount > 0 && (
+                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                )}
+              </button>
+              {/* Avatar */}
+              <button
+                onClick={() => goTab('profile')}
+                className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center"
+                style={{
+                  background: '#2A2A2A',
+                  border: '1px solid rgba(60, 73, 71, 0.15)',
+                }}
+              >
+                {profile?.avatar_url
+                  ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
+                  : <User className="w-4 h-4" style={{ color: '#BBC9C7' }} />
+                }
+              </button>
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setSoundEnabled(!soundEnabled)}
-              className={`p-2.5 rounded-2xl border border-white/10 transition-all hover:scale-105 active:scale-95 ${soundEnabled ? 'bg-blue-500/20 hover:bg-blue-500/30' : 'bg-white/5 hover:bg-white/10'}`}
-              title={soundEnabled ? (lang === 'he' ? 'השתק צלילים' : 'Mute sounds') : (lang === 'he' ? 'הפעל צלילים' : 'Enable sounds')}>
-              {soundEnabled ? <Volume2 className="w-4 h-4 text-blue-400" /> : <VolumeX className="w-4 h-4 text-slate-500" />}
-            </button>
-            <button onClick={() => setLang(lang === 'en' ? 'he' : 'en')}
-              className="px-4 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-medium flex items-center gap-2 transition-all hover:scale-105 active:scale-95">
-              <Globe className="w-4 h-4 text-blue-400" />{lang === 'en' ? 'עב' : 'EN'}
-            </button>
           </div>
         </header>
 
@@ -288,42 +336,69 @@ function AppShell() {
         <CheckoutSheet />
 
         {/* Bottom Nav */}
-        <nav className="fixed bottom-0 left-0 right-0 z-40">
-          <div className="absolute inset-0 bg-[#060a14]/90 backdrop-blur-xl border-t border-white/10" />
-          <div className="relative max-w-md mx-auto flex">
-            {[
-              { id: 'home', icon: Home },
-              { id: 'browse', icon: Search },
-              { id: 'sell', icon: ShoppingBag },
-              { id: 'messages', icon: MessageCircle },
-              { id: 'profile', icon: User }
-            ].map((n) => (
-              <button key={n.id} onClick={() => goTab(n.id)}
-                className={`flex-1 py-4 flex flex-col items-center gap-1.5 relative transition-all ${tab === n.id ? 'text-blue-400' : 'text-slate-500 hover:text-slate-300'}`}>
-                {tab === n.id && <div className="absolute top-0 left-1/2 -translate-x-1/2 w-12 h-1 bg-gradient-to-r from-blue-500 to-blue-400 rounded-full" />}
-                <div className={`relative transition-transform ${tab === n.id ? 'scale-110' : ''}`}>
-                  <n.icon className={`w-6 h-6 ${n.id === 'messages' && unreadCount > 0 && tab !== 'messages' ? 'text-blue-400' : ''}`} />
+        {/* ═══ STITCH BOTTOM NAV — faithful port of HTML nav ═══ */}
+        <nav
+          className="fixed bottom-0 left-0 right-0 z-40 flex justify-around items-center px-4 py-3"
+          style={{
+            background: 'rgba(28, 27, 27, 0.95)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+            borderTopLeftRadius: '32px',
+            borderTopRightRadius: '32px',
+            borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+            boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.5)',
+          }}
+        >
+          {[
+            { id: 'home', icon: Home, label: lang === 'he' ? 'בית' : 'Home' },
+            { id: 'browse', icon: Search, label: lang === 'he' ? 'עיון' : 'Browse' },
+            { id: 'sell', icon: PlusCircle, label: lang === 'he' ? 'מכור' : 'Sell' },
+            { id: 'messages', icon: MessageCircle, label: lang === 'he' ? 'צ\'אט' : 'Chat' },
+            { id: 'profile', icon: User, label: lang === 'he' ? 'פרופיל' : 'Profile' },
+          ].map((n) => {
+            const active = tab === n.id;
+            return (
+              <button
+                key={n.id}
+                onClick={() => goTab(n.id)}
+                className="flex flex-col items-center justify-center px-4 py-1.5 rounded-2xl active:scale-95 transition-all duration-200 relative"
+                style={{ color: active ? '#6FEEE1' : '#BBC9C7' }}
+              >
+                <div className="relative mb-0.5">
+                  <n.icon
+                    className="w-6 h-6"
+                    strokeWidth={active ? 2.5 : 2}
+                    fill={active ? 'currentColor' : 'none'}
+                  />
                   {n.id === 'sell' && (() => {
                     const pendingCount = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending').length;
                     if (pendingCount > 0) return (
                       <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold text-black animate-pulse">{pendingCount}</span>
                     );
                     if (myListings.length > 0) return (
-                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-blue-500 to-blue-400 text-[9px] flex items-center justify-center font-bold">{myListings.length}</span>
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold text-black" style={{ background: '#6FEEE1' }}>{myListings.length}</span>
                     );
                     return null;
                   })()}
                   {n.id === 'messages' && unreadCount > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
                   )}
-                  {n.id === 'profile' && notifUnreadCount > 0 && tab !== 'profile' && (
+                  {n.id === 'profile' && notifUnreadCount > 0 && !active && (
                     <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{notifUnreadCount}</span>
                   )}
                 </div>
-                <span className="text-[10px] font-medium">{n.id === 'messages' ? (lang === 'he' ? 'הודעות' : 'Chat') : (t?.[n.id] ?? n.id)}</span>
+                <span
+                  className="text-[10px] tracking-wide"
+                  style={{
+                    fontFamily: '"Inter", system-ui, sans-serif',
+                    fontWeight: active ? 700 : 500,
+                  }}
+                >
+                  {n.label}
+                </span>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </nav>
       </div>
 

@@ -1,12 +1,35 @@
 import React, { useRef, useEffect, useCallback } from 'react';
-import { Sparkles, Upload, Scan, MapPin, ChevronRight, ChevronLeft, Zap, TrendingUp, ShoppingBag } from 'lucide-react';
+import {
+  Camera, Upload, ArrowRight, ArrowLeft, Flame
+} from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { Card, Btn, FadeIn } from '../components/ui';
 import { SAMPLE_ITEMS } from '../lib/constants';
-import { formatPrice, getConditionLabel, getConditionColor } from '../lib/utils';
+import { formatPrice } from '../lib/utils';
 
-// ─── FIX #1: JS auto-scroll that pauses on touch, resumes after release ───
-function useAutoScroll(speed = 0.5, direction = 'left') {
+// ═══════════════════════════════════════════════════════════════════════
+// STITCH DESIGN TOKENS — ported faithfully from the HTML tailwind.config
+// ═══════════════════════════════════════════════════════════════════════
+const STITCH = {
+  background:          '#131313',
+  primary:             '#6FEEE1',
+  primaryContainer:    '#4FD1C5',
+  onPrimary:           '#003733',
+  onSurface:           '#e5e2e1',
+  onSurfaceVariant:    '#BBC9C7',
+  surfaceContainerLow: '#1C1B1B',
+  surfaceContainerHigh:'#2A2A2A',
+  surfaceContainerHighest:'#353534',
+  outlineVariant:      '#3c4947',
+  GRADIENT_PRIMARY: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)',
+  GLASS_BG:        'rgba(53, 53, 52, 0.4)',
+  GLASS_BORDER:    '1px solid rgba(255, 255, 255, 0.05)',
+  GLASS_BLUR:      'blur(24px)',
+  FONT_HEADLINE:   '"Manrope", system-ui, -apple-system, sans-serif',
+  FONT_BODY:       '"Inter", system-ui, -apple-system, sans-serif',
+};
+
+// ─── Auto-scroll hook (touch-pause) ─────────────────────────────────
+function useAutoScroll(speed = 0.4) {
   const scrollRef = useRef(null);
   const animRef = useRef(null);
   const isPaused = useRef(false);
@@ -15,39 +38,25 @@ function useAutoScroll(speed = 0.5, direction = 'left') {
   const tick = useCallback(() => {
     const el = scrollRef.current;
     if (el && !isPaused.current) {
-      const delta = direction === 'left' ? speed : -speed;
-      el.scrollLeft += delta;
-      // Seamless loop: reset when reaching duplicate boundary
+      el.scrollLeft += speed;
       const half = el.scrollWidth / 2;
-      if (direction === 'left' && el.scrollLeft >= half) {
-        el.scrollLeft -= half;
-      } else if (direction === 'right' && el.scrollLeft <= 0) {
-        el.scrollLeft += half;
-      }
+      if (el.scrollLeft >= half) el.scrollLeft -= half;
     }
     animRef.current = requestAnimationFrame(tick);
-  }, [speed, direction]);
+  }, [speed]);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      const el = scrollRef.current;
-      if (el && direction === 'right') {
-        el.scrollLeft = el.scrollWidth / 2;
-      }
-      animRef.current = requestAnimationFrame(tick);
-    }, 300);
+    animRef.current = requestAnimationFrame(tick);
     return () => {
-      clearTimeout(t);
       if (animRef.current) cancelAnimationFrame(animRef.current);
       if (resumeTimer.current) clearTimeout(resumeTimer.current);
     };
-  }, [tick, direction]);
+  }, [tick]);
 
   const pause = useCallback(() => {
     isPaused.current = true;
     if (resumeTimer.current) clearTimeout(resumeTimer.current);
   }, []);
-
   const resume = useCallback(() => {
     if (resumeTimer.current) clearTimeout(resumeTimer.current);
     resumeTimer.current = setTimeout(() => { isPaused.current = false; }, 3000);
@@ -56,143 +65,322 @@ function useAutoScroll(speed = 0.5, direction = 'left') {
   return { scrollRef, pause, resume };
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════
 export default function HomeView() {
-  const { t, lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
+  const { lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
 
-  const baseItems1 = [...SAMPLE_ITEMS.slice(0, 6), ...listings.slice(0, 4)];
-  const baseItems2 = [...SAMPLE_ITEMS.slice(6, 12), ...listings.slice(4, 8)];
-  const allItems = [...baseItems1, ...baseItems1, ...baseItems1];
-  const allItems2 = [...baseItems2, ...baseItems2, ...baseItems2];
+  // Inject Manrope + Inter fonts once (no index.html edit required)
+  useEffect(() => {
+    if (document.getElementById('stitch-fonts')) return;
+    const link = document.createElement('link');
+    link.id = 'stitch-fonts';
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap';
+    document.head.appendChild(link);
+  }, []);
 
-  const row1 = useAutoScroll(0.5, 'left');
-  const row2 = useAutoScroll(0.5, 'right');
+  // Build carousel items from real listings + samples, triple for seamless loop
+  const carouselItems = [
+    ...listings.slice(0, 8),
+    ...SAMPLE_ITEMS.slice(0, 6),
+  ];
+  const allItems = [...carouselItems, ...carouselItems, ...carouselItems];
+
+  const carousel = useAutoScroll(0.4);
 
   return (
-    <div className="space-y-6">
-      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }} />
+    <div
+      className="-mx-5 relative"
+      dir={rtl ? 'rtl' : 'ltr'}
+      style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
+    >
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { if (e.target.files?.[0]) handleFile(e.target.files[0]); }}
+      />
 
-      {/* Hero */}
-      <FadeIn className="text-center space-y-4 pt-2">
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-500/10 border border-blue-500/20">
-          <Sparkles className="w-4 h-4 text-blue-400" />
-          <span className="text-xs font-semibold text-blue-300 tracking-wide">{t.aiPowered}</span>
-        </div>
-        <h2 className="text-3xl font-bold leading-tight">
-          {t.heroTitle1}<br/>
-          <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">{t.heroTitle2}</span>
-        </h2>
-        <p className="text-slate-400 text-sm max-w-xs mx-auto">{t.heroSub}</p>
-      </FadeIn>
+      {/* ════ MAIN ════ */}
+      <main className="flex-grow flex flex-col items-center pt-8 pb-32 px-6 relative overflow-hidden">
 
-      {/* Action Buttons — primary scan + upload entry points (unchanged) */}
-      <FadeIn delay={100} className="grid grid-cols-2 gap-4">
-        <Btn primary onClick={startCamera} className="py-4"><Scan className="w-5 h-5" />{t.scan}</Btn>
-        <Btn onClick={() => fileRef.current?.click()} className="py-4"><Upload className="w-5 h-5" />{t.upload}</Btn>
-      </FadeIn>
+        {/* Ambient Decorative Glows — ported from HTML */}
+        <div
+          className="absolute top-1/4 -left-20 w-64 h-64 rounded-full pointer-events-none"
+          style={{ background: 'rgba(111, 238, 225, 0.05)', filter: 'blur(100px)' }}
+        />
+        <div
+          className="absolute bottom-1/4 -right-20 w-80 h-80 rounded-full pointer-events-none"
+          style={{ background: 'rgba(79, 209, 197, 0.05)', filter: 'blur(120px)' }}
+        />
 
-      {/* Hot Items — auto-scrolls + touch/swipe to browse */}
-      <FadeIn delay={200} className="space-y-4 -mx-5">
-        <div className="px-5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
-            <h3 className="font-bold text-lg">{lang === 'he' ? 'פריטים חמים' : 'Hot Items'}</h3>
-            <span className="text-xs text-slate-500">•</span>
-            <span className="text-xs text-slate-400">{lang === 'he' ? 'בזמן אמת' : 'Live'}</span>
+        {/* ═══ HERO / SCAN SECTION ═══ */}
+        <div className="w-full max-w-md flex flex-col items-center text-center space-y-10 z-10">
+
+          {/* Title + subtitle */}
+          <div className="space-y-3">
+            <h2
+              className="text-4xl font-extrabold tracking-tight"
+              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+            >
+              {lang === 'he' ? 'אוצר דיגיטלי' : 'Digital Curator'}
+            </h2>
+            <p
+              className="font-medium text-lg max-w-[280px] mx-auto leading-relaxed"
+              style={{ color: STITCH.onSurfaceVariant }}
+            >
+              {lang === 'he'
+                ? 'זהה, הערך ופרסם פריטים בשוק באופן מיידי.'
+                : 'Instantly identify, value, and list items in the marketplace.'}
+            </p>
           </div>
-          <button onClick={() => goTab('browse')} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
-            {lang === 'he' ? 'הכל' : 'See All'}
-            {rtl ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+
+          {/* PRIMARY ACTION: LARGE SCAN BUTTON */}
+          <div className="relative group">
+            {/* Ambient glow behind button */}
+            <div
+              className="absolute inset-0 rounded-full opacity-40 group-active:opacity-70 transition-opacity duration-700 pointer-events-none"
+              style={{
+                background: 'rgba(111, 238, 225, 0.20)',
+                transform: 'scale(1.10)',
+                filter: 'blur(40px)',
+              }}
+            />
+            <button
+              onClick={startCamera}
+              className="relative w-56 h-56 rounded-full flex flex-col items-center justify-center gap-3 active:scale-95 transition-transform duration-300"
+              style={{
+                background: STITCH.GRADIENT_PRIMARY,
+                boxShadow: '0 20px 40px rgba(111, 238, 225, 0.25)',
+              }}
+              aria-label={lang === 'he' ? 'סרוק פריט' : 'Scan Item'}
+            >
+              {/* Inner icon circle */}
+              <div
+                className="w-20 h-20 rounded-full flex items-center justify-center"
+                style={{ background: 'rgba(0, 55, 51, 0.10)' }}
+              >
+                <Camera className="w-12 h-12" strokeWidth={2.25} style={{ color: STITCH.onPrimary }} />
+              </div>
+              <span
+                className="font-bold text-xl tracking-tight"
+                style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onPrimary }}
+              >
+                {lang === 'he' ? 'סרוק פריט' : 'Scan Item'}
+              </span>
+            </button>
+          </div>
+
+          {/* SECONDARY ACTION: UPLOAD PILL */}
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="px-8 py-4 rounded-full flex items-center gap-3 active:scale-[0.97] transition-all"
+            style={{
+              background: 'rgba(42, 42, 42, 0.80)',
+              border: '1px solid rgba(255, 255, 255, 0.05)',
+            }}
+          >
+            <Upload className="w-5 h-5" style={{ color: STITCH.primary }} />
+            <span
+              className="font-semibold tracking-wide text-sm"
+              style={{ color: STITCH.primary }}
+            >
+              {lang === 'he' ? 'העלה מהגלריה' : 'Upload from Gallery'}
+            </span>
           </button>
+
         </div>
 
-        {/* Row 1 */}
-        <div
-          ref={row1.scrollRef}
-          className="flex gap-3 overflow-x-auto scrollbar-hide px-3"
-          onTouchStart={row1.pause} onTouchEnd={row1.resume}
-          onMouseDown={row1.pause} onMouseUp={row1.resume} onMouseLeave={row1.resume}
-          style={{ WebkitOverflowScrolling: 'touch' }}
-        >
-          {allItems.map((item, i) => (
-            <MarqueeItem key={`row1-${item.id}-${i}`} item={item} lang={lang} onClick={() => viewItem(item)} accent="blue" />
-          ))}
-        </div>
+        {/* ═══ HOT ITEMS / LIVE LISTINGS SECTION ═══ */}
+        <section className="w-full max-w-7xl mx-auto mt-16">
 
-        {/* Row 2 */}
-        <div
-          ref={row2.scrollRef}
-          className="flex gap-3 overflow-x-auto scrollbar-hide px-3"
-          onTouchStart={row2.pause} onTouchEnd={row2.resume}
-          onMouseDown={row2.pause} onMouseUp={row2.resume} onMouseLeave={row2.resume}
-          style={{ WebkitOverflowScrolling: 'touch' }}
-        >
-          {allItems2.map((item, i) => (
-            <MarqueeItem key={`row2-${item.id}-${i}`} item={item} lang={lang} onClick={() => viewItem(item)} accent="green" />
-          ))}
-        </div>
+          {/* Section Header */}
+          <div className="flex items-center justify-between px-2 mb-6">
+            <div className="relative" style={{ [rtl ? 'marginRight' : 'marginLeft']: '16px' }}>
+              {/* Live pulse indicator dot — ported from ::before */}
+              <div
+                className="absolute top-[10px] w-1.5 h-1.5 rounded-full animate-pulse"
+                style={{
+                  [rtl ? 'right' : 'left']: '-12px',
+                  background: STITCH.primary,
+                  boxShadow: `0 0 8px ${STITCH.primary}`,
+                }}
+              />
+              <h3
+                className="font-bold text-xl"
+                style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+              >
+                {lang === 'he' ? 'פריטים חמים' : 'Hot Items'}
+              </h3>
+              <p
+                className="text-[10px] uppercase tracking-widest font-bold mt-0.5"
+                style={{ color: STITCH.onSurfaceVariant }}
+              >
+                {lang === 'he' ? 'פעילות שוק חיה' : 'Live Marketplace activity'}
+              </p>
+            </div>
+            <button
+              onClick={() => goTab('browse')}
+              className="text-sm font-semibold flex items-center gap-1 group/viewall"
+              style={{ color: STITCH.primary }}
+            >
+              {lang === 'he' ? 'הצג הכל' : 'View All'}
+              {rtl
+                ? <ArrowLeft className="w-4 h-4 group-hover/viewall:-translate-x-1 transition-transform" />
+                : <ArrowRight className="w-4 h-4 group-hover/viewall:translate-x-1 transition-transform" />
+              }
+            </button>
+          </div>
 
-        {/* Sell banner — secondary CTA that opens camera scan (same as main Scan button) */}
-        {/* No UI/styling changes — only added onClick + cursor + a11y attributes */}
-        <div
-          className="px-5 pt-2 cursor-pointer active:scale-[0.98] transition-transform"
-          onClick={startCamera}
-          role="button"
-          tabIndex={0}
-          aria-label={lang === 'he' ? 'סרוק פריט למכירה' : 'Scan an item to sell'}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startCamera(); } }}
-        >
-          <Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.1))">
-            <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'יש לך משהו למכור?' : 'Have something to sell?'}</p>
-            <p className="text-xs text-slate-500 mt-1">{lang === 'he' ? 'סרוק את הפריט וקבל הערכת מחיר מיידית' : 'Scan your item and get instant valuation'}</p>
-          </Card>
-        </div>
-      </FadeIn>
+          {/* Horizontal Carousel */}
+          <div className="relative group">
+            <div
+              ref={carousel.scrollRef}
+              className="flex overflow-x-auto gap-5 px-2 pb-8 scroll-smooth scrollbar-hide"
+              onTouchStart={carousel.pause} onTouchEnd={carousel.resume}
+              onMouseDown={carousel.pause} onMouseUp={carousel.resume} onMouseLeave={carousel.resume}
+              style={{
+                WebkitOverflowScrolling: 'touch',
+                scrollbarWidth: 'none',
+                msOverflowStyle: 'none',
+              }}
+            >
+              {allItems.map((item, i) => (
+                <HotCard
+                  key={`hot-${item.id}-${i}`}
+                  item={item}
+                  index={i % carouselItems.length}
+                  lang={lang}
+                  onClick={() => viewItem(item)}
+                />
+              ))}
+            </div>
+          </div>
+        </section>
 
-      {/* Quick Stats */}
-      <FadeIn delay={300}>
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { icon: Zap, label: lang === 'he' ? 'מהיר' : 'Fast', value: '< 3s' },
-            { icon: TrendingUp, label: lang === 'he' ? 'דיוק' : 'Accuracy', value: '95%' },
-            { icon: ShoppingBag, label: lang === 'he' ? 'פריטים' : 'Items', value: `${listings.length}+` }
-          ].map((stat, i) => (
-            <Card key={i} className="p-3 text-center">
-              <stat.icon className="w-4 h-4 text-blue-400 mx-auto mb-1" />
-              <p className="text-base font-bold">{stat.value}</p>
-              <p className="text-[9px] text-slate-500 uppercase tracking-wider">{stat.label}</p>
-            </Card>
-          ))}
-        </div>
-      </FadeIn>
+      </main>
     </div>
   );
 }
 
-function MarqueeItem({ item, lang, onClick, accent }) {
-  const borderHover = accent === 'blue' ? 'group-hover:border-blue-500/50' : 'group-hover:border-green-500/50';
-  const avatarGradient = accent === 'blue' ? 'from-blue-500 to-purple-600' : 'from-green-500 to-emerald-600';
+// ═══════════════════════════════════════════════════════════════════════
+// HOT CARD — faithful glass-panel port
+// ═══════════════════════════════════════════════════════════════════════
+function HotCard({ item, index, lang, onClick }) {
+  // Rotate 3 badge states to match the HTML mockup (Card 1/2/3)
+  const badgeType = index % 3;
+  const isNew = badgeType === 0;
+  const isHot = badgeType === 1;
+  // badgeType === 2 → no badge
 
   return (
-    <div onClick={onClick} className="flex-shrink-0 w-40 cursor-pointer group">
-      <div className={`relative rounded-2xl overflow-hidden bg-white/5 border border-white/10 transition-all duration-300 group-hover:scale-105 ${borderHover} shadow-lg shadow-black/20`}>
-        <div className="aspect-square overflow-hidden">
-          <img src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" loading="lazy" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+    <div
+      onClick={onClick}
+      className="min-w-[280px] rounded-2xl p-4 flex flex-col gap-4 relative overflow-hidden cursor-pointer active:scale-[0.98] transition-transform"
+      style={{
+        background: STITCH.GLASS_BG,
+        backdropFilter: STITCH.GLASS_BLUR,
+        WebkitBackdropFilter: STITCH.GLASS_BLUR,
+        border: STITCH.GLASS_BORDER,
+      }}
+    >
+      {/* Badge */}
+      {(isNew || isHot) && (
+        <div className="absolute top-3 right-3 z-10">
+          <span
+            className="text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur-md"
+            style={
+              isNew
+                ? {
+                    background: 'rgba(111, 238, 225, 0.20)',
+                    color: STITCH.primary,
+                    border: '1px solid rgba(111, 238, 225, 0.20)',
+                  }
+                : {
+                    background: 'rgba(249, 115, 22, 0.20)',
+                    color: '#fb923c',
+                    border: '1px solid rgba(249, 115, 22, 0.20)',
+                  }
+            }
+          >
+            {isNew
+              ? (lang === 'he' ? 'חדש' : 'NEWLY LISTED')
+              : (lang === 'he' ? 'מבצע חם' : 'HOT DEAL')}
+          </span>
         </div>
-        <div className="absolute bottom-0 left-0 right-0 p-3">
-          <p className="text-xs font-semibold truncate text-white">{lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}</p>
-          <p className="text-base font-bold text-green-400 mt-0.5">{formatPrice(item.price)}</p>
-          <p className="text-[10px] text-slate-400 mt-1 flex items-center gap-1">
-            <MapPin className="w-3 h-3" />{item.location}
-          </p>
-        </div>
-        {item.condition && (
-          <div className={`absolute top-2 left-2 px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase ${getConditionColor(item.condition)}`}>
-            {getConditionLabel(item.condition, lang)}
-          </div>
+      )}
+
+      {/* Image */}
+      <div
+        className="w-full h-40 rounded-xl overflow-hidden"
+        style={{ background: STITCH.surfaceContainerHighest }}
+      >
+        {item.images?.[0] && (
+          <img
+            src={item.images[0]}
+            alt=""
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
         )}
-        <div className={`absolute top-2 right-2 w-8 h-8 rounded-full bg-gradient-to-br ${avatarGradient} flex items-center justify-center text-[11px] font-bold border-2 border-white/30 shadow-lg`}>
-          {item.seller?.full_name?.charAt(0) || 'S'}
+      </div>
+
+      {/* Title + Price Row */}
+      <div className="flex flex-col gap-1">
+        <div className="flex justify-between items-start gap-2">
+          <h4
+            className="font-bold text-lg truncate flex-1"
+            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+          >
+            {lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}
+          </h4>
+          <span
+            className="font-bold text-lg whitespace-nowrap"
+            style={{ color: STITCH.primary }}
+          >
+            {formatPrice(item.price)}
+          </span>
+        </div>
+
+        {/* Meta row */}
+        <div className="flex items-center gap-2">
+          {isHot ? (
+            <>
+              <Flame className="w-3.5 h-3.5" fill="#fb923c" style={{ color: '#fb923c' }} />
+              <p className="text-xs font-medium" style={{ color: STITCH.onSurfaceVariant }}>
+                {lang === 'he' ? 'פופולרי עכשיו' : 'Trending now'}
+              </p>
+            </>
+          ) : isNew ? (
+            <>
+              <div className="flex -space-x-2">
+                <div
+                  className="w-5 h-5 rounded-full"
+                  style={{
+                    background: 'rgba(200, 198, 197, 0.5)',
+                    border: `1px solid ${STITCH.background}`,
+                  }}
+                />
+                <div
+                  className="w-5 h-5 rounded-full"
+                  style={{
+                    background: 'rgba(111, 238, 225, 0.5)',
+                    border: `1px solid ${STITCH.background}`,
+                  }}
+                />
+              </div>
+              <p className="text-xs font-medium" style={{ color: STITCH.onSurfaceVariant }}>
+                {lang === 'he' ? '12 הצעות פעילות' : '12 bids active'}
+              </p>
+            </>
+          ) : (
+            <p className="text-xs font-medium" style={{ color: STITCH.onSurfaceVariant }}>
+              {item.location || (lang === 'he' ? 'מצב מעולה' : 'Near Mint Condition')}
+            </p>
+          )}
         </div>
       </div>
     </div>
