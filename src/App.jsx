@@ -240,6 +240,11 @@ function AppShell() {
             background: 'rgba(19, 19, 19, 0.60)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
+            // Safe area: respect notch / Dynamic Island / status bar
+            // env() returns 0 on browsers without support, so max() ensures a minimum
+            paddingTop: 'max(env(safe-area-inset-top), 12px)',
+            paddingLeft: 'env(safe-area-inset-left)',
+            paddingRight: 'env(safe-area-inset-right)',
           }}
         >
           <div className="flex items-center justify-between px-6 h-16 w-full max-w-7xl mx-auto">
@@ -338,7 +343,7 @@ function AppShell() {
         {/* Bottom Nav */}
         {/* ═══ STITCH BOTTOM NAV — faithful port of HTML nav ═══ */}
         <nav
-          className="fixed bottom-0 left-0 right-0 z-40 flex justify-around items-center px-4 py-3"
+          className="fixed bottom-0 left-0 right-0 z-40 flex justify-around items-center px-4"
           style={{
             background: 'rgba(28, 27, 27, 0.95)',
             backdropFilter: 'blur(24px)',
@@ -347,6 +352,11 @@ function AppShell() {
             borderTopRightRadius: '32px',
             borderTop: '1px solid rgba(255, 255, 255, 0.05)',
             boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.5)',
+            // Safe area: respect iPhone home indicator / Android gesture bar
+            paddingTop: '12px',
+            paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+            paddingLeft: 'max(env(safe-area-inset-left), 16px)',
+            paddingRight: 'max(env(safe-area-inset-right), 16px)',
           }}
         >
           {[
