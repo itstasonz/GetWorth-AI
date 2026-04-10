@@ -147,6 +147,7 @@ export function OrdersView() {
   const otherSellOrders = sellOrders.filter(o => o.status !== 'pending');
 
   const renderOrder = (order) => {
+    if (!STATUS_CONFIG[order.status]) console.warn('[OrderViews] Unknown order status:', order.status);
     const cfg = STATUS_CONFIG[order.status] || STATUS_CONFIG.pending;
     const StatusIcon = cfg.icon;
     const listing = order.listing;

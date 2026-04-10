@@ -131,9 +131,7 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
     prev.item.images?.[0] === next.item.images?.[0] &&
     prev.lang === next.lang &&
     (prev.savedIds?.has(prev.item.id) ?? false) === (next.savedIds?.has(next.item.id) ?? false) &&
-    prev.heartAnim === next.heartAnim &&
-    prev.toggleSave === next.toggleSave &&
-    prev.viewItem === next.viewItem
+    prev.heartAnim === next.heartAnim
   );
 });
 

@@ -116,7 +116,7 @@ export function ChatView() {
           <img src={activeChat.listing?.images?.[0]} alt="" className="w-full h-full object-cover" />
         </button>
         <div className="flex-1 min-w-0">
-          <p className="font-semibold truncate">{activeChat.otherUser?.full_name || activeChat.seller?.full_name || 'User'}</p>
+          <p className="font-semibold truncate">{activeChat.otherUser?.full_name || activeChat.seller?.full_name || (lang === 'he' ? 'משתמש' : 'User')}</p>
           <p className="text-xs text-slate-400 truncate">{activeChat.listing?.title}</p>
         </div>
         <div className="text-right">

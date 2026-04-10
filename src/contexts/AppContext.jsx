@@ -41,7 +41,9 @@ function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
         const canvas = document.createElement('canvas');
         canvas.width = w;
         canvas.height = h;
-        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) { reject(new Error('Canvas 2D context unavailable')); return; }
+        ctx.drawImage(img, 0, 0, w, h);
         const compressed = canvas.toDataURL('image/jpeg', quality);
         if (DEV) {
           const compKB = Math.round(compressed.length * 0.75 / 1024);
@@ -251,7 +253,7 @@ export function AppProvider({ children }) {
       if (session?.user) {
         setUser(session.user);
         supabase.from('profiles').select('*').eq('id', session.user.id).single()
-          .then(({ data }) => { if (data) setProfile(data); })
+          .then(({ data }) => { if (mounted && data) setProfile(data); })
           .catch(() => {});
       } else { setUser(null); setProfile(null); }
     });
@@ -502,7 +504,7 @@ export function AppProvider({ children }) {
 
   // ─── DATA LOADING ───────────────────────────────────
 
-  const loadListings = async (reset = false) => {
+  const loadListings = useCallback(async (reset = false) => {
     const thisRequestId = ++loadRequestIdRef.current; // Increment request ID
     const page = reset ? 0 : listingsPage;
     const offset = page * PAGE_SIZE;
@@ -532,7 +534,8 @@ export function AppProvider({ children }) {
       if (reset || page === 0) { setListings(normalized); } else { setListings((prev) => [...prev, ...normalized]); }
       setHasMore(normalized.length === PAGE_SIZE);
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [category, filterCondition, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
 
   const loadMoreListings = async () => {
     if (loadingMore || !hasMore) return;
@@ -570,12 +573,13 @@ export function AppProvider({ children }) {
 
   const loadUserData = async () => {
     if (!user) return;
-    const [{ data: myData }, { data: savedData }] = await Promise.all([
+    const [myResult, savedResult] = await Promise.allSettled([
       supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false }),
       supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id)
     ]);
-    if (myData) setMyListings(myData);
-    if (savedData) {
+    if (myResult.status === 'fulfilled' && myResult.value.data) setMyListings(myResult.value.data);
+    if (savedResult.status === 'fulfilled' && savedResult.value.data) {
+      const savedData = savedResult.value.data;
       setSavedItems(savedData.map((s) => s.listing).filter(Boolean));
       setSavedIds(new Set(savedData.map((s) => s.listing_id)));
     }
@@ -712,7 +716,8 @@ export function AppProvider({ children }) {
       if (msgError) throw msgError;
       if (data) {
         setMessages((prev) => prev.map((m) => m.id === optimisticId ? data : m));
-        await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
+        const { error: convUpdateErr } = await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
+        if (convUpdateErr) console.warn('Conversation timestamp update failed:', convUpdateErr.message);
       }
     } catch (e) {
       console.error('Send message error:', e);
@@ -803,6 +808,7 @@ export function AppProvider({ children }) {
 
       // Get public URL
       const { data: urlData } = supabase.storage.from('avatars').getPublicUrl(filePath);
+      if (!urlData?.publicUrl) throw new Error('Failed to get avatar URL');
       const publicUrl = urlData.publicUrl + '?t=' + Date.now(); // cache bust
 
       // Update profile
@@ -864,6 +870,7 @@ export function AppProvider({ children }) {
 
       // Get URL (private — only admins can access)
       const { data: urlData } = supabase.storage.from('verification-photos').getPublicUrl(filePath);
+      if (!urlData?.publicUrl) throw new Error('Failed to get verification photo URL');
 
       // Update profile status
       const { error: updateErr } = await supabase
@@ -1056,9 +1063,13 @@ export function AppProvider({ children }) {
 
         const data = await res.json();
         if (data.content?.[0]?.text) {
-          const parsed = JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
-          if (DEV) console.log(`[Analyze] Success:`, parsed.name || parsed.nameHebrew);
-          return parsed;
+          try {
+            const parsed = JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
+            if (DEV) console.log(`[Analyze] Success:`, parsed.name || parsed.nameHebrew);
+            return parsed;
+          } catch {
+            throw new Error(lang === 'he' ? 'תגובה לא תקינה מהשרת' : 'Invalid response from server');
+          }
         }
         throw new Error(lang === 'he' ? 'תגובה לא תקינה מהשרת' : 'Invalid response from server');
       } catch (e) {
