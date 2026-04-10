@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Settings, Image as ImageIcon, History, Box, Database, MoreVertical } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Settings, Image as ImageIcon, History, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice, isSerialEligible } from '../lib/utils';
@@ -1212,26 +1212,214 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* ═══ "ADD PHOTO" PROMPT — shown for <80% confidence ═══ */}
-      {confidence < 0.80 && canAddPhoto && !isConfirmed && (
-        <FadeIn delay={65}>
-          <button onClick={handleAddPhotoClick}
-            className="w-full flex items-center gap-3 p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/15 transition-all active:scale-[0.98]">
-            <div className="w-9 h-9 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-              <Camera className="w-4 h-4 text-blue-400" />
+      {/* ═══ STITCH ACTION GRID: Add Photo + Add Serial ═══ */}
+      {/* Hidden file input for serial — kept with the grid for clarity */}
+      <input
+        ref={serialFileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => submitSerialPhoto(reader.result);
+          reader.readAsDataURL(file);
+          e.target.value = '';
+        }}
+      />
+
+      {(() => {
+        const serialEligible = isSerialEligible(result.category, resolvedSubcategory, resolvedName);
+        const hasSerialData = !!(serialData?.serial || serialData?.type === 'submitted');
+        const showPhotoButton = canAddPhoto; // images.length < 3 && !isConfirmed
+        const showSerialButton = serialEligible;
+
+        // If neither is available, render nothing
+        if (!showPhotoButton && !showSerialButton) return null;
+
+        const gridCols = showPhotoButton && showSerialButton ? 'grid-cols-2' : 'grid-cols-1';
+
+        return (
+          <FadeIn delay={65}>
+            <div className={`grid ${gridCols} gap-4`}>
+              {/* ─── ADD PHOTO BUTTON ─── */}
+              {showPhotoButton && (
+                <button
+                  onClick={handleAddPhotoClick}
+                  className="flex flex-col items-center justify-center gap-3 py-6 rounded-2xl active:scale-95 transition-all duration-200"
+                  style={{
+                    background: STITCH.surfaceContainerHigh,
+                    border: '1px solid rgba(255, 255, 255, 0.03)',
+                  }}
+                >
+                  <div
+                    className="w-12 h-12 rounded-full flex items-center justify-center"
+                    style={{ background: STITCH.background, color: STITCH.primary }}
+                  >
+                    <Camera className="w-6 h-6" strokeWidth={2} />
+                  </div>
+                  <span
+                    className="text-sm font-semibold"
+                    style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
+                  >
+                    {lang === 'he' ? 'הוסף תמונה' : 'Add Photo'}
+                  </span>
+                </button>
+              )}
+
+              {/* ─── ADD SERIAL BUTTON (3 states: empty / loading / success) ─── */}
+              {showSerialButton && (
+                hasSerialData && serialData.serial ? (
+                  /* SUCCESS STATE — masked serial displayed */
+                  <button
+                    onClick={clearSerialData}
+                    className="flex flex-col items-center justify-center gap-2 py-6 rounded-2xl active:scale-95 transition-all duration-200 relative"
+                    style={{
+                      background: 'rgba(111, 238, 225, 0.08)',
+                      border: '1px solid rgba(111, 238, 225, 0.25)',
+                    }}
+                    title={lang === 'he' ? 'הסר' : 'Remove'}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center"
+                      style={{ background: STITCH.background, color: STITCH.primary }}
+                    >
+                      <Shield className="w-6 h-6" strokeWidth={2} fill="currentColor" fillOpacity={0.15} />
+                    </div>
+                    <div className="text-center">
+                      <span
+                        className="block text-xs font-semibold"
+                        style={{ color: STITCH.primary, fontFamily: STITCH.FONT_BODY }}
+                      >
+                        {serialData.type === 'imei' ? 'IMEI ✓' : (lang === 'he' ? 'מספר סידורי ✓' : 'Serial ✓')}
+                      </span>
+                      <span
+                        className="block text-[10px] font-mono mt-0.5"
+                        style={{ color: STITCH.onSurfaceVariant }}
+                      >
+                        {serialData.masked}
+                      </span>
+                    </div>
+                    <X
+                      className="absolute top-2 right-2 w-3.5 h-3.5"
+                      style={{ color: STITCH.onSurfaceVariant }}
+                    />
+                  </button>
+                ) : hasSerialData && serialData?.type === 'submitted' ? (
+                  /* SUBMITTED STATE — photo saved but OCR couldn't extract */
+                  <button
+                    onClick={clearSerialData}
+                    className="flex flex-col items-center justify-center gap-2 py-6 rounded-2xl active:scale-95 transition-all duration-200 relative"
+                    style={{
+                      background: STITCH.surfaceContainerHigh,
+                      border: '1px solid rgba(255, 255, 255, 0.03)',
+                    }}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center"
+                      style={{ background: STITCH.background, color: STITCH.onSurfaceVariant }}
+                    >
+                      <Shield className="w-6 h-6" strokeWidth={2} />
+                    </div>
+                    <div className="text-center">
+                      <span
+                        className="block text-xs font-semibold"
+                        style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
+                      >
+                        {lang === 'he' ? 'תמונה נשמרה' : 'Photo saved'}
+                      </span>
+                      <span className="block text-[9px] mt-0.5" style={{ color: STITCH.onSurfaceVariant }}>
+                        {lang === 'he' ? 'ללא זיהוי' : 'no serial found'}
+                      </span>
+                    </div>
+                    <X
+                      className="absolute top-2 right-2 w-3.5 h-3.5"
+                      style={{ color: STITCH.onSurfaceVariant }}
+                    />
+                  </button>
+                ) : (
+                  /* DEFAULT STATE — "Add Serial" CTA */
+                  <button
+                    onClick={() => !serialLoading && serialFileRef.current?.click()}
+                    disabled={serialLoading}
+                    className="flex flex-col items-center justify-center gap-3 py-6 rounded-2xl active:scale-95 transition-all duration-200"
+                    style={{
+                      background: STITCH.surfaceContainerHigh,
+                      border: '1px solid rgba(255, 255, 255, 0.03)',
+                      opacity: serialLoading ? 0.7 : 1,
+                    }}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center"
+                      style={{ background: STITCH.background, color: STITCH.primary }}
+                    >
+                      {serialLoading
+                        ? <Loader2 className="w-6 h-6 animate-spin" strokeWidth={2} />
+                        : <Barcode className="w-6 h-6" strokeWidth={2} />
+                      }
+                    </div>
+                    <span
+                      className="text-sm font-semibold"
+                      style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
+                    >
+                      {serialLoading
+                        ? (lang === 'he' ? 'קורא...' : 'Reading...')
+                        : (lang === 'he' ? 'הוסף סריאלי' : 'Add Serial')
+                      }
+                    </span>
+                  </button>
+                )
+              )}
             </div>
-            <div className="text-left flex-1 min-w-0">
-              <p className="text-sm font-medium text-blue-300">
-                {lang === 'he' ? 'הוסף תמונה של התווית' : 'Add photo of the label'}
-              </p>
-              <p className="text-[10px] text-slate-500">
-                {lang === 'he' ? 'צלם את הלוגו או מספר הדגם לזיהוי מדויק יותר' : 'Capture the logo or model number for better identification'}
+          </FadeIn>
+        );
+      })()}
+
+      {/* ═══ STITCH MARKET INSIGHT CARD ═══ */}
+      {(() => {
+        const insightText = result.israeliMarketNotes
+          || result.sellingTips
+          || (result.demandLevel === 'high'
+            ? (lang === 'he'
+              ? 'ביקוש גבוה בישראל. פריטים כאלה נמכרים בדרך כלל במהירות.'
+              : 'High demand detected in your region. Items like this typically sell quickly.')
+            : result.demandLevel === 'low'
+            ? (lang === 'he'
+              ? 'ביקוש נמוך. שקול מחיר תחרותי לזמן מכירה מהיר יותר.'
+              : 'Lower demand for this category. Consider a competitive price for faster sale.')
+            : (lang === 'he'
+              ? 'ביקוש יציב. רשום במחיר המשוער לקבלת הצעות טובות.'
+              : 'Steady demand. List at the estimated price for strong offers.')
+          );
+
+        if (!insightText) return null;
+
+        return (
+          <FadeIn delay={85}>
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: STITCH.surfaceContainerLowest,
+                borderLeft: `4px solid rgba(111, 238, 225, 0.40)`,
+              }}
+            >
+              <h3
+                className="font-semibold text-sm mb-2"
+                style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
+              >
+                {lang === 'he' ? 'תובנת שוק' : 'Market Insight'}
+              </h3>
+              <p
+                className="text-sm leading-relaxed"
+                style={{ color: STITCH.onSurfaceVariant }}
+              >
+                {insightText}
               </p>
             </div>
-            <ChevronRight className="w-4 h-4 text-slate-500 flex-shrink-0" />
-          </button>
-        </FadeIn>
-      )}
+          </FadeIn>
+        );
+      })()}
 
       {/* ═══ TIER: Very Low (<40%) — Broad estimate, need help ═══ */}
       {tier === 'very_low' && !isConfirmed && (
@@ -1548,97 +1736,6 @@ export function ResultsView() {
                   ))}
                 </div>
               )}
-            </Card>
-          )}
-        </FadeIn>
-      )}
-
-      {/* Serial/IMEI verification CTA — secondary optional, only for eligible categories */}
-      {isSerialEligible(result.category, resolvedSubcategory, resolvedName) && (
-        <FadeIn delay={150}>
-          <input
-            ref={serialFileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              const reader = new FileReader();
-              reader.onload = () => submitSerialPhoto(reader.result);
-              reader.readAsDataURL(file);
-              e.target.value = '';
-            }}
-          />
-          {serialData?.serial ? (
-            /* Serial already added — show confirmation badge */
-            <Card className="p-4" gradient="linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.05))">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0">
-                  <Shield className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold text-emerald-300">
-                      {serialData.type === 'imei' ? 'IMEI' : (lang === 'he' ? 'מספר סידורי' : 'Serial')} {serialData.verified ? '✓' : ''}
-                    </span>
-                    {serialData.verified && (
-                      <Badge color="green" className="text-[9px]">{lang === 'he' ? 'פורמט תקין' : 'Format Valid'}</Badge>
-                    )}
-                  </div>
-                  <p className="text-xs text-slate-400 mt-0.5 font-mono">{serialData.masked}</p>
-                </div>
-                <button onClick={clearSerialData} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-                  <X className="w-4 h-4 text-slate-500" />
-                </button>
-              </div>
-            </Card>
-          ) : serialData?.type === 'submitted' ? (
-            /* Photo submitted but no serial extracted */
-            <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.03))">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-                  <Shield className="w-5 h-5 text-blue-400" />
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'תמונת תווית נשמרה' : 'Label photo saved'}</p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">{lang === 'he' ? 'לא הצלחנו לקרוא מספר — נסה שוב או המשך' : "Couldn't read serial — retry or continue"}</p>
-                </div>
-                <button onClick={clearSerialData} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors">
-                  <X className="w-4 h-4 text-slate-500" />
-                </button>
-              </div>
-            </Card>
-          ) : (
-            /* No serial yet — show CTA to add one */
-            <Card
-              className="p-4 cursor-pointer active:scale-[0.98] transition-transform"
-              gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(139,92,246,0.05))"
-              onClick={() => serialFileRef.current?.click()}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/15 flex items-center justify-center flex-shrink-0">
-                  {serialLoading
-                    ? <Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
-                    : <Shield className="w-5 h-5 text-blue-400" />
-                  }
-                </div>
-                <div className="flex-1">
-                  <p className="text-sm font-medium text-slate-300">
-                    {serialLoading
-                      ? (lang === 'he' ? 'קורא מספר סידורי...' : 'Reading serial number...')
-                      : (lang === 'he' ? 'הוסף תמונת מספר סידורי' : 'Add serial number photo')
-                    }
-                  </p>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    {serialLoading
-                      ? (lang === 'he' ? 'מנתח תווית...' : 'Analyzing label...')
-                      : (lang === 'he' ? 'מגביר אמון קונים ואמינות המודעה' : 'Increases buyer trust & listing credibility')
-                    }
-                  </p>
-                </div>
-                {!serialLoading && <ChevronRight className="w-5 h-5 text-slate-600 flex-shrink-0" />}
-              </div>
             </Card>
           )}
         </FadeIn>
