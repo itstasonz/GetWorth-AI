@@ -108,7 +108,7 @@ export default function HomeView() {
       <main
         className="flex-grow flex flex-col items-center relative overflow-hidden"
         style={{
-          paddingTop: 'clamp(16px, 3vh, 28px)',
+          paddingTop: 'clamp(8px, 1.5vh, 20px)',
           paddingBottom: 'clamp(96px, 16vh, 140px)',
           paddingLeft: 'clamp(16px, 5vw, 24px)',
           paddingRight: 'clamp(16px, 5vw, 24px)',
@@ -128,15 +128,15 @@ export default function HomeView() {
         {/* ═══ HERO / SCAN SECTION ═══ */}
         <div
           className="w-full max-w-md flex flex-col items-center text-center z-10"
-          style={{ gap: 'clamp(20px, 3vh, 40px)' }}
+          style={{ gap: 'clamp(14px, 2.2vh, 28px)' }}
         >
 
           {/* Title + subtitle */}
-          <div className="flex flex-col items-center" style={{ gap: 'clamp(8px, 1.2vh, 12px)' }}>
+          <div className="flex flex-col items-center" style={{ gap: 'clamp(4px, 0.8vh, 8px)' }}>
             <h2
               className="font-extrabold tracking-tight leading-[1.05]"
               style={{
-                fontSize: 'clamp(28px, 4.8vw, 40px)',
+                fontSize: 'clamp(24px, 3.6vh, 36px)',
                 fontFamily: STITCH.FONT_HEADLINE,
                 color: STITCH.onSurface,
               }}
@@ -144,10 +144,10 @@ export default function HomeView() {
               {lang === 'he' ? 'אוצר דיגיטלי' : 'Digital Curator'}
             </h2>
             <p
-              className="font-medium leading-relaxed mx-auto"
+              className="font-medium leading-snug mx-auto"
               style={{
-                fontSize: 'clamp(14px, 2.5vw, 18px)',
-                maxWidth: 'clamp(260px, 70vw, 300px)',
+                fontSize: 'clamp(13px, 1.8vh, 16px)',
+                maxWidth: 'clamp(240px, 70vw, 300px)',
                 color: STITCH.onSurfaceVariant,
               }}
             >
@@ -172,9 +172,9 @@ export default function HomeView() {
               onClick={startCamera}
               className="relative rounded-full flex flex-col items-center justify-center active:scale-95 transition-transform duration-300"
               style={{
-                width: 'clamp(148px, 42vw, 224px)',
-                height: 'clamp(148px, 42vw, 224px)',
-                gap: 'clamp(8px, 1.5vw, 12px)',
+                width: 'clamp(120px, 22vh, 200px)',
+                height: 'clamp(120px, 22vh, 200px)',
+                gap: 'clamp(6px, 1vh, 10px)',
                 background: STITCH.GRADIENT_PRIMARY,
                 boxShadow: '0 20px 40px rgba(111, 238, 225, 0.25)',
               }}
@@ -184,8 +184,8 @@ export default function HomeView() {
               <div
                 className="rounded-full flex items-center justify-center"
                 style={{
-                  width: 'clamp(52px, 15vw, 80px)',
-                  height: 'clamp(52px, 15vw, 80px)',
+                  width: 'clamp(44px, 8vh, 72px)',
+                  height: 'clamp(44px, 8vh, 72px)',
                   background: 'rgba(0, 55, 51, 0.10)',
                 }}
               >
@@ -193,15 +193,15 @@ export default function HomeView() {
                   strokeWidth={2.25}
                   style={{
                     color: STITCH.onPrimary,
-                    width: 'clamp(24px, 7vw, 40px)',
-                    height: 'clamp(24px, 7vw, 40px)',
+                    width: 'clamp(22px, 4vh, 36px)',
+                    height: 'clamp(22px, 4vh, 36px)',
                   }}
                 />
               </div>
               <span
                 className="font-bold tracking-tight"
                 style={{
-                  fontSize: 'clamp(18px, 3.4vw, 22px)',
+                  fontSize: 'clamp(15px, 2.2vh, 20px)',
                   fontFamily: STITCH.FONT_HEADLINE,
                   color: STITCH.onPrimary,
                 }}
@@ -214,21 +214,21 @@ export default function HomeView() {
           {/* SECONDARY ACTION: UPLOAD PILL */}
           <button
             onClick={() => fileRef.current?.click()}
-            className="rounded-full flex items-center gap-3 active:scale-[0.97] transition-all"
+            className="rounded-full flex items-center gap-2.5 active:scale-[0.97] transition-all"
             style={{
-              paddingLeft: 'clamp(20px, 5vw, 32px)',
-              paddingRight: 'clamp(20px, 5vw, 32px)',
-              paddingTop: 'clamp(10px, 1.6vh, 16px)',
-              paddingBottom: 'clamp(10px, 1.6vh, 16px)',
+              paddingLeft: 'clamp(18px, 5vw, 28px)',
+              paddingRight: 'clamp(18px, 5vw, 28px)',
+              paddingTop: 'clamp(8px, 1.2vh, 14px)',
+              paddingBottom: 'clamp(8px, 1.2vh, 14px)',
               background: 'rgba(42, 42, 42, 0.80)',
               border: '1px solid rgba(255, 255, 255, 0.05)',
             }}
           >
-            <Upload className="w-5 h-5" style={{ color: STITCH.primary }} />
+            <Upload className="w-4 h-4" style={{ color: STITCH.primary }} />
             <span
               className="font-semibold tracking-wide"
               style={{
-                fontSize: 'clamp(13px, 2.5vw, 15px)',
+                fontSize: 'clamp(12px, 1.6vh, 14px)',
                 color: STITCH.primary,
               }}
             >
@@ -241,7 +241,7 @@ export default function HomeView() {
         {/* ═══ HOT ITEMS / LIVE LISTINGS SECTION ═══ */}
         <section
           className="w-full max-w-7xl mx-auto"
-          style={{ marginTop: 'clamp(28px, 5vh, 64px)' }}
+          style={{ marginTop: 'clamp(16px, 2.5vh, 36px)' }}
         >
 
           {/* Section Header */}
