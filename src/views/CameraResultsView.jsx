@@ -1,8 +1,31 @@
 import React, { useEffect } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2 } from 'lucide-react';
+import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Settings, Image as ImageIcon, History, Box, Database, MoreVertical } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice, isSerialEligible } from '../lib/utils';
+
+// ═══════════════════════════════════════════════════════
+// STITCH DESIGN TOKENS — ported from HTML tailwind.config
+// ═══════════════════════════════════════════════════════
+const STITCH = {
+  background:              '#131313',
+  primary:                 '#6FEEE1',
+  primaryContainer:        '#4FD1C5',
+  onPrimary:               '#003733',
+  onSurface:               '#e5e2e1',
+  onSurfaceVariant:        '#BBC9C7',
+  surfaceContainerLowest:  '#0e0e0e',
+  surfaceContainerLow:     '#1C1B1B',
+  surfaceContainer:        '#201f1f',
+  surfaceContainerHigh:    '#2A2A2A',
+  surfaceContainerHighest: '#353534',
+  outlineVariant:          '#3c4947',
+  GRADIENT_PRIMARY: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)',
+  GLASS_BG:    'rgba(53, 53, 52, 0.6)',
+  GLASS_BLUR:  'blur(24px)',
+  FONT_HEADLINE: '"Manrope", system-ui, -apple-system, sans-serif',
+  FONT_BODY:     '"Inter", system-ui, -apple-system, sans-serif',
+};
 
 // ═══════════════════════════════════════════════════════
 // POPULAR BRANDS PER CATEGORY — for quick-select chips
@@ -37,11 +60,21 @@ function getBrandSuggestions(category) {
 export function CameraView() {
   const {
     videoRef, canvasRef, capture, stopCamera, showFlash,
-    torchSupported, torchOn, toggleTorch, lang, releaseCamera,
+    torchSupported, torchOn, toggleTorch, lang, rtl, releaseCamera,
     addPhotoMode,
   } = useApp();
 
   const [cameraReady, setCameraReady] = React.useState(false);
+
+  // Inject Manrope + Inter fonts
+  useEffect(() => {
+    if (document.getElementById('stitch-fonts')) return;
+    const link = document.createElement('link');
+    link.id = 'stitch-fonts';
+    link.rel = 'stylesheet';
+    link.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap';
+    document.head.appendChild(link);
+  }, []);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -73,57 +106,226 @@ export function CameraView() {
   }, [releaseCamera]);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black">
-      <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover" />
-      <canvas ref={canvasRef} className="hidden" />
-      
-      {showFlash && <div className="absolute inset-0 bg-white animate-flash z-50" />}
-      
-      <div className="absolute inset-0 pointer-events-none">
-        <div className="absolute inset-8 rounded-3xl border-2 border-white/30" style={{ boxShadow: '0 0 0 9999px rgba(0,0,0,0.5)' }} />
-        <div className="absolute top-10 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full bg-black/50 backdrop-blur-sm text-sm text-white">
-          {addPhotoMode
-            ? (lang === 'he' ? 'צלם את התווית או הלוגו' : 'Take a photo of the label or logo')
-            : (lang === 'he' ? 'מקם את הפריט במסגרת' : 'Position item in frame')
-          }
+    <div
+      className="fixed inset-0 z-50 overflow-hidden"
+      style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
+      dir={rtl ? 'rtl' : 'ltr'}
+    >
+      {/* ═══ BACKGROUND: Live camera feed (slightly dimmed) ═══ */}
+      <div className="fixed inset-0 z-0">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full h-full object-cover"
+          style={{ filter: 'brightness(0.85)' }}
+        />
+        <canvas ref={canvasRef} className="hidden" />
+        <div className="absolute inset-0" style={{ background: 'rgba(19, 19, 19, 0.35)', backdropFilter: 'blur(1px)' }} />
+      </div>
+
+      {/* Flash overlay on capture */}
+      {showFlash && <div className="absolute inset-0 bg-white animate-flash z-[60]" />}
+
+      {/* Radial vignette */}
+      <div
+        className="fixed inset-0 pointer-events-none z-10"
+        style={{ background: 'radial-gradient(circle at center, transparent 40%, rgba(0,0,0,0.6) 100%)' }}
+      />
+
+      {/* ═══ SCANNER FRAME with corner brackets ═══ */}
+      <div className="fixed inset-0 z-20 flex flex-col items-center justify-center pointer-events-none">
+        <div
+          className="relative aspect-square flex items-center justify-center"
+          style={{
+            width: '75vw',
+            maxWidth: '28rem',
+            border: '1.5px solid rgba(111, 238, 225, 0.30)',
+            borderRadius: '1rem',
+          }}
+        >
+          {/* Four corner brackets with pulse */}
+          {[
+            { pos: 'top-0 left-0', border: 'border-t-[3px] border-l-[3px] rounded-tl-xl' },
+            { pos: 'top-0 right-0', border: 'border-t-[3px] border-r-[3px] rounded-tr-xl' },
+            { pos: 'bottom-0 left-0', border: 'border-b-[3px] border-l-[3px] rounded-bl-xl' },
+            { pos: 'bottom-0 right-0', border: 'border-b-[3px] border-r-[3px] rounded-br-xl' },
+          ].map((c, i) => (
+            <div
+              key={i}
+              className={`absolute ${c.pos} w-8 h-8 ${c.border} animate-pulse`}
+              style={{ borderColor: STITCH.primary, animationDuration: '3s' }}
+            />
+          ))}
+
+          {/* Center label */}
+          <div className="text-center">
+            <p
+              className="font-bold tracking-widest text-xs uppercase mb-2"
+              style={{ color: STITCH.primary, fontFamily: STITCH.FONT_HEADLINE }}
+            >
+              {addPhotoMode
+                ? (lang === 'he' ? 'צלם תווית' : 'CAPTURE LABEL')
+                : (lang === 'he' ? 'יישר פריט' : 'ALIGN ITEM')}
+            </p>
+            <p
+              className="font-medium text-[10px] tracking-wide"
+              style={{ color: STITCH.onSurfaceVariant }}
+            >
+              {addPhotoMode
+                ? (lang === 'he' ? 'מקם את התווית או הלוגו' : 'Position the label or logo')
+                : (lang === 'he' ? 'מקם את הפריט במסגרת' : 'Position the item within the frame')}
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Add-photo indicator */}
-      {addPhotoMode && (
-        <div className="absolute top-20 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-blue-500/20 border border-blue-500/30 text-xs text-blue-300 flex items-center gap-1.5">
-          <Camera className="w-3 h-3" />
-          {lang === 'he' ? 'תמונה נוספת' : 'Additional photo'}
-        </div>
-      )}
-
-      <div className="absolute bottom-0 inset-x-0 p-8 flex justify-center gap-6 bg-gradient-to-t from-black via-black/80 to-transparent">
-        <button onClick={stopCamera} className="w-14 h-14 rounded-2xl bg-white/10 backdrop-blur flex items-center justify-center hover:bg-white/20 transition-all">
-          <X className="w-6 h-6 text-white" />
+      {/* ═══ TOP BAR: close + flash + settings ═══ */}
+      <nav className="fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-6 h-16 max-w-7xl mx-auto bg-transparent">
+        <button
+          onClick={stopCamera}
+          className="w-12 h-12 flex items-center justify-center rounded-full transition-all active:scale-95"
+          style={{
+            background: 'rgba(19, 19, 19, 0.40)',
+            backdropFilter: 'blur(24px)',
+            WebkitBackdropFilter: 'blur(24px)',
+          }}
+          aria-label={lang === 'he' ? 'סגור' : 'Close'}
+        >
+          <X className="w-6 h-6" style={{ color: STITCH.onSurface }} />
         </button>
 
-        <button onClick={capture} disabled={!cameraReady}
-          className={`w-20 h-20 rounded-full flex items-center justify-center shadow-xl active:scale-95 transition-all ${cameraReady ? 'bg-gradient-to-r from-blue-500 to-blue-600 shadow-blue-500/50' : 'bg-white/10 opacity-50'}`}>
-          {cameraReady ? (
-            <div className="w-16 h-16 rounded-full border-4 border-white/30" />
-          ) : (
-            <div className="w-6 h-6 border-2 border-white/50 border-t-transparent rounded-full animate-spin" />
+        <div className="flex items-center gap-3">
+          {torchSupported && (
+            <button
+              onClick={toggleTorch}
+              className="w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-95"
+              style={{
+                background: torchOn
+                  ? 'rgba(111, 238, 225, 0.20)'
+                  : 'rgba(19, 19, 19, 0.40)',
+                backdropFilter: 'blur(24px)',
+                WebkitBackdropFilter: 'blur(24px)',
+                border: torchOn ? `1px solid ${STITCH.primary}` : 'none',
+              }}
+              aria-label={torchOn ? (lang === 'he' ? 'כבה פלאש' : 'Flash off') : (lang === 'he' ? 'הדלק פלאש' : 'Flash on')}
+            >
+              {torchOn
+                ? <Zap className="w-5 h-5" style={{ color: STITCH.primary }} />
+                : <ZapOff className="w-5 h-5" style={{ color: STITCH.onSurface }} />
+              }
+            </button>
           )}
-        </button>
-
-        {torchSupported ? (
-          <button
-            onClick={toggleTorch}
-            className={`w-14 h-14 rounded-2xl backdrop-blur flex items-center justify-center transition-all ${
-              torchOn ? 'bg-yellow-500/30 border border-yellow-400/50' : 'bg-white/10 hover:bg-white/20'
-            }`}
-            title={torchOn ? (lang === 'he' ? 'כבה פלאש' : 'Turn off flash') : (lang === 'he' ? 'הדלק פלאש' : 'Turn on flash')}
+          {/* Settings button — decorative for now, mirrors the Stitch HTML */}
+          <div
+            className="w-10 h-10 flex items-center justify-center rounded-full opacity-50 cursor-default"
+            style={{
+              background: 'rgba(19, 19, 19, 0.40)',
+              backdropFilter: 'blur(24px)',
+              WebkitBackdropFilter: 'blur(24px)',
+            }}
+            aria-hidden="true"
           >
-            {torchOn ? <Zap className="w-6 h-6 text-yellow-300" /> : <ZapOff className="w-6 h-6 text-white/70" />}
+            <Settings className="w-5 h-5" style={{ color: STITCH.onSurface }} />
+          </div>
+        </div>
+      </nav>
+
+      {/* ═══ BOTTOM PANEL: PHOTO/SCANNER/BATCH + shutter + GALLERY/RECENT ═══ */}
+      <div
+        className="fixed bottom-0 left-0 right-0 z-30 px-8 pb-10 pt-16 flex flex-col items-center gap-6"
+        style={{
+          background: 'linear-gradient(to top, #131313 0%, rgba(19,19,19,0.85) 40%, transparent 100%)',
+        }}
+      >
+        {/* PHOTO / SCANNER / BATCH tabs */}
+        <div
+          className="flex items-center gap-10 font-semibold tracking-wide text-sm"
+          style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
+        >
+          <span className="opacity-60 cursor-default" aria-hidden="true">
+            {lang === 'he' ? 'תמונה' : 'PHOTO'}
+          </span>
+          <span
+            className="relative"
+            style={{ color: STITCH.primary }}
+          >
+            {lang === 'he' ? 'סורק' : 'SCANNER'}
+            <span
+              className="absolute left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full"
+              style={{
+                bottom: '-8px',
+                background: STITCH.primary,
+                boxShadow: `0 0 8px ${STITCH.primary}`,
+              }}
+            />
+          </span>
+          <span className="opacity-30 cursor-not-allowed" aria-disabled="true">
+            {lang === 'he' ? 'אצווה' : 'BATCH'}
+          </span>
+        </div>
+
+        {/* Shutter button with outer ring */}
+        <div className="relative flex items-center justify-center">
+          <div
+            className="absolute w-24 h-24 rounded-full pointer-events-none"
+            style={{ border: '1.5px solid rgba(111, 238, 225, 0.20)', transform: 'scale(1.25)' }}
+          />
+          <button
+            onClick={capture}
+            disabled={!cameraReady}
+            className="group relative w-20 h-20 rounded-full flex items-center justify-center transition-all duration-300 active:scale-90"
+            style={{
+              background: cameraReady ? STITCH.primaryContainer : STITCH.surfaceContainerHigh,
+              boxShadow: cameraReady ? '0 0 30px rgba(111, 238, 225, 0.40)' : 'none',
+              opacity: cameraReady ? 1 : 0.5,
+            }}
+            aria-label={lang === 'he' ? 'צלם' : 'Capture'}
+          >
+            <div
+              className="absolute rounded-full"
+              style={{
+                inset: '6px',
+                border: '3px solid rgba(19, 19, 19, 0.20)',
+              }}
+            />
+            {cameraReady ? (
+              <Camera className="w-8 h-8 relative z-10" style={{ color: STITCH.onPrimary }} strokeWidth={2.5} />
+            ) : (
+              <div
+                className="w-6 h-6 border-2 border-t-transparent rounded-full animate-spin relative z-10"
+                style={{ borderColor: STITCH.onSurfaceVariant, borderTopColor: 'transparent' }}
+              />
+            )}
           </button>
-        ) : (
-          <div className="w-14 h-14" />
-        )}
+        </div>
+
+        {/* GALLERY / RECENT shortcuts — visual only, not wired (Stitch parity) */}
+        <div className="flex justify-between w-full max-w-sm px-6">
+          <div className="flex flex-col items-center gap-1 opacity-60">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{ background: STITCH.surfaceContainerHigh, color: STITCH.onSurfaceVariant }}
+            >
+              <ImageIcon className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-semibold tracking-tighter" style={{ color: STITCH.onSurfaceVariant }}>
+              {lang === 'he' ? 'גלריה' : 'GALLERY'}
+            </span>
+          </div>
+          <div className="flex flex-col items-center gap-1 opacity-60">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{ background: STITCH.surfaceContainerHigh, color: STITCH.onSurfaceVariant }}
+            >
+              <History className="w-5 h-5" />
+            </div>
+            <span className="text-[10px] font-semibold tracking-tighter" style={{ color: STITCH.onSurfaceVariant }}>
+              {lang === 'he' ? 'אחרונים' : 'RECENT'}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -134,7 +336,7 @@ export function CameraView() {
 // ═══════════════════════════════════════════════════════
 export function AnalyzingView() {
   const {
-    lang, t, images, capturedImageRef,
+    lang, t, images, capturedImageRef, rtl,
     pipelineState, pipelineError,
     retryPipeline, cancelPipeline,
   } = useApp();
@@ -143,54 +345,67 @@ export function AnalyzingView() {
   const isCompressing = pipelineState === 'compressing';
   const isIdentifying = pipelineState === 'identifying';
   const isPricing = pipelineState === 'pricing';
-  const isAnalyzing = isIdentifying || isPricing;
 
+  // ═══ ERROR STATE ═══
   if (isError) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
-        <div className="relative w-48 h-48 rounded-3xl overflow-hidden shadow-2xl mb-8 opacity-60">
+      <div
+        className="fixed inset-0 z-50 flex flex-col items-center justify-center px-6"
+        style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
+        dir={rtl ? 'rtl' : 'ltr'}
+      >
+        {/* Captured image preview */}
+        <div
+          className="relative w-48 h-48 rounded-2xl overflow-hidden mb-8 opacity-60"
+          style={{ background: STITCH.surfaceContainerLowest }}
+        >
           {(capturedImageRef.current || images[0]) && (
             <img src={capturedImageRef.current || images[0]} className="w-full h-full object-cover" alt="" />
           )}
-          <div className="absolute inset-0 bg-red-900/30" />
+          <div className="absolute inset-0" style={{ background: 'rgba(127, 29, 29, 0.30)' }} />
         </div>
 
         <div className="text-center space-y-4 max-w-xs">
-          <div className="w-16 h-16 rounded-2xl bg-red-500/20 flex items-center justify-center mx-auto">
-            <AlertTriangle className="w-8 h-8 text-red-400" />
+          <div
+            className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+            style={{ background: 'rgba(255, 180, 171, 0.15)' }}
+          >
+            <AlertTriangle className="w-8 h-8" style={{ color: '#ffb4ab' }} />
           </div>
 
-          <h3 className="text-xl font-bold text-white">
+          <h3 className="text-xl font-bold" style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}>
             {pipelineState === 'compress_error'
               ? (lang === 'he' ? 'שגיאה בעיבוד התמונה' : 'Image Processing Failed')
               : (lang === 'he' ? 'שגיאה בניתוח' : 'Analysis Failed')
             }
           </h3>
 
-          <p className="text-sm text-slate-400">
+          <p className="text-sm" style={{ color: STITCH.onSurfaceVariant }}>
             {pipelineError || (lang === 'he' ? 'משהו השתבש, נסה שוב' : 'Something went wrong, please try again')}
           </p>
 
-          <div className="flex items-center justify-center gap-3 text-xs">
-            <div className={`flex items-center gap-1.5 ${pipelineState === 'compress_error' ? 'text-red-400' : 'text-green-400'}`}>
-              <div className={`w-2 h-2 rounded-full ${pipelineState === 'compress_error' ? 'bg-red-400' : 'bg-green-400'}`} />
-              {lang === 'he' ? 'עיבוד' : 'Processing'}
-            </div>
-            <div className="w-4 h-px bg-slate-600" />
-            <div className={`flex items-center gap-1.5 ${pipelineState === 'analysis_error' ? 'text-red-400' : 'text-slate-500'}`}>
-              <div className={`w-2 h-2 rounded-full ${pipelineState === 'analysis_error' ? 'bg-red-400' : 'bg-slate-600'}`} />
-              {lang === 'he' ? 'ניתוח AI' : 'AI Analysis'}
-            </div>
-          </div>
-
           <div className="flex gap-3 pt-2">
-            <button onClick={cancelPipeline}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/10 transition-all flex items-center justify-center gap-2">
-              <ArrowLeft className="w-4 h-4" />
+            <button
+              onClick={cancelPipeline}
+              className="flex-1 py-3 rounded-xl text-sm transition-all flex items-center justify-center gap-2"
+              style={{
+                background: STITCH.surfaceContainerHigh,
+                color: STITCH.onSurfaceVariant,
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+              }}
+            >
+              {rtl ? <ArrowLeft className="w-4 h-4 rotate-180" /> : <ArrowLeft className="w-4 h-4" />}
               {lang === 'he' ? 'חזור' : 'Back'}
             </button>
-            <button onClick={retryPipeline}
-              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-blue-500 text-sm font-semibold text-white shadow-lg shadow-blue-500/30 hover:from-blue-500 hover:to-blue-400 transition-all flex items-center justify-center gap-2 active:scale-[0.97]">
+            <button
+              onClick={retryPipeline}
+              className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 active:scale-[0.97]"
+              style={{
+                background: STITCH.GRADIENT_PRIMARY,
+                color: STITCH.onPrimary,
+                boxShadow: '0 10px 25px rgba(111, 238, 225, 0.25)',
+              }}
+            >
               <RefreshCw className="w-4 h-4" />
               {lang === 'he' ? 'נסה שוב' : 'Retry'}
             </button>
@@ -200,99 +415,275 @@ export function AnalyzingView() {
     );
   }
 
+  // ═══ ANALYZING STATE ═══
   return (
-    <div className="flex-1 flex flex-col items-center justify-center py-10 min-h-[70vh]">
-      <div className="relative">
-        <div className="absolute -inset-12 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-cyan-500/20 rounded-full blur-3xl animate-pulse" />
-        <div className="absolute -inset-8 bg-blue-500/10 rounded-full blur-2xl animate-ping" style={{ animationDuration: '2s' }} />
-        <div className="absolute -inset-3 rounded-[2rem] bg-gradient-to-r from-blue-500 via-purple-500 to-cyan-500 animate-spin-slow opacity-70" style={{ animationDuration: '3s' }} />
-        <div className="absolute -inset-2.5 rounded-[1.8rem] bg-[#0a1020]" />
-        
-        <div className="relative w-56 h-56 rounded-3xl overflow-hidden shadow-2xl shadow-blue-500/40">
-          {(capturedImageRef.current || images[0]) && (
-            <img src={capturedImageRef.current || images[0]} className="w-full h-full object-cover" alt="Captured item" />
-          )}
-          <div className="absolute inset-0 overflow-hidden">
-            <div className="absolute left-0 right-0 h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent animate-scan" />
-          </div>
-          <div className="absolute inset-0 pointer-events-none">
-            {['top-2 left-2', 'top-2 right-2', 'bottom-2 left-2', 'bottom-2 right-2'].map((pos, i) => (
-              <svg key={i} className={`absolute ${pos} w-6 h-6 text-blue-400`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d={i < 2 ? (i === 0 ? 'M4 8V4h4M4 16v4h4' : 'M20 8V4h-4M20 16v4h-4') : (i === 2 ? 'M4 8V4h4M4 16v4h4' : 'M20 8V4h-4M20 16v4h-4')} />
-              </svg>
-            ))}
-          </div>
-          <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent animate-shimmer-fast" />
-        </div>
-
-        {/* Multi-photo indicator */}
-        {images.length > 1 && (
-          <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-blue-600 text-xs font-bold text-white shadow-lg">
-            {images.length} {lang === 'he' ? 'תמונות' : 'photos'}
-          </div>
+    <div
+      className="fixed inset-0 z-50 overflow-hidden"
+      style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
+      dir={rtl ? 'rtl' : 'ltr'}
+    >
+      {/* Captured image as blurred background */}
+      <div className="fixed inset-0 z-0">
+        {(capturedImageRef.current || images[0]) && (
+          <img
+            src={capturedImageRef.current || images[0]}
+            className="w-full h-full object-cover"
+            alt=""
+          />
         )}
-        
-        <div className="absolute -inset-8 pointer-events-none">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="absolute w-2 h-2 rounded-full bg-blue-400 animate-float"
-              style={{ left: `${20 + (i * 15)}%`, top: `${10 + (i % 3) * 30}%`, animationDelay: `${i * 0.3}s`, animationDuration: `${2 + (i % 2)}s` }} />
-          ))}
-        </div>
+        <div
+          className="absolute inset-0"
+          style={{
+            backdropFilter: 'blur(40px) brightness(0.4)',
+            WebkitBackdropFilter: 'blur(40px) brightness(0.4)',
+            background: 'rgba(19, 19, 19, 0.55)',
+          }}
+        />
       </div>
-      
-      <div className="mt-10 text-center space-y-5">
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/30">
-          <Sparkles className="w-4 h-4 text-blue-400 animate-pulse" />
-          <span className="text-sm font-semibold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
-            {isCompressing
-              ? (lang === 'he' ? 'מכין תמונה' : 'Preparing Image')
-              : isPricing
-              ? (lang === 'he' ? 'מעריך מחיר' : 'Estimating Price')
-              : (lang === 'he' ? 'מזהה פריט' : 'Identifying Item')
-            }
-          </span>
-        </div>
-        <div>
-          <h3 className="text-xl font-bold text-white mb-1">
-            {isCompressing ? (lang === 'he' ? 'מעבד תמונה...' : 'Processing image...') : t.analyzing}
-          </h3>
-          <p className="text-sm text-slate-400">
-            {isCompressing
-              ? (lang === 'he' ? 'מכווץ ומכין לניתוח...' : 'Compressing and preparing...')
-              : isPricing
-              ? (lang === 'he' ? 'בודק מחירים בשוק הישראלי...' : 'Checking Israeli market prices...')
-              : (lang === 'he' ? 'קורא טקסט, מזהה מותג ודגם...' : 'Reading text, identifying brand & model...')
-            }
-          </p>
-        </div>
-        <div className="w-48 mx-auto">
-          <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500 rounded-full animate-progress" />
+
+      {/* ═══ TOP BAR: back arrow + Marketplace + AI ACTIVE ═══ */}
+      <header
+        className="sticky top-0 w-full z-50"
+        style={{
+          background: 'rgba(19, 19, 19, 0.60)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+        }}
+      >
+        <div className="flex items-center justify-between px-6 h-16 max-w-7xl mx-auto">
+          <div className="flex items-center gap-4">
+            <button onClick={cancelPipeline} className="active:scale-95 transition-all hover:opacity-80">
+              {rtl
+                ? <ChevronRight className="w-6 h-6" style={{ color: STITCH.primary }} />
+                : <ArrowLeft className="w-6 h-6" style={{ color: STITCH.primary }} />
+              }
+            </button>
+            <h1
+              className="text-lg font-semibold tracking-tight"
+              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.primary }}
+            >
+              {lang === 'he' ? 'שוק' : 'Marketplace'}
+            </h1>
           </div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: STITCH.primary }} />
+            <span className="text-[10px] font-medium tracking-widest uppercase" style={{ color: STITCH.onSurfaceVariant }}>
+              {lang === 'he' ? 'AI פעיל' : 'AI Active'}
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* ═══ MAIN SCANNING CANVAS ═══ */}
+      <main className="relative z-10 flex flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 128px)' }}>
+        {/* Intelligent void container */}
+        <div className="relative w-full max-w-md aspect-square flex items-center justify-center">
+          {/* Outer frame */}
+          <div
+            className="absolute inset-0 rounded-2xl"
+            style={{ border: '1px solid rgba(60, 73, 71, 0.20)' }}
+          />
+
+          {/* Pulse rings */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+            <div
+              className="w-64 h-64 rounded-full animate-pulse"
+              style={{
+                border: `2px solid rgba(111, 238, 225, 0.20)`,
+                animationDuration: '4s',
+              }}
+            />
+            <div
+              className="absolute w-48 h-48 rounded-full animate-pulse"
+              style={{
+                border: `1px solid rgba(111, 238, 225, 0.40)`,
+                animationDuration: '4s',
+                animationDelay: '1s',
+              }}
+            />
+          </div>
+
+          {/* Central scanning indicator */}
+          <div className="relative z-20 flex flex-col items-center">
+            <div
+              className="w-32 h-32 rounded-full flex items-center justify-center"
+              style={{
+                background: STITCH.GLASS_BG,
+                backdropFilter: STITCH.GLASS_BLUR,
+                WebkitBackdropFilter: STITCH.GLASS_BLUR,
+                border: `1px solid rgba(111, 238, 225, 0.30)`,
+                boxShadow: '0 0 50px rgba(111, 238, 225, 0.15)',
+              }}
+            >
+              <Box className="w-14 h-14" style={{ color: STITCH.primary }} strokeWidth={2} />
+            </div>
+          </div>
+
+          {/* Horizontal scan line */}
+          <div
+            className="absolute left-0 right-0 top-1/2 z-20 pointer-events-none"
+            style={{
+              height: '2px',
+              background: `linear-gradient(90deg, transparent, ${STITCH.primary}, transparent)`,
+              boxShadow: `0 0 20px 2px ${STITCH.primary}`,
+            }}
+          />
+
+          {/* Floating chip: Texture Map (top-left) */}
+          <div
+            className="absolute top-12 left-0 p-3 rounded-2xl flex items-center gap-3"
+            style={{
+              background: STITCH.GLASS_BG,
+              backdropFilter: STITCH.GLASS_BLUR,
+              WebkitBackdropFilter: STITCH.GLASS_BLUR,
+              border: '1px solid rgba(111, 238, 225, 0.10)',
+            }}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center"
+              style={{ background: 'rgba(111, 238, 225, 0.10)' }}
+            >
+              <Sparkles className="w-4 h-4" style={{ color: STITCH.primary }} />
+            </div>
+            <div>
+              <div className="text-[10px] leading-none uppercase tracking-tighter" style={{ color: STITCH.onSurfaceVariant }}>
+                {lang === 'he' ? 'טקסטורה' : 'Texture Map'}
+              </div>
+              <div className="text-xs font-semibold" style={{ color: STITCH.primary }}>
+                {(isCompressing || isIdentifying)
+                  ? (lang === 'he' ? 'מנתח...' : 'ANALYZING...')
+                  : (lang === 'he' ? 'הושלם' : 'COMPLETE')
+                }
+              </div>
+            </div>
+          </div>
+
+          {/* Floating chip: Database (bottom-right) */}
+          <div
+            className="absolute bottom-12 right-0 p-3 rounded-2xl flex items-center gap-3"
+            style={{
+              background: STITCH.GLASS_BG,
+              backdropFilter: STITCH.GLASS_BLUR,
+              WebkitBackdropFilter: STITCH.GLASS_BLUR,
+              border: '1px solid rgba(111, 238, 225, 0.10)',
+            }}
+          >
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center"
+              style={{ background: 'rgba(111, 238, 225, 0.10)' }}
+            >
+              <Database className="w-4 h-4" style={{ color: STITCH.primary }} />
+            </div>
+            <div>
+              <div className="text-[10px] leading-none uppercase tracking-tighter" style={{ color: STITCH.onSurfaceVariant }}>
+                {lang === 'he' ? 'מסד נתונים' : 'Database'}
+              </div>
+              <div className="text-xs font-semibold" style={{ color: STITCH.primary }}>
+                {isPricing
+                  ? (lang === 'he' ? 'מתמחר...' : 'PRICING...')
+                  : (lang === 'he' ? 'מחפש...' : 'MATCHING...')
+                }
+              </div>
+            </div>
+          </div>
+
+          {/* Multi-photo indicator */}
+          {images.length > 1 && (
+            <div
+              className="absolute -bottom-4 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-xs font-bold shadow-lg"
+              style={{ background: STITCH.primary, color: STITCH.onPrimary }}
+            >
+              {images.length} {lang === 'he' ? 'תמונות' : 'photos'}
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center justify-center gap-6 text-xs text-slate-500">
-          <div className={`flex items-center gap-1.5 ${isCompressing ? 'animate-pulse text-blue-400' : (isAnalyzing ? 'text-green-400' : 'text-slate-500')}`}>
-            <div className={`w-2 h-2 rounded-full ${isCompressing ? 'bg-blue-400 animate-pulse' : (isAnalyzing ? 'bg-green-400' : 'bg-slate-600')}`} />
-            <Scan className="w-3.5 h-3.5" />
-            <span>{lang === 'he' ? 'עיבוד' : 'Processing'}</span>
+        {/* ═══ STATUS + STEPPER ═══ */}
+        <div className="mt-12 w-full max-w-sm flex flex-col items-center gap-8">
+          {/* Editorial status */}
+          <div className="text-center">
+            <h2
+              className="text-2xl font-bold mb-2"
+              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+            >
+              {isCompressing
+                ? (lang === 'he' ? 'מעבד תמונה...' : 'Processing image...')
+                : isPricing
+                ? (lang === 'he' ? 'מעריך מחיר...' : 'Estimating price...')
+                : (lang === 'he' ? 'מזהה פריט...' : 'Identifying item...')
+              }
+            </h2>
+            <p className="text-sm" style={{ color: STITCH.onSurfaceVariant }}>
+              {isCompressing
+                ? (lang === 'he' ? 'מכווץ ומכין את התמונה' : 'Compressing and preparing your image')
+                : isPricing
+                ? (lang === 'he' ? 'בודק מחירים בשוק הישראלי' : 'Checking Israeli market prices')
+                : (lang === 'he' ? 'הרשת הנוירונית מצליבה מיליוני מודעות' : 'Our neural network is cross-referencing millions of marketplace listings.')
+              }
+            </p>
           </div>
-          <div className={`flex items-center gap-1.5 ${isIdentifying ? 'animate-pulse text-blue-400' : (isPricing ? 'text-green-400' : 'text-slate-500')}`}>
-            <div className={`w-2 h-2 rounded-full ${isIdentifying ? 'bg-blue-400 animate-pulse' : (isPricing ? 'bg-green-400' : 'bg-slate-600')}`} />
-            <Search className="w-3.5 h-3.5" />
-            <span>{lang === 'he' ? 'זיהוי' : 'Identifying'}</span>
-          </div>
-          <div className={`flex items-center gap-1.5 ${isPricing ? 'animate-pulse text-blue-400' : 'text-slate-500'}`}>
-            <div className={`w-2 h-2 rounded-full ${isPricing ? 'bg-blue-400 animate-pulse' : 'bg-slate-600'}`} />
-            <TrendingUp className="w-3.5 h-3.5" />
-            <span>{lang === 'he' ? 'הערכה' : 'Pricing'}</span>
-          </div>
-        </div>
 
-        <button onClick={cancelPipeline} className="text-slate-500 text-xs hover:text-slate-300 transition-colors mt-2">
-          {lang === 'he' ? 'ביטול' : 'Cancel'}
-        </button>
-      </div>
+          {/* Stepper — 3 dashes */}
+          <div className="flex gap-4 items-center">
+            {/* Processing */}
+            <div className="flex flex-col items-center gap-2" style={{ opacity: isCompressing || isIdentifying || isPricing ? 1 : 0.3 }}>
+              <div className="w-12 h-1 rounded-full" style={{ background: STITCH.primary }} />
+              <span className="text-[10px] font-medium" style={{ color: STITCH.primary }}>
+                {lang === 'he' ? 'עיבוד' : 'Processing'}
+              </span>
+            </div>
+            {/* Identifying */}
+            <div className="flex flex-col items-center gap-2" style={{ opacity: isIdentifying || isPricing ? 1 : 0.3 }}>
+              <div
+                className="w-12 h-1 rounded-full relative overflow-hidden"
+                style={{ background: isIdentifying || isPricing ? STITCH.primary : STITCH.onSurfaceVariant }}
+              >
+                {isIdentifying && (
+                  <div
+                    className="absolute inset-0 animate-pulse"
+                    style={{ background: 'rgba(255, 255, 255, 0.30)', animationDuration: '2s' }}
+                  />
+                )}
+              </div>
+              <span
+                className="text-[10px] font-medium"
+                style={{ color: isIdentifying || isPricing ? STITCH.primary : STITCH.onSurfaceVariant }}
+              >
+                {lang === 'he' ? 'זיהוי' : 'Identifying'}
+              </span>
+            </div>
+            {/* Pricing */}
+            <div className="flex flex-col items-center gap-2" style={{ opacity: isPricing ? 1 : 0.3 }}>
+              <div
+                className="w-12 h-1 rounded-full relative overflow-hidden"
+                style={{ background: isPricing ? STITCH.primary : STITCH.onSurfaceVariant }}
+              >
+                {isPricing && (
+                  <div
+                    className="absolute inset-0 animate-pulse"
+                    style={{ background: 'rgba(255, 255, 255, 0.30)', animationDuration: '2s' }}
+                  />
+                )}
+              </div>
+              <span
+                className="text-[10px] font-medium"
+                style={{ color: isPricing ? STITCH.primary : STITCH.onSurfaceVariant }}
+              >
+                {lang === 'he' ? 'תמחור' : 'Pricing'}
+              </span>
+            </div>
+          </div>
+
+          {/* Cancel */}
+          <button
+            onClick={cancelPipeline}
+            className="text-xs transition-colors"
+            style={{ color: STITCH.onSurfaceVariant }}
+          >
+            {lang === 'he' ? 'ביטול' : 'Cancel'}
+          </button>
+        </div>
+      </main>
     </div>
   );
 }
@@ -608,7 +999,10 @@ export function ResultsView() {
   }
 
   return (
-    <div className="space-y-5 pb-4">
+    <div
+      className="space-y-5 pb-4"
+      style={{ fontFamily: STITCH.FONT_BODY, color: STITCH.onSurface }}
+    >
       {/* Help modal */}
       <HelpIdentifyModal />
 
@@ -617,7 +1011,9 @@ export function ResultsView() {
 
       {/* Item image + name — swipeable when multiple photos */}
       <FadeIn>
-        <div className="relative rounded-3xl overflow-hidden shadow-2xl"
+        <div
+          className="relative rounded-2xl overflow-hidden"
+          style={{ background: STITCH.surfaceContainerLowest }}
           onTouchStart={(e) => { e.currentTarget._touchX = e.touches[0].clientX; }}
           onTouchEnd={(e) => {
             const dx = e.changedTouches[0].clientX - (e.currentTarget._touchX || 0);
@@ -626,56 +1022,67 @@ export function ResultsView() {
               else setActivePhotoIndex(prev => Math.max(prev - 1, 0));
             }
           }}>
-          <div className="aspect-[4/3]">
+          <div className="aspect-[4/5]">
             <img src={images[activePhotoIndex] || images[0]} className="w-full h-full object-cover" />
           </div>
-          {/* Photo counter dots — only when multiple photos */}
+          {/* AUTHENTICATED glass pill — only shown when high confidence */}
+          {tier === 'high' && (
+            <div
+              className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2"
+              style={{
+                background: STITCH.GLASS_BG,
+                backdropFilter: STITCH.GLASS_BLUR,
+                WebkitBackdropFilter: STITCH.GLASS_BLUR,
+              }}
+            >
+              <Check className="w-3.5 h-3.5" style={{ color: STITCH.primary }} strokeWidth={3} />
+              <span
+                className="text-xs font-medium uppercase tracking-widest"
+                style={{ color: STITCH.primary }}
+              >
+                {lang === 'he' ? 'מאומת' : 'Authenticated'}
+              </span>
+            </div>
+          )}
+          {/* Photo counter dots — bottom center like Stitch */}
           {images.length > 1 && (
-            <div className="absolute top-3 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
               {images.map((_, i) => (
-                <button key={i} onClick={() => setActivePhotoIndex(i)}
-                  className={`w-2 h-2 rounded-full transition-all ${
-                    i === activePhotoIndex ? 'bg-white scale-125' : 'bg-white/40'
-                  }`} />
+                <button
+                  key={i}
+                  onClick={() => setActivePhotoIndex(i)}
+                  className="rounded-full transition-all"
+                  style={{
+                    height: '4px',
+                    width: i === activePhotoIndex ? '32px' : '6px',
+                    background: i === activePhotoIndex ? STITCH.primary : 'rgba(187, 201, 199, 0.30)',
+                  }}
+                />
               ))}
             </div>
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
-          <div className="absolute bottom-0 left-0 right-0 p-5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Badge color="blue">{result.category}</Badge>
-              {/* Confidence badge — tier-colored */}
-              <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold backdrop-blur-md ${styles.badgeBg}`}>
-                {isConfirmed || tier === 'high' ? <Check className="w-3 h-3" /> : <Search className="w-3 h-3" />}
-                {confidencePercent}%
+          {/* Category + confidence badges — top left, small overlay */}
+          <div className="absolute top-4 left-4 flex items-center gap-2 flex-wrap">
+            <Badge color="blue">{result.category}</Badge>
+            {/* Multi-photo badge */}
+            {images.length > 1 && (
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-purple-500/15 text-purple-400 backdrop-blur-md">
+                <Camera className="w-2.5 h-2.5" />
+                {images.length}
               </div>
-              {/* Multi-photo badge */}
-              {images.length > 1 && (
-                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-purple-500/15 text-purple-400 backdrop-blur-md">
-                  <Camera className="w-2.5 h-2.5" />
-                  {images.length}
-                </div>
-              )}
-              {/* Brand confidence indicator */}
-              {brandConf === 'confirmed_by_text' && (
-                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-green-500/15 text-green-400 backdrop-blur-md">
-                  <Eye className="w-2.5 h-2.5" />
-                  OCR
-                </div>
-              )}
-              {brandConf === 'inferred_from_visuals' && (
-                <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-500/15 text-blue-400 backdrop-blur-md">
-                  <Eye className="w-2.5 h-2.5" />
-                  {lang === 'he' ? 'חזותי' : 'Visual'}
-                </div>
-              )}
-            </div>
-            <h2 className="text-2xl font-bold mt-2">{lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}</h2>
-            {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
-              <p className="text-xs text-slate-400 mt-1">
-                {lang === 'he' ? 'דגם: ' : 'Model: '}{recognition.modelNumber || identification.model}
-                {brandConf === 'confirmed_by_text' ? ' ✓' : ''}
-              </p>
+            )}
+            {/* Brand confidence indicator */}
+            {brandConf === 'confirmed_by_text' && (
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-green-500/15 text-green-400 backdrop-blur-md">
+                <Eye className="w-2.5 h-2.5" />
+                OCR
+              </div>
+            )}
+            {brandConf === 'inferred_from_visuals' && (
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-500/15 text-blue-400 backdrop-blur-md">
+                <Eye className="w-2.5 h-2.5" />
+                {lang === 'he' ? 'חזותי' : 'Visual'}
+              </div>
             )}
           </div>
         </div>
@@ -695,25 +1102,74 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* Confidence bar */}
+      {/* ═══ STITCH CONFIDENCE SCORE CARD ═══ */}
       <FadeIn delay={50}>
-        <div className="px-1">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className={`text-xs font-semibold ${styles.color}`}>{getConfidenceLabel(tier, lang)}</span>
-            <span className="text-xs text-slate-500">{confidencePercent}%</span>
+        <div
+          className="relative overflow-hidden rounded-2xl p-6"
+          style={{ background: STITCH.surfaceContainerLow }}
+        >
+          <div className="flex justify-between items-end relative z-10">
+            <div>
+              <p
+                className="text-xs font-semibold uppercase tracking-wider"
+                style={{ color: STITCH.onSurfaceVariant }}
+              >
+                {lang === 'he' ? 'ציון ביטחון' : 'Confidence Score'}
+              </p>
+              <p
+                className="text-3xl font-bold mt-1"
+                style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.primary }}
+              >
+                {confidencePercent}%
+              </p>
+              <p className={`text-[10px] font-medium mt-0.5 ${styles.color}`}>
+                {getConfidenceLabel(tier, lang)}
+              </p>
+            </div>
+            <div className="text-right">
+              <p
+                className="text-[10px] font-medium uppercase mb-2"
+                style={{ color: STITCH.onSurfaceVariant }}
+              >
+                {lang === 'he' ? 'דיוק סריקה' : 'Scanning precision'}
+              </p>
+              {/* Bar visualizer — heights proportional to confidence */}
+              <div className="flex gap-0.5 items-end">
+                {[0.45, 0.70, 0.95, 0.55, 0.80, 1.0].map((h, i) => (
+                  <div
+                    key={i}
+                    className={`w-1 rounded-full ${i === 5 ? 'animate-pulse' : ''}`}
+                    style={{
+                      height: `${Math.max(8, Math.round(h * confidencePercent * 0.4))}px`,
+                      background: STITCH.primary,
+                      animationDuration: '2s',
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div className={`h-full rounded-full transition-all duration-700 ${styles.barColor}`} style={{ width: `${confidencePercent}%` }} />
-          </div>
+          <div
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background: `linear-gradient(to right, rgba(111, 238, 225, 0.05), transparent)`,
+            }}
+          />
         </div>
       </FadeIn>
 
-      {/* Confidence reasoning */}
+      {/* Confidence reasoning — more prominent for low/moderate confidence */}
       {confidenceReasoning && (
         <FadeIn delay={60}>
-          <div className="px-1 flex items-start gap-2">
-            <Info className="w-3.5 h-3.5 text-slate-500 mt-0.5 flex-shrink-0" />
-            <p className="text-[11px] text-slate-500 leading-relaxed">{confidenceReasoning}</p>
+          <div className={`px-3 py-2.5 rounded-xl flex items-start gap-2 ${
+            tier === 'high' ? '' : 'bg-white/[0.03] border border-white/5'
+          }`}>
+            <Info className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${
+              tier === 'high' ? 'text-slate-500' : tier === 'moderate' ? 'text-amber-400/70' : 'text-orange-400/70'
+            }`} />
+            <p className={`text-[11px] leading-relaxed ${
+              tier === 'high' ? 'text-slate-500' : 'text-slate-400'
+            }`}>{confidenceReasoning}</p>
           </div>
         </FadeIn>
       )}
@@ -933,33 +1389,57 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* Price card */}
+      {/* ═══ STITCH ESTIMATED VALUE — centered editorial display ═══ */}
       <FadeIn delay={100}>
-        <Card className="p-6 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.15), rgba(139,92,246,0.1))" glow>
-          <p className="text-sm text-blue-300 font-medium mb-2">
+        <div className="text-center px-4">
+          <h2
+            className="text-base font-medium tracking-wide"
+            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
+          >
             {tier === 'very_low'
               ? (lang === 'he' ? 'טווח מחירים משוער' : 'Estimated Price Range')
-              : t.marketValue}
+              : (lang === 'he' ? 'ערך משוער' : 'Estimated Value')}
+          </h2>
+          <div className="mt-1 flex items-baseline justify-center gap-1">
+            <span
+              className="text-5xl md:text-6xl font-extrabold tracking-tighter"
+              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+            >
+              {formatPrice(result.marketValue?.mid)}
+            </span>
+          </div>
+          <p
+            className="mt-4 text-2xl font-bold tracking-tight"
+            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+          >
+            {lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}
           </p>
-          <p className="text-5xl font-bold bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
-            {formatPrice(result.marketValue?.mid)}
-          </p>
+          {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
+            <p
+              className="text-sm mt-1 uppercase tracking-[0.2em] font-medium"
+              style={{ color: STITCH.onSurfaceVariant }}
+            >
+              {lang === 'he' ? 'דגם' : 'Ref.'} {recognition.modelNumber || identification.model}
+            </p>
+          )}
           {result.marketValue?.low > 0 && (
-            <p className="text-sm text-slate-400 mt-3">{t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}</p>
+            <p className="text-sm mt-3" style={{ color: STITCH.onSurfaceVariant }}>
+              {t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}
+            </p>
           )}
           {result.marketValue?.newRetailPrice > 0 && (
-            <p className="text-[11px] text-slate-500 mt-1.5">
+            <p className="text-[11px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
               {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
             </p>
           )}
           {priceMethod && (
-            <p className="text-[10px] text-slate-600 mt-1">
+            <p className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
               {priceMethod === 'comp_based'
                 ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
                 : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
             </p>
           )}
-        </Card>
+        </div>
       </FadeIn>
 
       {/* OCR extracted text — pill tags */}
@@ -1126,14 +1606,29 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* Actions */}
-      <FadeIn delay={200} className="flex gap-3">
-        <Btn primary className="flex-1 py-4" onClick={startListing}><Plus className="w-5 h-5" />{t.listItem}</Btn>
-        <Btn className="px-5"><Share2 className="w-5 h-5" /></Btn>
+      {/* Actions — Stitch gradient CTA */}
+      <FadeIn delay={200}>
+        <button
+          onClick={startListing}
+          className="w-full h-16 rounded-full flex items-center justify-center gap-3 font-extrabold text-lg active:scale-[0.97] transition-all"
+          style={{
+            background: STITCH.GRADIENT_PRIMARY,
+            color: STITCH.onPrimary,
+            fontFamily: STITCH.FONT_HEADLINE,
+            boxShadow: '0 20px 40px rgba(111, 238, 225, 0.20)',
+          }}
+        >
+          <span>{t.listItem}</span>
+          <Rocket className="w-5 h-5" strokeWidth={2.5} />
+        </button>
       </FadeIn>
 
       <FadeIn delay={300}>
-        <button onClick={reset} className="w-full py-3 text-slate-400 text-sm flex items-center justify-center gap-2 hover:text-white transition-colors">
+        <button
+          onClick={reset}
+          className="w-full py-3 text-sm flex items-center justify-center gap-2 transition-colors"
+          style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
+        >
           <RefreshCw className="w-4 h-4" />{t.scanAnother}
         </button>
       </FadeIn>
