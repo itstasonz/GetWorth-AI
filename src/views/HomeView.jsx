@@ -105,7 +105,15 @@ export default function HomeView() {
       />
 
       {/* ════ MAIN ════ */}
-      <main className="flex-grow flex flex-col items-center pt-8 pb-32 px-6 relative overflow-hidden">
+      <main
+        className="flex-grow flex flex-col items-center relative overflow-hidden"
+        style={{
+          paddingTop: 'clamp(16px, 3vh, 28px)',
+          paddingBottom: 'clamp(96px, 16vh, 140px)',
+          paddingLeft: 'clamp(16px, 5vw, 24px)',
+          paddingRight: 'clamp(16px, 5vw, 24px)',
+        }}
+      >
 
         {/* Ambient Decorative Glows — ported from HTML */}
         <div
@@ -118,19 +126,30 @@ export default function HomeView() {
         />
 
         {/* ═══ HERO / SCAN SECTION ═══ */}
-        <div className="w-full max-w-md flex flex-col items-center text-center space-y-10 z-10">
+        <div
+          className="w-full max-w-md flex flex-col items-center text-center z-10"
+          style={{ gap: 'clamp(20px, 3vh, 40px)' }}
+        >
 
           {/* Title + subtitle */}
-          <div className="space-y-3">
+          <div className="flex flex-col items-center" style={{ gap: 'clamp(8px, 1.2vh, 12px)' }}>
             <h2
-              className="text-4xl font-extrabold tracking-tight"
-              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+              className="font-extrabold tracking-tight leading-[1.05]"
+              style={{
+                fontSize: 'clamp(28px, 4.8vw, 40px)',
+                fontFamily: STITCH.FONT_HEADLINE,
+                color: STITCH.onSurface,
+              }}
             >
               {lang === 'he' ? 'אוצר דיגיטלי' : 'Digital Curator'}
             </h2>
             <p
-              className="font-medium text-lg max-w-[280px] mx-auto leading-relaxed"
-              style={{ color: STITCH.onSurfaceVariant }}
+              className="font-medium leading-relaxed mx-auto"
+              style={{
+                fontSize: 'clamp(14px, 2.5vw, 18px)',
+                maxWidth: 'clamp(260px, 70vw, 300px)',
+                color: STITCH.onSurfaceVariant,
+              }}
             >
               {lang === 'he'
                 ? 'זהה, הערך ופרסם פריטים בשוק באופן מיידי.'
@@ -151,8 +170,11 @@ export default function HomeView() {
             />
             <button
               onClick={startCamera}
-              className="relative w-56 h-56 rounded-full flex flex-col items-center justify-center gap-3 active:scale-95 transition-transform duration-300"
+              className="relative rounded-full flex flex-col items-center justify-center active:scale-95 transition-transform duration-300"
               style={{
+                width: 'clamp(148px, 42vw, 224px)',
+                height: 'clamp(148px, 42vw, 224px)',
+                gap: 'clamp(8px, 1.5vw, 12px)',
                 background: STITCH.GRADIENT_PRIMARY,
                 boxShadow: '0 20px 40px rgba(111, 238, 225, 0.25)',
               }}
@@ -160,14 +182,29 @@ export default function HomeView() {
             >
               {/* Inner icon circle */}
               <div
-                className="w-20 h-20 rounded-full flex items-center justify-center"
-                style={{ background: 'rgba(0, 55, 51, 0.10)' }}
+                className="rounded-full flex items-center justify-center"
+                style={{
+                  width: 'clamp(52px, 15vw, 80px)',
+                  height: 'clamp(52px, 15vw, 80px)',
+                  background: 'rgba(0, 55, 51, 0.10)',
+                }}
               >
-                <Camera className="w-12 h-12" strokeWidth={2.25} style={{ color: STITCH.onPrimary }} />
+                <Camera
+                  strokeWidth={2.25}
+                  style={{
+                    color: STITCH.onPrimary,
+                    width: 'clamp(24px, 7vw, 40px)',
+                    height: 'clamp(24px, 7vw, 40px)',
+                  }}
+                />
               </div>
               <span
-                className="font-bold text-xl tracking-tight"
-                style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onPrimary }}
+                className="font-bold tracking-tight"
+                style={{
+                  fontSize: 'clamp(18px, 3.4vw, 22px)',
+                  fontFamily: STITCH.FONT_HEADLINE,
+                  color: STITCH.onPrimary,
+                }}
               >
                 {lang === 'he' ? 'סרוק פריט' : 'Scan Item'}
               </span>
@@ -177,16 +214,23 @@ export default function HomeView() {
           {/* SECONDARY ACTION: UPLOAD PILL */}
           <button
             onClick={() => fileRef.current?.click()}
-            className="px-8 py-4 rounded-full flex items-center gap-3 active:scale-[0.97] transition-all"
+            className="rounded-full flex items-center gap-3 active:scale-[0.97] transition-all"
             style={{
+              paddingLeft: 'clamp(20px, 5vw, 32px)',
+              paddingRight: 'clamp(20px, 5vw, 32px)',
+              paddingTop: 'clamp(10px, 1.6vh, 16px)',
+              paddingBottom: 'clamp(10px, 1.6vh, 16px)',
               background: 'rgba(42, 42, 42, 0.80)',
               border: '1px solid rgba(255, 255, 255, 0.05)',
             }}
           >
             <Upload className="w-5 h-5" style={{ color: STITCH.primary }} />
             <span
-              className="font-semibold tracking-wide text-sm"
-              style={{ color: STITCH.primary }}
+              className="font-semibold tracking-wide"
+              style={{
+                fontSize: 'clamp(13px, 2.5vw, 15px)',
+                color: STITCH.primary,
+              }}
             >
               {lang === 'he' ? 'העלה מהגלריה' : 'Upload from Gallery'}
             </span>
@@ -195,7 +239,10 @@ export default function HomeView() {
         </div>
 
         {/* ═══ HOT ITEMS / LIVE LISTINGS SECTION ═══ */}
-        <section className="w-full max-w-7xl mx-auto mt-16">
+        <section
+          className="w-full max-w-7xl mx-auto"
+          style={{ marginTop: 'clamp(28px, 5vh, 64px)' }}
+        >
 
           {/* Section Header */}
           <div className="flex items-center justify-between px-2 mb-6">
