@@ -1,5 +1,22 @@
-import React, { useRef } from 'react';
-import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, AlertTriangle, CheckCircle, Circle, Check, Share2, Loader2, Phone, Plus, X, Camera, Bell, ChevronRight } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, AlertTriangle, CheckCircle, Circle, Check, Share2, Loader2, Phone, Plus, X, Camera, Bell, ChevronRight, Pencil } from 'lucide-react';
+
+// ═══════════════════════════════════════════════════════
+// STITCH DESIGN TOKENS — My Listings dashboard
+// ═══════════════════════════════════════════════════════
+const SELL_STITCH = {
+  background:              '#131313',
+  primary:                 '#6FEEE1',
+  primaryContainer:        '#4FD1C5',
+  onPrimary:               '#003733',
+  onSurface:               '#e5e2e1',
+  onSurfaceVariant:        '#BBC9C7',
+  surfaceContainerLow:     '#1C1B1B',
+  surfaceContainerHigh:    '#2A2A2A',
+  GRADIENT_PRIMARY:        'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)',
+  FONT_HEADLINE:           '"Manrope", system-ui, -apple-system, sans-serif',
+  FONT_BODY:               '"Inter", system-ui, -apple-system, sans-serif',
+};
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, ScaleIn, InputField, BackButton } from '../components/ui';
 import ListingCard from '../components/ListingCard';
@@ -7,102 +24,266 @@ import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
 
 export function MyListingsView() {
-  // [FIX] Added viewItem to open listing details when tapped
   const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
+  const [activeTab, setActiveTab] = useState('active');
 
-  // Pending requests for seller — guard against orders being undefined during init
+  // ─── Derived data ───
   const pendingRequests = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending');
-  const activeOrders = (orders || []).filter(o => (o.seller_id === user?.id || o.buyer_id === user?.id) && !['completed', 'cancelled', 'declined'].includes(o.status));
+  const activeListings  = myListings.filter(l => l.status !== 'sold' && l.status !== 'deleted');
+  const soldListings    = myListings.filter(l => l.status === 'sold');
+  const tabListings     = activeTab === 'sold' ? soldListings : activeListings;
+
+  // Analytics — computed from real data with safe fallbacks
+  const totalRevenue = (orders || [])
+    .filter(o => o.status === 'completed' && o.seller_id === user?.id)
+    .reduce((sum, o) => sum + (o.price || 0), 0);
+  const totalViews = myListings.reduce((sum, item) => sum + (item.views || 0), 0);
+
+  const fmtRevenue = (v) => {
+    if (v >= 1000000) return `₪${(v / 1000000).toFixed(1)}M`;
+    if (v >= 1000)    return `₪${(v / 1000).toFixed(v >= 10000 ? 0 : 1)}K`;
+    return `₪${v.toLocaleString()}`;
+  };
+
+  // Status pill per listing
+  const getStatusPill = (item) => {
+    const hasPending = (orders || []).some(o => o.listing_id === item.id && o.status === 'pending');
+    if (hasPending) return {
+      label: lang === 'he' ? 'ממתין' : 'Pending Sale',
+      style: { color: '#ffd1af', background: 'rgba(255,171,103,0.18)', border: '1px solid rgba(255,171,103,0.3)' },
+    };
+    if (item.status === 'sold') return {
+      label: lang === 'he' ? 'נמכר' : 'Sold',
+      style: { color: '#6ee7b7', background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.25)' },
+    };
+    return {
+      label: lang === 'he' ? 'פעיל' : 'Live',
+      style: { color: '#6FEEE1', background: 'rgba(111,238,225,0.1)', border: '1px solid rgba(111,238,225,0.2)' },
+    };
+  };
 
   return (
-    <div className="space-y-5">
-      <FadeIn className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold">{t.myListings}</h2>
-        {myListings.length > 0 && <Badge>{myListings.length} {lang === 'he' ? 'פעילים' : 'active'}</Badge>}
+    <div className="space-y-6 pt-2" dir={rtl ? 'rtl' : 'ltr'}>
+
+      {/* ── Dashboard Header ── */}
+      <FadeIn>
+        <div>
+          <h2 style={{
+            fontFamily: SELL_STITCH.FONT_HEADLINE,
+            fontSize: 'clamp(2rem, 9vw, 3.5rem)',
+            fontWeight: 800,
+            lineHeight: 1.05,
+            letterSpacing: '-0.03em',
+            color: SELL_STITCH.onSurface,
+          }}>
+            {lang === 'he' ? 'המודעות שלי' : 'My Listings'}
+          </h2>
+          <div className="flex items-center justify-between mt-2 gap-3">
+            <p style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY, fontSize: '0.875rem', fontWeight: 500 }}>
+              {activeListings.length > 0
+                ? (lang === 'he' ? `יש לך ${activeListings.length} פריטים פעילים.` : `You have ${activeListings.length} items currently active.`)
+                : (lang === 'he' ? 'עדיין לא פרסמת פריטים.' : 'No active listings yet.')}
+            </p>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full flex-shrink-0"
+              style={{ background: SELL_STITCH.surfaceContainerLow }}>
+              <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: SELL_STITCH.primary }} />
+              <span style={{ fontFamily: SELL_STITCH.FONT_BODY, fontSize: '0.6rem', fontWeight: 700, letterSpacing: '0.1em', color: SELL_STITCH.primary }}>
+                {lang === 'he' ? 'נתונים חיים' : 'LIVE STATS'}
+              </span>
+            </div>
+          </div>
+        </div>
       </FadeIn>
 
-      {/* ── Orders & Requests Button ── */}
-      {user && (
-        <FadeIn delay={50}>
-          <button
-            onClick={() => { setView('orders'); loadOrders(); }}
-            className="w-full p-4 rounded-3xl flex items-center gap-4 transition-all active:scale-[0.98]"
-            style={{
-              background: pendingRequests.length > 0
-                ? 'linear-gradient(135deg, rgba(245,158,11,0.15) 0%, rgba(217,119,6,0.1) 100%)'
-                : 'linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(37,99,235,0.05) 100%)',
-              border: pendingRequests.length > 0
-                ? '1px solid rgba(245,158,11,0.3)'
-                : '1px solid rgba(59,130,246,0.15)',
-            }}
-          >
-            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center relative ${pendingRequests.length > 0 ? 'bg-amber-500/20' : 'bg-blue-500/20'}`}>
-              <Package className={`w-6 h-6 ${pendingRequests.length > 0 ? 'text-amber-400' : 'text-blue-400'}`} />
-              {pendingRequests.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-amber-500 text-[10px] font-bold text-black flex items-center justify-center animate-pulse">
-                  {pendingRequests.length}
+      {/* ── Analytics Bento Grid ── */}
+      <FadeIn delay={60}>
+        <div className="grid grid-cols-2 gap-3">
+          {/* Total Revenue */}
+          <div className="p-5 rounded-2xl flex flex-col justify-between min-h-[110px]"
+            style={{ background: SELL_STITCH.surfaceContainerLow }}>
+            <span style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY, fontSize: '0.75rem', fontWeight: 500 }}>
+              {lang === 'he' ? 'הכנסות' : 'Total Revenue'}
+            </span>
+            <div className="flex items-baseline gap-1.5 mt-3 flex-wrap">
+              <span style={{ fontFamily: SELL_STITCH.FONT_HEADLINE, fontSize: 'clamp(1.35rem, 5vw, 1.75rem)', fontWeight: 700, color: SELL_STITCH.onSurface, lineHeight: 1 }}>
+                {fmtRevenue(totalRevenue)}
+              </span>
+              {soldListings.length > 0 && (
+                <span style={{ color: SELL_STITCH.primary, fontSize: '0.72rem', fontWeight: 700 }}>
+                  +{soldListings.length}
                 </span>
               )}
             </div>
-            <div className="flex-1 text-left">
-              <p className="font-bold text-white">
-                {lang === 'he' ? 'הזמנות ובקשות' : 'Orders & Requests'}
-              </p>
-              <p className="text-xs text-slate-400">
-                {pendingRequests.length > 0
-                  ? (lang === 'he' ? `${pendingRequests.length} בקשות ממתינות` : `${pendingRequests.length} pending requests`)
-                  : (lang === 'he' ? 'הצג היסטוריית עסקאות' : 'View transaction history')
-                }
-              </p>
-            </div>
-            {pendingRequests.length > 0 && (
-              <div className="w-3 h-3 rounded-full bg-amber-500 animate-pulse" />
-            )}
-            <ChevronRight className="w-5 h-5 text-slate-500" />
-          </button>
-        </FadeIn>
-      )}
-
-      {/* Active orders summary */}
-      {activeOrders.length > 0 && (
-        <FadeIn delay={75}>
-          <div className="space-y-2">
-            <p className="text-xs text-slate-500 font-medium">{lang === 'he' ? 'עסקאות פעילות' : 'Active transactions'}</p>
-            {activeOrders.slice(0, 3).map((order) => (
-              <button key={order.id} onClick={() => viewOrder(order.id)}
-                className="w-full p-3 rounded-xl bg-white/5 border border-white/10 flex items-center gap-3 hover:bg-white/10 transition-all">
-                <div className={`w-2 h-2 rounded-full ${order.status === 'pending' ? 'bg-amber-400 animate-pulse' : 'bg-blue-400'}`} />
-                <span className="text-sm flex-1 text-left truncate">{order.listing?.title || order.listing?.title_hebrew || 'Order'}</span>
-                <Badge color={order.status === 'pending' ? 'amber' : 'blue'} className="text-[9px]">{order.status}</Badge>
-              </button>
-            ))}
           </div>
-        </FadeIn>
-      )}
 
-      {myListings.length > 0 ? (
-        <div className="grid grid-cols-2 gap-4">
-          {myListings.map((item, i) => (
-            <FadeIn key={item.id} delay={i * 50}>
-              <div className="relative">
-                <ListingCard item={item} onClick={() => viewItem(item)} />
-                <button onClick={() => deleteListing(item.id)}
-                  className="absolute top-3 left-3 w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center backdrop-blur-md hover:bg-red-500/30 transition-all z-10">
-                  <Trash2 className="w-4 h-4 text-red-400" />
-                </button>
-              </div>
-            </FadeIn>
+          {/* Active Views */}
+          <div className="p-5 rounded-2xl flex flex-col justify-between min-h-[110px]"
+            style={{ background: SELL_STITCH.surfaceContainerLow }}>
+            <span style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY, fontSize: '0.75rem', fontWeight: 500 }}>
+              {lang === 'he' ? 'צפיות' : 'Active Views'}
+            </span>
+            <div className="flex items-baseline gap-1.5 mt-3">
+              <span style={{ fontFamily: SELL_STITCH.FONT_HEADLINE, fontSize: 'clamp(1.35rem, 5vw, 1.75rem)', fontWeight: 700, color: SELL_STITCH.onSurface, lineHeight: 1 }}>
+                {totalViews >= 1000 ? `${(totalViews / 1000).toFixed(1)}k` : (totalViews || '0')}
+              </span>
+              <span style={{ color: SELL_STITCH.primary, fontSize: '0.72rem', fontWeight: 700 }}>
+                {lang === 'he' ? 'סה"כ' : 'Today'}
+              </span>
+            </div>
+          </div>
+
+          {/* Quick Action — full width */}
+          <div className="col-span-2 p-4 rounded-2xl flex items-center justify-between"
+            style={{ background: 'rgba(79,209,197,0.07)', border: '1px solid rgba(111,238,225,0.1)' }}>
+            <span style={{ fontFamily: SELL_STITCH.FONT_BODY, fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.1em', color: SELL_STITCH.primary }}>
+              {lang === 'he' ? 'פעולה מהירה' : 'QUICK ACTION'}
+            </span>
+            <button
+              onClick={() => goTab('home')}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+              style={{
+                background: SELL_STITCH.GRADIENT_PRIMARY,
+                color: SELL_STITCH.onPrimary,
+                fontFamily: SELL_STITCH.FONT_BODY,
+                boxShadow: '0 0 18px rgba(111,238,225,0.18)',
+              }}
+            >
+              <Plus className="w-4 h-4" />
+              {lang === 'he' ? 'פרסם פריט' : 'Create Listing'}
+            </button>
+          </div>
+        </div>
+      </FadeIn>
+
+      {/* ── Tab Navigation ── */}
+      <FadeIn delay={100}>
+        <nav className="flex gap-6 border-b overflow-x-auto hide-scrollbar"
+          style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          {[
+            { key: 'active', label: lang === 'he' ? 'פעיל' : 'Active' },
+            { key: 'orders', label: lang === 'he' ? 'הזמנות' : 'Orders', badge: pendingRequests.length },
+            { key: 'sold',   label: lang === 'he' ? 'נמכר' : 'Sold' },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => {
+                if (tab.key === 'orders') { setView('orders'); loadOrders(); }
+                else setActiveTab(tab.key);
+              }}
+              className="relative pb-3 flex items-center gap-1.5 flex-shrink-0 transition-colors"
+              style={{
+                color: activeTab === tab.key ? SELL_STITCH.onSurface : SELL_STITCH.onSurfaceVariant,
+                fontFamily: SELL_STITCH.FONT_HEADLINE,
+                fontWeight: 700,
+                fontSize: '1rem',
+              }}
+            >
+              {tab.label}
+              {tab.badge > 0 && (
+                <span className="w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse"
+                  style={{ background: '#f59e0b', color: '#000' }}>
+                  {tab.badge}
+                </span>
+              )}
+              {/* Active underline indicator */}
+              <div className="absolute bottom-0 left-0 w-full h-[3px] rounded-full"
+                style={{ background: activeTab === tab.key ? SELL_STITCH.primary : 'transparent' }} />
+            </button>
           ))}
+        </nav>
+      </FadeIn>
+
+      {/* ── Listing Cards ── */}
+      {tabListings.length > 0 ? (
+        <div className="space-y-3 pb-4">
+          {tabListings.map((item, i) => {
+            const pill  = getStatusPill(item);
+            const title = lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title;
+            const meta  = `${timeAgo(item.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })} • ${item.category || ''}`;
+            return (
+              <FadeIn key={item.id} delay={i * 40}>
+                <div
+                  className="flex gap-3 p-3 rounded-2xl transition-all active:scale-[0.99] cursor-pointer group"
+                  style={{ background: SELL_STITCH.surfaceContainerLow }}
+                  onClick={() => viewItem(item)}
+                >
+                  {/* Thumbnail */}
+                  <div className="w-28 h-[88px] rounded-xl overflow-hidden flex-shrink-0"
+                    style={{ background: SELL_STITCH.surfaceContainerHigh }}>
+                    {item.images?.[0]
+                      ? <img src={item.images[0]} alt={title} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                      : <div className="w-full h-full flex items-center justify-center"><ShoppingBag className="w-7 h-7 opacity-25" /></div>
+                    }
+                  </div>
+
+                  {/* Content */}
+                  <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+                    <div>
+                      <div className="flex items-start justify-between gap-2 mb-0.5">
+                        <h3 className="font-bold text-[0.95rem] leading-snug truncate flex-1"
+                          style={{ fontFamily: SELL_STITCH.FONT_HEADLINE, color: SELL_STITCH.onSurface }}>
+                          {title}
+                        </h3>
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide flex-shrink-0"
+                          style={pill.style}>
+                          {pill.label}
+                        </span>
+                      </div>
+                      <p className="text-xs truncate mt-0.5"
+                        style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY }}>
+                        {meta}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="font-bold text-xl"
+                        style={{ fontFamily: SELL_STITCH.FONT_HEADLINE, color: SELL_STITCH.onSurface }}>
+                        {formatPrice(item.price)}
+                      </span>
+                      <div className="flex gap-0.5">
+                        <button
+                          onClick={e => { e.stopPropagation(); viewItem(item); }}
+                          className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
+                          style={{ color: SELL_STITCH.onSurfaceVariant }}>
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteListing(item.id); }}
+                          className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-red-500/15"
+                          style={{ color: '#f87171' }}>
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </FadeIn>
+            );
+          })}
         </div>
       ) : (
         <FadeIn delay={100}>
-          <Card className="p-10 text-center" gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.02))">
-            <div className="w-20 h-20 rounded-3xl bg-blue-500/10 flex items-center justify-center mx-auto mb-4">
-              <ShoppingBag className="w-10 h-10 text-blue-400" />
+          <div className="p-10 rounded-2xl text-center"
+            style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.1)' }}>
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+              style={{ background: 'rgba(59,130,246,0.12)' }}>
+              <ShoppingBag className="w-8 h-8 text-blue-400" />
             </div>
-            <p className="text-slate-400 mb-4">{t.noListings}</p>
-            <Btn primary onClick={() => goTab('home')}><Scan className="w-5 h-5" />{lang === 'he' ? 'סרוק פריט' : 'Scan an item'}</Btn>
-          </Card>
+            <p className="mb-4 text-sm" style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY }}>
+              {activeTab === 'sold'
+                ? (lang === 'he' ? 'עדיין לא מכרת פריטים.' : 'No sold items yet.')
+                : t.noListings}
+            </p>
+            {activeTab !== 'sold' && (
+              <button
+                onClick={() => goTab('home')}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+                style={{ background: SELL_STITCH.GRADIENT_PRIMARY, color: SELL_STITCH.onPrimary, fontFamily: SELL_STITCH.FONT_BODY }}>
+                <Scan className="w-4 h-4" />
+                {lang === 'he' ? 'סרוק פריט' : 'Scan an item'}
+              </button>
+            )}
+          </div>
         </FadeIn>
       )}
     </div>
