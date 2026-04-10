@@ -141,7 +141,7 @@ export default function HomeView() {
                 color: STITCH.onSurface,
               }}
             >
-              {lang === 'he' ? 'אוצר דיגיטלי' : 'Digital Curator'}
+              {lang === 'he' ? 'GetWorth AI' : 'GetWorth AI'}
             </h2>
             <p
               className="font-medium leading-snug mx-auto"
@@ -152,8 +152,8 @@ export default function HomeView() {
               }}
             >
               {lang === 'he'
-                ? 'זהה, הערך ופרסם פריטים בשוק באופן מיידי.'
-                : 'Instantly identify, value, and list items in the marketplace.'}
+                ? 'סרוק, הערך ומכור תוך שניות'
+                : 'Scan, value, and sell instantly'}
             </p>
           </div>
 
