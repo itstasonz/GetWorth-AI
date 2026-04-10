@@ -484,50 +484,88 @@ export function AnalyzingView() {
             style={{ border: '1px solid rgba(60, 73, 71, 0.20)' }}
           />
 
-          {/* Pulse rings */}
+          {/* Pulse rings — custom scale+opacity animation (more visible than Tailwind animate-pulse) */}
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div
-              className="w-64 h-64 rounded-full animate-pulse"
+              className="w-64 h-64 rounded-full stitch-pulse-ring"
               style={{
-                border: `2px solid rgba(111, 238, 225, 0.20)`,
-                animationDuration: '4s',
+                border: `2px solid rgba(111, 238, 225, 0.30)`,
               }}
             />
             <div
-              className="absolute w-48 h-48 rounded-full animate-pulse"
+              className="absolute w-48 h-48 rounded-full stitch-pulse-ring"
+              style={{
+                border: `1px solid rgba(111, 238, 225, 0.50)`,
+                animationDelay: '1.3s',
+              }}
+            />
+            <div
+              className="absolute w-32 h-32 rounded-full stitch-pulse-ring"
               style={{
                 border: `1px solid rgba(111, 238, 225, 0.40)`,
-                animationDuration: '4s',
-                animationDelay: '1s',
+                animationDelay: '2.6s',
               }}
             />
           </div>
 
-          {/* Central scanning indicator */}
+          {/* Central scanning indicator — with subtle breathing glow */}
           <div className="relative z-20 flex flex-col items-center">
             <div
-              className="w-32 h-32 rounded-full flex items-center justify-center"
+              className="w-32 h-32 rounded-full flex items-center justify-center stitch-breathe"
               style={{
                 background: STITCH.GLASS_BG,
                 backdropFilter: STITCH.GLASS_BLUR,
                 WebkitBackdropFilter: STITCH.GLASS_BLUR,
                 border: `1px solid rgba(111, 238, 225, 0.30)`,
-                boxShadow: '0 0 50px rgba(111, 238, 225, 0.15)',
               }}
             >
               <Box className="w-14 h-14" style={{ color: STITCH.primary }} strokeWidth={2} />
             </div>
           </div>
 
-          {/* Horizontal scan line */}
+          {/* Horizontal scan line — sweeps vertically */}
           <div
-            className="absolute left-0 right-0 top-1/2 z-20 pointer-events-none"
+            className="absolute left-0 right-0 z-20 pointer-events-none stitch-scan-sweep"
             style={{
               height: '2px',
               background: `linear-gradient(90deg, transparent, ${STITCH.primary}, transparent)`,
               boxShadow: `0 0 20px 2px ${STITCH.primary}`,
             }}
           />
+
+          {/* Keyframes injected inline — guaranteed to run regardless of global CSS */}
+          <style>{`
+            @keyframes stitchPulseRing {
+              0%   { transform: scale(0.85); opacity: 0.00; }
+              30%  { opacity: 0.70; }
+              100% { transform: scale(1.35); opacity: 0.00; }
+            }
+            .stitch-pulse-ring {
+              animation: stitchPulseRing 3.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+            }
+            @keyframes stitchBreathe {
+              0%, 100% {
+                box-shadow: 0 0 30px rgba(111, 238, 225, 0.15), inset 0 0 20px rgba(111, 238, 225, 0.05);
+                transform: scale(1);
+              }
+              50% {
+                box-shadow: 0 0 60px rgba(111, 238, 225, 0.35), inset 0 0 30px rgba(111, 238, 225, 0.10);
+                transform: scale(1.04);
+              }
+            }
+            .stitch-breathe {
+              animation: stitchBreathe 2.4s ease-in-out infinite;
+            }
+            @keyframes stitchScanSweep {
+              0%   { top: 15%; opacity: 0; }
+              10%  { opacity: 1; }
+              90%  { opacity: 1; }
+              100% { top: 85%; opacity: 0; }
+            }
+            .stitch-scan-sweep {
+              animation: stitchScanSweep 2.8s ease-in-out infinite;
+            }
+          `}</style>
 
           {/* Floating chip: Texture Map (top-left) */}
           <div
