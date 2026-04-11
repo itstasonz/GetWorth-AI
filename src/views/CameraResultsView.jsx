@@ -1,6 +1,7 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Settings, Image as ImageIcon, History, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
+import { camLog } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice, isSerialEligible } from '../lib/utils';
 
@@ -65,6 +66,15 @@ export function CameraView() {
   } = useApp();
 
   const [cameraReady, setCameraReady] = React.useState(false);
+  const [debugLogs, setDebugLogs] = useState([]);
+
+  // Refresh debug panel every 500ms
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setDebugLogs([...(window.__camLogs || [])]);
+    }, 500);
+    return () => clearInterval(iv);
+  }, []);
 
   // Inject Manrope + Inter fonts
   useEffect(() => {
@@ -78,10 +88,12 @@ export function CameraView() {
 
   useEffect(() => {
     const video = videoRef.current;
+    camLog(`CameraView mounted — videoRef=${!!video}`);
     if (!video) return;
 
     const checkReady = () => {
       if (video.readyState >= 2 && video.videoWidth > 0) {
+        camLog(`cameraReady=true — ${video.videoWidth}×${video.videoHeight} rs=${video.readyState} srcObj=${!!video.srcObject}`);
         setCameraReady(true);
       }
     };
@@ -91,9 +103,13 @@ export function CameraView() {
     video.addEventListener('playing', checkReady);
 
     const interval = setInterval(checkReady, 200);
-    const timeout = setTimeout(() => { setCameraReady(true); }, 5000);
+    const timeout = setTimeout(() => {
+      camLog(`5s timeout forced cameraReady — srcObj=${!!video.srcObject} rs=${video.readyState}`);
+      setCameraReady(true);
+    }, 5000);
 
     return () => {
+      camLog('CameraView unmounting — removing video listeners');
       video.removeEventListener('loadeddata', checkReady);
       video.removeEventListener('playing', checkReady);
       clearInterval(interval);
@@ -325,6 +341,24 @@ export function CameraView() {
               {lang === 'he' ? 'אחרונים' : 'RECENT'}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* ── DEBUG PANEL — remove after diagnosing ── */}
+      <div
+        className="fixed bottom-32 left-2 right-2 z-[999] rounded-xl overflow-hidden pointer-events-none"
+        style={{ background: 'rgba(0,0,0,0.85)', border: '1px solid rgba(111,238,225,0.3)' }}
+      >
+        <div className="px-2 py-1" style={{ color: '#6FEEE1', fontSize: 9 }}>
+          CAM DEBUG {cameraReady ? '✓READY' : '…WAITING'} srcObj={videoRef.current?.srcObject ? '✓' : '✗'}
+        </div>
+        <div className="px-2 pb-2 space-y-0.5 max-h-40 overflow-y-auto">
+          {debugLogs.slice(-15).map((l, i) => (
+            <div key={i} style={{ color: l.includes('ERROR') || l.includes('ABORT') || l.includes('FAILED') ? '#f87171' : l.includes('success') || l.includes('COMPLETE') || l.includes('playing') ? '#4ade80' : '#cbd5e1', fontSize: 8, lineHeight: '1.3', fontFamily: 'monospace' }}>
+              {l}
+            </div>
+          ))}
+          {debugLogs.length === 0 && <div style={{ color: '#64748b', fontSize: 8 }}>no logs yet</div>}
         </div>
       </div>
     </div>

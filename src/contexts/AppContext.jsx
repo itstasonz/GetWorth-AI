@@ -7,6 +7,16 @@ import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSeria
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+// ── Camera debug log — visible on-screen panel for iPhone debugging ──
+const camLogs = [];
+export const camLog = (msg) => {
+  const entry = `${new Date().toISOString().slice(11,23)} ${msg}`;
+  console.log('[CAM]', entry);
+  camLogs.push(entry);
+  if (camLogs.length > 30) camLogs.shift();
+  window.__camLogs = camLogs;
+};
+
 export const useApp = () => {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error('useApp must be used within AppProvider');
@@ -1292,7 +1302,7 @@ export function AppProvider({ children }) {
   // ── Camera release (MUST be before captureAdditionalPhoto to avoid TDZ crash) ──
   const cameraStartingRef = useRef(false);
   const releaseCamera = useCallback(() => {
-    if (DEV) console.log('[Camera] releaseCamera called');
+    camLog(`releaseCamera called — hadStream=${!!cameraStreamRef.current} hadVideo=${!!videoRef.current}`);
     if (cameraStreamRef.current) {
       try {
         const vt = cameraStreamRef.current.getVideoTracks()[0];
@@ -1543,18 +1553,23 @@ export function AppProvider({ children }) {
       const done = (val) => { if (!resolved) { resolved = true; resolve(val); } };
 
       const video = videoRef.current;
-      if (!video) { done(false); return; }
+      camLog(`attachStreamToVideo — video=${!!video} stream=${!!stream} tracks=${stream?.getVideoTracks().length}`);
+      if (!video) { camLog('attachStreamToVideo ABORT: no video element'); done(false); return; }
 
+      camLog(`video el: readyState=${video.readyState} srcObject=${!!video.srcObject} w=${video.videoWidth}`);
       video.onloadedmetadata = null;
       video.srcObject = stream;
+      camLog('srcObject assigned');
+
       video.onloadedmetadata = () => {
+        camLog(`onloadedmetadata fired — ${video.videoWidth}×${video.videoHeight}`);
         video.play()
           .then(() => {
-            if (DEV) console.log(`[Camera] Video playing: ${video.videoWidth}×${video.videoHeight}`);
+            camLog(`play() success — ${video.videoWidth}×${video.videoHeight}`);
             done(true);
           })
           .catch((e) => {
-            console.warn('[Camera] play() failed:', e.message);
+            camLog(`play() FAILED: ${e.name} ${e.message}`);
             done(false);
           });
       };
@@ -1562,7 +1577,8 @@ export function AppProvider({ children }) {
       // Fallback: if metadata doesn't fire in 3s, force play
       setTimeout(() => {
         if (!resolved) {
-          video.play().catch(() => {});
+          camLog(`3s fallback — forcing play, readyState=${video.readyState}`);
+          video.play().catch((e) => camLog(`fallback play FAILED: ${e.message}`));
           done(true);
         }
       }, 3000);
@@ -1572,29 +1588,27 @@ export function AppProvider({ children }) {
   // ── Wait for videoRef to be mounted (React may not have rendered yet) ──
   const waitForVideoElement = useCallback(() => {
     return new Promise((resolve) => {
-      if (videoRef.current) { resolve(true); return; }
+      if (videoRef.current) { camLog('waitForVideo: already mounted'); resolve(true); return; }
+      camLog('waitForVideo: polling...');
       let attempts = 0;
       const poll = setInterval(() => {
         attempts++;
-        if (videoRef.current) { clearInterval(poll); resolve(true); return; }
-        if (attempts > 30) { clearInterval(poll); resolve(false); } // 1.5s max
+        if (videoRef.current) { clearInterval(poll); camLog(`waitForVideo: found at attempt ${attempts}`); resolve(true); return; }
+        if (attempts > 30) { clearInterval(poll); camLog('waitForVideo: TIMEOUT — video never mounted'); resolve(false); }
       }, 50);
     });
   }, []);
 
   // ── Start camera — single entry point, guarded against double calls ──
   const startCamera = useCallback(async () => {
-    // Prevent double start
+    camLog(`startCamera called — alreadyStarting=${cameraStartingRef.current}`);
     if (cameraStartingRef.current) {
-      if (DEV) console.log('[Camera] Start already in progress, skipping');
+      camLog('startCamera: skipped (in progress)');
       return;
     }
     cameraStartingRef.current = true;
 
-    if (DEV) console.log('[Camera] Start requested');
-
     try {
-      // Always release previous stream first
       releaseCamera();
       cameraStartingRef.current = true; // Re-set after releaseCamera clears it
 
@@ -1602,58 +1616,62 @@ export function AppProvider({ children }) {
       if (navigator.permissions?.query) {
         try {
           const permResult = await navigator.permissions.query({ name: 'camera' });
+          camLog(`permission state: ${permResult.state}`);
           if (permResult.state === 'denied') {
             setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
             cameraStartingRef.current = false;
             return;
           }
-        } catch {}
+        } catch (pe) { camLog(`permission query error: ${pe.message}`); }
       }
 
       // Try environment camera first, fallback to user
       let stream;
       try {
+        camLog('getUserMedia(environment) calling...');
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
+        camLog(`getUserMedia(environment) SUCCESS — tracks=${stream.getVideoTracks().length}`);
       } catch (envErr) {
-        if (DEV) console.log('[Camera] Environment failed, trying user camera:', envErr.message);
+        camLog(`getUserMedia(environment) failed: ${envErr.name} ${envErr.message} — trying user`);
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
+        camLog(`getUserMedia(user) SUCCESS — tracks=${stream.getVideoTracks().length}`);
       }
 
-      // Store stream
+      const vt = stream.getVideoTracks()[0];
+      camLog(`track: label=${vt?.label} readyState=${vt?.readyState} enabled=${vt?.enabled}`);
+
       cameraStreamRef.current = stream;
       cameraPermissionGranted.current = true;
 
-      // Navigate to camera view so React mounts the <video> element
+      camLog('setView(camera)');
       setView('camera');
 
-      // Wait for videoRef to exist in DOM (polling, not fixed delay)
       const videoMounted = await waitForVideoElement();
       if (!videoMounted) {
-        console.warn('[Camera] Video element never mounted');
+        camLog('ABORT: video element never mounted');
         releaseCamera();
         cameraStartingRef.current = false;
         return;
       }
 
-      // Check if stream was released while waiting (user cancelled fast)
       if (!cameraStreamRef.current) {
+        camLog('ABORT: stream released while waiting for video');
         cameraStartingRef.current = false;
         return;
       }
 
       await attachStreamToVideo(stream);
       detectTorch(stream);
-
-      if (DEV) console.log('[Camera] Start success');
+      camLog('startCamera COMPLETE');
 
     } catch (err) {
-      console.error('[Camera] Start error:', err);
+      camLog(`startCamera ERROR: ${err.name} — ${err.message}`);
       releaseCamera();
       if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
         cameraPermissionGranted.current = false;
@@ -1668,8 +1686,9 @@ export function AppProvider({ children }) {
   // ── Auto-start camera when view transitions to 'camera' without a stream ──
   // Fixes: addPhoto('camera') sets view but doesn't acquire camera hardware
   useEffect(() => {
+    camLog(`view changed to: ${view} — stream=${!!cameraStreamRef.current} starting=${cameraStartingRef.current}`);
     if (view === 'camera' && !cameraStreamRef.current && !cameraStartingRef.current) {
-      if (DEV) console.log('[Camera] Auto-starting: view=camera but no stream');
+      camLog('auto-start: triggering startCamera()');
       startCamera();
     }
   }, [view, startCamera]);
@@ -1742,7 +1761,7 @@ export function AppProvider({ children }) {
   }, [runPipeline, playSound, releaseCamera, lang, showToastMsg, addPhotoMode]);
 
   const stopCamera = useCallback(() => {
-    if (DEV) console.log('[Camera] Stop requested, addPhotoMode=', addPhotoMode);
+    camLog(`stopCamera called — addPhotoMode=${addPhotoMode}`);
     releaseCamera();
     if (addPhotoMode) {
       // Was adding a photo — go back to results, keep the existing scan
