@@ -1594,7 +1594,22 @@ export function AppProvider({ children }) {
     if (DEV) console.log('[Camera] Start requested');
 
     try {
-      // Always release previous stream first
+      // Reuse stream if already live — avoids a new getUserMedia() call which
+      // triggers the iOS permission banner on every camera open.
+      if (cameraStreamRef.current) {
+        const tracks = cameraStreamRef.current.getVideoTracks();
+        if (tracks.length > 0 && tracks[0].readyState === 'live') {
+          setView('camera');
+          const videoMounted = await waitForVideoElement();
+          if (videoMounted && cameraStreamRef.current) {
+            await attachStreamToVideo(cameraStreamRef.current);
+          }
+          cameraStartingRef.current = false;
+          return;
+        }
+      }
+
+      // No live stream — release any dead one and request a fresh stream
       releaseCamera();
       cameraStartingRef.current = true; // Re-set after releaseCamera clears it
 
