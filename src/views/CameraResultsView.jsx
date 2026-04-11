@@ -127,6 +127,12 @@ export function CameraView() {
       style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
       dir={rtl ? 'rtl' : 'ltr'}
     >
+      {/* ── DEBUG MARKER — remove after diagnosis ── */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 9999, background: '#ff0000', color: '#fff', fontSize: 11, fontFamily: 'monospace', padding: '4px 8px', textAlign: 'center', lineHeight: 1.4 }}>
+        CAMERA DEBUG ACTIVE — ready={cameraReady ? 'YES' : 'NO'} srcObj={videoRef.current?.srcObject ? 'YES' : 'NO'}
+        {debugLogs.slice(-6).map((l, i) => <div key={i} style={{ fontSize: 9, opacity: 0.9 }}>{l}</div>)}
+      </div>
+
       {/* ═══ BACKGROUND: Live camera feed (slightly dimmed) ═══ */}
       <div className="fixed inset-0 z-0">
         <video
@@ -344,23 +350,6 @@ export function CameraView() {
         </div>
       </div>
 
-      {/* ── DEBUG PANEL — remove after diagnosing ── */}
-      <div
-        className="fixed bottom-32 left-2 right-2 z-[999] rounded-xl overflow-hidden pointer-events-none"
-        style={{ background: 'rgba(0,0,0,0.85)', border: '1px solid rgba(111,238,225,0.3)' }}
-      >
-        <div className="px-2 py-1" style={{ color: '#6FEEE1', fontSize: 9 }}>
-          CAM DEBUG {cameraReady ? '✓READY' : '…WAITING'} srcObj={videoRef.current?.srcObject ? '✓' : '✗'}
-        </div>
-        <div className="px-2 pb-2 space-y-0.5 max-h-40 overflow-y-auto">
-          {debugLogs.slice(-15).map((l, i) => (
-            <div key={i} style={{ color: l.includes('ERROR') || l.includes('ABORT') || l.includes('FAILED') ? '#f87171' : l.includes('success') || l.includes('COMPLETE') || l.includes('playing') ? '#4ade80' : '#cbd5e1', fontSize: 8, lineHeight: '1.3', fontFamily: 'monospace' }}>
-              {l}
-            </div>
-          ))}
-          {debugLogs.length === 0 && <div style={{ color: '#64748b', fontSize: 8 }}>no logs yet</div>}
-        </div>
-      </div>
     </div>
   );
 }
