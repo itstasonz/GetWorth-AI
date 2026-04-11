@@ -60,7 +60,7 @@ function getBrandSuggestions(category) {
 export function CameraView() {
   const {
     videoRef, canvasRef, capture, stopCamera, showFlash,
-    torchSupported, torchOn, toggleTorch, lang, rtl,
+    torchSupported, torchOn, toggleTorch, lang, rtl, releaseCamera,
     addPhotoMode,
   } = useApp();
 
@@ -101,9 +101,9 @@ export function CameraView() {
     };
   }, [videoRef]);
 
-  // Stream lifecycle is owned by AppContext — do not release on unmount here.
-  // Releasing on every navigation triggers a fresh getUserMedia() call which
-  // shows the iOS permission banner each time.
+  useEffect(() => {
+    return () => releaseCamera();
+  }, [releaseCamera]);
 
   return (
     <div

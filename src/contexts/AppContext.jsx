@@ -1594,22 +1594,7 @@ export function AppProvider({ children }) {
     if (DEV) console.log('[Camera] Start requested');
 
     try {
-      // Reuse stream if already live — avoids a new getUserMedia() call which
-      // triggers the iOS permission banner on every camera open.
-      if (cameraStreamRef.current) {
-        const tracks = cameraStreamRef.current.getVideoTracks();
-        if (tracks.length > 0 && tracks[0].readyState === 'live') {
-          setView('camera');
-          const videoMounted = await waitForVideoElement();
-          if (videoMounted && cameraStreamRef.current) {
-            await attachStreamToVideo(cameraStreamRef.current);
-          }
-          cameraStartingRef.current = false;
-          return;
-        }
-      }
-
-      // No live stream — release any dead one and request a fresh stream
+      // Always release previous stream first
       releaseCamera();
       cameraStartingRef.current = true; // Re-set after releaseCamera clears it
 
@@ -1680,11 +1665,11 @@ export function AppProvider({ children }) {
     cameraStartingRef.current = false;
   }, [releaseCamera, attachStreamToVideo, waitForVideoElement, detectTorch, lang, setError]);
 
-  // ── Auto-start/reattach camera when view transitions to 'camera' ──
-  // startCamera() handles both cases: reattach live stream or request fresh one.
+  // ── Auto-start camera when view transitions to 'camera' without a stream ──
+  // Fixes: addPhoto('camera') sets view but doesn't acquire camera hardware
   useEffect(() => {
-    if (view === 'camera' && !cameraStartingRef.current) {
-      if (DEV) console.log('[Camera] view=camera — ensuring stream is attached');
+    if (view === 'camera' && !cameraStreamRef.current && !cameraStartingRef.current) {
+      if (DEV) console.log('[Camera] Auto-starting: view=camera but no stream');
       startCamera();
     }
   }, [view, startCamera]);
