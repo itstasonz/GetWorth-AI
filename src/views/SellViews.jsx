@@ -267,7 +267,7 @@ export function MyListingsView() {
             style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.1)' }}>
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
               style={{ background: 'rgba(59,130,246,0.12)' }}>
-              <ShoppingBag className="w-8 h-8 text-blue-400" />
+              <ShoppingBag className="w-8 h-8" style={{ color: '#6FEEE1' }} />
             </div>
             <p className="mb-4 text-sm" style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY }}>
               {activeTab === 'sold'
@@ -1487,18 +1487,19 @@ export function ListingFlowView() {
           <div className="space-y-3">
             {[
               { id: 'newSealed', icon: Box, gradient: 'from-emerald-500 to-green-500' },
-              { id: 'likeNew', icon: Sparkles, gradient: 'from-blue-500 to-cyan-500' },
+              { id: 'likeNew', icon: Sparkles, gradient: 'from-[#6FEEE1] to-cyan-400' },
               { id: 'used', icon: Package, gradient: 'from-amber-500 to-orange-500' },
               { id: 'poor', icon: AlertTriangle, gradient: 'from-red-500 to-pink-500' }
             ].map((c, i) => (
               <FadeIn key={c.id} delay={i * 50}>
                 <button onClick={() => selectCondition(c.id)}
-                  className={`w-full p-5 rounded-2xl border-2 flex items-center gap-4 transition-all ${condition === c.id ? 'border-blue-500 bg-blue-500/10 scale-[1.02]' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/5'}`}>
+                  className={`w-full p-5 rounded-2xl border-2 flex items-center gap-4 transition-all ${condition === c.id ? 'scale-[1.02]' : 'border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/5'}`}
+                  style={condition === c.id ? { borderColor: 'rgba(111,238,225,0.6)', background: 'rgba(111,238,225,0.06)' } : {}}>
                   <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${c.gradient} flex items-center justify-center shadow-lg`}>
                     <c.icon className="w-7 h-7 text-white" />
                   </div>
                   <span className="flex-1 font-semibold text-lg text-left">{t?.[c.id] || c.id}</span>
-                  {condition === c.id ? <CheckCircle className="w-6 h-6 text-blue-400" /> : <Circle className="w-6 h-6 text-slate-600" />}
+                  {condition === c.id ? <CheckCircle className="w-6 h-6" style={{ color: '#6FEEE1' }} /> : <Circle className="w-6 h-6 text-slate-600" />}
                 </button>
               </FadeIn>
             ))}
@@ -1525,10 +1526,9 @@ export function ListingFlowView() {
                     {q.opts.map((o) => (
                       <button key={o} onClick={() => setAnswers({ ...answers, [q.key]: o })}
                         className={`${q.wrap ? 'px-3' : 'flex-1'} py-3 rounded-xl text-sm font-medium transition-all ${
-                          answers[q.key] === o
-                            ? 'bg-blue-600 shadow-lg shadow-blue-500/30 text-white'
-                            : 'bg-white/5 hover:bg-white/10 text-slate-300'
-                        }`}>
+                          answers[q.key] === o ? 'shadow-lg' : 'bg-white/5 hover:bg-white/10 text-slate-300'
+                        }`}
+                        style={answers[q.key] === o ? { background: '#6FEEE1', color: '#003733' } : {}}>
                         {oLabel(o, lang)}
                       </button>
                     ))}
@@ -1585,7 +1585,7 @@ export function ListingFlowView() {
                       </button>
                     )}
                     {i === 0 && (
-                      <div className="absolute bottom-0 inset-x-0 bg-blue-600/90 text-[8px] font-bold text-center py-0.5">
+                      <div className="absolute bottom-0 inset-x-0 text-[8px] font-bold text-center py-0.5" style={{ background: 'rgba(111,238,225,0.9)', color: '#003733' }}>
                         {lang === 'he' ? 'ראשית' : 'Cover'}
                       </div>
                     )}
@@ -1594,7 +1594,7 @@ export function ListingFlowView() {
                 {images.length < 6 && (
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="flex-shrink-0 w-20 h-20 rounded-xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center gap-1 hover:border-blue-500/50 hover:bg-blue-500/5 transition-all"
+                    className="flex-shrink-0 w-20 h-20 rounded-xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center gap-1 hover:border-[#6FEEE1]/50 hover:bg-[#6FEEE1]/5 transition-all"
                   >
                     <Plus className="w-5 h-5 text-slate-500" />
                     <span className="text-[9px] text-slate-500">{lang === 'he' ? 'הוסף' : 'Add'}</span>
@@ -1622,7 +1622,7 @@ export function ListingFlowView() {
           <FadeIn delay={100}>
             <div className="space-y-2">
               <label className="text-sm text-slate-400 font-medium">{t.desc}</label>
-              <textarea className="w-full px-4 py-4 rounded-2xl bg-white/5 border border-white/10 h-28 resize-none focus:border-blue-500/50 focus:bg-white/10 transition-all"
+              <textarea className="w-full px-4 py-4 rounded-2xl bg-white/5 border border-white/10 h-28 resize-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
                 value={listingData.desc} onChange={(e) => setListingData({ ...listingData, desc: e.target.value })} />
             </div>
           </FadeIn>

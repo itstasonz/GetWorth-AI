@@ -833,7 +833,8 @@ function HelpIdentifyModal() {
               </p>
               <div className="flex gap-2">
                 <button onClick={() => { setHelpModalOpen(false); addPhoto('camera'); }}
-                  className="flex-1 py-3 rounded-xl bg-blue-600/20 border border-blue-500/30 text-sm font-medium text-blue-300 flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-all active:scale-[0.97]">
+                  className="flex-1 py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-[0.97] hover:opacity-80"
+                  style={{ background: 'rgba(111,238,225,0.1)', border: '1px solid rgba(111,238,225,0.25)', color: '#6FEEE1' }}>
                   <Camera className="w-4 h-4" />
                   {lang === 'he' ? 'צלם תווית' : 'Take photo'}
                 </button>
@@ -861,7 +862,7 @@ function HelpIdentifyModal() {
               <div className="flex flex-wrap gap-2">
                 {visibleSuggestions.map((brand) => (
                   <button key={brand} onClick={() => handleBrandChip(brand)}
-                    className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/15 hover:border-blue-500/30 transition-all active:scale-95">
+                    className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm text-slate-300 hover:bg-white/15 hover:border-[#6FEEE1]/30 transition-all active:scale-95">
                     {brand}
                   </button>
                 ))}
@@ -885,11 +886,12 @@ function HelpIdentifyModal() {
             <div className="flex gap-2">
               <input type="text" value={brandInput} onChange={(e) => setBrandInput(e.target.value)}
                 placeholder={lang === 'he' ? 'מותג ודגם...' : 'Brand & model...'}
-                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
               />
               <button onClick={handleSubmit} disabled={!brandInput.trim()}
-                className="px-4 py-2.5 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all active:scale-95">
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all active:scale-95 hover:opacity-80"
+                style={{ background: '#6FEEE1', color: '#003733' }}>
                 {lang === 'he' ? 'עדכן' : 'Update'}
               </button>
             </div>
@@ -919,7 +921,7 @@ function PhotoStrip({ images, canAdd, onAddPhoto, lang, activeIndex = 0, onSelec
         <button key={i} onClick={() => onSelect?.(i)}
           className={`relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 transition-all ${
             i === activeIndex
-              ? 'border-2 border-blue-400 ring-2 ring-blue-400/30 scale-105'
+              ? 'border-2 border-[#6FEEE1] ring-2 ring-[#6FEEE1]/30 scale-105'
               : 'border-2 border-white/20 opacity-60 hover:opacity-90'
           }`}>
           <img src={img} className="w-full h-full object-cover" alt={`Photo ${i + 1}`} />
@@ -930,7 +932,7 @@ function PhotoStrip({ images, canAdd, onAddPhoto, lang, activeIndex = 0, onSelec
       ))}
       {canAdd && (
         <button onClick={onAddPhoto}
-          className="w-14 h-14 rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center hover:border-blue-500/50 hover:bg-blue-500/10 transition-all flex-shrink-0">
+          className="w-14 h-14 rounded-xl border-2 border-dashed border-white/20 flex items-center justify-center hover:border-[#6FEEE1]/50 hover:bg-[#6FEEE1]/10 transition-all flex-shrink-0">
           <Plus className="w-5 h-5 text-slate-500" />
         </button>
       )}
@@ -1028,8 +1030,8 @@ export function ResultsView() {
   if (refining) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center py-20">
-        <div className="w-12 h-12 rounded-2xl bg-blue-500/20 flex items-center justify-center mb-4 animate-pulse">
-          <Search className="w-6 h-6 text-blue-400" />
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4 animate-pulse" style={{ background: 'rgba(111,238,225,0.15)' }}>
+          <Search className="w-6 h-6" style={{ color: '#6FEEE1' }} />
         </div>
         <p className="text-sm text-slate-400">{lang === 'he' ? 'מעדכן זיהוי ומחירים...' : 'Updating identification & prices...'}</p>
       </div>
@@ -1117,7 +1119,7 @@ export function ResultsView() {
               </div>
             )}
             {brandConf === 'inferred_from_visuals' && (
-              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold bg-blue-500/15 text-blue-400 backdrop-blur-md">
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold backdrop-blur-md" style={{ background: 'rgba(111,238,225,0.12)', color: '#6FEEE1' }}>
                 <Eye className="w-2.5 h-2.5" />
                 {lang === 'he' ? 'חזותי' : 'Visual'}
               </div>
@@ -1444,12 +1446,12 @@ export function ResultsView() {
             <div className="flex gap-2">
               <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
                 placeholder={lang === 'he' ? 'הקלד מותג ודגם...' : 'Type brand & model...'}
-                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                 autoFocus
               />
               <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
-                className="px-4 py-2.5 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                className="px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all" style={{ background: '#6FEEE1', color: '#003733' }}>
                 {lang === 'he' ? 'עדכן' : 'Update'}
               </button>
             </div>
@@ -1464,7 +1466,7 @@ export function ResultsView() {
                   </button>
                 ))}
                 <button onClick={() => setHelpModalOpen(true)}
-                  className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] text-blue-400 hover:bg-blue-500/10 transition-all">
+                  className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[11px] hover:bg-[#6FEEE1]/10 transition-all" style={{ color: '#6FEEE1' }}>
                   {lang === 'he' ? 'עוד...' : 'More...'}
                 </button>
               </div>
@@ -1521,7 +1523,7 @@ export function ResultsView() {
 
             {!showCorrection ? (
               <div className="flex items-center gap-3">
-                <button onClick={() => setShowCorrection(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+                <button onClick={() => setShowCorrection(true)} className="text-xs transition-colors" style={{ color: '#6FEEE1' }}>
                   {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
                 </button>
                 <span className="text-slate-700">|</span>
@@ -1533,12 +1535,12 @@ export function ResultsView() {
               <div className="flex gap-2">
                 <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
                   placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                   autoFocus
                 />
                 <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
-                  className="px-4 py-2 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all" style={{ background: '#6FEEE1', color: '#003733' }}>
                   {lang === 'he' ? 'עדכן' : 'Update'}
                 </button>
               </div>
@@ -1584,19 +1586,19 @@ export function ResultsView() {
             )}
 
             {!showCorrection ? (
-              <button onClick={() => setShowCorrection(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+              <button onClick={() => setShowCorrection(true)} className="text-xs transition-colors" style={{ color: '#6FEEE1' }}>
                 {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
               </button>
             ) : (
               <div className="flex gap-2">
                 <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
                   placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                   autoFocus
                 />
                 <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
-                  className="px-4 py-2 rounded-xl bg-blue-600 text-sm font-semibold disabled:opacity-30 hover:bg-blue-500 transition-all">
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all" style={{ background: '#6FEEE1', color: '#003733' }}>
                   {lang === 'he' ? 'עדכן' : 'Update'}
                 </button>
               </div>

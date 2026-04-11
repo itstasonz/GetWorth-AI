@@ -116,14 +116,14 @@ function AppShell() {
       <div className="min-h-screen flex items-center justify-center bg-[#060a14]">
         <div className="text-center space-y-4">
           <div className="relative">
-            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center animate-pulse shadow-2xl shadow-blue-500/30">
-              <DollarSign className="w-10 h-10 text-white" />
+            <div className="w-20 h-20 rounded-3xl flex items-center justify-center animate-pulse shadow-2xl" style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', boxShadow: '0 0 40px rgba(111,238,225,0.3)' }}>
+              <DollarSign className="w-10 h-10" style={{ color: '#003733' }} />
             </div>
-            <div className="absolute -inset-4 bg-blue-500/20 rounded-full blur-2xl animate-pulse" />
+            <div className="absolute -inset-4 rounded-full blur-2xl animate-pulse" style={{ background: 'rgba(111,238,225,0.12)' }} />
           </div>
           <div className="flex gap-1 justify-center">
             {[0, 1, 2].map((i) => (
-              <div key={i} className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: `${i * 150}ms` }} />
+              <div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: '#6FEEE1', animationDelay: `${i * 150}ms` }} />
             ))}
           </div>
         </div>
@@ -131,12 +131,21 @@ function AppShell() {
     );
   }
 
+  const tabItems = [
+    { id: 'home', icon: Home, label: lang === 'he' ? 'בית' : 'Home' },
+    { id: 'browse', icon: Search, label: lang === 'he' ? 'עיון' : 'Browse' },
+    { id: 'sell', icon: PlusCircle, label: lang === 'he' ? 'מכור' : 'Sell' },
+    { id: 'messages', icon: MessageCircle, label: lang === 'he' ? 'צ\'אט' : 'Chat' },
+    { id: 'profile', icon: User, label: lang === 'he' ? 'פרופיל' : 'Profile' },
+  ];
+  const activeTabIndex = tabItems.findIndex(n => n.id === tab);
+
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif', background: '#131313' }} dir={rtl ? 'rtl' : 'ltr'}>
       
       {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] bg-blue-500/10 rounded-full blur-[120px]" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[600px] rounded-full blur-[120px]" style={{ background: 'rgba(111,238,225,0.06)' }} />
         <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-purple-500/10 rounded-full blur-[100px]" />
         <div className="absolute top-1/2 right-0 w-[300px] h-[300px] bg-cyan-500/10 rounded-full blur-[80px]" />
       </div>
@@ -161,8 +170,8 @@ function AppShell() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-5 animate-fadeIn">
           <ScaleIn>
             <Card className="p-8 max-w-sm w-full text-center space-y-5" glow>
-              <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500/20 to-blue-600/20 flex items-center justify-center mx-auto">
-                <User className="w-10 h-10 text-blue-400" />
+              <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto" style={{ background: 'rgba(111,238,225,0.12)' }}>
+                <User className="w-10 h-10" style={{ color: '#6FEEE1' }} />
               </div>
               <h3 className="text-2xl font-bold">{t.signInReq}</h3>
               <p className="text-slate-400">{signInAction === 'save' ? t.signInSave : signInAction === 'contact' ? t.signInContact : t.signInList}</p>
@@ -185,13 +194,13 @@ function AppShell() {
 
               <Card className="p-4">
                 <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center text-xl font-bold shadow-lg shadow-blue-500/30">
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg" style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733', boxShadow: '0 8px 24px rgba(111,238,225,0.25)' }}>
                     {selected.seller?.full_name?.charAt(0) || 'S'}
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-bold">{selected.seller?.full_name || 'Seller'}</span>
-                      {selected.seller?.is_verified && <Shield className="w-4 h-4 text-blue-400" />}
+                      {selected.seller?.is_verified && <Shield className="w-4 h-4" style={{ color: '#6FEEE1' }} />}
                     </div>
                     {selected.seller?.rating && (
                       <div className="flex items-center gap-1 text-sm text-slate-400 mt-0.5">
@@ -206,7 +215,7 @@ function AppShell() {
 
               <div className="space-y-3">
                 <button onClick={() => { setShowContact(false); startConversation(selected); }}
-                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-blue-500 text-center font-semibold flex items-center justify-center gap-3 shadow-lg shadow-blue-500/30 active:scale-[0.98] transition-transform">
+                  className="w-full py-4 rounded-2xl text-center font-semibold flex items-center justify-center gap-3 active:scale-[0.98] transition-transform" style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733', boxShadow: '0 8px 24px rgba(111,238,225,0.3)' }}>
                   <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'שלח הודעה באפליקציה' : 'Message in App'}
                 </button>
 
@@ -315,35 +324,36 @@ function AppShell() {
         {/* Content - View Router */}
         <main className="flex-1 px-5 pb-4 overflow-y-auto">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-
-          {view === 'home' && <HomeView />}
-          {view === 'camera' && <CameraView />}
-          {view === 'analyzing' && <AnalyzingView />}
-          {view === 'results' && <ResultsView />}
-          {view === 'browse' && !selected && <BrowseView />}
-          {view === 'detail' && selected && <DetailView />}
-          {view === 'sellerProfile' && <SellerProfileView />}
-          {view === 'saved' && <SavedView />}
-          {view === 'inbox' && <InboxView />}
-          {view === 'chat' && <ChatView />}
-          {view === 'auth' && <AuthView />}
-          {view === 'profile' && user && <ProfileView />}
-          {view === 'myListings' && <MyListingsView />}
-          {view === 'listing' && <ListingFlowView />}
-          {view === 'analytics' && <AnalyticsView />}
-          {view === 'admin' && <AdminPanel />}
-          {view === 'orders' && <OrdersView />}
-          {view === 'orderDetail' && <OrderDetailView />}
-          {view === 'notifications' && <NotificationsView />}
+          <div key={view} className="animate-viewFade">
+            {view === 'home' && <HomeView />}
+            {view === 'camera' && <CameraView />}
+            {view === 'analyzing' && <AnalyzingView />}
+            {view === 'results' && <ResultsView />}
+            {view === 'browse' && !selected && <BrowseView />}
+            {view === 'detail' && selected && <DetailView />}
+            {view === 'sellerProfile' && <SellerProfileView />}
+            {view === 'saved' && <SavedView />}
+            {view === 'inbox' && <InboxView />}
+            {view === 'chat' && <ChatView />}
+            {view === 'auth' && <AuthView />}
+            {view === 'profile' && user && <ProfileView />}
+            {view === 'myListings' && <MyListingsView />}
+            {view === 'listing' && <ListingFlowView />}
+            {view === 'analytics' && <AnalyticsView />}
+            {view === 'admin' && <AdminPanel />}
+            {view === 'orders' && <OrdersView />}
+            {view === 'orderDetail' && <OrderDetailView />}
+            {view === 'notifications' && <NotificationsView />}
+          </div>
         </main>
 
         {/* Checkout Sheet (modal overlay) */}
         <CheckoutSheet />
 
         {/* Bottom Nav */}
-        {/* ═══ STITCH BOTTOM NAV — faithful port of HTML nav ═══ */}
+        {/* ═══ STITCH BOTTOM NAV — sliding pill edition ═══ */}
         <nav
-          className="fixed bottom-0 left-0 right-0 z-40 flex justify-around items-center px-4"
+          className="fixed bottom-0 left-0 right-0 z-40 overflow-hidden"
           style={{
             background: 'rgba(28, 27, 27, 0.95)',
             backdropFilter: 'blur(24px)',
@@ -352,63 +362,76 @@ function AppShell() {
             borderTopRightRadius: '32px',
             borderTop: '1px solid rgba(255, 255, 255, 0.05)',
             boxShadow: '0 -10px 40px rgba(0, 0, 0, 0.5)',
-            // Safe area: respect iPhone home indicator / Android gesture bar
-            paddingTop: '12px',
-            paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
-            paddingLeft: 'max(env(safe-area-inset-left), 16px)',
-            paddingRight: 'max(env(safe-area-inset-right), 16px)',
           }}
         >
-          {[
-            { id: 'home', icon: Home, label: lang === 'he' ? 'בית' : 'Home' },
-            { id: 'browse', icon: Search, label: lang === 'he' ? 'עיון' : 'Browse' },
-            { id: 'sell', icon: PlusCircle, label: lang === 'he' ? 'מכור' : 'Sell' },
-            { id: 'messages', icon: MessageCircle, label: lang === 'he' ? 'צ\'אט' : 'Chat' },
-            { id: 'profile', icon: User, label: lang === 'he' ? 'פרופיל' : 'Profile' },
-          ].map((n) => {
-            const active = tab === n.id;
-            return (
-              <button
-                key={n.id}
-                onClick={() => goTab(n.id)}
-                className="flex flex-col items-center justify-center px-4 py-1.5 rounded-2xl active:scale-95 transition-all duration-200 relative"
-                style={{ color: active ? '#6FEEE1' : '#BBC9C7' }}
-              >
-                <div className="relative mb-0.5">
-                  <n.icon
-                    className="w-6 h-6"
-                    strokeWidth={active ? 2.5 : 2}
-                    fill={active ? 'currentColor' : 'none'}
-                  />
-                  {n.id === 'sell' && (() => {
-                    const pendingCount = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending').length;
-                    if (pendingCount > 0) return (
-                      <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold text-black animate-pulse">{pendingCount}</span>
-                    );
-                    if (myListings.length > 0) return (
-                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold text-black" style={{ background: '#6FEEE1' }}>{myListings.length}</span>
-                    );
-                    return null;
-                  })()}
-                  {n.id === 'messages' && unreadCount > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
-                  )}
-                  {n.id === 'profile' && notifUnreadCount > 0 && !active && (
-                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{notifUnreadCount}</span>
-                  )}
-                </div>
-                <span
-                  className="text-[10px] tracking-wide"
-                  style={{
-                    fontFamily: '"Inter", system-ui, sans-serif',
-                    fontWeight: active ? 700 : 500,
-                  }}
+          <div
+            className="relative flex w-full items-center"
+            style={{
+              paddingTop: '12px',
+              paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+              paddingLeft: 'max(env(safe-area-inset-left), 16px)',
+              paddingRight: 'max(env(safe-area-inset-right), 16px)',
+            }}
+          >
+            {/* Sliding teal pill behind active tab */}
+            <div
+              className="absolute pointer-events-none rounded-2xl"
+              style={{
+                width: '20%',
+                top: '8px',
+                bottom: '8px',
+                left: 0,
+                background: 'rgba(111,238,225,0.09)',
+                border: '1px solid rgba(111,238,225,0.14)',
+                transform: `translateX(${(rtl ? (4 - activeTabIndex) : activeTabIndex) * 100}%)`,
+                transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
+              }}
+            />
+            {tabItems.map((n) => {
+              const active = tab === n.id;
+              return (
+                <button
+                  key={n.id}
+                  onClick={() => goTab(n.id)}
+                  className="flex-1 flex flex-col items-center justify-center py-1.5 relative z-10 active:scale-95 transition-all duration-200"
+                  style={{ color: active ? '#6FEEE1' : '#BBC9C7' }}
                 >
-                  {n.label}
-                </span>
-              </button>
-            );
-          })}
+                  <div className="relative mb-0.5">
+                    <n.icon
+                      className="w-6 h-6"
+                      strokeWidth={active ? 2.5 : 2}
+                      fill={active ? 'currentColor' : 'none'}
+                    />
+                    {n.id === 'sell' && (() => {
+                      const pendingCount = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending').length;
+                      if (pendingCount > 0) return (
+                        <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold text-black animate-pulse">{pendingCount}</span>
+                      );
+                      if (myListings.length > 0) return (
+                        <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full text-[9px] flex items-center justify-center font-bold text-black" style={{ background: '#6FEEE1' }}>{myListings.length}</span>
+                      );
+                      return null;
+                    })()}
+                    {n.id === 'messages' && unreadCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
+                    )}
+                    {n.id === 'profile' && notifUnreadCount > 0 && !active && (
+                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{notifUnreadCount}</span>
+                    )}
+                  </div>
+                  <span
+                    className="text-[10px] tracking-wide"
+                    style={{
+                      fontFamily: '"Inter", system-ui, sans-serif',
+                      fontWeight: active ? 700 : 500,
+                    }}
+                  >
+                    {n.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </nav>
       </div>
 
@@ -444,6 +467,11 @@ function AppShell() {
         .animate-notifProgress { animation: notifProgress 6s linear forwards; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        @keyframes viewFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-viewFade { animation: viewFade 0.22s ease-out forwards; }
+        .btn-spring { transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease; -webkit-tap-highlight-color: transparent; will-change: transform; }
+        .btn-spring:active { transform: scale(0.95); transition-duration: 0.08s; transition-timing-function: ease; }
+        .btn-spring-primary:active { box-shadow: 0 0 20px rgba(111,238,225,0.35), 0 0 40px rgba(111,238,225,0.15) !important; }
       `}</style>
     </div>
   );

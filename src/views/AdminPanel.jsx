@@ -219,7 +219,7 @@ export default function AdminPanel() {
             <ArrowLeft className="w-5 h-5" />
           </button>
           <h2 className="text-xl font-bold flex items-center gap-2">
-            <Shield className="w-6 h-6 text-blue-400" />
+            <Shield className="w-6 h-6 text-[#6FEEE1]" />
             {t('Admin Panel', 'פאנל ניהול')}
           </h2>
         </div>
@@ -233,7 +233,7 @@ export default function AdminPanel() {
             onClick={() => setTab(tb.id)}
             className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all ${
               tab === tb.id
-                ? 'bg-blue-600/30 text-blue-300 border border-blue-500/30'
+                ? 'bg-[#6FEEE1]/10 text-[#6FEEE1] border border-[#6FEEE1]/25'
                 : 'bg-white/5 text-slate-400 hover:bg-white/10'
             }`}
           >
@@ -248,7 +248,7 @@ export default function AdminPanel() {
 
       {loading && (
         <div className="text-center py-8">
-          <Loader2 className="w-6 h-6 animate-spin text-blue-400 mx-auto" />
+          <Loader2 className="w-6 h-6 animate-spin text-[#6FEEE1] mx-auto" />
         </div>
       )}
 
@@ -269,7 +269,7 @@ export default function AdminPanel() {
               { label: t('Revenue', 'הכנסות'), value: formatPrice(stats.totalRevenue), icon: DollarSign, color: 'emerald' },
             ].map((s, i) => {
               const colors = {
-                blue: 'text-blue-400', green: 'text-green-400', emerald: 'text-emerald-400',
+                blue: 'text-[#6FEEE1]', green: 'text-green-400', emerald: 'text-emerald-400',
                 purple: 'text-purple-400', amber: 'text-amber-400', yellow: 'text-yellow-400',
                 cyan: 'text-cyan-400', red: 'text-red-400',
               };
@@ -370,14 +370,14 @@ export default function AdminPanel() {
                   {u.avatar_url ? (
                     <img src={u.avatar_url} alt="" className="w-10 h-10 rounded-xl object-cover" />
                   ) : (
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-sm font-bold">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-600 to-slate-500 flex items-center justify-center text-sm font-bold">
                       {u.full_name?.charAt(0) || '?'}
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="text-sm font-semibold truncate">{u.full_name || 'Anonymous'}</span>
-                      {u.is_verified && <CheckCircle className="w-3.5 h-3.5 text-blue-400 flex-shrink-0" />}
+                      {u.is_verified && <CheckCircle className="w-3.5 h-3.5 text-[#6FEEE1] flex-shrink-0" />}
                       {u.is_admin && <Shield className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />}
                     </div>
                     <div className="flex items-center gap-3 mt-0.5">
@@ -416,7 +416,7 @@ function VerificationCard({ user, lang, onApprove, onReject }) {
             {user.avatar_url ? (
               <img src={user.avatar_url} alt="" className="w-12 h-12 rounded-xl object-cover" />
             ) : (
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-lg font-bold">
+              <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-slate-600 to-slate-500 flex items-center justify-center text-lg font-bold">
                 {user.full_name?.charAt(0) || '?'}
               </div>
             )}
@@ -522,9 +522,9 @@ function AdminOrderCard({ order, lang, onUpdate }) {
 
   const statusColors = {
     pending: 'bg-amber-500/15 text-amber-300',
-    accepted: 'bg-blue-500/15 text-blue-300',
-    shipped: 'bg-blue-500/15 text-blue-300',
-    ready_pickup: 'bg-blue-500/15 text-blue-300',
+    accepted: 'bg-[#6FEEE1]/10 text-[#6FEEE1]',
+    shipped: 'bg-[#6FEEE1]/10 text-[#6FEEE1]',
+    ready_pickup: 'bg-[#6FEEE1]/10 text-[#6FEEE1]',
     delivered: 'bg-emerald-500/15 text-emerald-300',
     completed: 'bg-emerald-500/15 text-emerald-300',
     cancelled: 'bg-red-500/15 text-red-300',

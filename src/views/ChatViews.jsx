@@ -12,7 +12,7 @@ export function InboxView() {
       <div className="space-y-4">
         <FadeIn><h2 className="text-2xl font-bold">{lang === 'he' ? 'הודעות' : 'Messages'}</h2></FadeIn>
         <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-blue-500/10 flex items-center justify-center mx-auto mb-4"><MessageCircle className="w-10 h-10 text-blue-400" /></div>
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center mx-auto mb-4" style={{ background: 'rgba(111,238,225,0.08)' }}><MessageCircle className="w-10 h-10" style={{ color: '#6FEEE1' }} /></div>
           <p className="text-slate-400 mb-5">{lang === 'he' ? 'התחבר כדי לראות הודעות' : 'Sign in to see messages'}</p>
           <Btn primary onClick={() => goTab('profile')}>{t.signIn}</Btn>
         </FadeIn>
@@ -131,7 +131,7 @@ export function ChatView() {
           <div className="space-y-3 py-4">
             {[0, 1, 2].map(i => (
               <div key={i} className={`flex ${i % 2 === 0 ? 'justify-start' : 'justify-end'}`}>
-                <div className={`rounded-2xl px-4 py-3 animate-pulse ${i % 2 === 0 ? 'bg-white/5 w-2/3' : 'bg-blue-600/20 w-1/2'}`}>
+                <div className={`rounded-2xl px-4 py-3 animate-pulse ${i % 2 === 0 ? 'bg-white/5 w-2/3' : 'w-1/2'}`} style={i % 2 !== 0 ? { background: 'rgba(111,238,225,0.08)' } : {}}>
                   <div className="h-3 bg-white/10 rounded w-full mb-2" />
                   <div className="h-3 bg-white/10 rounded w-2/3" />
                 </div>
@@ -145,11 +145,14 @@ export function ChatView() {
           const isMe = msg.sender_id === user.id;
           return (
             <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[80%] rounded-2xl px-4 py-3 ${isMe ? 'bg-blue-600 rounded-br-sm' : 'bg-white/10 rounded-bl-sm'}`}>
-                {msg.is_offer && <div className={`text-xs mb-1 ${isMe ? 'text-blue-200' : 'text-slate-400'}`}>💰 {lang === 'he' ? 'הצעת מחיר' : 'Price Offer'}</div>}
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-3 ${isMe ? 'rounded-br-sm' : 'bg-white/10 rounded-bl-sm'}`}
+                style={isMe ? { background: 'rgba(111,238,225,0.18)', border: '1px solid rgba(111,238,225,0.35)' } : {}}
+              >
+                {msg.is_offer && <div className={`text-xs mb-1 ${isMe ? 'text-[#6FEEE1]/80' : 'text-slate-400'}`}>💰 {lang === 'he' ? 'הצעת מחיר' : 'Price Offer'}</div>}
                 {msg.is_offer && msg.offer_amount && <p className="text-xl font-bold text-green-400 mb-1">₪{msg.offer_amount.toLocaleString()}</p>}
                 <p className="text-sm">{msg.content}</p>
-                <p className={`text-[10px] mt-1 ${isMe ? 'text-blue-200' : 'text-slate-500'}`}>
+                <p className={`text-[10px] mt-1 ${isMe ? 'text-[#6FEEE1]/70' : 'text-slate-500'}`}>
                   {formatMessageTime(msg.created_at, lang)}
                   {isMe && msg.is_read && ' ✓✓'}
                 </p>
@@ -186,10 +189,11 @@ export function ChatView() {
           <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && sendMessage(newMessage)}
             placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Type a message...'}
-            className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-blue-500/50"
+            className="flex-1 px-4 py-3 rounded-xl bg-white/5 border border-white/10 focus:outline-none focus:border-[#6FEEE1]/50"
             dir={rtl ? 'rtl' : 'ltr'} />
           <button onClick={() => sendMessage(newMessage)} disabled={!newMessage.trim() || sendingMessage}
-            className="w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center disabled:opacity-50 hover:bg-blue-500 transition-all">
+            className="w-12 h-12 rounded-xl flex items-center justify-center disabled:opacity-50 transition-all"
+            style={{ background: '#6FEEE1', color: '#003733' }}>
             {sendingMessage ? <Loader2 className="w-5 h-5 animate-spin" /> : <ChevronRight className="w-5 h-5" />}
           </button>
         </div>

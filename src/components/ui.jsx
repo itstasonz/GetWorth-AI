@@ -35,6 +35,22 @@ export const Skeleton = ({ className }) => (
   </div>
 );
 
+// Skeleton card — for listings grid loading state
+export const SkeletonCard = () => (
+  <div className="rounded-3xl overflow-hidden bg-white/5 relative">
+    <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent z-10 pointer-events-none" />
+    <div className="aspect-square bg-white/5" />
+    <div className="p-4 space-y-3">
+      <div className="h-4 bg-white/5 rounded-xl w-3/4" />
+      <div className="h-7 bg-white/5 rounded-xl w-1/2" />
+      <div className="flex justify-between">
+        <div className="h-3 bg-white/5 rounded-xl w-1/3" />
+        <div className="h-3 bg-white/5 rounded-xl w-1/4" />
+      </div>
+    </div>
+  </div>
+);
+
 // Card
 export const Card = ({ children, className = '', onClick, glow, gradient }) => (
   <div 
@@ -54,11 +70,12 @@ export const Card = ({ children, className = '', onClick, glow, gradient }) => (
 export const Btn = ({ children, primary, secondary, disabled, className = '', ...p }) => (
   <button 
     disabled={disabled} 
-    className={`relative px-6 py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all duration-300 active:scale-95 disabled:opacity-50 overflow-hidden group ${className}`}
+    className={`relative px-6 py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all duration-300 active:scale-95 disabled:opacity-50 overflow-hidden group btn-spring ${primary ? 'btn-spring-primary' : ''} ${className}`}
     style={{
-      background: primary ? 'linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%)' : secondary ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
+      background: primary ? 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)' : secondary ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
       border: primary || secondary ? 'none' : '1px solid rgba(255,255,255,0.1)',
-      boxShadow: primary ? '0 8px 24px rgba(59,130,246,0.4), inset 0 1px 0 rgba(255,255,255,0.2)' : secondary ? '0 8px 24px rgba(16,185,129,0.4)' : 'none'
+      boxShadow: primary ? '0 8px 24px rgba(111,238,225,0.35), inset 0 1px 0 rgba(255,255,255,0.25)' : secondary ? '0 8px 24px rgba(16,185,129,0.4)' : 'none',
+      color: primary ? '#003733' : undefined,
     }}
     {...p}
   >
@@ -84,7 +101,7 @@ export const InputField = ({ label, icon: Icon, rtl, ...p }) => (
     <div className="relative">
       {Icon && <Icon className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />}
       <input 
-        className={`w-full px-4 py-4 ${Icon ? (rtl ? 'pr-12' : 'pl-12') : ''} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all`}
+        className={`w-full px-4 py-4 ${Icon ? (rtl ? 'pr-12' : 'pl-12') : ''} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all`}
         dir={rtl ? 'rtl' : 'ltr'} 
         {...p} 
       />

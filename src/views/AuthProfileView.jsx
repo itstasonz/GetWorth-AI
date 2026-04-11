@@ -72,7 +72,7 @@ export function AuthView() {
       <FadeIn delay={250}>
         <p className="text-center text-sm text-slate-400">
           {authMode === 'login' ? t.noAcc : t.haveAcc}{' '}
-          <button onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthError(null); }} className="text-blue-400 font-medium hover:text-blue-300" disabled={authLoading}>
+          <button onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setAuthError(null); }} className="font-medium hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} disabled={authLoading}>
             {authMode === 'login' ? t.signUp : t.signIn}
           </button>
         </p>
@@ -244,8 +244,8 @@ export function ProfileView() {
         {vStatus === 'unverified' && (
           <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(59,130,246,0.02))">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-                <Shield className="w-5 h-5 text-blue-400" />
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(111,238,225,0.12)' }}>
+                <Shield className="w-5 h-5" style={{ color: '#6FEEE1' }} />
               </div>
               <div className="flex-1">
                 <p className="text-sm font-semibold">{lang === 'he' ? 'אמת את הפרופיל שלך' : 'Verify your profile'}</p>
@@ -255,7 +255,8 @@ export function ProfileView() {
             <button
               onClick={() => verifyInputRef.current?.click()}
               disabled={verificationUploading}
-              className="w-full mt-3 py-2.5 rounded-xl bg-blue-600/20 border border-blue-500/30 text-sm font-semibold text-blue-300 flex items-center justify-center gap-2 hover:bg-blue-600/30 transition-all"
+              className="w-full mt-3 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all hover:opacity-80"
+              style={{ background: 'rgba(111,238,225,0.1)', border: '1px solid rgba(111,238,225,0.25)', color: '#6FEEE1' }}
             >
               {verificationUploading ? (
                 <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'מעלה...' : 'Uploading...'}</>
@@ -600,7 +601,7 @@ export function ProfileView() {
         {scansExpanded && (
           <>
             {valuationsLoading && (
-              <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-blue-400" /></div>
+              <div className="flex justify-center py-4"><Loader2 className="w-5 h-5 animate-spin text-[#6FEEE1]" /></div>
             )}
 
             {!valuationsLoading && valuations.length > 0 && (
@@ -639,7 +640,7 @@ export function ProfileView() {
                   <Card key={v.id} className="p-3 flex items-center gap-3">
                     <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 ${
                       v.ai_confidence >= 0.9 ? 'bg-green-500/20 text-green-300' :
-                      v.ai_confidence >= 0.75 ? 'bg-blue-500/20 text-blue-300' :
+                      v.ai_confidence >= 0.75 ? 'bg-[#6FEEE1]/10 text-[#6FEEE1]' :
                       'bg-amber-500/20 text-amber-300'
                     }`}>
                       {Math.round((v.ai_confidence || 0) * 100)}%
@@ -653,7 +654,7 @@ export function ProfileView() {
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      {v.price_mid > 0 && <p className="text-sm font-bold text-blue-400">₪{v.price_mid.toLocaleString()}</p>}
+                      {v.price_mid > 0 && <p className="text-sm font-bold text-[#6FEEE1]">₪{v.price_mid.toLocaleString()}</p>}
                       <p className="text-[10px] text-slate-600">{new Date(v.created_at).toLocaleDateString()}</p>
                     </div>
                     {/* Delete button */}

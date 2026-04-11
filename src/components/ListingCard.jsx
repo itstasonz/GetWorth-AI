@@ -61,7 +61,7 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
   const isSaved = savedIds?.has(item.id) ?? false;
 
   return (
-    <div className="animate-fadeIn">
+    <div className="animate-fadeIn" style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}>
       <Card className="overflow-hidden group" onClick={() => viewItem(item)}>
         <div className="relative aspect-square overflow-hidden">
           <LazyImage src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
@@ -100,7 +100,7 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
         </div>
         
         <div className="p-4 space-y-2">
-          <h3 className="font-semibold text-sm truncate group-hover:text-blue-400 transition-colors">
+          <h3 className="font-semibold text-sm truncate group-hover:text-[#6FEEE1] transition-colors">
             {lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}
           </h3>
           <p className="text-2xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">

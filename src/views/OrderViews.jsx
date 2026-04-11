@@ -29,18 +29,18 @@ const STEPS_SHIPPING = ['pending', 'accepted', 'shipped', 'delivered', 'complete
 
 function badgeCls(color) {
   return color === 'amber' ? 'bg-amber-500/15 text-amber-300' :
-    color === 'blue' ? 'bg-blue-500/15 text-blue-300' :
+    color === 'blue' ? 'bg-[#6FEEE1]/10 text-[#6FEEE1]' :
     color === 'emerald' ? 'bg-emerald-500/15 text-emerald-300' :
     'bg-red-500/15 text-red-300';
 }
 function txtCls(color) {
   return color === 'amber' ? 'text-amber-400' :
-    color === 'blue' ? 'text-blue-400' :
+    color === 'blue' ? 'text-[#6FEEE1]' :
     color === 'emerald' ? 'text-emerald-400' : 'text-red-400';
 }
 function bgCls(color) {
   return color === 'amber' ? 'bg-amber-500/10 border-amber-500/20' :
-    color === 'blue' ? 'bg-blue-500/10 border-blue-500/20' :
+    color === 'blue' ? 'bg-[#6FEEE1]/5 border-[#6FEEE1]/20' :
     color === 'emerald' ? 'bg-emerald-500/10 border-emerald-500/20' :
     'bg-red-500/10 border-red-500/20';
 }
@@ -88,9 +88,10 @@ export function CheckoutSheet() {
             <div className="grid grid-cols-2 gap-3">
               {[{ key: 'pickup', Icon: MapPin, he: 'איסוף עצמי', en: 'Pickup' }, { key: 'shipping', Icon: Truck, he: 'משלוח', en: 'Shipping' }].map(m => (
                 <button key={m.key} onClick={() => setDeliveryMethod(m.key)}
-                  className={`p-4 rounded-2xl border text-center transition-all ${deliveryMethod === m.key ? 'border-blue-500 bg-blue-500/10' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}>
-                  <m.Icon className={`w-6 h-6 mx-auto mb-2 ${deliveryMethod === m.key ? 'text-blue-400' : 'text-slate-400'}`} />
-                  <span className={`text-sm font-medium ${deliveryMethod === m.key ? 'text-blue-300' : 'text-slate-300'}`}>{lang === 'he' ? m.he : m.en}</span>
+                  className={`p-4 rounded-2xl border text-center transition-all ${deliveryMethod === m.key ? '' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
+                  style={deliveryMethod === m.key ? { borderColor: 'rgba(111,238,225,0.5)', background: 'rgba(111,238,225,0.08)' } : {}}>
+                  <m.Icon className="w-6 h-6 mx-auto mb-2" style={{ color: deliveryMethod === m.key ? '#6FEEE1' : '#64748b' }} />
+                  <span className="text-sm font-medium" style={{ color: deliveryMethod === m.key ? '#6FEEE1' : '#cbd5e1' }}>{lang === 'he' ? m.he : m.en}</span>
                   {m.key === 'pickup' && listing.location && <p className="text-[10px] text-slate-500 mt-1 truncate">{listing.location}</p>}
                 </button>
               ))}
@@ -103,7 +104,7 @@ export function CheckoutSheet() {
             <label className="text-sm text-slate-400 mb-1.5 block">{lang === 'he' ? 'הערה למוכר (אופציונלי)' : 'Note to seller (optional)'}</label>
             <textarea value={buyerNote} onChange={e => setBuyerNote(e.target.value)}
               placeholder={lang === 'he' ? 'למשל: זמין בערבים...' : 'e.g. Available evenings...'}
-              className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-blue-500/50" rows={2} />
+              className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-[#6FEEE1]/50" rows={2} />
           </div>
           <Card className="p-4" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
             <div className="flex items-start gap-3">
@@ -184,7 +185,7 @@ export function OrdersView() {
             <div className="flex-1 min-w-0">
               <h4 className="font-semibold text-sm truncate">{lang === 'he' && listing?.title_hebrew ? listing.title_hebrew : (listing?.title || '')}</h4>
               <p className="text-lg font-bold text-emerald-400">{formatPrice(order.price)}</p>
-              <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'מאת: ' : 'From: '}{buyer?.full_name || (lang === 'he' ? 'קונה' : 'Buyer')}{buyer?.is_verified && <Shield className="w-3 h-3 text-blue-400 inline ml-1" />}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'מאת: ' : 'From: '}{buyer?.full_name || (lang === 'he' ? 'קונה' : 'Buyer')}{buyer?.is_verified && <Shield className="w-3 h-3 text-[#6FEEE1] inline ml-1" />}</p>
             </div>
           </div>
           {order.buyer_note && <div className="bg-white/5 rounded-xl p-3"><p className="text-xs text-slate-400"><CornerDownRight className="w-3 h-3 inline mr-1" />{order.buyer_note}</p></div>}
@@ -219,7 +220,8 @@ export function OrdersView() {
           { key: 'selling', he: 'מכירות', en: 'Sales', count: otherSellOrders.length, color: 'blue' },
         ].map(tab => (
           <button key={tab.key} onClick={() => setActiveTab(tab.key)}
-            className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key ? `bg-${tab.color}-600/30 text-${tab.color}-300` : 'text-slate-400 hover:text-white'}`}>
+            className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === tab.key ? '' : 'text-slate-400 hover:text-white'}`}
+            style={activeTab === tab.key ? (tab.key === 'requests' ? { background: 'rgba(245,158,11,0.2)', color: '#fbbf24' } : { background: 'rgba(111,238,225,0.12)', color: '#6FEEE1' }) : {}}>
             {lang === 'he' ? tab.he : tab.en}
             {tab.count > 0 && tab.key === 'requests' && <span className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-500 text-[10px] font-bold text-black">{tab.count}</span>}
             {tab.count > 0 && tab.key !== 'requests' && ` (${tab.count})`}
@@ -228,7 +230,7 @@ export function OrdersView() {
       </div>
 
       {ordersLoading ? (
-        <div className="text-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-400 mx-auto" /></div>
+        <div className="text-center py-12"><Loader2 className="w-8 h-8 animate-spin text-[#6FEEE1] mx-auto" /></div>
       ) : currentList.length === 0 ? (
         <FadeIn><div className="text-center py-16 space-y-3">
           <Package className="w-12 h-12 text-slate-600 mx-auto" />
@@ -277,7 +279,7 @@ export function OrderDetailView() {
             <h2 className="text-xl font-bold">{lang === 'he' ? 'פרטי הזמנה' : 'Order Details'}</h2>
           </div>
         </FadeIn>
-        <div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin text-blue-400 mx-auto" /></div>
+        <div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin text-[#6FEEE1] mx-auto" /></div>
       </div>
     );
   }
@@ -359,7 +361,7 @@ export function OrderDetailView() {
       {!isTerminal && (
         <FadeIn delay={120}>
           <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.02))">
-            <p className="text-sm text-blue-200 text-center">
+            <p className="text-sm text-slate-300 text-center">
               {order.status === 'pending' && isBuyer && (lang === 'he' ? 'ממתין לאישור המוכר...' : 'Waiting for seller to accept...')}
               {order.status === 'pending' && isSeller && (lang === 'he' ? 'יש לך בקשת קנייה חדשה! אשר או דחה למטה.' : 'New purchase request! Accept or decline below.')}
               {order.status === 'accepted' && isBuyer && (lang === 'he' ? 'המוכר אישר! ממתין שיסמן מוכן.' : 'Seller accepted! Waiting for them to mark ready.')}
@@ -383,14 +385,14 @@ export function OrderDetailView() {
               return (
                 <div key={step} className="flex items-start gap-3">
                   <div className="flex flex-col items-center">
-                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${isActive ? 'border-blue-500 bg-blue-500' : 'border-slate-600'}`}>
-                      {isActive && <Check className="w-2.5 h-2.5 text-white" />}
+                    <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${isActive ? 'border-[#6FEEE1] bg-[#6FEEE1]' : 'border-slate-600'}`}>
+                      {isActive && <Check className="w-2.5 h-2.5" style={{ color: '#003733' }} />}
                     </div>
-                    {i < steps.length - 1 && <div className={`w-0.5 h-8 ${isActive && i < currentStepIndex ? 'bg-blue-500' : 'bg-slate-700'}`} />}
+                    {i < steps.length - 1 && <div className={`w-0.5 h-8 ${isActive && i < currentStepIndex ? 'bg-[#6FEEE1]' : 'bg-slate-700'}`} />}
                   </div>
                   <div className={`pt-0 pb-4 ${isCurrent ? 'text-white font-semibold' : isActive ? 'text-slate-300' : 'text-slate-500'}`}>
                     <span className="text-sm">{label[lang === 'he' ? 'he' : 'en']}</span>
-                    {isCurrent && <span className="ml-2 text-[10px] text-blue-400 font-medium">{lang === 'he' ? '← כאן' : '← current'}</span>}
+                    {isCurrent && <span className="ml-2 text-[10px] font-medium" style={{ color: '#6FEEE1' }}>{lang === 'he' ? '← כאן' : '← current'}</span>}
                   </div>
                 </div>
               );
@@ -410,7 +412,7 @@ export function OrderDetailView() {
           {order.buyer_note && <div className="flex justify-between text-sm"><span className="text-slate-400">{lang === 'he' ? 'הערה' : 'Note'}</span><span className="text-slate-300 text-right max-w-[200px]">{order.buyer_note}</span></div>}
           <div className="flex justify-between text-sm">
             <span className="text-slate-400">{lang === 'he' ? (isBuyer ? 'מוכר' : 'קונה') : (isBuyer ? 'Seller' : 'Buyer')}</span>
-            <span className="text-slate-300 flex items-center gap-1.5">{otherName}{otherVerified && <Shield className="w-3 h-3 text-blue-400" />}</span>
+            <span className="text-slate-300 flex items-center gap-1.5">{otherName}{otherVerified && <Shield className="w-3 h-3 text-[#6FEEE1]" />}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-slate-400">{lang === 'he' ? 'תאריך' : 'Date'}</span>
@@ -574,7 +576,7 @@ export function NotificationsView() {
     ORDER_REQUESTED: { icon: ShoppingBag, color: 'text-amber-400' },
     ORDER_ACCEPTED:  { icon: Check,        color: 'text-emerald-400' },
     ORDER_DECLINED:  { icon: ThumbsDown,   color: 'text-red-400' },
-    ORDER_READY:     { icon: MapPin,        color: 'text-blue-400' },
+    ORDER_READY:     { icon: MapPin,        color: 'text-[#6FEEE1]' },
     ORDER_RECEIVED:  { icon: Package,       color: 'text-emerald-400' },
     ORDER_COMPLETED: { icon: CheckCircle,   color: 'text-emerald-400' },
     ORDER_CANCELLED: { icon: XCircle,       color: 'text-red-400' },
@@ -605,7 +607,7 @@ export function NotificationsView() {
         <div className="flex items-center gap-3">
           <button onClick={() => setView('orders')} className="p-2 rounded-xl bg-white/5 hover:bg-white/10"><ArrowLeft className="w-5 h-5" /></button>
           <h2 className="text-xl font-bold flex-1">{lang === 'he' ? 'התראות' : 'Notifications'}</h2>
-          {notifUnreadCount > 0 && <button onClick={markAllNotifsRead} className="text-xs text-blue-400 hover:text-blue-300">{lang === 'he' ? 'סמן הכל כנקרא' : 'Mark all read'}</button>}
+          {notifUnreadCount > 0 && <button onClick={markAllNotifsRead} className="text-xs hover:opacity-70 transition-opacity" style={{ color: '#6FEEE1' }}>{lang === 'he' ? 'סמן הכל כנקרא' : 'Mark all read'}</button>}
         </div>
       </FadeIn>
 
@@ -620,9 +622,9 @@ export function NotificationsView() {
             return (
               <FadeIn key={notif.id}>
                 <button onClick={() => handleTap(notif)} className="w-full text-left">
-                  <Card className={`p-4 hover:bg-white/[0.03] transition-all ${unread ? 'border-l-2 border-l-blue-500' : ''}`}>
+                  <Card className="p-4 hover:bg-white/[0.03] transition-all" style={unread ? { borderLeft: '2px solid rgba(111,238,225,0.5)' } : {}}>
                     <div className="flex items-start gap-3">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${unread ? 'bg-blue-500/15' : 'bg-white/5'}`}>
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${unread ? '' : 'bg-white/5'}`} style={unread ? { background: 'rgba(111,238,225,0.1)' } : {}}>
                         <Icon className={`w-4 h-4 ${c.color}`} />
                       </div>
                       <div className="flex-1 min-w-0">
@@ -630,7 +632,7 @@ export function NotificationsView() {
                         {notif.body && <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{notif.body}</p>}
                         <p className="text-[10px] text-slate-500 mt-1">{timeAgo(notif.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })}</p>
                       </div>
-                      {unread && <div className="w-2 h-2 rounded-full bg-blue-500 mt-2 flex-shrink-0" />}
+                      {unread && <div className="w-2 h-2 rounded-full mt-2 flex-shrink-0" style={{ background: '#6FEEE1' }} />}
                     </div>
                   </Card>
                 </button>

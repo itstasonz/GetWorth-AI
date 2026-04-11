@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, CheckCircle, Loader2, Flag, Car, Gem, BookOpen, Gift, Home as HomeIcon, Wrench } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp } from '../components/ui';
@@ -14,6 +14,38 @@ export function BrowseView() {
     savedIds, heartAnim, toggleSave, viewItem, loadListings,
     hasMore, loadingMore, loadMoreListings,
   } = useApp();
+
+  // ─── Pull-to-refresh ────────────────────────────────────────────────
+  const [refreshingUI, setRefreshingUI] = useState(false);
+  const touchStartY = useRef(0);
+  const refreshingRef = useRef(false);
+  const loadListingsRef = useRef(loadListings);
+  useEffect(() => { loadListingsRef.current = loadListings; }, [loadListings]);
+
+  useEffect(() => {
+    const main = document.querySelector('main');
+    if (!main) return;
+
+    const onTouchStart = (e) => { touchStartY.current = e.touches[0].clientY; };
+
+    const onTouchEnd = async (e) => {
+      const dy = e.changedTouches[0].clientY - touchStartY.current;
+      if (dy >= 80 && main.scrollTop <= 5 && !refreshingRef.current) {
+        refreshingRef.current = true;
+        setRefreshingUI(true);
+        await loadListingsRef.current(true);
+        refreshingRef.current = false;
+        setRefreshingUI(false);
+      }
+    };
+
+    main.addEventListener('touchstart', onTouchStart, { passive: true });
+    main.addEventListener('touchend', onTouchEnd, { passive: true });
+    return () => {
+      main.removeEventListener('touchstart', onTouchStart);
+      main.removeEventListener('touchend', onTouchEnd);
+    };
+  }, []);
 
   const categories = [
     { id: 'all', label: t.all, icon: Grid },
@@ -55,19 +87,28 @@ export function BrowseView() {
 
   return (
     <div className="space-y-5">
+      {/* Pull-to-refresh indicator */}
+      {refreshingUI && (
+        <div className="flex items-center justify-center gap-2 py-1 animate-fadeIn" style={{ color: '#6FEEE1' }}>
+          <Loader2 className="w-4 h-4 animate-spin" />
+          <span className="text-xs font-medium">{lang === 'he' ? 'מרענן...' : 'Refreshing...'}</span>
+        </div>
+      )}
+
       {/* Search + Filter — flex row, no absolute positioning */}
       <FadeIn>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 min-w-0">
             <Search className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500 pointer-events-none`} />
             <input type="text" placeholder={lang === 'he' ? 'חיפוש לפי שם, תיאור, קטגוריה...' : 'Search name, description, category...'} value={search} onChange={(e) => setSearch(e.target.value)}
-              className={`w-full h-12 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 focus:border-blue-500/50 focus:bg-white/10 transition-all text-sm`} />
+              className={`w-full h-12 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all text-sm`} />
           </div>
           <button onClick={() => setShowFilters(!showFilters)}
-            className={`relative flex-shrink-0 h-12 w-12 rounded-2xl flex items-center justify-center transition-all ${showFilters ? 'bg-blue-600 shadow-lg shadow-blue-500/30' : 'bg-white/5 border border-white/10 hover:bg-white/10'}`}>
+            className={`relative flex-shrink-0 h-12 w-12 rounded-2xl flex items-center justify-center transition-all ${showFilters ? '' : 'bg-white/5 border border-white/10 hover:bg-white/10'}`}
+            style={showFilters ? { background: 'rgba(111,238,225,0.2)', border: '1px solid rgba(111,238,225,0.4)', color: '#6FEEE1' } : {}}>
             <SlidersHorizontal className="w-5 h-5" />
             {activeFilterCount > 0 && (
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-[9px] font-bold flex items-center justify-center">{activeFilterCount}</span>
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center" style={{ background: '#6FEEE1', color: '#003733' }}>{activeFilterCount}</span>
             )}
           </button>
         </div>
@@ -78,7 +119,8 @@ export function BrowseView() {
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5 scrollbar-hide">
           {categories.map((c) => (
             <button key={c.id} onClick={() => setCategory(c.id)}
-              className={`flex-shrink-0 px-4 py-3 rounded-2xl flex items-center gap-2 text-xs font-semibold transition-all ${category === c.id ? 'bg-gradient-to-r from-blue-600 to-blue-500 shadow-lg shadow-blue-500/30' : 'bg-white/5 hover:bg-white/10 border border-white/10'}`}>
+              className={`flex-shrink-0 px-4 py-3 rounded-2xl flex items-center gap-2 text-xs font-semibold transition-all ${category === c.id ? '' : 'bg-white/5 hover:bg-white/10 border border-white/10'}`}
+              style={category === c.id ? { background: 'rgba(111,238,225,0.15)', border: '1px solid rgba(111,238,225,0.4)', color: '#6FEEE1', boxShadow: '0 4px 20px rgba(111,238,225,0.15)' } : {}}>
               <c.icon className="w-4 h-4" />{c.label}
             </button>
           ))}
@@ -91,16 +133,16 @@ export function BrowseView() {
           <Card className="p-4 sm:p-5 space-y-4 overflow-hidden">
             <div className="flex justify-between items-center">
               <span className="font-semibold text-sm">{t.filters}</span>
-              <button onClick={() => { setPriceRange({ min: '', max: '' }); setSort('newest'); setFilterCondition('all'); }} className="text-xs text-blue-400 hover:text-blue-300">{t.clear}</button>
+              <button onClick={() => { setPriceRange({ min: '', max: '' }); setSort('newest'); setFilterCondition('all'); }} className="text-xs" style={{ color: '#6FEEE1' }}>{t.clear}</button>
             </div>
 
             {/* Price range — flex with min-w-0 to prevent overflow */}
             <div>
               <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'טווח מחיר' : 'Price Range'}</p>
               <div className="flex items-center gap-2">
-                <input type="number" inputMode="numeric" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all" />
+                <input type="number" inputMode="numeric" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all" />
                 <span className="flex-shrink-0 text-slate-500 text-sm">—</span>
-                <input type="number" inputMode="numeric" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-blue-500/50 transition-all" />
+                <input type="number" inputMode="numeric" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all" />
               </div>
             </div>
 
@@ -110,7 +152,8 @@ export function BrowseView() {
               <div className="flex gap-2 flex-wrap">
                 {conditions.map((c) => (
                   <button key={c.id} onClick={() => setFilterCondition(c.id)}
-                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${filterCondition === c.id ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>
+                    className={`px-3 py-2 rounded-xl text-xs font-semibold transition-all ${filterCondition === c.id ? '' : 'bg-white/5 hover:bg-white/10'}`}
+                    style={filterCondition === c.id ? { background: 'rgba(111,238,225,0.15)', border: '1px solid rgba(111,238,225,0.35)', color: '#6FEEE1' } : {}}>
                     {c.label}
                   </button>
                 ))}
@@ -122,7 +165,9 @@ export function BrowseView() {
               <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'מיון' : 'Sort'}</p>
               <div className="grid grid-cols-3 gap-2">
                 {['newest', 'lowHigh', 'highLow'].map((s) => (
-                  <button key={s} onClick={() => setSort(s)} className={`py-2.5 rounded-xl text-xs font-semibold transition-all ${sort === s ? 'bg-blue-600 shadow-lg shadow-blue-500/20' : 'bg-white/5 hover:bg-white/10'}`}>{t[s]}</button>
+                  <button key={s} onClick={() => setSort(s)}
+                    className={`py-2.5 rounded-xl text-xs font-semibold transition-all ${sort === s ? '' : 'bg-white/5 hover:bg-white/10'}`}
+                    style={sort === s ? { background: 'rgba(111,238,225,0.15)', border: '1px solid rgba(111,238,225,0.35)', color: '#6FEEE1' } : {}}>{t[s]}</button>
                 ))}
               </div>
             </div>
@@ -132,8 +177,9 @@ export function BrowseView() {
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-slate-400">{sortedListings.length} {t.results}</p>
-        <button onClick={() => loadListings(true)} className="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
-          <RefreshCw className="w-3 h-3" /> Refresh
+        <button onClick={() => loadListings(true)} className="text-xs flex items-center gap-1 transition-opacity hover:opacity-70" style={{ color: '#6FEEE1' }}>
+          <RefreshCw className={`w-3 h-3 ${refreshingUI ? 'animate-spin' : ''}`} />
+          {lang === 'he' ? 'רענן' : 'Refresh'}
         </button>
       </div>
 
@@ -256,8 +302,8 @@ export function DetailView() {
                 <div className={`relative w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).gradient} ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).shadow}`}>
                   {selected.seller.full_name?.charAt(0) || 'S'}
                   {selected.seller.is_verified && (
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-blue-500 flex items-center justify-center border-2 border-[#0a1020]">
-                      <Shield className="w-3 h-3 text-white" />
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 border-[#0a1020]" style={{ background: '#6FEEE1' }}>
+                      <Shield className="w-3 h-3" style={{ color: '#003733' }} />
                     </div>
                   )}
                 </div>
@@ -318,7 +364,7 @@ export function DetailView() {
         {(selected.description || selected.description_hebrew) && (
           <FadeIn delay={100}>
             <Card className="p-5">
-              <h3 className="font-semibold mb-3 flex items-center gap-2"><Package className="w-5 h-5 text-blue-400" />{lang === 'he' ? 'תיאור' : 'Description'}</h3>
+              <h3 className="font-semibold mb-3 flex items-center gap-2"><Package className="w-5 h-5" style={{ color: '#6FEEE1' }} />{lang === 'he' ? 'תיאור' : 'Description'}</h3>
               <p className="text-sm text-slate-300 leading-relaxed">{lang === 'he' && selected.description_hebrew ? selected.description_hebrew : selected.description}</p>
             </Card>
           </FadeIn>
@@ -331,7 +377,7 @@ export function DetailView() {
             const sl = orderStatusLabels[existingStatus] || { en: existingStatus, he: existingStatus, color: 'slate' };
             const colorMap = {
               amber: 'bg-amber-500/15 border-amber-500/30 text-amber-300',
-              blue: 'bg-blue-500/15 border-blue-500/30 text-blue-300',
+              blue: 'border text-[#6FEEE1]',
               emerald: 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300',
               slate: 'bg-white/5 border-white/10 text-slate-300',
             };
@@ -453,7 +499,7 @@ export function SellerProfileView() {
   if (loadingSeller) {
     return (
       <div className="flex items-center justify-center py-20">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
+        <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#6FEEE1' }} />
       </div>
     );
   }
@@ -478,8 +524,8 @@ export function SellerProfileView() {
               {sellerProfile.full_name?.charAt(0) || 'S'}
             </div>
             {sellerProfile.is_verified && (
-              <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center border-3 border-[#060a14]">
-                <Check className="w-5 h-5 text-white" />
+              <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full flex items-center justify-center border-3 border-[#060a14]" style={{ background: '#6FEEE1' }}>
+                <Check className="w-5 h-5" style={{ color: '#003733' }} />
               </div>
             )}
           </div>
@@ -496,7 +542,7 @@ export function SellerProfileView() {
             </div>
             <div className="h-1.5 rounded-full bg-white/10">
               <div
-                className={`h-full rounded-full transition-all ${trust.trustScore >= 70 ? 'bg-green-500' : trust.trustScore >= 40 ? 'bg-blue-500' : 'bg-slate-500'}`}
+                className={`h-full rounded-full transition-all ${trust.trustScore >= 70 ? 'bg-green-500' : trust.trustScore >= 40 ? 'bg-[#6FEEE1]' : 'bg-slate-500'}`}
                 style={{ width: `${trust.trustScore}%` }}
               />
             </div>
@@ -513,7 +559,7 @@ export function SellerProfileView() {
               </div>
             )}
             {sellerProfile.is_verified && (
-              <div className="flex items-center gap-1 text-blue-400">
+              <div className="flex items-center gap-1" style={{ color: '#6FEEE1' }}>
                 <Shield className="w-4 h-4" />
                 <span className="text-xs font-medium">{lang === 'he' ? 'מאומת' : 'Verified'}</span>
               </div>
@@ -546,7 +592,7 @@ export function SellerProfileView() {
                   {review.reviewer?.avatar_url ? (
                     <img src={review.reviewer.avatar_url} alt="" className="w-9 h-9 rounded-xl object-cover" />
                   ) : (
-                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-sm font-bold text-white">
+                    <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-slate-600 to-slate-500 flex items-center justify-center text-sm font-bold text-white">
                       {review.reviewer?.full_name?.charAt(0) || '?'}
                     </div>
                   )}

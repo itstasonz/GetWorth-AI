@@ -58,7 +58,7 @@ const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
       <div className="relative">
         <MapPin className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />
         <input 
-          className={`w-full px-4 py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500/50 focus:bg-white/10 transition-all`}
+          className={`w-full px-4 py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all`}
           dir={rtl ? 'rtl' : 'ltr'}
           value={value}
           onChange={onChange}
@@ -68,13 +68,13 @@ const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
           type="button"
           onClick={getLocation}
           disabled={loading}
-          className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-3' : 'right-3'} w-9 h-9 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 flex items-center justify-center transition-all active:scale-95 disabled:opacity-50`}
+          className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-3' : 'right-3'} w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-95 disabled:opacity-50`} style={{ background: 'rgba(111,238,225,0.12)' }}
           title={rtl ? 'השתמש במיקום נוכחי' : 'Use current location'}
         >
           {loading ? (
-            <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+            <Loader2 className="w-4 h-4 animate-spin" style={{ color: '#6FEEE1' }} />
           ) : (
-            <LocateFixed className="w-4 h-4 text-blue-400" />
+            <LocateFixed className="w-4 h-4" style={{ color: '#6FEEE1' }} />
           )}
         </button>
       </div>

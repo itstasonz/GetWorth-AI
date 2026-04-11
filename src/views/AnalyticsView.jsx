@@ -75,7 +75,7 @@ export default function AnalyticsView() {
     return Math.floor(s/86400) + 'd';
   }
 
-  var barColors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-cyan-500'];
+  var barColors = ['bg-[#6FEEE1]', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-cyan-500'];
 
   return (
     <div className="space-y-4 pb-4">
@@ -85,7 +85,7 @@ export default function AnalyticsView() {
         </button>
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold flex items-center gap-2">
-            <BarChart3 className="w-5 h-5 text-blue-400" />
+            <BarChart3 className="w-5 h-5 text-[#6FEEE1]" />
             {lang === 'he' ? 'אנליטיקס' : 'Analytics'}
           </h2>
           <button onClick={load} className="p-2 rounded-xl bg-white/5 border border-white/10">
@@ -98,7 +98,7 @@ export default function AnalyticsView() {
 
       {loading && !stats && (
         <div className="text-center py-16">
-          <Activity className="w-8 h-8 text-blue-400 animate-pulse mx-auto mb-2" />
+          <Activity className="w-8 h-8 text-[#6FEEE1] animate-pulse mx-auto mb-2" />
           <p className="text-sm text-slate-400">{lang === 'he' ? 'טוען...' : 'Loading...'}</p>
         </div>
       )}
@@ -107,7 +107,7 @@ export default function AnalyticsView() {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Card className="p-4">
-              <Users className="w-5 h-5 text-blue-400 mb-2" />
+              <Users className="w-5 h-5 text-[#6FEEE1] mb-2" />
               <p className="text-2xl font-bold">{stats.totalUsers}</p>
               <p className="text-xs text-slate-400">{lang === 'he' ? 'משתמשים' : 'Users'}</p>
             </Card>
@@ -130,7 +130,7 @@ export default function AnalyticsView() {
 
           <Card className="p-5" glow>
             <div className="flex items-center gap-3 mb-3">
-              <DollarSign className="w-6 h-6 text-blue-400" />
+              <DollarSign className="w-6 h-6 text-[#6FEEE1]" />
               <div>
                 <p className="text-xs text-slate-400">{lang === 'he' ? 'סך ערך שוק' : 'Total Market Value'}</p>
                 <p className="text-2xl font-bold">{'₪'}{stats.totalValue.toLocaleString()}</p>
@@ -188,7 +188,7 @@ export default function AnalyticsView() {
                   <div key={i} className="flex items-center gap-3 py-1.5">
                     {a.type === 'user'
                       ? <Users className="w-3 h-3 text-green-400 flex-shrink-0" />
-                      : <ShoppingBag className="w-3 h-3 text-blue-400 flex-shrink-0" />}
+                      : <ShoppingBag className="w-3 h-3 text-[#6FEEE1] flex-shrink-0" />}
                     <p className="text-xs text-slate-300 flex-1 truncate">{a.text}</p>
                     <p className="text-[10px] text-slate-500 flex-shrink-0">{a.time}</p>
                   </div>

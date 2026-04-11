@@ -60,7 +60,7 @@ export const getConditionLabel = (condition, lang) => {
 export const getConditionColor = (condition) => {
   const map = {
     newSealed: 'bg-emerald-500',
-    likeNew: 'bg-blue-500',
+    likeNew: 'bg-[#6FEEE1]',
     used: 'bg-amber-500',
     poor: 'bg-red-500',
   };
@@ -70,7 +70,7 @@ export const getConditionColor = (condition) => {
 export const getConditionColorAlpha = (condition) => {
   const map = {
     newSealed: 'bg-emerald-500/90',
-    likeNew: 'bg-blue-500/90',
+    likeNew: 'bg-[#6FEEE1]/90',
     used: 'bg-amber-500/90',
     poor: 'bg-red-500/90',
   };
@@ -82,9 +82,9 @@ export const getConditionColorAlpha = (condition) => {
 // Use explicit class maps instead.
 export const BADGE_COLORS = {
   blue: {
-    bg: 'bg-blue-500/20',
-    text: 'text-blue-400',
-    border: 'border-blue-500/30',
+    bg: 'bg-[#6FEEE1]/10',
+    text: 'text-[#6FEEE1]',
+    border: 'border-[#6FEEE1]/30',
   },
   green: {
     bg: 'bg-green-500/20',
@@ -115,7 +115,7 @@ export const BADGE_COLORS = {
 
 // Profile stat color lookup (same fix - avoids dynamic tailwind)
 export const STAT_COLORS = {
-  blue: { icon: 'text-blue-400', value: 'text-blue-400' },
+  blue: { icon: 'text-[#6FEEE1]', value: 'text-[#6FEEE1]' },
   green: { icon: 'text-green-400', value: 'text-green-400' },
   red: { icon: 'text-red-400', value: 'text-red-400' },
 };
@@ -125,7 +125,7 @@ export const getSellerBadgeStyle = (badge) => {
   const map = {
     eliteSeller: { bg: 'bg-yellow-500/20', text: 'text-yellow-400', gradient: 'from-yellow-500 to-amber-600', shadow: 'shadow-yellow-500/30' },
     topSeller: { bg: 'bg-purple-500/20', text: 'text-purple-400', gradient: 'from-purple-500 to-pink-600', shadow: 'shadow-purple-500/30' },
-    trustedSeller: { bg: 'bg-blue-500/20', text: 'text-blue-400', gradient: 'from-blue-500 to-blue-600', shadow: 'shadow-blue-500/30' },
+    trustedSeller: { bg: 'bg-[#6FEEE1]/10', text: 'text-[#6FEEE1]', gradient: 'from-[#6FEEE1] to-[#4FD1C5]', shadow: 'shadow-[#6FEEE1]/20' },
     newSeller: { bg: 'bg-slate-500/20', text: 'text-slate-400', gradient: 'from-slate-500 to-slate-600', shadow: 'shadow-slate-500/30' },
   };
   return map[badge] || map.newSeller;
