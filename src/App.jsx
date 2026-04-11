@@ -138,7 +138,7 @@ function AppShell() {
     { id: 'messages', icon: MessageCircle, label: lang === 'he' ? 'צ\'אט' : 'Chat' },
     { id: 'profile', icon: User, label: lang === 'he' ? 'פרופיל' : 'Profile' },
   ];
-  const activeTabIndex = tabItems.findIndex(n => n.id === tab);
+
 
   return (
     <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif', background: '#131313' }} dir={rtl ? 'rtl' : 'ltr'}>
@@ -373,20 +373,6 @@ function AppShell() {
               paddingRight: 'max(env(safe-area-inset-right), 16px)',
             }}
           >
-            {/* Sliding teal pill behind active tab */}
-            <div
-              className="absolute pointer-events-none rounded-2xl"
-              style={{
-                width: '20%',
-                top: '8px',
-                bottom: '8px',
-                left: 0,
-                background: 'rgba(111,238,225,0.09)',
-                border: '1px solid rgba(111,238,225,0.14)',
-                transform: `translateX(${(rtl ? (4 - activeTabIndex) : activeTabIndex) * 100}%)`,
-                transition: 'transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)',
-              }}
-            />
             {tabItems.map((n) => {
               const active = tab === n.id;
               return (
