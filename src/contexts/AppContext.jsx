@@ -1680,11 +1680,11 @@ export function AppProvider({ children }) {
     cameraStartingRef.current = false;
   }, [releaseCamera, attachStreamToVideo, waitForVideoElement, detectTorch, lang, setError]);
 
-  // ── Auto-start camera when view transitions to 'camera' without a stream ──
-  // Fixes: addPhoto('camera') sets view but doesn't acquire camera hardware
+  // ── Auto-start/reattach camera when view transitions to 'camera' ──
+  // startCamera() handles both cases: reattach live stream or request fresh one.
   useEffect(() => {
-    if (view === 'camera' && !cameraStreamRef.current && !cameraStartingRef.current) {
-      if (DEV) console.log('[Camera] Auto-starting: view=camera but no stream');
+    if (view === 'camera' && !cameraStartingRef.current) {
+      if (DEV) console.log('[Camera] view=camera — ensuring stream is attached');
       startCamera();
     }
   }, [view, startCamera]);
