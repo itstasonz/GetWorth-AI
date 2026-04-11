@@ -321,14 +321,18 @@ function AppShell() {
           </div>
         </header>
 
+        {/* Fullscreen overlays — rendered OUTSIDE overflow-y-auto main so that
+            position:fixed works correctly on iOS Safari (fixed inside overflow:auto
+            is positioned relative to the scroll container, not the viewport) */}
+        {view === 'camera' && <CameraView />}
+        {view === 'analyzing' && <AnalyzingView />}
+        {view === 'results' && <ResultsView />}
+
         {/* Content - View Router */}
         <main className="flex-1 px-5 pb-4 overflow-y-auto">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           <div key={view} className="animate-viewFade">
             {view === 'home' && <HomeView />}
-            {view === 'camera' && <CameraView />}
-            {view === 'analyzing' && <AnalyzingView />}
-            {view === 'results' && <ResultsView />}
             {view === 'browse' && !selected && <BrowseView />}
             {view === 'detail' && selected && <DetailView />}
             {view === 'sellerProfile' && <SellerProfileView />}
