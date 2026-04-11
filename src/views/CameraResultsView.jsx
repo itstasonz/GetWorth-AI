@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { X, Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Settings, Image as ImageIcon, History, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon } from 'lucide-react';
+import React, { useEffect } from 'react';
+import { Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { camLog } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
@@ -66,15 +66,6 @@ export function CameraView() {
   } = useApp();
 
   const [cameraReady, setCameraReady] = React.useState(false);
-  const [debugLogs, setDebugLogs] = useState([]);
-
-  // Refresh debug panel every 500ms
-  useEffect(() => {
-    const iv = setInterval(() => {
-      setDebugLogs([...(window.__camLogs || [])]);
-    }, 500);
-    return () => clearInterval(iv);
-  }, []);
 
   // Inject Manrope + Inter fonts
   useEffect(() => {
@@ -127,12 +118,6 @@ export function CameraView() {
       style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
       dir={rtl ? 'rtl' : 'ltr'}
     >
-      {/* ── DEBUG MARKER — remove after diagnosis ── */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 9999, background: '#ff0000', color: '#fff', fontSize: 11, fontFamily: 'monospace', padding: '4px 8px', textAlign: 'center', lineHeight: 1.4 }}>
-        CAMERA DEBUG ACTIVE — ready={cameraReady ? 'YES' : 'NO'} srcObj={videoRef.current?.srcObject ? 'YES' : 'NO'}
-        {debugLogs.slice(-6).map((l, i) => <div key={i} style={{ fontSize: 9, opacity: 0.9 }}>{l}</div>)}
-      </div>
-
       {/* ═══ BACKGROUND: Live camera feed (slightly dimmed) ═══ */}
       <div className="fixed inset-0 z-0">
         <video
@@ -203,19 +188,31 @@ export function CameraView() {
         </div>
       </div>
 
-      {/* ═══ TOP BAR: close + flash + settings ═══ */}
-      <nav className="fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-6 h-16 max-w-7xl mx-auto bg-transparent">
+      {/* ═══ TOP BAR: back + flash ═══ */}
+      <nav
+        className="fixed top-0 left-0 right-0 z-30 flex items-center justify-between px-6 bg-transparent"
+        style={{
+          paddingTop: 'max(env(safe-area-inset-top), 16px)',
+          height: 'calc(max(env(safe-area-inset-top), 16px) + 56px)',
+        }}
+      >
         <button
           onClick={stopCamera}
-          className="w-12 h-12 flex items-center justify-center rounded-full transition-all active:scale-95"
+          className="flex items-center gap-2 px-3 py-2 rounded-full transition-all active:scale-95"
           style={{
-            background: 'rgba(19, 19, 19, 0.40)',
+            background: 'rgba(19, 19, 19, 0.50)',
             backdropFilter: 'blur(24px)',
             WebkitBackdropFilter: 'blur(24px)',
           }}
-          aria-label={lang === 'he' ? 'סגור' : 'Close'}
+          aria-label={lang === 'he' ? 'חזור' : 'Back'}
         >
-          <X className="w-6 h-6" style={{ color: STITCH.onSurface }} />
+          {rtl
+            ? <ChevronRight className="w-5 h-5" style={{ color: STITCH.onSurface }} />
+            : <ArrowLeft className="w-5 h-5" style={{ color: STITCH.onSurface }} />
+          }
+          <span className="text-sm font-medium" style={{ color: STITCH.onSurface }}>
+            {lang === 'he' ? 'חזור' : 'Back'}
+          </span>
         </button>
 
         <div className="flex items-center gap-3">
@@ -239,55 +236,18 @@ export function CameraView() {
               }
             </button>
           )}
-          {/* Settings button — decorative for now, mirrors the Stitch HTML */}
-          <div
-            className="w-10 h-10 flex items-center justify-center rounded-full opacity-50 cursor-default"
-            style={{
-              background: 'rgba(19, 19, 19, 0.40)',
-              backdropFilter: 'blur(24px)',
-              WebkitBackdropFilter: 'blur(24px)',
-            }}
-            aria-hidden="true"
-          >
-            <Settings className="w-5 h-5" style={{ color: STITCH.onSurface }} />
-          </div>
         </div>
       </nav>
 
-      {/* ═══ BOTTOM PANEL: PHOTO/SCANNER/BATCH + shutter + GALLERY/RECENT ═══ */}
+      {/* ═══ BOTTOM PANEL: shutter ═══ */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-30 px-8 pb-10 pt-16 flex flex-col items-center gap-6"
+        className="fixed bottom-0 left-0 right-0 z-30 flex flex-col items-center"
         style={{
-          background: 'linear-gradient(to top, #131313 0%, rgba(19,19,19,0.85) 40%, transparent 100%)',
+          paddingBottom: 'max(env(safe-area-inset-bottom), 40px)',
+          paddingTop: '48px',
+          background: 'linear-gradient(to top, #131313 0%, rgba(19,19,19,0.85) 50%, transparent 100%)',
         }}
       >
-        {/* PHOTO / SCANNER / BATCH tabs */}
-        <div
-          className="flex items-center gap-10 font-semibold tracking-wide text-sm"
-          style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
-        >
-          <span className="opacity-60 cursor-default" aria-hidden="true">
-            {lang === 'he' ? 'תמונה' : 'PHOTO'}
-          </span>
-          <span
-            className="relative"
-            style={{ color: STITCH.primary }}
-          >
-            {lang === 'he' ? 'סורק' : 'SCANNER'}
-            <span
-              className="absolute left-1/2 -translate-x-1/2 w-1.5 h-1.5 rounded-full"
-              style={{
-                bottom: '-8px',
-                background: STITCH.primary,
-                boxShadow: `0 0 8px ${STITCH.primary}`,
-              }}
-            />
-          </span>
-          <span className="opacity-30 cursor-not-allowed" aria-disabled="true">
-            {lang === 'he' ? 'אצווה' : 'BATCH'}
-          </span>
-        </div>
-
         {/* Shutter button with outer ring */}
         <div className="relative flex items-center justify-center">
           <div
@@ -307,10 +267,7 @@ export function CameraView() {
           >
             <div
               className="absolute rounded-full"
-              style={{
-                inset: '6px',
-                border: '3px solid rgba(19, 19, 19, 0.20)',
-              }}
+              style={{ inset: '6px', border: '3px solid rgba(19, 19, 19, 0.20)' }}
             />
             {cameraReady ? (
               <Camera className="w-8 h-8 relative z-10" style={{ color: STITCH.onPrimary }} strokeWidth={2.5} />
@@ -321,32 +278,6 @@ export function CameraView() {
               />
             )}
           </button>
-        </div>
-
-        {/* GALLERY / RECENT shortcuts — visual only, not wired (Stitch parity) */}
-        <div className="flex justify-between w-full max-w-sm px-6">
-          <div className="flex flex-col items-center gap-1 opacity-60">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: STITCH.surfaceContainerHigh, color: STITCH.onSurfaceVariant }}
-            >
-              <ImageIcon className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-semibold tracking-tighter" style={{ color: STITCH.onSurfaceVariant }}>
-              {lang === 'he' ? 'גלריה' : 'GALLERY'}
-            </span>
-          </div>
-          <div className="flex flex-col items-center gap-1 opacity-60">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: STITCH.surfaceContainerHigh, color: STITCH.onSurfaceVariant }}
-            >
-              <History className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] font-semibold tracking-tighter" style={{ color: STITCH.onSurfaceVariant }}>
-              {lang === 'he' ? 'אחרונים' : 'RECENT'}
-            </span>
-          </div>
         </div>
       </div>
 
