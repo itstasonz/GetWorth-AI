@@ -994,7 +994,7 @@ export function ResultsView() {
 
   return (
     <div
-      className="space-y-5 pb-4"
+      className="space-y-4 pb-4"
       style={{ fontFamily: STITCH.FONT_BODY, color: STITCH.onSurface }}
     >
       {/* Help modal */}
@@ -1096,10 +1096,63 @@ export function ResultsView() {
         </FadeIn>
       )}
 
+      {/* ═══ STITCH ESTIMATED VALUE — centered editorial display ═══ */}
+      <FadeIn delay={100}>
+        <div className="text-center px-4">
+          <h2
+            className="text-base font-medium tracking-wide"
+            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
+          >
+            {tier === 'very_low'
+              ? (lang === 'he' ? 'טווח מחירים משוער' : 'Estimated Price Range')
+              : (lang === 'he' ? 'ערך משוער' : 'Estimated Value')}
+          </h2>
+          <div className="mt-1 flex items-baseline justify-center gap-1">
+            <span
+              className="text-5xl md:text-6xl font-extrabold tracking-tighter"
+              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+            >
+              {formatPrice(result.marketValue?.mid)}
+            </span>
+          </div>
+          <p
+            className="mt-4 text-2xl font-bold tracking-tight"
+            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+          >
+            {lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}
+          </p>
+          {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
+            <p
+              className="text-sm mt-1 uppercase tracking-[0.2em] font-medium"
+              style={{ color: STITCH.onSurfaceVariant }}
+            >
+              {lang === 'he' ? 'דגם' : 'Ref.'} {recognition.modelNumber || identification.model}
+            </p>
+          )}
+          {result.marketValue?.low > 0 && (
+            <p className="text-sm mt-3" style={{ color: STITCH.onSurfaceVariant }}>
+              {t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}
+            </p>
+          )}
+          {result.marketValue?.newRetailPrice > 0 && (
+            <p className="text-[11px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
+              {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
+            </p>
+          )}
+          {priceMethod && (
+            <p className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
+              {priceMethod === 'comp_based'
+                ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
+                : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
+            </p>
+          )}
+        </div>
+      </FadeIn>
+
       {/* ═══ STITCH CONFIDENCE SCORE CARD ═══ */}
       <FadeIn delay={50}>
         <div
-          className="relative overflow-hidden rounded-2xl p-6"
+          className="relative overflow-hidden rounded-2xl p-4"
           style={{ background: STITCH.surfaceContainerLow }}
         >
           <div className="flex justify-between items-end relative z-10">
@@ -1203,7 +1256,7 @@ export function ResultsView() {
               {showPhotoButton && (
                 <button
                   onClick={handleAddPhotoClick}
-                  className="flex flex-col items-center justify-center gap-3 py-6 rounded-2xl active:scale-95 transition-all duration-200"
+                  className="flex flex-col items-center justify-center gap-3 py-4 rounded-2xl active:scale-95 transition-all duration-200"
                   style={{
                     background: STITCH.surfaceContainerHigh,
                     border: '1px solid rgba(255, 255, 255, 0.03)',
@@ -1230,7 +1283,7 @@ export function ResultsView() {
                   /* SUCCESS STATE — masked serial displayed */
                   <button
                     onClick={clearSerialData}
-                    className="flex flex-col items-center justify-center gap-2 py-6 rounded-2xl active:scale-95 transition-all duration-200 relative"
+                    className="flex flex-col items-center justify-center gap-2 py-4 rounded-2xl active:scale-95 transition-all duration-200 relative"
                     style={{
                       background: 'rgba(111, 238, 225, 0.08)',
                       border: '1px solid rgba(111, 238, 225, 0.25)',
@@ -1266,7 +1319,7 @@ export function ResultsView() {
                   /* SUBMITTED STATE — photo saved but OCR couldn't extract */
                   <button
                     onClick={clearSerialData}
-                    className="flex flex-col items-center justify-center gap-2 py-6 rounded-2xl active:scale-95 transition-all duration-200 relative"
+                    className="flex flex-col items-center justify-center gap-2 py-4 rounded-2xl active:scale-95 transition-all duration-200 relative"
                     style={{
                       background: STITCH.surfaceContainerHigh,
                       border: '1px solid rgba(255, 255, 255, 0.03)',
@@ -1299,7 +1352,7 @@ export function ResultsView() {
                   <button
                     onClick={() => !serialLoading && serialFileRef.current?.click()}
                     disabled={serialLoading}
-                    className="flex flex-col items-center justify-center gap-3 py-6 rounded-2xl active:scale-95 transition-all duration-200"
+                    className="flex flex-col items-center justify-center gap-3 py-4 rounded-2xl active:scale-95 transition-all duration-200"
                     style={{
                       background: STITCH.surfaceContainerHigh,
                       border: '1px solid rgba(255, 255, 255, 0.03)',
@@ -1376,6 +1429,33 @@ export function ResultsView() {
           </FadeIn>
         );
       })()}
+
+      {/* Actions — Stitch gradient CTA */}
+      <FadeIn delay={200}>
+        <button
+          onClick={startListing}
+          className="w-full h-16 rounded-full flex items-center justify-center gap-3 font-extrabold text-lg active:scale-[0.97] transition-all"
+          style={{
+            background: STITCH.GRADIENT_PRIMARY,
+            color: STITCH.onPrimary,
+            fontFamily: STITCH.FONT_HEADLINE,
+            boxShadow: '0 20px 40px rgba(111, 238, 225, 0.20)',
+          }}
+        >
+          <span>{t.listItem}</span>
+          <Rocket className="w-5 h-5" strokeWidth={2.5} />
+        </button>
+      </FadeIn>
+
+      <FadeIn delay={300}>
+        <button
+          onClick={reset}
+          className="w-full py-3 text-sm flex items-center justify-center gap-2 transition-colors"
+          style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
+        >
+          <RefreshCw className="w-4 h-4" />{t.scanAnother}
+        </button>
+      </FadeIn>
 
       {/* ═══ TIER: Very Low (<40%) — Broad estimate, need help ═══ */}
       {tier === 'very_low' && !isConfirmed && (
@@ -1571,59 +1651,6 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* ═══ STITCH ESTIMATED VALUE — centered editorial display ═══ */}
-      <FadeIn delay={100}>
-        <div className="text-center px-4">
-          <h2
-            className="text-base font-medium tracking-wide"
-            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
-          >
-            {tier === 'very_low'
-              ? (lang === 'he' ? 'טווח מחירים משוער' : 'Estimated Price Range')
-              : (lang === 'he' ? 'ערך משוער' : 'Estimated Value')}
-          </h2>
-          <div className="mt-1 flex items-baseline justify-center gap-1">
-            <span
-              className="text-5xl md:text-6xl font-extrabold tracking-tighter"
-              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
-            >
-              {formatPrice(result.marketValue?.mid)}
-            </span>
-          </div>
-          <p
-            className="mt-4 text-2xl font-bold tracking-tight"
-            style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
-          >
-            {lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}
-          </p>
-          {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
-            <p
-              className="text-sm mt-1 uppercase tracking-[0.2em] font-medium"
-              style={{ color: STITCH.onSurfaceVariant }}
-            >
-              {lang === 'he' ? 'דגם' : 'Ref.'} {recognition.modelNumber || identification.model}
-            </p>
-          )}
-          {result.marketValue?.low > 0 && (
-            <p className="text-sm mt-3" style={{ color: STITCH.onSurfaceVariant }}>
-              {t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}
-            </p>
-          )}
-          {result.marketValue?.newRetailPrice > 0 && (
-            <p className="text-[11px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
-              {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
-            </p>
-          )}
-          {priceMethod && (
-            <p className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
-              {priceMethod === 'comp_based'
-                ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
-                : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
-            </p>
-          )}
-        </div>
-      </FadeIn>
-
       {/* OCR extracted text — pill tags */}
       {ocr.text_found && ocr.text_found.length > 0 && (
         <FadeIn delay={150}>
@@ -1697,32 +1724,6 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* Actions — Stitch gradient CTA */}
-      <FadeIn delay={200}>
-        <button
-          onClick={startListing}
-          className="w-full h-16 rounded-full flex items-center justify-center gap-3 font-extrabold text-lg active:scale-[0.97] transition-all"
-          style={{
-            background: STITCH.GRADIENT_PRIMARY,
-            color: STITCH.onPrimary,
-            fontFamily: STITCH.FONT_HEADLINE,
-            boxShadow: '0 20px 40px rgba(111, 238, 225, 0.20)',
-          }}
-        >
-          <span>{t.listItem}</span>
-          <Rocket className="w-5 h-5" strokeWidth={2.5} />
-        </button>
-      </FadeIn>
-
-      <FadeIn delay={300}>
-        <button
-          onClick={reset}
-          className="w-full py-3 text-sm flex items-center justify-center gap-2 transition-colors"
-          style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
-        >
-          <RefreshCw className="w-4 h-4" />{t.scanAnother}
-        </button>
-      </FadeIn>
     </div>
   );
 }
