@@ -1459,6 +1459,24 @@ export function AppProvider({ children }) {
           if (DEV) console.log('[Confirm] Stored in DB');
         });
     }
+    // ── Insert into confirmations table for training / analytics ──
+    const recognition = result.recognition || {};
+    const identification = result.identification || {};
+    const ocr = result.ocr || {};
+    const confirmationRow = {
+      valuation_id: result.valuation_id || null,
+      detected_name: result.name || null,
+      detected_brand: result.details?.brand || identification.brand || null,
+      detected_model: recognition.modelNumber || identification.model || null,
+      confidence: result.confidence || null,
+      ocr_text: ocr.text_found?.join(', ') || recognition.ocrText || null,
+      model_number: recognition.modelNumber || identification.model || null,
+      user_id: user?.id || null,
+    };
+    if (result.product_id) confirmationRow.product_id = result.product_id;
+    supabase.from('confirmations').insert(confirmationRow).then(({ error }) => {
+      if (DEV) console.log('[Confirm] confirmations insert', error || 'ok');
+    });
     // ── LEARNING: Store positive confirmation so we know Claude got it right ──
     storeConfirmation(
       result.name,
@@ -1466,7 +1484,7 @@ export function AppProvider({ children }) {
       result.details?.brand
     );
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
-  }, [result, playSound, storeConfirmation]);
+  }, [result, user, playSound, storeConfirmation]);
 
   // ── Correct: user types the correct model manually ──
   const correctResult = useCallback(async (userInput) => {
