@@ -474,20 +474,6 @@ export function AnalyzingView() {
             />
           </div>
 
-          {/* Central scan indicator — compact, sits over photo */}
-          <div className="relative z-20 flex flex-col items-center">
-            <div
-              className="w-16 h-16 rounded-full flex items-center justify-center stitch-breathe"
-              style={{
-                background: 'rgba(6, 10, 20, 0.55)',
-                backdropFilter: 'blur(12px)',
-                WebkitBackdropFilter: 'blur(12px)',
-                border: `1px solid rgba(111, 238, 225, 0.40)`,
-              }}
-            >
-              <Scan className="w-7 h-7" style={{ color: STITCH.primary }} strokeWidth={1.5} />
-            </div>
-          </div>
 
           {/* Horizontal scan line — sweeps vertically */}
           <div
