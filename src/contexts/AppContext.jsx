@@ -227,7 +227,7 @@ export function AppProvider({ children }) {
   // ─── INIT + AUTH LISTENER ────────────────────────────
   useEffect(() => {
     let mounted = true;
-    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 1500);
+    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 300);
 
     const init = async () => {
       try {
