@@ -206,7 +206,7 @@ export function AppProvider({ children }) {
     }
   }, [soundEnabled]);
 
-  const showToastMsg = useCallback((msg) => setToast(msg), []);
+  const showToastMsg = useCallback((msg, type = 'success') => setToast({ message: msg, type }), []);
 
   // ─── Refresh current user's profile from DB ───
   const refreshProfile = useCallback(async () => {
@@ -2257,11 +2257,17 @@ export function AppProvider({ children }) {
       playSound('coin');
       return true;
     } catch (e) {
-      console.error('[Reviews] Submit error:', e);
-      if (e.message?.includes('one_review_per_order') || e.message?.includes('one_review_per_order_role')) {
-        showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת' : 'You already reviewed this order');
+      // Log full Supabase error for debugging
+      console.error('[Reviews] Submit error:', e?.message, e?.code, e?.details, e?.hint);
+      const isDuplicate = e.message?.includes('one_review_per_order')
+        || e.message?.includes('one_review_per_order_role')
+        || e.code === '23505'; // Postgres unique violation
+      if (isDuplicate) {
+        showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת להזמנה זו' : 'You already reviewed this order');
       } else {
-        setError(lang === 'he' ? 'שגיאה בשליחת הביקורת' : 'Failed to submit review');
+        // Show real error in toast (readable on mobile) instead of persistent banner
+        const detail = e?.message || (lang === 'he' ? 'שגיאה לא ידועה' : 'Unknown error');
+        showToastMsg(lang === 'he' ? `שגיאה בשליחת הביקורת: ${detail}` : `Review failed: ${detail}`, 'error');
       }
       return false;
     }

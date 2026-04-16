@@ -153,14 +153,23 @@ function AppShell() {
       {/* ── Message Notification Banner (renders above everything) ── */}
       <MessageNotificationBanner />
 
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+      {toast && (
+        <Toast
+          message={typeof toast === 'string' ? toast : toast.message}
+          type={typeof toast === 'string' ? 'success' : (toast.type || 'success')}
+          onClose={() => setToast(null)}
+        />
+      )}
 
       {error && (
-        <div className="fixed top-20 left-4 right-4 z-50 animate-slideDown">
-          <Card className="p-4 flex items-center gap-3" gradient="linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.1))">
-            <AlertCircle className="w-5 h-5 text-red-400" />
-            <span className="flex-1 text-sm text-red-300">{error}</span>
-            <button onClick={() => setError(null)} className="p-1 hover:bg-white/10 rounded-lg"><X className="w-4 h-4" /></button>
+        <div
+          className="fixed left-4 right-4 z-50 animate-slideDown"
+          style={{ top: 'max(80px, calc(env(safe-area-inset-top) + 64px))' }}
+        >
+          <Card className="p-4 flex items-start gap-3" gradient="linear-gradient(135deg, rgba(239,68,68,0.2), rgba(239,68,68,0.1))">
+            <AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <span className="flex-1 text-sm text-red-300 leading-relaxed break-words">{error}</span>
+            <button onClick={() => setError(null)} className="p-1 hover:bg-white/10 rounded-lg flex-shrink-0"><X className="w-4 h-4" /></button>
           </Card>
         </div>
       )}

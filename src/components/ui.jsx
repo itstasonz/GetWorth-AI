@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { CheckCircle, ChevronRight, ChevronLeft } from 'lucide-react';
+import { CheckCircle, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
 import { BADGE_COLORS } from '../lib/utils';
 
 // Animated wrappers
@@ -15,14 +15,28 @@ export const ScaleIn = ({ children, delay = 0, className = '' }) => (
   <div className={`animate-scaleIn ${className}`} style={{ animationDelay: `${delay}ms` }}>{children}</div>
 );
 
-// Toast notification
-export const Toast = ({ message, onClose }) => {
-  useEffect(() => { const t = setTimeout(onClose, 2500); return () => clearTimeout(t); }, [onClose]);
+// Toast notification — supports success (green) and error (red) variants
+export const Toast = ({ message, type = 'success', onClose }) => {
+  const duration = type === 'error' ? 4500 : 2500;
+  useEffect(() => { const t = setTimeout(onClose, duration); return () => clearTimeout(t); }, [onClose, duration]);
+
+  const isError = type === 'error';
+  const Icon = isError ? AlertCircle : CheckCircle;
+  const gradientClass = isError
+    ? 'bg-gradient-to-r from-red-600 to-red-500 shadow-red-600/30'
+    : 'bg-gradient-to-r from-green-500 to-emerald-500 shadow-green-500/30';
+
   return (
-    <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-toastIn">
-      <div className="px-5 py-3 rounded-2xl bg-gradient-to-r from-green-500 to-emerald-500 text-white text-sm font-semibold shadow-xl shadow-green-500/30 flex items-center gap-2">
-        <CheckCircle className="w-4 h-4" />
-        {message}
+    <div
+      className="fixed left-4 right-4 z-[100] animate-toastIn"
+      style={{ top: 'max(80px, calc(env(safe-area-inset-top) + 64px))' }}
+    >
+      <div
+        className={`w-full px-4 py-3 rounded-2xl text-white text-sm font-semibold shadow-xl ${gradientClass} flex items-start gap-3`}
+        onClick={onClose}
+      >
+        <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <span className="flex-1 leading-relaxed break-words">{message}</span>
       </div>
     </div>
   );

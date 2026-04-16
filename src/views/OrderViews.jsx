@@ -523,9 +523,7 @@ export function OrderDetailView() {
             <Btn primary className="w-full py-3.5" disabled={reviewRating === 0 || reviewSubmitting}
               onClick={async () => {
                 setReviewSubmitting(true);
-                // reviewedUserId = the OTHER party (the person being rated)
-                const reviewedUserId = isBuyer ? order.seller_id : order.buyer_id;
-                const ok = await submitReview(order.id, order.listing_id, order.seller_id, reviewedUserId, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
+                const ok = await submitReview(order.id, order.listing_id, order.seller_id, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
                 setReviewSubmitting(false);
                 if (ok) setReviewDone(true);
               }}>
