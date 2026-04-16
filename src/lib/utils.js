@@ -160,26 +160,175 @@ export const getQualityBadge = (score, lang) => {
   return { label: lang === 'he' ? 'שפר מודעה' : 'Improve', color: 'red', icon: '!' };
 };
 
-// ─── Seller trust — computed client-side from profile data ───
+// ═══════════════════════════════════════════════════════
+// TRUST + RATING SYSTEM
+// ═══════════════════════════════════════════════════════
+
+// ─── computeTrustScore — canonical trust engine ───
+// Accepts a rich metrics object. All fields are optional (safe defaults to 0/false).
+// Returns { score: 0-100, badge, buyerBadge }
+export const computeTrustScore = (metrics = {}) => {
+  const {
+    hasFullName = false,
+    hasAvatar = false,
+    hasBio = false,
+    isVerified = false,
+    isPhoneVerified = false,
+    listingsCount = 0,
+    salesCount = 0,
+    purchasesCount = 0,
+    sellerRating = 0,
+    sellerRatingCount = 0,
+    buyerRating = 0,
+    buyerRatingCount = 0,
+    accountAgeDays = 0,
+  } = metrics;
+
+  let score = 0;
+
+  // Profile completeness — up to 20 pts
+  if (hasFullName)    score += 5;
+  if (hasAvatar)      score += 5;
+  if (hasBio)         score += 5;
+  if (isPhoneVerified) score += 5;
+
+  // Identity verification — up to 15 pts
+  if (isVerified) score += 15;
+
+  // Seller activity — up to 25 pts (salesCount preferred over listingsCount)
+  if (salesCount >= 20)       score += 25;
+  else if (salesCount >= 10)  score += 20;
+  else if (salesCount >= 3)   score += 14;
+  else if (salesCount >= 1)   score += 8;
+  else if (listingsCount >= 10) score += 15;
+  else if (listingsCount >= 5)  score += 10;
+  else if (listingsCount >= 1)  score += 5;
+
+  // Seller ratings — up to 30 pts
+  if (sellerRating >= 4.7 && sellerRatingCount >= 10) score += 30;
+  else if (sellerRating >= 4.5 && sellerRatingCount >= 5) score += 25;
+  else if (sellerRating >= 4.0 && sellerRatingCount >= 3) score += 17;
+  else if (sellerRating >= 3.5 && sellerRatingCount >= 1) score += 10;
+  else if (sellerRatingCount >= 1)                        score += 5;
+
+  // Account age — up to 10 pts
+  if (accountAgeDays >= 365)      score += 10;
+  else if (accountAgeDays >= 180) score += 8;
+  else if (accountAgeDays >= 90)  score += 5;
+  else if (accountAgeDays >= 30)  score += 3;
+  else if (accountAgeDays >= 7)   score += 1;
+
+  const finalScore = Math.min(100, score);
+
+  // Seller badge thresholds
+  let badge = 'newSeller';
+  if (finalScore >= 85)      badge = 'eliteSeller';
+  else if (finalScore >= 65) badge = 'topSeller';
+  else if (finalScore >= 40) badge = 'trustedSeller';
+
+  // Buyer badge (separate axis — based on purchases + buyer ratings)
+  let buyerBadge = 'newBuyer';
+  const buyerPts = (purchasesCount >= 10 ? 40 : purchasesCount >= 3 ? 25 : purchasesCount >= 1 ? 10 : 0)
+    + (buyerRating >= 4.5 && buyerRatingCount >= 3 ? 40 : buyerRating >= 4.0 && buyerRatingCount >= 1 ? 25 : buyerRatingCount >= 1 ? 10 : 0);
+  if (buyerPts >= 60)      buyerBadge = 'topBuyer';
+  else if (buyerPts >= 25) buyerBadge = 'trustedBuyer';
+
+  return { score: finalScore, badge, buyerBadge };
+};
+
+// ─── computeSellerTrust — backward-compatible wrapper ───
+// Old call: computeSellerTrust(seller, listingsCount)
+// Now delegates to computeTrustScore internally.
 export const computeSellerTrust = (seller, listingsCount = 0) => {
   if (!seller) return { badge: 'newSeller', trustScore: 0 };
-  let score = 0;
-  // Has listings
-  if (listingsCount >= 5) score += 25; else if (listingsCount >= 1) score += 10;
-  // Is verified
-  if (seller.is_verified) score += 25;
-  // Has rating
-  if (seller.rating >= 4.5) score += 25; else if (seller.rating >= 3.5) score += 15;
-  // Has profile info
-  if (seller.full_name && seller.full_name.length > 2) score += 10;
-  if (seller.avatar_url) score += 5;
-  if (seller.bio) score += 10;
+  const result = computeTrustScore({
+    hasFullName:     !!(seller.full_name && seller.full_name.length > 2),
+    hasAvatar:       !!seller.avatar_url,
+    hasBio:          !!seller.bio,
+    isVerified:      !!seller.is_verified,
+    isPhoneVerified: !!seller.phone_verified,
+    listingsCount,
+    salesCount:      seller.sales_count        || 0,
+    sellerRating:    seller.rating             || 0,
+    sellerRatingCount: seller.rating_count     || 0,
+    accountAgeDays:  seller.created_at
+      ? Math.floor((Date.now() - new Date(seller.created_at)) / 86400000)
+      : 0,
+  });
+  return { badge: result.badge, trustScore: result.score };
+};
 
-  let badge = 'newSeller';
-  if (score >= 70) badge = 'topSeller';
-  else if (score >= 40) badge = 'trustedSeller';
+// ─── Buyer badge styles ───
+export const getBuyerBadgeStyle = (badge) => {
+  const map = {
+    topBuyer:     { bg: 'bg-purple-500/20', text: 'text-purple-400', gradient: 'from-purple-500 to-pink-600',     shadow: 'shadow-purple-500/30' },
+    trustedBuyer: { bg: 'bg-[#6FEEE1]/10',  text: 'text-[#6FEEE1]',  gradient: 'from-[#6FEEE1] to-[#4FD1C5]',   shadow: 'shadow-[#6FEEE1]/20' },
+    newBuyer:     { bg: 'bg-slate-500/20',   text: 'text-slate-400',  gradient: 'from-slate-500 to-slate-600',    shadow: 'shadow-slate-500/30' },
+  };
+  return map[badge] || map.newBuyer;
+};
 
-  return { badge, trustScore: Math.min(100, score) };
+export const getBuyerBadgeLabel = (badge, lang) => {
+  const labels = {
+    topBuyer:     lang === 'he' ? '🏆 קונה מוביל'   : '🏆 Top Buyer',
+    trustedBuyer: lang === 'he' ? '✓ קונה מהימן'    : '✓ Trusted Buyer',
+    newBuyer:     lang === 'he' ? '🆕 קונה חדש'     : '🆕 New Buyer',
+  };
+  return labels[badge] || labels.newBuyer;
+};
+
+// ─── Trust level label (for 0-100 score display) ───
+export const getTrustLevelLabel = (score, lang) => {
+  if (score >= 85) return lang === 'he' ? 'עילית'      : 'Elite';
+  if (score >= 65) return lang === 'he' ? 'מוביל'      : 'Top Rated';
+  if (score >= 40) return lang === 'he' ? 'מהימן'      : 'Trusted';
+  if (score >= 20) return lang === 'he' ? 'מוכר חדש'   : 'New Seller';
+  return                lang === 'he' ? 'מתחיל'        : 'Starter';
+};
+
+// ─── Rating display helpers ───
+
+// formatUserRating — "4.8 ★ (23 ביקורות)" / "No reviews yet"
+export const formatUserRating = (avg, count, lang) => {
+  if (!count || count === 0) return lang === 'he' ? 'אין ביקורות עדיין' : 'No reviews yet';
+  const formatted = Number(avg).toFixed(1);
+  const countLabel = lang === 'he' ? `(${count} ביקורות)` : `(${count} review${count === 1 ? '' : 's'})`;
+  return `${formatted} ★ ${countLabel}`;
+};
+
+// getRatingStars — returns array of 'full' | 'half' | 'empty' for rendering 5 stars
+export const getRatingStars = (rating, maxStars = 5) => {
+  const stars = [];
+  for (let i = 1; i <= maxStars; i++) {
+    const diff = rating - (i - 1);
+    if (diff >= 0.75)      stars.push('full');
+    else if (diff >= 0.25) stars.push('half');
+    else                   stars.push('empty');
+  }
+  return stars;
+};
+
+// getReviewSummary — compute avg/distribution from a reviews array
+// reviews: [{ rating, reviewer_role }]
+export const getReviewSummary = (reviews = []) => {
+  const seller = reviews.filter(r => r.reviewer_role === 'buyer');   // buyer reviewed the seller
+  const buyer  = reviews.filter(r => r.reviewer_role === 'seller');  // seller reviewed the buyer
+
+  const avg = (arr) => arr.length ? arr.reduce((s, r) => s + r.rating, 0) / arr.length : 0;
+  const dist = reviews.reduce((acc, r) => {
+    acc[r.rating] = (acc[r.rating] || 0) + 1;
+    return acc;
+  }, { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 });
+
+  return {
+    asSellerAvg:   parseFloat(avg(seller).toFixed(1)),
+    asSellerCount: seller.length,
+    asBuyerAvg:    parseFloat(avg(buyer).toFixed(1)),
+    asBuyerCount:  buyer.length,
+    overall:       parseFloat(avg(reviews).toFixed(1)),
+    total:         reviews.length,
+    distribution:  dist,
+  };
 };
 
 // Pagination constants
