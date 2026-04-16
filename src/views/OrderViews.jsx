@@ -6,6 +6,7 @@ import {
   CornerDownRight,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
+import { supabase } from '../lib/supabase';
 import { Card, Btn, Badge, FadeIn, SlideUp, InputField } from '../components/ui';
 import { formatPrice, timeAgo } from '../lib/utils';
 
@@ -268,6 +269,21 @@ export function OrderDetailView() {
       });
     }
   }, [activeOrderId, activeOrder, fetchOrderById, setActiveOrder]);
+
+  // On mount / order change: if completed, check whether this user already reviewed
+  useEffect(() => {
+    if (!activeOrder || activeOrder.status !== 'completed' || !user || reviewDone) return;
+    supabase
+      .from('reviews')
+      .select('id')
+      .eq('order_id', activeOrder.id)
+      .eq('reviewer_id', user.id)
+      .limit(1)
+      .then(({ data }) => {
+        if (data?.length > 0) setReviewDone(true);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeOrder?.id, activeOrder?.status, user?.id]);
 
   // Show loading if we're fetching the order
   if (loading || (!activeOrder && activeOrderId)) {
