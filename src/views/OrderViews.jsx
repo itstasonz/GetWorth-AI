@@ -256,7 +256,8 @@ export function OrderDetailView() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
-  const [reviewDone, setReviewDone] = useState(false);
+  // null = check in flight | false = confirmed no review | true = confirmed reviewed
+  const [reviewDone, setReviewDone] = useState(null);
   const [loading, setLoading] = useState(false);
 
   // If we have an activeOrderId but no activeOrder (or stale), fetch the full order
@@ -270,9 +271,10 @@ export function OrderDetailView() {
     }
   }, [activeOrderId, activeOrder, fetchOrderById, setActiveOrder]);
 
-  // On mount / order change: if completed, check whether this user already reviewed
+  // On mount / order change: resolve reviewDone before showing any review UI
   useEffect(() => {
-    if (!activeOrder || activeOrder.status !== 'completed' || !user || reviewDone) return;
+    if (!activeOrder || activeOrder.status !== 'completed' || !user) return;
+    if (reviewDone === true) return; // already confirmed — skip
     supabase
       .from('reviews')
       .select('id')
@@ -280,7 +282,8 @@ export function OrderDetailView() {
       .eq('reviewer_id', user.id)
       .limit(1)
       .then(({ data }) => {
-        if (data?.length > 0) setReviewDone(true);
+        // Always resolve: true = already reviewed, false = not yet
+        setReviewDone(data?.length > 0 ? true : false);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeOrder?.id, activeOrder?.status, user?.id]);
@@ -520,7 +523,10 @@ export function OrderDetailView() {
       )}
 
       {/* Review — bidirectional (buyer rates seller, seller rates buyer) */}
-      {order.status === 'completed' && !reviewDone && (
+      {/* reviewDone===null: check in flight — render nothing until resolved   */}
+      {/* reviewDone===false: confirmed no review — show form                  */}
+      {/* reviewDone===true: confirmed reviewed — show badge (see below)       */}
+      {order.status === 'completed' && reviewDone === false && (
         <FadeIn delay={300}>
           <Card className="p-5 space-y-4" gradient="linear-gradient(135deg, rgba(251,191,36,0.08), rgba(251,191,36,0.02))">
             <div className="text-center">
@@ -548,7 +554,7 @@ export function OrderDetailView() {
           </Card>
         </FadeIn>
       )}
-      {reviewDone && (
+      {order.status === 'completed' && reviewDone === true && (
         <FadeIn><Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
           <div className="flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5 text-yellow-400" /><span className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'הביקורת נשלחה!' : 'Review submitted!'}</span></div>
         </Card></FadeIn>
