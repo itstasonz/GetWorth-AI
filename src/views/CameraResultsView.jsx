@@ -430,50 +430,62 @@ export function AnalyzingView() {
 
       {/* ═══ MAIN SCANNING CANVAS ═══ */}
       <main className="relative z-10 flex flex-col items-center justify-center px-6" style={{ minHeight: 'calc(100vh - 128px)' }}>
-        {/* Intelligent void container */}
+        {/* Scanning frame — item photo fills the box */}
         <div className="relative w-full max-w-md aspect-square flex items-center justify-center">
-          {/* Outer frame */}
+          {/* ── Item photo layer — fills and clips to rounded box ── */}
+          <div className="absolute inset-0 rounded-2xl overflow-hidden z-0">
+            {(capturedImageRef.current || images[0]) ? (
+              <>
+                <img
+                  src={capturedImageRef.current || images[0]}
+                  className="w-full h-full object-cover"
+                  alt=""
+                />
+                {/* Subtle overlay so teal rings/line remain readable */}
+                <div
+                  className="absolute inset-0"
+                  style={{ background: 'rgba(6, 10, 20, 0.48)' }}
+                />
+              </>
+            ) : (
+              <div className="w-full h-full" style={{ background: STITCH.surfaceContainerLow }} />
+            )}
+          </div>
+
+          {/* Outer frame — slightly brighter to frame the photo */}
           <div
-            className="absolute inset-0 rounded-2xl"
-            style={{ border: '1px solid rgba(60, 73, 71, 0.20)' }}
+            className="absolute inset-0 rounded-2xl z-10"
+            style={{ border: '1px solid rgba(111, 238, 225, 0.28)' }}
           />
 
-          {/* Pulse rings — custom scale+opacity animation (more visible than Tailwind animate-pulse) */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          {/* Pulse rings */}
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
             <div
               className="w-64 h-64 rounded-full stitch-pulse-ring"
-              style={{
-                border: `2px solid rgba(111, 238, 225, 0.30)`,
-              }}
+              style={{ border: `2px solid rgba(111, 238, 225, 0.35)` }}
             />
             <div
               className="absolute w-48 h-48 rounded-full stitch-pulse-ring"
-              style={{
-                border: `1px solid rgba(111, 238, 225, 0.50)`,
-                animationDelay: '1.3s',
-              }}
+              style={{ border: `1px solid rgba(111, 238, 225, 0.55)`, animationDelay: '1.3s' }}
             />
             <div
               className="absolute w-32 h-32 rounded-full stitch-pulse-ring"
-              style={{
-                border: `1px solid rgba(111, 238, 225, 0.40)`,
-                animationDelay: '2.6s',
-              }}
+              style={{ border: `1px solid rgba(111, 238, 225, 0.45)`, animationDelay: '2.6s' }}
             />
           </div>
 
-          {/* Central scanning indicator — with subtle breathing glow */}
+          {/* Central scan indicator — compact, sits over photo */}
           <div className="relative z-20 flex flex-col items-center">
             <div
-              className="w-32 h-32 rounded-full flex items-center justify-center stitch-breathe"
+              className="w-16 h-16 rounded-full flex items-center justify-center stitch-breathe"
               style={{
-                background: STITCH.GLASS_BG,
-                backdropFilter: STITCH.GLASS_BLUR,
-                WebkitBackdropFilter: STITCH.GLASS_BLUR,
-                border: `1px solid rgba(111, 238, 225, 0.30)`,
+                background: 'rgba(6, 10, 20, 0.55)',
+                backdropFilter: 'blur(12px)',
+                WebkitBackdropFilter: 'blur(12px)',
+                border: `1px solid rgba(111, 238, 225, 0.40)`,
               }}
             >
-              <Box className="w-14 h-14" style={{ color: STITCH.primary }} strokeWidth={2} />
+              <Scan className="w-7 h-7" style={{ color: STITCH.primary }} strokeWidth={1.5} />
             </div>
           </div>
 

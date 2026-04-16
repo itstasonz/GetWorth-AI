@@ -1730,10 +1730,13 @@ export function AppProvider({ children }) {
     playSound('shutter');
     setShowFlash(true);
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Cap capture resolution at 800px — eliminates the heavy decode+resize in compressImage
+    const MAX_CAP = 800;
+    const capScale = Math.min(1, MAX_CAP / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * capScale);
+    canvas.height = Math.round(video.videoHeight * capScale);
     const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0);
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
     // Try toBlob first (better), fallback to toDataURL
     const processCapture = (rawImg) => {

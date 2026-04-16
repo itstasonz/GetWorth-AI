@@ -1164,27 +1164,24 @@ export default async function handler(req) {
     const t1b = Date.now();
     if (visionData) console.log(`[Pipeline] Vision fallback done in ${t1b - t1}ms`);
 
-    // ── GENERATE EMBEDDING ──
+    // ── GENERATE EMBEDDING + FETCH CORRECTIONS (parallel) ──
     const embeddingText = recognition.embedding_text
       || [recognition.brand_candidates?.[0]?.brand, recognition.model_candidates?.[0]?.model, recognition.category, ...(recognition.visual_features?.materials || [])].filter(Boolean).join(' ');
 
-    const queryEmbedding = await generateQueryEmbedding(embeddingText);
+    const [queryEmbedding, corrections] = await Promise.all([
+      generateQueryEmbedding(embeddingText),
+      clientHints.length > 0 ? Promise.resolve(clientHints) : fetchCorrections().catch(() => []),
+    ]);
     recognition._embedding_used = !!queryEmbedding;
 
     const t2 = Date.now();
-    if (queryEmbedding) console.log(`[Pipeline] Embedding generated in ${t2 - t1b}ms`);
+    if (queryEmbedding) console.log(`[Pipeline] Embedding + corrections fetched in ${t2 - t1b}ms`);
 
     // ── RETRIEVE CANDIDATES (Phase 3: Vision-enriched) ──
     const candidates = await retrieveCandidates(recognition, queryEmbedding, visionData);
 
     const t3 = Date.now();
     console.log(`[Pipeline] Retrieved ${candidates.length} candidates in ${t3 - t2}ms`);
-
-    // ── FETCH CORRECTIONS ──
-    let corrections = clientHints;
-    if (!corrections.length) {
-      corrections = await fetchCorrections().catch(() => []);
-    }
 
     // ── STAGE 2: VERIFY + PRICE (Phase 3: Vision data injected) ──
     let verification;
