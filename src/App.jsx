@@ -103,7 +103,7 @@ function AppShell() {
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.getRegistrations().then(regs => {
         regs.forEach(r => {
-          r.update().catch(() => {});
+          r.update().catch(err => console.warn('[SW] Update failed:', err));
           if (r.waiting) r.waiting.postMessage({ type: 'SKIP_WAITING' });
         });
       });

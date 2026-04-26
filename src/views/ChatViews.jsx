@@ -51,7 +51,7 @@ export function InboxView() {
         <div className="space-y-3">
           {conversations.map((conv, i) => {
             const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
-            const lastMessage = [...(conv.messages || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+            const lastMessage = (conv.messages || []).reduce((latest, m) => !latest || m.created_at > latest.created_at ? m : latest, null);
             const convUnread = conv.messages?.filter((m) => !m.is_read && m.sender_id !== user.id).length || 0;
             
             return (
@@ -59,7 +59,10 @@ export function InboxView() {
                 <Card className="p-4 cursor-pointer" onClick={() => { setActiveChat({ ...conv, otherUser }); loadMessages(conv.id); setView('chat'); }}>
                   <div className="flex items-center gap-4">
                     <div className="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0">
-                      <img src={conv.listing?.images?.[0]} alt="" className="w-full h-full object-cover" />
+                      {conv.listing?.images?.[0]
+                        ? <img src={conv.listing.images[0]} alt="" className="w-full h-full object-cover" />
+                        : <div className="w-full h-full bg-white/5 flex items-center justify-center"><MessageCircle className="w-6 h-6 text-slate-500" /></div>
+                      }
                       {convUnread > 0 && (
                         <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-[10px] font-bold flex items-center justify-center">{convUnread}</div>
                       )}
@@ -182,7 +185,7 @@ export function ChatView() {
         <div className="flex gap-2">
           <button onClick={() => {
             const amount = prompt(lang === 'he' ? 'הכנס הצעת מחיר:' : 'Enter your offer:');
-            if (amount && !isNaN(amount)) sendMessage(`${lang === 'he' ? 'אני מציע' : 'I offer'} ₪${amount}`, true, parseInt(amount));
+            if (amount && !isNaN(amount)) sendMessage(`${lang === 'he' ? 'אני מציע' : 'I offer'} ₪${amount}`, true, parseInt(amount, 10));
           }} className="w-12 h-12 rounded-xl bg-green-500/20 flex items-center justify-center text-green-400 hover:bg-green-500/30 transition-all">
             <DollarSign className="w-5 h-5" />
           </button>

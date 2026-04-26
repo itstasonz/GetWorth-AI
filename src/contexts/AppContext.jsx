@@ -264,7 +264,7 @@ export function AppProvider({ children }) {
         setUser(session.user);
         supabase.from('profiles').select('*').eq('id', session.user.id).single()
           .then(({ data }) => { if (mounted && data) setProfile(data); })
-          .catch(() => {});
+          .catch(err => { if (DEV) console.error('[Auth] Profile fetch failed:', err); });
       } else { setUser(null); setProfile(null); }
     });
 
@@ -293,7 +293,7 @@ export function AppProvider({ children }) {
   // Load user data when auth changes
   useEffect(() => {
     if (user) loadUserData();
-    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; }
+    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); setSelected(null); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; }
   }, [user]);
 
   // Auto-dismiss errors
@@ -336,7 +336,8 @@ export function AppProvider({ children }) {
                 return [...prev, newMsg];
               });
               setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-              supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id).then(() => {});
+              supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id)
+                .then(({ error }) => { if (error && DEV) console.error('[Chat] Mark read failed:', error); });
             }
             return current;
           });
@@ -602,13 +603,15 @@ export function AppProvider({ children }) {
     if (!sellerId) return;
     setLoadingSeller(true);
     setView('sellerProfile');
-    const [{ data: profileData }, { data: listingsData }] = await Promise.all([
+    const [{ data: profileData, error: profileErr }, { data: listingsData, error: listingsErr }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', sellerId).single(),
       supabase.from('listings')
         .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
         .eq('seller_id', sellerId).eq('status', 'active')
         .order('created_at', { ascending: false })
     ]);
+    if (profileErr) console.error('[Seller] Profile fetch failed:', profileErr);
+    if (listingsErr) console.error('[Seller] Listings fetch failed:', listingsErr);
     if (profileData) setSellerProfile(profileData);
     if (listingsData) setSellerListings(listingsData);
     setLoadingSeller(false);
@@ -1077,7 +1080,8 @@ export function AppProvider({ children }) {
             const parsed = JSON.parse(data.content[0].text.replace(/```json\n?|\n?```/g, '').trim());
             if (DEV) console.log(`[Analyze] Success:`, parsed.name || parsed.nameHebrew);
             return parsed;
-          } catch {
+          } catch (parseErr) {
+            if (DEV) console.error('[Analyze] JSON parse error:', parseErr, data.content[0].text);
             throw new Error(lang === 'he' ? 'תגובה לא תקינה מהשרת' : 'Invalid response from server');
           }
         }
@@ -1264,7 +1268,7 @@ export function AppProvider({ children }) {
       // Store valuation in DB (async, non-blocking)
       storeValuation(analysisResult).then(vid => {
         if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
-      });
+      }).catch(err => { if (DEV) console.error('[Pipeline] storeValuation failed:', err); });
 
       if (DEV) console.log(`[Pipeline] ✅ Done in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
 
@@ -2200,6 +2204,7 @@ export function AppProvider({ children }) {
       console.error('[Orders] Transition FAILED:', e);
       setOrders(prevOrders);
       setActiveOrder(prevActiveOrder);
+      loadOrders(true).catch(() => {}); // re-sync from server in case prevOrders is stale
       showToastMsg(lang === 'he' ? `שגיאה: ${e.message || 'עדכון נכשל'}` : `Error: ${e.message || 'Update failed'}`);
       return false;
     }

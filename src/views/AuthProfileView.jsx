@@ -102,7 +102,7 @@ export function ProfileView() {
 
   // Load reviews about me
   useEffect(() => {
-    if (user && typeof loadMyReviews === 'function') loadMyReviews();
+    if (user) loadMyReviews();
   }, [user, loadMyReviews]);
 
   // Inject Manrope + Inter fonts once

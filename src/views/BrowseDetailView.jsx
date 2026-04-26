@@ -240,7 +240,7 @@ export function DetailView() {
     completed:    { en: 'Completed',           he: 'הושלם',           color: 'emerald' },
   };
 
-  const quality = selected.quality_score != null ? getQualityBadge(selected.quality_score, lang) : null;
+  const quality = selected.quality_score != null && selected.quality_score > 0 ? getQualityBadge(selected.quality_score, lang) : null;
   const sellerTrust = selected.seller ? computeSellerTrust(selected.seller) : null;
 
   const handleReport = async () => {
@@ -267,7 +267,7 @@ export function DetailView() {
         images={selected.images || []}
         overlay={
           <>
-            <button onClick={() => { setSelected(null); setView(tab === 'home' ? 'home' : 'browse'); }}
+            <button onClick={() => { setSelected(null); setView((tab ?? 'home') === 'home' ? 'home' : 'browse'); }}
               className={`absolute top-4 ${rtl ? 'right-4' : 'left-4'} w-12 h-12 rounded-2xl bg-black/30 backdrop-blur-md flex items-center justify-center hover:bg-black/50 transition-all z-20`}>
               {rtl ? <ChevronRight className="w-6 h-6" /> : <ChevronLeft className="w-6 h-6" />}
             </button>

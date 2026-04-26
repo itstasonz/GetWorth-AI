@@ -95,8 +95,8 @@ export function CameraView() {
 
     const interval = setInterval(checkReady, 200);
     const timeout = setTimeout(() => {
-      camLog(`5s timeout forced cameraReady — srcObj=${!!video.srcObject} rs=${video.readyState}`);
-      setCameraReady(true);
+      camLog(`5s timeout — srcObj=${!!video.srcObject} rs=${video.readyState}`);
+      if (video.srcObject) setCameraReady(true); // only enable capture if stream actually exists
     }, 5000);
 
     return () => {
