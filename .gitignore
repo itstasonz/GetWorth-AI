@@ -1,3 +1,28 @@
 node_modules
 .env.local
 .env
+
+# DB expansion artifacts (Apr 2026)
+batch-data/
+db-expansion-*.json
+db-expansion-*.sql
+db-expansion-*.md
+db-expansion-*.log
+db-expansion.mjs
+generate-batch-data*.py
+products-backup-*.json
+test-api.mjs
+dist/
+
+# DB expansion artifacts
+batch-data/
+db-expansion-*.json
+db-expansion-*.sql
+db-expansion-*.md
+db-expansion-*.log
+db-expansion.mjs
+generate-batch-data*.py
+products-backup-*.json
+test-api.mjs
+dist/
+db-expansion.log
