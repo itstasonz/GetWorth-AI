@@ -1094,6 +1094,36 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
 
 
 // ═══════════════════════════════════════════════════════
+// §9.5  SERIAL OCR — lightweight label text extraction
+// ═══════════════════════════════════════════════════════
+
+async function ocrSerialLabel(imageBase64, apiKey) {
+  const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 200,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: imageBase64 } },
+          { type: 'text', text: 'Extract all text from this image, focusing on serial numbers, IMEI numbers, and S/N labels. Return ONLY the raw text you see, no commentary.' },
+        ],
+      }],
+    }),
+  });
+  if (!res.ok) return '';
+  const data = await res.json();
+  return data.content?.find(c => c.type === 'text')?.text?.trim() || '';
+}
+
+
+// ═══════════════════════════════════════════════════════
 // §10  MAIN HANDLER
 // ═══════════════════════════════════════════════════════
 
@@ -1112,10 +1142,16 @@ export default async function handler(req) {
   if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);
 
   try {
-    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [] } = await req.json();
+    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false } = await req.json();
     const clientHints = clientCorrections.length > 0 ? clientCorrections : hints;
     const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
     if (!imageList.length) return json({ error: 'No image data provided' }, 400, cors);
+
+    // ── SERIAL OCR EARLY EXIT — skip full pipeline ──
+    if (serialOCR) {
+      const ocrText = await ocrSerialLabel(imageList[0], apiKey);
+      return json({ ocrText, raw_texts: [ocrText] }, 200, cors);
+    }
 
     // ── PHASE 3: RATE LIMITING ──
     const supa = getSupabase();

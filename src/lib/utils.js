@@ -367,6 +367,30 @@ export const maskSerial = (serial) => {
   return serial.slice(0, show) + '•'.repeat(serial.length - show * 2) + serial.slice(-show);
 };
 
+// Validate serial format per category/brand
+export const validateSerialFormat = (serial, category = '', brand = '') => {
+  if (!serial || serial.trim().length < 5) return false;
+  const s = serial.trim().toUpperCase().replace(/[\s-]/g, '');
+  const cat = category.toLowerCase();
+  const br = brand.toLowerCase();
+
+  if (br.includes('apple') || /\b(iphone|ipad|macbook|airpods)\b/.test(br)) {
+    // Apple IMEI (15 digits) or serial (12 alphanumeric)
+    if (/^\d{15}$/.test(s)) return true; // IMEI — Luhn checked at submit
+    return s.length === 12 && /^[A-Z0-9]{12}$/.test(s);
+  }
+  if (br.includes('samsung')) {
+    if (/^\d{15}$/.test(s)) return true;
+    return s.length >= 11 && s.length <= 15 && /^[A-Z0-9]+$/.test(s);
+  }
+  if (cat === 'cars' || cat === 'vehicles') {
+    // VIN: 17 chars, no I/O/Q
+    return s.length === 17 && /^[A-HJ-NPR-Z0-9]{17}$/.test(s);
+  }
+  // Generic: 5-30 alphanumeric with optional dashes/slashes
+  return s.length >= 5 && s.length <= 30 && /^[A-Z0-9\-\/]+$/.test(s);
+};
+
 // Basic IMEI validation (15 digits, Luhn check)
 export const validateIMEI = (str) => {
   const digits = str.replace(/\D/g, '');

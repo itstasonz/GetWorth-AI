@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -2374,13 +2374,7 @@ export function AppProvider({ children }) {
       if (res.ok) {
         if (DEV) console.log(`[Serial] API: ${(performance.now() - tApi).toFixed(0)}ms`);
         const data = await res.json();
-        const text = data.content?.[0]?.text || '';
-        try {
-          const parsed = JSON.parse(text.replace(/```json\n?|\n?```/g, '').trim());
-          rawText = parsed.raw_texts?.join(' ') || parsed.ocrText || parsed.serial || text;
-        } catch {
-          rawText = text;
-        }
+        rawText = data.ocrText || data.raw_texts?.[0] || '';
       }
 
       // Extract serial/IMEI from OCR text
@@ -2417,6 +2411,21 @@ export function AppProvider({ children }) {
 
   const clearSerialData = useCallback(() => setSerialData(null), []);
 
+  const submitSerialText = useCallback((serialNumber) => {
+    if (!serialNumber?.trim()) return;
+    const serial = serialNumber.trim().toUpperCase().replace(/[\s-]/g, '');
+    const isImei = /^\d{15}$/.test(serial) && validateIMEI(serial);
+    setSerialData({
+      photo: null,
+      rawText: serial,
+      serial,
+      masked: maskSerial(serial),
+      verified: isImei || serial.length >= 8,
+      type: isImei ? 'imei' : 'serial',
+    });
+    showToastMsg(lang === 'he' ? 'מספר סידורי נוסף ✓' : 'Serial number added ✓');
+  }, [lang, showToastMsg]);
+
   const value = {
     lang, setLang, t, rtl,
     user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading,
@@ -2440,7 +2449,7 @@ export function AppProvider({ children }) {
     publishing, publishListing, startListing, selectCondition,
     reportListing,
     // Serial/IMEI verification
-    serialData, serialLoading, submitSerialPhoto, clearSerialData,
+    serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
     // Orders / Checkout
     orders, activeOrder, setActiveOrder, activeOrderId, ordersLoading,
     showCheckout, setShowCheckout,

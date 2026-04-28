@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon } from 'lucide-react';
+import { Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon, X, Keyboard } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { camLog } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
@@ -907,7 +907,7 @@ export function ResultsView() {
     refineResult, confirmResult, correctResult,
     addPhoto, setHelpModalOpen, helpModalOpen, fileRef,
     handleAdditionalFile,
-    serialData, serialLoading, submitSerialPhoto, clearSerialData,
+    serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
   } = useApp();
 
   const [showCorrection, setShowCorrection] = React.useState(false);
@@ -915,6 +915,8 @@ export function ResultsView() {
   const [refining, setRefining] = React.useState(false);
   const [showDetails, setShowDetails] = React.useState(false);
   const [activePhotoIndex, setActivePhotoIndex] = React.useState(0);
+  const [serialTextMode, setSerialTextMode] = React.useState(false);
+  const [serialTextValue, setSerialTextValue] = React.useState('');
   const addPhotoFileRef = React.useRef(null);
   const serialFileRef = React.useRef(null);
 
@@ -1345,37 +1347,106 @@ export function ResultsView() {
                       style={{ color: STITCH.onSurfaceVariant }}
                     />
                   </button>
+                ) : serialTextMode ? (
+                  /* TEXT INPUT STATE */
+                  <div
+                    className="flex flex-col gap-2 p-3 rounded-2xl"
+                    style={{
+                      background: STITCH.surfaceContainerHigh,
+                      border: '1px solid rgba(111, 238, 225, 0.2)',
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Barcode className="w-4 h-4 flex-shrink-0" style={{ color: STITCH.primary }} />
+                      <input
+                        autoFocus
+                        type="text"
+                        value={serialTextValue}
+                        onChange={e => setSerialTextValue(e.target.value.toUpperCase())}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && serialTextValue.trim()) {
+                            submitSerialText(serialTextValue);
+                            setSerialTextMode(false);
+                            setSerialTextValue('');
+                          }
+                          if (e.key === 'Escape') {
+                            setSerialTextMode(false);
+                            setSerialTextValue('');
+                          }
+                        }}
+                        placeholder={lang === 'he' ? 'הזן מספר סידורי...' : 'Enter serial number...'}
+                        className="flex-1 bg-transparent text-[13px] font-mono outline-none min-w-0 placeholder-slate-600"
+                        style={{ color: STITCH.onSurface, caretColor: STITCH.primary }}
+                      />
+                      <button
+                        onClick={() => { setSerialTextMode(false); setSerialTextValue(''); }}
+                        style={{ color: STITCH.onSurfaceVariant }}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {serialTextValue.trim().length >= 5 && (
+                      <button
+                        onClick={() => {
+                          submitSerialText(serialTextValue);
+                          setSerialTextMode(false);
+                          setSerialTextValue('');
+                        }}
+                        className="w-full py-1.5 rounded-xl text-xs font-semibold active:scale-95 transition-all"
+                        style={{ background: STITCH.primary, color: STITCH.background }}
+                      >
+                        {lang === 'he' ? 'אמת' : 'Verify'}
+                      </button>
+                    )}
+                  </div>
                 ) : (
-                  /* DEFAULT STATE — "Add Serial" CTA */
-                  <button
-                    onClick={() => !serialLoading && serialFileRef.current?.click()}
-                    disabled={serialLoading}
-                    className="flex flex-col items-center justify-center gap-3 py-4 rounded-2xl active:scale-95 transition-all duration-200"
+                  /* DEFAULT STATE — dual mode: Scan label + Type serial */
+                  <div
+                    className="flex flex-col items-center gap-2.5 py-3 rounded-2xl"
                     style={{
                       background: STITCH.surfaceContainerHigh,
                       border: '1px solid rgba(255, 255, 255, 0.03)',
-                      opacity: serialLoading ? 0.7 : 1,
                     }}
                   >
-                    <div
-                      className="w-12 h-12 rounded-full flex items-center justify-center"
-                      style={{ background: STITCH.background, color: STITCH.primary }}
-                    >
-                      {serialLoading
-                        ? <Loader2 className="w-6 h-6 animate-spin" strokeWidth={2} />
-                        : <Barcode className="w-6 h-6" strokeWidth={2} />
-                      }
-                    </div>
                     <span
-                      className="text-sm font-semibold"
-                      style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
+                      className="text-[11px] font-medium"
+                      style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
                     >
-                      {serialLoading
-                        ? (lang === 'he' ? 'קורא...' : 'Reading...')
-                        : (lang === 'he' ? 'הוסף סריאלי' : 'Add Serial')
-                      }
+                      {lang === 'he' ? 'הוסף מספר סידורי' : 'Add Serial'}
                     </span>
-                  </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => !serialLoading && serialFileRef.current?.click()}
+                        disabled={serialLoading}
+                        className="flex flex-col items-center gap-1.5 px-4 py-2 rounded-xl active:scale-95 transition-all"
+                        style={{
+                          background: STITCH.background,
+                          color: serialLoading ? STITCH.onSurfaceVariant : STITCH.primary,
+                        }}
+                      >
+                        {serialLoading
+                          ? <Loader2 className="w-5 h-5 animate-spin" strokeWidth={2} />
+                          : <Camera className="w-5 h-5" strokeWidth={2} />
+                        }
+                        <span className="text-[10px] font-semibold">
+                          {serialLoading
+                            ? (lang === 'he' ? 'קורא...' : 'Reading...')
+                            : (lang === 'he' ? 'סרוק' : 'Scan')
+                          }
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setSerialTextMode(true)}
+                        className="flex flex-col items-center gap-1.5 px-4 py-2 rounded-xl active:scale-95 transition-all"
+                        style={{ background: STITCH.background, color: STITCH.onSurface }}
+                      >
+                        <Keyboard className="w-5 h-5" strokeWidth={2} />
+                        <span className="text-[10px] font-semibold">
+                          {lang === 'he' ? 'הקלד' : 'Type'}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                 )
               )}
             </div>
