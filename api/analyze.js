@@ -308,16 +308,32 @@ VERIFICATION RULES:
 - NEVER exceed 95% final confidence
 - NEVER fabricate a brand that wasn't found in OCR or DB
 
-AUTHENTICITY ASSESSMENT (for watches, designer bags, sneakers, jewelry, perfumes, collectibles):
-- Required for: Rolex, Omega, Cartier, Patek, AP, IWC, Breitling, Tag Heuer, Hublot, Tudor, Chanel, Louis Vuitton, Gucci, Prada, Hermès, Dior, Balenciaga, Off-White, Supreme, Yeezy, Jordan, and similar luxury/limited brands
-- DEFAULT status is "unknown" — do NOT assume authentic without evidence
-- Signs of REPLICA: incorrect font weight/spacing on dial or logo, misaligned text, wrong proportions, cheap visible materials inconsistent with claimed brand, incorrect engraving depth, wrong color tones for model, incorrect seconds hand behavior
-- Signs of AUTHENTIC: correct proportions/finishing quality visible, proper engraving depth, correct serial format visible, consistent details with known authentic references
-- "likely_original": require at LEAST 2-3 consistent authentic details — logo alone is NOT enough
-- "suspected_fake": clear counterfeit markers visible (wrong dial font, misaligned logo, obvious quality issues)
-- "possible_replica": some suspicious elements but not conclusive
-- For luxury watches: always flag "unknown" unless case-back serial AND dial are both clearly visible and consistent
-- NEVER set "likely_original" for Rolex, Omega, Cartier, Patek, AP based on a single photo of the dial — too easy to fake
+AUTHENTICITY FORENSICS (required for watches, designer bags, sneakers, jewelry, perfumes, collectibles, high-value electronics):
+Apply to: Rolex, Omega, Cartier, Patek Philippe, Audemars Piguet, IWC, Breitling, Tag Heuer, Hublot, Tudor, Chanel, Louis Vuitton, Gucci, Prada, Hermès, Dior, Balenciaga, Off-White, Supreme, Yeezy, Air Jordan, and similar luxury/limited brands.
+DEFAULT status is "unknown" for ALL high-risk items — never assume authentic without clear evidence.
+
+Answer these questions in authenticity_assessment:
+1. visual_signals — What specific details in the image support OR undermine authenticity? Be precise: "Dial text spacing consistent with authentic Submariner" or "Logo proportions cannot be verified at this resolution". List up to 5 short observations.
+2. missing_evidence — What photos/information are missing for proper verification? e.g. "Caseback photo", "Serial/reference number", "Clasp engraving", "Box & papers", "Dial macro photo".
+3. signal_conflict — Are there contradictions? has_conflict: true if: brand identified as luxury name but no brand OCR text confirmed; claimed model doesn't match visible details; high-end brand but materials/finishing quality appears inconsistent; category details contradict claimed price point.
+4. replica_tier — Classify: "none" (not replica-risk), "unknown" (insufficient evidence), "low_quality_fake" (obvious markers: wrong font/proportions/materials), "mid_replica" (some details off, not definitive), "high_end_replica" (visually accurate but zero verifiable proof).
+5. evidence_score — Integer 0–100. Start at 0, add only what you can directly observe:
+   +15 brand/logo clearly visible in correct position and style
+   +20 OCR confirms model/reference/caliber matching known authentic
+   +20 serial/reference number visible and format-correct for claimed brand
+   +20 category-specific detail present (dial macro, caseback, clasp)
+   +15 box/papers/documentation visible
+   +10 zero contradiction between visual and claimed identity
+   Do NOT give credit for what you assume. Do NOT exceed 85 for single-photo luxury items.
+
+STATUS RULES:
+- "unknown" — default for all high-risk items with insufficient evidence
+- "likely_original" — requires at least 3 consistent authentic details confirmed visually (NOT logo alone)
+- "possible_replica" — some suspicious elements but not conclusive
+- "suspected_fake" — clear counterfeit markers: wrong font/spacing, misaligned logo, obviously wrong proportions, cheap materials
+- For Rolex/Omega/Cartier/Patek/AP: ALWAYS "unknown" unless both serial+caseback are clearly visible and format-correct
+
+WORDING RULES: NEVER write "This is authentic", "Guaranteed original", "Verified [brand]". Use: "Authenticity not verified", "Requires expert inspection", "Looks like [brand]-style item".
 
 ISRAELI MARKET PRICING RULES:
 - All prices in Israeli New Shekel (₪)
@@ -356,6 +372,14 @@ Respond ONLY with valid JSON:
   "authenticity_assessment": {
     "status": "not_required|unknown|likely_original|possible_replica|suspected_fake",
     "confidence": 0.0,
+    "evidence_score": 0,
+    "replica_tier": "none|unknown|low_quality_fake|mid_replica|high_end_replica",
+    "visual_signals": ["specific observation about what you can/cannot see"],
+    "missing_evidence": ["Caseback photo", "Serial/reference number"],
+    "signal_conflict": {
+      "has_conflict": false,
+      "reasons": ["e.g. brand identified but no brand OCR text confirmed"]
+    },
     "red_flags": ["e.g. dial font spacing irregular"],
     "green_flags": ["e.g. case finishing consistent with authentic"]
   }
@@ -953,20 +977,27 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
     }
   }
 
-  // RULE 9: Authenticity penalty — high-risk unverified items
+  // RULE 9: Authenticity penalty — high-risk items
   const authAssessment = verification.authenticity_assessment;
   if (authAssessment && brand.toLowerCase() !== 'unidentified') {
-    if (authAssessment.status === 'unknown' && AUTHENTICITY_HIGH_RISK_BRANDS.test(brand)) {
+    const repTier = authAssessment.replica_tier || '';
+    const hasConflict = authAssessment.signal_conflict?.has_conflict;
+    const status = authAssessment.status || '';
+    if (status === 'unknown' && AUTHENTICITY_HIGH_RISK_BRANDS.test(brand)) {
       conf = Math.min(conf, 0.72);
-      console.log(`[Calibrate] Auth: high-risk brand "${brand}" unverified → cap 0.72`);
+      console.log(`[Calibrate] Auth: high-risk "${brand}" unverified → cap 0.72`);
     }
-    if (authAssessment.status === 'possible_replica') {
+    if (hasConflict) {
+      conf = Math.min(conf, 0.65);
+      console.log(`[Calibrate] Auth: signal conflict → cap 0.65`);
+    }
+    if (status === 'possible_replica' || repTier === 'mid_replica' || repTier === 'high_end_replica') {
       conf = Math.min(conf, 0.55);
-      console.log(`[Calibrate] Auth: possible_replica → cap 0.55`);
+      console.log(`[Calibrate] Auth: possible_replica / high_end_replica → cap 0.55`);
     }
-    if (authAssessment.status === 'suspected_fake') {
+    if (status === 'suspected_fake' || repTier === 'low_quality_fake') {
       conf = Math.min(conf, 0.35);
-      console.log(`[Calibrate] Auth: suspected_fake → cap 0.35`);
+      console.log(`[Calibrate] Auth: suspected_fake / low_quality_fake → cap 0.35`);
     }
   }
 
@@ -1062,7 +1093,9 @@ async function writeBack(recognition, verification, embedding) {
 function assessAuthenticity(recognition, verification) {
   const cat = (verification.final_category || recognition.category || '').toLowerCase();
   const brand = (verification.final_brand || '').toLowerCase();
+  const brandDisplay = verification.final_brand || '';
   const subcategory = (recognition.subcategory || '').toLowerCase();
+  const ocr = recognition.ocr_text || {};
 
   const isBrandHighRisk = brand !== 'unidentified' && AUTHENTICITY_HIGH_RISK_BRANDS.test(brand);
   const isCategoryHighRisk = AUTHENTICITY_HIGH_RISK_CATEGORIES.has(cat)
@@ -1079,34 +1112,76 @@ function assessAuthenticity(recognition, verification) {
   const authenticityStatus = aiAuth.status || (authenticityRisk === 'low' ? 'not_required' : 'unknown');
   const authenticityConfidence = typeof aiAuth.confidence === 'number' ? aiAuth.confidence : (authenticityRisk === 'low' ? 1.0 : 0.0);
 
-  let requiredVerificationPhotos = [];
-  if (isLuxuryWatch) {
-    requiredVerificationPhotos = ['Dial close-up', 'Case back', 'Clasp & bracelet', 'Serial/reference number'];
-    if (authenticityStatus === 'unknown') requiredVerificationPhotos.push('Box & papers');
-  } else if (isDesignerBag) {
-    requiredVerificationPhotos = ['Logo close-up', 'Stitching', 'Hardware', 'Date code / serial tag'];
-    if (authenticityStatus === 'unknown') requiredVerificationPhotos.push('Dust bag & box');
-  } else if (isLimitedSneaker) {
-    requiredVerificationPhotos = ['Label/tag inside tongue', 'Sole', 'Box with barcode', 'Stitching detail'];
-  } else if (isBrandHighRisk) {
-    requiredVerificationPhotos = ['Brand label', 'Serial number', 'Packaging'];
+  // ── New fields from forensics ──
+  const visual_authenticity_signals = Array.isArray(aiAuth.visual_signals) ? aiAuth.visual_signals : [];
+  const replicaTier = aiAuth.replica_tier || (authenticityRisk === 'low' ? 'none' : 'unknown');
+
+  // Signal conflict: combine AI detection + our own structural rule
+  const aiConflict = aiAuth.signal_conflict || {};
+  const ourConflictReasons = [];
+  if (isBrandHighRisk) {
+    const brandFirst = brand.split(' ')[0];
+    const ocrAll = (ocr.raw_texts || []).concat(ocr.logos_detected || []).join(' ').toLowerCase();
+    if (!ocrAll.includes(brandFirst)) {
+      ourConflictReasons.push(`${brandDisplay} identified visually but no brand text/logo confirmed in OCR`);
+    }
+  }
+  const signalConflict = {
+    hasConflict: !!(aiConflict.has_conflict || ourConflictReasons.length > 0),
+    reasons: [...(aiConflict.reasons || []), ...ourConflictReasons],
+  };
+
+  // Missing evidence — prefer AI-provided list, fall back to category defaults
+  let missingEvidence = Array.isArray(aiAuth.missing_evidence) && aiAuth.missing_evidence.length > 0
+    ? aiAuth.missing_evidence
+    : [];
+  if (missingEvidence.length === 0) {
+    if (isLuxuryWatch) missingEvidence = ['Dial close-up', 'Caseback photo', 'Clasp & bracelet', 'Serial/reference number', 'Box & papers'];
+    else if (isDesignerBag) missingEvidence = ['Logo close-up', 'Stitching detail', 'Hardware', 'Date code / serial tag', 'Dust bag & box'];
+    else if (isLimitedSneaker) missingEvidence = ['Label/tag inside tongue', 'Sole photo', 'Box with barcode', 'Stitching detail'];
+    else if (isBrandHighRisk) missingEvidence = ['Brand label', 'Serial number', 'Packaging'];
   }
 
+  // Evidence score: start from AI score, apply caps
+  let authenticityEvidenceScore = typeof aiAuth.evidence_score === 'number' ? aiAuth.evidence_score : 0;
+  if (signalConflict.hasConflict) authenticityEvidenceScore = Math.min(authenticityEvidenceScore, 40);
+  const missingSerial = missingEvidence.some(e => /serial|reference|imei/i.test(e));
+  if (missingSerial && authenticityRisk === 'high') authenticityEvidenceScore = Math.min(authenticityEvidenceScore, 55);
+  if (authenticityRisk === 'low') authenticityEvidenceScore = 100;
+  else authenticityEvidenceScore = Math.min(Math.max(authenticityEvidenceScore, 0), 85);
+
+  // Required verification photos = missing evidence (same list, different label in UI)
+  const requiredVerificationPhotos = missingEvidence;
+
+  // Pricing mode
   let pricingMode = 'normal';
-  if (authenticityRisk === 'high' && (authenticityStatus === 'unknown' || !authenticityStatus || authenticityStatus === 'not_required')) {
+  const isReplicaStatus = authenticityStatus === 'suspected_fake' || authenticityStatus === 'possible_replica';
+  const isReplicaTier = replicaTier === 'low_quality_fake' || replicaTier === 'mid_replica' || replicaTier === 'high_end_replica';
+  if (isReplicaStatus || isReplicaTier) {
+    pricingMode = 'replica_adjusted';
+  } else if (authenticityRisk === 'high' && (authenticityStatus === 'unknown' || authenticityStatus === 'not_required' || !authenticityStatus)) {
     pricingMode = 'verification_required';
   } else if (authenticityRisk === 'medium' && authenticityStatus === 'unknown') {
     pricingMode = 'conditional';
-  } else if (authenticityStatus === 'suspected_fake' || authenticityStatus === 'possible_replica') {
-    pricingMode = 'replica_adjusted';
+  } else if (signalConflict.hasConflict) {
+    pricingMode = 'conditional';
   }
 
-  const authenticityNotes = [
-    ...(aiAuth.red_flags || []),
-    ...(aiAuth.green_flags || []),
-  ];
+  const authenticityNotes = [...(aiAuth.red_flags || []), ...(aiAuth.green_flags || [])];
 
-  return { authenticityRisk, authenticityStatus, authenticityConfidence, requiredVerificationPhotos, authenticityNotes, pricingMode };
+  return {
+    authenticityRisk,
+    authenticityStatus,
+    authenticityConfidence,
+    requiredVerificationPhotos,
+    authenticityNotes,
+    pricingMode,
+    visual_authenticity_signals,
+    missingEvidence,
+    authenticityEvidenceScore,
+    replicaTier,
+    signalConflict,
+  };
 }
 
 
@@ -1114,9 +1189,11 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
   const ocr = recognition.ocr_text || {};
   const auth = assessAuthenticity(recognition, verification);
 
-  // Price multiplier for suspected replicas/fakes
-  const priceMultiplier = auth.authenticityStatus === 'suspected_fake' ? 0.08
-    : auth.authenticityStatus === 'possible_replica' ? 0.20
+  // Price multiplier — replica tier takes precedence over status
+  const priceMultiplier =
+    (auth.authenticityStatus === 'suspected_fake' || auth.replicaTier === 'low_quality_fake') ? 0.07
+    : (auth.authenticityStatus === 'possible_replica' || auth.replicaTier === 'mid_replica') ? 0.15
+    : auth.replicaTier === 'high_end_replica' ? 0.28
     : 1.0;
 
   return {

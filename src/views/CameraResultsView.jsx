@@ -1262,61 +1262,124 @@ export function ResultsView() {
       {/* ═══ AUTHENTICITY CARD — high-risk items ═══ */}
       {result.authenticity && result.authenticity.authenticityRisk !== 'low' && (() => {
         const auth = result.authenticity;
-        const isReplica = auth.authenticityStatus === 'suspected_fake' || auth.authenticityStatus === 'possible_replica';
+        const isReplica = auth.authenticityStatus === 'suspected_fake' || auth.authenticityStatus === 'possible_replica'
+          || auth.replicaTier === 'low_quality_fake' || auth.replicaTier === 'mid_replica' || auth.replicaTier === 'high_end_replica';
         const isVerified = auth.authenticityStatus === 'verified_by_serial' || auth.authenticityStatus === 'verified_by_documents';
-        const needsProof = auth.pricingMode === 'verification_required' || auth.pricingMode === 'conditional';
+        const hasConflict = auth.signalConflict?.hasConflict;
+        const score = typeof auth.authenticityEvidenceScore === 'number' ? auth.authenticityEvidenceScore : 0;
+        const signals = auth.visual_authenticity_signals || [];
+        const missing = auth.missingEvidence || [];
+        const showReplicaTier = auth.replicaTier && auth.replicaTier !== 'none' && auth.replicaTier !== 'unknown';
 
         const cardBg = isReplica ? 'rgba(239,68,68,0.06)' : isVerified ? 'rgba(111,238,225,0.06)' : 'rgba(251,191,36,0.06)';
         const cardBorder = isReplica ? 'rgba(239,68,68,0.20)' : isVerified ? 'rgba(111,238,225,0.20)' : 'rgba(251,191,36,0.20)';
-        const accentColor = isReplica ? '#ef4444' : isVerified ? STITCH.primary : '#fbbf24';
+        const accent = isReplica ? '#ef4444' : isVerified ? STITCH.primary : '#fbbf24';
+        const scoreBarColor = score >= 70 ? '#6feee1' : score >= 40 ? '#fbbf24' : '#ef4444';
+
+        const REPLICA_TIER_LABEL = {
+          low_quality_fake: { en: 'Low-quality fake', he: 'זיוף נמוך' },
+          mid_replica: { en: 'Mid-grade replica', he: 'רפליקה בינונית' },
+          high_end_replica: { en: 'High-end replica', he: 'רפליקה איכותית' },
+        };
 
         return (
           <FadeIn delay={63}>
             <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
-              <div className="px-4 pt-3 pb-2">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: accentColor }} strokeWidth={2} />
-                  <div className="flex-1 min-w-0">
-                    <span className="block text-xs font-semibold mb-0.5" style={{ color: accentColor }}>
+              <div className="px-4 pt-3 pb-1">
+
+                {/* ── Header: icon + title + evidence score ── */}
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: accent }} strokeWidth={2} />
+                    <span className="text-xs font-semibold truncate" style={{ color: accent }}>
                       {isReplica
-                        ? (lang === 'he' ? 'סימנים לרפליקה אפשרית' : auth.authenticityStatus === 'suspected_fake' ? 'Suspected Fake' : 'Possible Replica')
+                        ? (auth.replicaTier === 'low_quality_fake'
+                          ? (lang === 'he' ? 'זיוף אפשרי' : 'Likely Fake')
+                          : auth.replicaTier === 'mid_replica'
+                          ? (lang === 'he' ? 'רפליקה אפשרית' : 'Possible Replica')
+                          : auth.replicaTier === 'high_end_replica'
+                          ? (lang === 'he' ? 'רפליקה איכותית — נדרש אימות' : 'High-End Replica — Verify')
+                          : auth.authenticityStatus === 'suspected_fake'
+                          ? (lang === 'he' ? 'חשד לזיוף' : 'Suspected Fake')
+                          : (lang === 'he' ? 'ייתכן רפליקה' : 'Possible Replica'))
                         : isVerified
                         ? (lang === 'he' ? 'אותנטיות אומתה' : 'Authenticity Verified')
-                        : (lang === 'he' ? 'נדרש אימות אותנטיות' : 'Authenticity Unverified')}
+                        : (lang === 'he' ? 'אותנטיות לא אומתה' : 'Authenticity Unverified')}
                     </span>
-                    <p className="text-[11px] leading-relaxed" style={{ color: STITCH.onSurfaceVariant }}>
-                      {isReplica
-                        ? (lang === 'he' ? 'הניתוח החזותי זיהה אלמנטים שעשויים להצביע על עותק. המחיר הותאם.' : 'Visual analysis detected elements suggesting a replica. Price adjusted accordingly.')
-                        : isVerified
-                        ? (lang === 'he' ? 'הפריט אומת באמצעות מספר סידורי או מסמכים.' : 'Item authenticated via serial number or documentation.')
-                        : (lang === 'he' ? 'עבור פריטים יקרים/ממותגים, המחיר מותנה באימות. AI בלבד — לא הערכת מומחה.' : 'For luxury/branded items, price is conditional on verified authenticity.')}
-                    </p>
-                    {needsProof && auth.requiredVerificationPhotos?.length > 0 && (
-                      <div className="mt-2">
-                        <span className="block text-[10px] font-medium mb-1" style={{ color: STITCH.onSurfaceVariant }}>
-                          {lang === 'he' ? 'תמונות מומלצות לאימות:' : 'Recommended verification photos:'}
-                        </span>
-                        <div className="flex flex-wrap gap-1">
-                          {auth.requiredVerificationPhotos.slice(0, 5).map((photo, i) => (
-                            <span key={i} className="inline-block text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>
-                              {photo}
-                            </span>
-                          ))}
-                        </div>
+                  </div>
+                  {/* Evidence score pill */}
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <span className="text-[9px] font-medium" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
+                      {lang === 'he' ? 'ראיות' : 'Evidence'}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
+                        <div className="h-full rounded-full transition-all" style={{ width: `${score}%`, background: scoreBarColor }} />
                       </div>
-                    )}
-                    {auth.authenticityNotes?.length > 0 && (
-                      <div className="mt-1.5">
-                        {auth.authenticityNotes.slice(0, 3).map((note, i) => (
-                          <p key={i} className="text-[10px] leading-relaxed" style={{ color: STITCH.onSurfaceVariant }}>• {note}</p>
-                        ))}
-                      </div>
-                    )}
+                      <span className="text-[10px] font-bold tabular-nums" style={{ color: scoreBarColor }}>{score}</span>
+                    </div>
                   </div>
                 </div>
+
+                {/* ── Signal conflict warning ── */}
+                {hasConflict && auth.signalConflict.reasons?.length > 0 && (
+                  <div className="mb-2 px-2.5 py-1.5 rounded-xl" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                    <p className="text-[10px] font-semibold text-red-400 mb-0.5">{lang === 'he' ? '⚠ סתירת אותות' : '⚠ Signal conflict'}</p>
+                    {auth.signalConflict.reasons.slice(0, 2).map((r, i) => (
+                      <p key={i} className="text-[10px] leading-snug" style={{ color: STITCH.onSurfaceVariant }}>• {r}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── Replica tier badge ── */}
+                {showReplicaTier && (
+                  <div className="mb-2">
+                    <span className="inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}>
+                      {lang === 'he' ? REPLICA_TIER_LABEL[auth.replicaTier]?.he : REPLICA_TIER_LABEL[auth.replicaTier]?.en}
+                    </span>
+                  </div>
+                )}
+
+                {/* ── Visual authenticity signals ── */}
+                {signals.length > 0 && (
+                  <div className="mb-2">
+                    {signals.slice(0, 3).map((s, i) => (
+                      <p key={i} className="text-[10px] leading-relaxed" style={{ color: STITCH.onSurfaceVariant }}>
+                        <span style={{ color: accent, fontWeight: 600 }}>›</span> {s}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {/* ── Missing evidence chips ── */}
+                {missing.length > 0 && (
+                  <div className="mb-2">
+                    <p className="text-[9px] font-medium mb-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
+                      {lang === 'he' ? 'ראיות חסרות:' : 'Missing for verification:'}
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {missing.slice(0, 5).map((m, i) => (
+                        <span key={i} className="inline-block text-[9px] px-1.5 py-0.5 rounded-md font-medium" style={{ background: 'rgba(251,191,36,0.10)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.15)' }}>
+                          {m}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Red/green flags (old authenticityNotes) ── */}
+                {auth.authenticityNotes?.length > 0 && (
+                  <div className="mb-1">
+                    {auth.authenticityNotes.slice(0, 2).map((note, i) => (
+                      <p key={i} className="text-[10px] leading-snug" style={{ color: STITCH.onSurfaceVariant }}>• {note}</p>
+                    ))}
+                  </div>
+                )}
               </div>
-              <div className="px-4 pb-2.5">
-                <p className="text-[9px]" style={{ color: STITCH.onSurfaceVariant, opacity: 0.55 }}>
+
+              {/* ── Disclaimer ── */}
+              <div className="px-4 pb-2.5 pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+                <p className="text-[9px]" style={{ color: STITCH.onSurfaceVariant, opacity: 0.50 }}>
                   {lang === 'he' ? '* הערכת AI בלבד. אימות סופי מצריך מומחה מוסמך.' : '* AI estimate only. Final authentication requires a qualified expert.'}
                 </p>
               </div>
