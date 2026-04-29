@@ -213,6 +213,19 @@ function AppShell() {
     window.__GW_VERSION__ = BUILD_VERSION;
   }, []);
 
+  // Prefetch the most-used lazy chunks during idle time so first tab tap is instant.
+  // import() without await starts the download without blocking; the browser caches the
+  // module so React.lazy resolves synchronously on first render.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      import('./views/SellViews').catch(() => {});
+      import('./views/ChatViews').catch(() => {});
+      import('./views/CameraResultsView').catch(() => {});
+      import('./views/OrderViews').catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const tabItems = [
     { id: 'home', icon: Home, label: lang === 'he' ? 'בית' : 'Home' },
     { id: 'browse', icon: Search, label: lang === 'he' ? 'עיון' : 'Browse' },

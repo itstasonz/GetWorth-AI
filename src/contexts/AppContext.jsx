@@ -197,6 +197,7 @@ export function AppProvider({ children }) {
 
   // Profile cache for notification banners
   const profileCacheRef = useRef({});
+  const profileLastLoadRef = useRef(0);
 
   const t = T[lang] || T.he || {};
   const rtl = lang === 'he';
@@ -209,11 +210,12 @@ export function AppProvider({ children }) {
 
   const showToastMsg = useCallback((msg, type = 'success') => setToast({ message: msg, type }), []);
 
-  // ─── Refresh current user's profile from DB ───
+  // ─── Refresh current user's profile from DB — 60s TTL to avoid hitting network on every tab tap ───
   const refreshProfile = useCallback(async () => {
     if (!user) return;
+    if (profileLastLoadRef.current > 0 && (Date.now() - profileLastLoadRef.current < 60000)) return;
     const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-    if (data) setProfile(data);
+    if (data) { setProfile(data); profileLastLoadRef.current = Date.now(); }
   }, [user]);
 
   // ─── Helper: get profile with in-memory cache ───
@@ -314,7 +316,7 @@ export function AppProvider({ children }) {
   // Load user data when auth changes
   useEffect(() => {
     if (user) loadUserData();
-    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); setSelected(null); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; }
+    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); setSelected(null); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0; }
   }, [user]);
 
   // Auto-dismiss errors
@@ -605,15 +607,32 @@ export function AppProvider({ children }) {
 
   const loadUserData = async () => {
     if (!user) return;
+
+    // Phase 1: IDB cache — fill state before network returns
+    const [cachedMy, cachedSaved] = await Promise.all([
+      cacheGet(`mylistings-${user.id}`),
+      cacheGet(`saved-${user.id}`),
+    ]);
+    if (cachedMy?.length) setMyListings(cachedMy);
+    if (cachedSaved?.length) {
+      setSavedItems(cachedSaved.map(s => s.listing).filter(Boolean));
+      setSavedIds(new Set(cachedSaved.map(s => s.listing_id)));
+    }
+
+    // Phase 2: network refresh
     const [myResult, savedResult] = await Promise.allSettled([
       supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false }),
       supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id)
     ]);
-    if (myResult.status === 'fulfilled' && myResult.value.data) setMyListings(myResult.value.data);
+    if (myResult.status === 'fulfilled' && myResult.value.data) {
+      setMyListings(myResult.value.data);
+      cacheSet(`mylistings-${user.id}`, myResult.value.data);
+    }
     if (savedResult.status === 'fulfilled' && savedResult.value.data) {
       const savedData = savedResult.value.data;
-      setSavedItems(savedData.map((s) => s.listing).filter(Boolean));
-      setSavedIds(new Set(savedData.map((s) => s.listing_id)));
+      setSavedItems(savedData.map(s => s.listing).filter(Boolean));
+      setSavedIds(new Set(savedData.map(s => s.listing_id)));
+      cacheSet(`saved-${user.id}`, savedData);
     }
     loadConversations(true);
     loadOrders(true);
@@ -640,11 +659,25 @@ export function AppProvider({ children }) {
 
   // ─── CHAT ───────────────────────────────────────────
 
+  const countUnread = (convList, userId) =>
+    (convList || []).reduce((n, c) => n + (c.messages?.filter(m => !m.is_read && m.sender_id !== userId)?.length || 0), 0);
+
   const loadConversations = useCallback(async (force = false) => {
     if (!user) return;
-    // Skip if loaded recently (unless forced by realtime/explicit)
     if (!force && conversationsLastLoadRef.current > 0 && (Date.now() - conversationsLastLoadRef.current < 30000)) return;
-    setConversationsLoading(true);
+
+    // Phase 1: serve from IDB cache instantly — no loading flash for returning users
+    const cacheKey = `conv-${user.id}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached?.length) {
+      setConversations(cached);
+      setUnreadCount(countUnread(cached, user.id));
+      // Don't show skeleton — we already have content
+    } else {
+      setConversationsLoading(true);
+    }
+
+    // Phase 2: background network refresh
     const { data } = await supabase
       .from('conversations')
       .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url), messages(id, content, created_at, sender_id, is_read)`)
@@ -653,10 +686,8 @@ export function AppProvider({ children }) {
     if (data) {
       setConversations(data);
       conversationsLastLoadRef.current = Date.now();
-      const unread = data.reduce((count, conv) => {
-        return count + (conv.messages?.filter((m) => !m.is_read && m.sender_id !== user.id)?.length || 0);
-      }, 0);
-      setUnreadCount(unread);
+      setUnreadCount(countUnread(data, user.id));
+      cacheSet(cacheKey, data);
     }
     setConversationsLoading(false);
   }, [user]);
@@ -1997,18 +2028,25 @@ export function AppProvider({ children }) {
   // Load all orders for current user (as buyer or seller)
   const loadOrders = useCallback(async (force = false) => {
     if (!user) return;
-    // Skip if loaded recently (unless forced by realtime/explicit)
     if (!force && ordersLastLoadRef.current > 0 && (Date.now() - ordersLastLoadRef.current < 30000)) return;
-    setOrdersLoading(true);
+
+    // Phase 1: serve from IDB cache instantly
+    const cacheKey = `orders-${user.id}`;
+    const cached = await cacheGet(cacheKey);
+    if (cached?.length) {
+      setOrders(cached);
+    } else {
+      setOrdersLoading(true);
+    }
+
+    // Phase 2: background network refresh
     try {
-      // Try full query with profile joins (requires FK constraints to profiles)
       let { data, error: err } = await supabase
         .from('orders')
         .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_profile_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_profile_fkey(id, full_name, avatar_url, is_verified)')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
-      // If FK join fails (constraint doesn't exist yet), fallback to simpler query
       if (err) {
         if (DEV) console.warn('[Orders] Profile join failed, trying without:', err.message);
         ({ data, error: err } = await supabase
@@ -2023,16 +2061,15 @@ export function AppProvider({ children }) {
       if (DEV) console.log(`[Orders] Loaded ${newOrders.length} orders`);
       setOrders(newOrders);
       ordersLastLoadRef.current = Date.now();
+      cacheSet(cacheKey, newOrders);
 
-      // Keep activeOrder in sync with fresh data (preserve joined relations)
       setActiveOrder(prev => {
         if (!prev) return prev;
         const fresh = newOrders.find(o => o.id === prev.id);
-        return fresh || prev; // Keep previous if not found (don't null it out)
+        return fresh || prev;
       });
     } catch (e) {
       console.error('[Orders] Load error:', e);
-      // Don't clear orders on error — keep stale data visible
     }
     setOrdersLoading(false);
   }, [user]);
