@@ -78,13 +78,12 @@ export default defineConfig({
             },
           },
           {
-            // Cache Supabase data requests — network first
+            // Supabase data — stale-while-revalidate: serve cache instantly, refresh in background
             urlPattern: /xbwxbdxuklrbnkpgonjc\.supabase\.co/,
-            handler: 'NetworkFirst',
+            handler: 'StaleWhileRevalidate',
             options: {
               cacheName: 'supabase-cache',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 5 }, // 5 min
-              networkTimeoutSeconds: 10,
+              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 10 }, // 10 min
             },
           },
           {
@@ -113,6 +112,9 @@ export default defineConfig({
             },
           },
         ],
+        // Navigate fallback — serve index.html for all non-API routes (SPA support offline)
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
         // Pre-cache the app shell
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // Don't cache more than 50MB total
@@ -136,6 +138,7 @@ export default defineConfig({
         manualChunks: {
           vendor: ['react', 'react-dom'],
           supabase: ['@supabase/supabase-js'],
+          icons: ['lucide-react'],
         },
       },
     },

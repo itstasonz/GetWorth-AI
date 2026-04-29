@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
 import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
+import { cacheGet, cacheSet } from '../lib/appCache';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -74,7 +75,7 @@ export function AppProvider({ children }) {
   const [lang, setLang] = useState('he');
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('home');
   const [view, setView] = useState('home');
   const [error, setError] = useState(null);
@@ -224,36 +225,52 @@ export function AppProvider({ children }) {
     return data;
   };
 
+  // Prevents filter useEffect from double-fetching listings on mount (init() already fetches)
+  const filterInitSkippedRef = useRef(true);
+
   // ─── INIT + AUTH LISTENER ────────────────────────────
   useEffect(() => {
     let mounted = true;
-    const timeout = setTimeout(() => { if (mounted) setLoading(false); }, 300);
 
     const init = async () => {
+      // Phase 1: read IDB cache — instant (~1ms), no network needed
+      const [cachedListings, cachedLang] = await Promise.all([
+        cacheGet('listings'),
+        cacheGet('lang'),
+      ]);
+      if (mounted) {
+        if (cachedListings?.length) {
+          setListings(cachedListings);
+          setHasMore(cachedListings.length >= PAGE_SIZE);
+        }
+        if (cachedLang) setLang(cachedLang);
+      }
+
+      // Phase 2: network refresh in background — doesn't block UI
       try {
-        const listingsPromise = supabase
-          .from('listings')
-          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
-          .eq('status', 'active')
-          .order('created_at', { ascending: false })
-          .limit(PAGE_SIZE);
+        const [sessionResult, listingsResult] = await Promise.all([
+          supabase.auth.getSession(),
+          supabase
+            .from('listings')
+            .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+            .eq('status', 'active')
+            .order('created_at', { ascending: false })
+            .limit(PAGE_SIZE),
+        ]);
 
-        const { data: { session } } = await supabase.auth.getSession();
-
-        if (mounted && session?.user) {
-          setUser(session.user);
-          supabase.from('profiles').select('*').eq('id', session.user.id).single()
+        if (mounted && sessionResult.data?.session?.user) {
+          setUser(sessionResult.data.session.user);
+          supabase.from('profiles').select('*').eq('id', sessionResult.data.session.user.id).single()
             .then(({ data }) => { if (mounted && data) setProfile(data); })
             .catch(() => {});
         }
 
-        const { data: listingsData } = await listingsPromise;
-        if (mounted && listingsData) {
-          setListings(listingsData);
-          setHasMore(listingsData.length === PAGE_SIZE);
+        if (mounted && listingsResult.data) {
+          setListings(listingsResult.data);
+          setHasMore(listingsResult.data.length === PAGE_SIZE);
+          cacheSet('listings', listingsResult.data);
         }
-      } catch (e) { console.log('Init error:', e); }
-      if (mounted) setLoading(false);
+      } catch (e) { console.log('Init refresh error:', e); }
     };
 
     init();
@@ -268,7 +285,7 @@ export function AppProvider({ children }) {
       } else { setUser(null); setProfile(null); }
     });
 
-    return () => { mounted = false; clearTimeout(timeout); subscription.unsubscribe(); };
+    return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
   // Debounce search
@@ -283,8 +300,12 @@ export function AppProvider({ children }) {
     return () => clearTimeout(timer);
   }, [priceRange]);
 
-  // Reload listings when filters change
+  // Persist lang to IDB so it's restored instantly on next launch
+  useEffect(() => { cacheSet('lang', lang); }, [lang]);
+
+  // Reload listings when filters change — skip first mount (init() already fetched)
   useEffect(() => {
+    if (filterInitSkippedRef.current) { filterInitSkippedRef.current = false; return; }
     setListingsPage(0);
     setHasMore(true);
     loadListings(true);

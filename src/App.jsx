@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, Suspense } from 'react';
 import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -7,16 +7,26 @@ import { formatPrice, getSellerBadgeStyle } from './lib/utils';
 
 export const BUILD_VERSION = '2.1.0-20260226';
 
-// Views
+// Views — eager (needed immediately or very commonly accessed)
 import HomeView from './views/HomeView';
-import { CameraView, AnalyzingView, ResultsView } from './views/CameraResultsView';
 import { BrowseView, DetailView, SellerProfileView } from './views/BrowseDetailView';
-import { InboxView, ChatView } from './views/ChatViews';
 import { AuthView, ProfileView } from './views/AuthProfileView';
-import { MyListingsView, SavedView, ListingFlowView } from './views/SellViews';
-import { CheckoutSheet, OrdersView, OrderDetailView, NotificationsView } from './views/OrderViews';
-import AnalyticsView from './views/AnalyticsView';
-import AdminPanel from './views/AdminPanel';
+
+// Views — lazy (only needed after user navigates there)
+const LazyCameraView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.CameraView })));
+const LazyAnalyzingView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.AnalyzingView })));
+const LazyResultsView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.ResultsView })));
+const LazyInboxView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.InboxView })));
+const LazyChatView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.ChatView })));
+const LazyMyListingsView = React.lazy(() => import('./views/SellViews').then(m => ({ default: m.MyListingsView })));
+const LazySavedView = React.lazy(() => import('./views/SellViews').then(m => ({ default: m.SavedView })));
+const LazyListingFlowView = React.lazy(() => import('./views/SellViews').then(m => ({ default: m.ListingFlowView })));
+const LazyCheckoutSheet = React.lazy(() => import('./views/OrderViews').then(m => ({ default: m.CheckoutSheet })));
+const LazyOrdersView = React.lazy(() => import('./views/OrderViews').then(m => ({ default: m.OrdersView })));
+const LazyOrderDetailView = React.lazy(() => import('./views/OrderViews').then(m => ({ default: m.OrderDetailView })));
+const LazyNotificationsView = React.lazy(() => import('./views/OrderViews').then(m => ({ default: m.NotificationsView })));
+const LazyAnalyticsView = React.lazy(() => import('./views/AnalyticsView'));
+const LazyAdminPanel = React.lazy(() => import('./views/AdminPanel'));
 
 // ─── In-App Message Notification Banner ───
 // Slides down from top when a message arrives and user is NOT in that chat
@@ -109,27 +119,6 @@ function AppShell() {
       });
     }
   }, []);
-
-  // Loading screen
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#060a14]">
-        <div className="text-center space-y-4">
-          <div className="relative">
-            <div className="w-20 h-20 rounded-3xl flex items-center justify-center animate-pulse shadow-2xl" style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', boxShadow: '0 0 40px rgba(111,238,225,0.3)' }}>
-              <DollarSign className="w-10 h-10" style={{ color: '#003733' }} />
-            </div>
-            <div className="absolute -inset-4 rounded-full blur-2xl animate-pulse" style={{ background: 'rgba(111,238,225,0.12)' }} />
-          </div>
-          <div className="flex gap-1 justify-center">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="w-2 h-2 rounded-full animate-bounce" style={{ background: '#6FEEE1', animationDelay: `${i * 150}ms` }} />
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   const tabItems = [
     { id: 'home', icon: Home, label: lang === 'he' ? 'בית' : 'Home' },
@@ -330,12 +319,12 @@ function AppShell() {
           </div>
         </header>
 
-        {/* Fullscreen overlays — rendered OUTSIDE overflow-y-auto main so that
-            position:fixed works correctly on iOS Safari (fixed inside overflow:auto
-            is positioned relative to the scroll container, not the viewport) */}
-        {view === 'camera' && <CameraView />}
-        {view === 'analyzing' && <AnalyzingView />}
-        {view === 'results' && <ResultsView />}
+        {/* Fullscreen overlays — lazy-loaded, rendered outside scroll container for iOS fixed-position */}
+        <Suspense fallback={null}>
+          {view === 'camera' && <LazyCameraView />}
+          {view === 'analyzing' && <LazyAnalyzingView />}
+          {view === 'results' && <LazyResultsView />}
+        </Suspense>
 
         {/* Content - View Router */}
         <main className="flex-1 px-5 pb-4 overflow-y-auto">
@@ -345,23 +334,25 @@ function AppShell() {
             {view === 'browse' && !selected && <BrowseView />}
             {view === 'detail' && selected && <DetailView />}
             {view === 'sellerProfile' && <SellerProfileView />}
-            {view === 'saved' && <SavedView />}
-            {view === 'inbox' && <InboxView />}
-            {view === 'chat' && <ChatView />}
             {view === 'auth' && <AuthView />}
             {view === 'profile' && user && <ProfileView />}
-            {view === 'myListings' && <MyListingsView />}
-            {view === 'listing' && <ListingFlowView />}
-            {view === 'analytics' && <AnalyticsView />}
-            {view === 'admin' && <AdminPanel />}
-            {view === 'orders' && <OrdersView />}
-            {view === 'orderDetail' && <OrderDetailView />}
-            {view === 'notifications' && <NotificationsView />}
+            <Suspense fallback={null}>
+              {view === 'saved' && <LazySavedView />}
+              {view === 'inbox' && <LazyInboxView />}
+              {view === 'chat' && <LazyChatView />}
+              {view === 'myListings' && <LazyMyListingsView />}
+              {view === 'listing' && <LazyListingFlowView />}
+              {view === 'analytics' && <LazyAnalyticsView />}
+              {view === 'admin' && <LazyAdminPanel />}
+              {view === 'orders' && <LazyOrdersView />}
+              {view === 'orderDetail' && <LazyOrderDetailView />}
+              {view === 'notifications' && <LazyNotificationsView />}
+            </Suspense>
           </div>
         </main>
 
-        {/* Checkout Sheet (modal overlay) */}
-        <CheckoutSheet />
+        {/* Checkout Sheet (modal overlay, lazy) */}
+        <Suspense fallback={null}><LazyCheckoutSheet /></Suspense>
 
         {/* Bottom Nav */}
         {/* ═══ STITCH BOTTOM NAV — sliding pill edition ═══ */}
