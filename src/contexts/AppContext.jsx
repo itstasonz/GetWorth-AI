@@ -666,28 +666,42 @@ export function AppProvider({ children }) {
     if (!user) return;
     if (!force && conversationsLastLoadRef.current > 0 && (Date.now() - conversationsLastLoadRef.current < 30000)) return;
 
-    // Phase 1: serve from IDB cache instantly — no loading flash for returning users
+    const t0 = DEV ? performance.now() : 0;
+
+    // Always show skeleton immediately — cleared as soon as cache or network resolves.
+    // This prevents the brief "No messages yet" flash caused by the async IDB gap.
+    setConversationsLoading(true);
+
+    // Phase 1: IDB cache (~1ms) — skeleton clears immediately on cache hit
     const cacheKey = `conv-${user.id}`;
     const cached = await cacheGet(cacheKey);
     if (cached?.length) {
       setConversations(cached);
       setUnreadCount(countUnread(cached, user.id));
-      // Don't show skeleton — we already have content
-    } else {
-      setConversationsLoading(true);
+      setConversationsLoading(false); // real content from cache — hide skeleton now
+      if (DEV) console.log(`[Chat] IDB cache: ${cached.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
     }
 
-    // Phase 2: background network refresh
+    // Phase 2: lightweight network refresh — ONLY preview data (last 20 msgs per conv).
+    // Full message threads are fetched lazily when the user opens a conversation.
+    if (DEV) console.log(`[Chat] Network fetch start (+${(performance.now() - t0).toFixed(0)}ms)`);
     const { data } = await supabase
       .from('conversations')
-      .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url), messages(id, content, created_at, sender_id, is_read)`)
+      .select(`id, buyer_id, seller_id, updated_at,
+        listing:listings(id, title, title_hebrew, price, images),
+        buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url),
+        seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url),
+        messages(id, content, created_at, sender_id, is_read, is_offer, offer_amount)`)
       .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-      .order('updated_at', { ascending: false });
+      .order('updated_at', { ascending: false })
+      .order('created_at', { ascending: false, referencedTable: 'messages' })
+      .limit(20, { referencedTable: 'messages' });
     if (data) {
       setConversations(data);
       conversationsLastLoadRef.current = Date.now();
       setUnreadCount(countUnread(data, user.id));
       cacheSet(cacheKey, data);
+      if (DEV) console.log(`[Chat] Network done: ${data.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
     }
     setConversationsLoading(false);
   }, [user]);

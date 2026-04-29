@@ -1,11 +1,27 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { MessageCircle, ChevronRight, ChevronLeft, DollarSign, Loader2 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, FadeIn } from '../components/ui';
 import { formatPrice, formatMessageTime } from '../lib/utils';
 
+const DEV = import.meta.env.DEV;
+
 export function InboxView() {
   const { t, lang, rtl, user, conversations, conversationsLoading, setActiveChat, loadMessages, setView, goTab, unreadCount } = useApp();
+
+  // Timing instrumentation — DEV only
+  const mountedAt = useRef(DEV ? performance.now() : 0);
+  useEffect(() => {
+    if (DEV) console.log(`[Chat] InboxView mounted`);
+  }, []);
+  const prevCountRef = useRef(0);
+  useEffect(() => {
+    if (!DEV) return;
+    if (conversations.length > 0 && prevCountRef.current === 0) {
+      console.log(`[Chat] First visible UI: ${conversations.length} convs after ${(performance.now() - mountedAt.current).toFixed(0)}ms from mount`);
+    }
+    prevCountRef.current = conversations.length;
+  }, [conversations.length]);
 
   if (!user) {
     return (
@@ -51,7 +67,8 @@ export function InboxView() {
         <div className="space-y-3">
           {conversations.map((conv, i) => {
             const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
-            const lastMessage = (conv.messages || []).reduce((latest, m) => !latest || m.created_at > latest.created_at ? m : latest, null);
+            // messages are sorted newest-first by the query (order created_at DESC, limit 20)
+            const lastMessage = conv.messages?.[0] ?? null;
             const convUnread = conv.messages?.filter((m) => !m.is_read && m.sender_id !== user.id).length || 0;
             
             return (
