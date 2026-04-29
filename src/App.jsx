@@ -1,11 +1,11 @@
-import React, { useEffect, Suspense } from 'react';
-import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle } from 'lucide-react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
+import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn } from './components/ui';
 import { formatPrice, getSellerBadgeStyle } from './lib/utils';
 
-export const BUILD_VERSION = '2.1.0-20260226';
+export const BUILD_VERSION = '2.2.0-20260429';
 
 // Views — eager (needed immediately or very commonly accessed)
 import HomeView from './views/HomeView';
@@ -27,6 +27,102 @@ const LazyOrderDetailView = React.lazy(() => import('./views/OrderViews').then(m
 const LazyNotificationsView = React.lazy(() => import('./views/OrderViews').then(m => ({ default: m.NotificationsView })));
 const LazyAnalyticsView = React.lazy(() => import('./views/AnalyticsView'));
 const LazyAdminPanel = React.lazy(() => import('./views/AdminPanel'));
+
+// ─── PWA update detection ───
+// Watches the SW lifecycle. When a new SW finishes installing and is waiting,
+// sets hasUpdate=true. applyUpdate() sends SKIP_WAITING; the controllerchange
+// event then reloads the page so users get fresh assets.
+function usePWAUpdate() {
+  const [hasUpdate, setHasUpdate] = useState(false);
+  const swWaitingRef = useRef(null);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+
+    const onControllerChange = () => window.location.reload();
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+
+    navigator.serviceWorker.getRegistration().then(reg => {
+      if (!reg) return;
+
+      // Already waiting on re-open (user had the app open across a deploy)
+      if (reg.waiting && navigator.serviceWorker.controller) {
+        swWaitingRef.current = reg.waiting;
+        setHasUpdate(true);
+      }
+
+      reg.addEventListener('updatefound', () => {
+        const installing = reg.installing;
+        if (!installing) return;
+        installing.addEventListener('statechange', () => {
+          if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+            swWaitingRef.current = installing;
+            setHasUpdate(true);
+          }
+        });
+      });
+
+      // Trigger a background check on mount (catches deploys between sessions)
+      reg.update().catch(() => {});
+    });
+
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+  }, []);
+
+  const applyUpdate = useCallback(() => {
+    swWaitingRef.current?.postMessage({ type: 'SKIP_WAITING' });
+  }, []);
+
+  return { hasUpdate, applyUpdate };
+}
+
+// ─── Update available banner ───
+// Only renders when hasUpdate=true. Positioned below the header so it
+// doesn't collide with the msg notification banner (z-[55] vs z-[60]).
+function UpdateBanner({ hasUpdate, onUpdate, onDismiss, lang }) {
+  if (!hasUpdate) return null;
+  return (
+    <div
+      className="fixed left-3 right-3 z-[55] animate-slideDown"
+      style={{ top: 'calc(max(env(safe-area-inset-top), 12px) + 64px + 8px)' }}
+    >
+      <div
+        className="relative overflow-hidden rounded-2xl p-3 flex items-center gap-3 shadow-2xl"
+        style={{
+          background: 'linear-gradient(135deg, rgba(111,238,225,0.15) 0%, rgba(79,209,197,0.22) 100%)',
+          border: '1px solid rgba(111,238,225,0.28)',
+          backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
+        }}
+      >
+        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(111,238,225,0.12)' }}>
+          <RefreshCw className="w-4 h-4 animate-spin-slow" style={{ color: '#6FEEE1' }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-white leading-tight">
+            {lang === 'he' ? 'עדכון זמין' : 'Update available'}
+          </p>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            {lang === 'he' ? 'גרסה חדשה מוכנה' : `v${BUILD_VERSION} is ready`}
+          </p>
+        </div>
+        <button
+          onClick={onUpdate}
+          className="px-3 py-1.5 rounded-xl text-xs font-bold flex-shrink-0 active:scale-95 transition-transform"
+          style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
+        >
+          {lang === 'he' ? 'עדכן' : 'Update'}
+        </button>
+        <button
+          onClick={onDismiss}
+          className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0 hover:bg-white/20 transition-colors"
+        >
+          <X className="w-3.5 h-3.5 text-white/70" />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ─── In-App Message Notification Banner ───
 // Slides down from top when a message arrives and user is NOT in that chat
@@ -108,16 +204,13 @@ function AppShell() {
     myListings, unreadCount, notifUnreadCount, fileRef, orders,
   } = useApp();
 
-  // Force service worker update on mount — prevents stale cached builds
+  const { hasUpdate, applyUpdate } = usePWAUpdate();
+  const [updateDismissed, setUpdateDismissed] = useState(false);
+
+  // Stamp version into console + window for devtools inspection
   useEffect(() => {
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(regs => {
-        regs.forEach(r => {
-          r.update().catch(err => console.warn('[SW] Update failed:', err));
-          if (r.waiting) r.waiting.postMessage({ type: 'SKIP_WAITING' });
-        });
-      });
-    }
+    console.log(`%cGetWorth ${BUILD_VERSION}`, 'color:#6FEEE1;font-weight:bold;font-size:13px;');
+    window.__GW_VERSION__ = BUILD_VERSION;
   }, []);
 
   const tabItems = [
@@ -141,6 +234,14 @@ function AppShell() {
 
       {/* ── Message Notification Banner (renders above everything) ── */}
       <MessageNotificationBanner />
+
+      {/* ── PWA Update Banner — only shown when a new version is waiting ── */}
+      <UpdateBanner
+        hasUpdate={hasUpdate && !updateDismissed}
+        onUpdate={applyUpdate}
+        onDismiss={() => setUpdateDismissed(true)}
+        lang={lang}
+      />
 
       {toast && (
         <Toast
