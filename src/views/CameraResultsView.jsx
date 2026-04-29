@@ -1019,25 +1019,55 @@ export function ResultsView() {
           <div className="aspect-[4/5]">
             <img src={images[activePhotoIndex] || images[0]} className="w-full h-full object-cover" />
           </div>
-          {/* AUTHENTICATED glass pill — only shown when high confidence */}
-          {tier === 'high' && (
-            <div
-              className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2"
-              style={{
-                background: STITCH.GLASS_BG,
-                backdropFilter: STITCH.GLASS_BLUR,
-                WebkitBackdropFilter: STITCH.GLASS_BLUR,
-              }}
-            >
-              <Check className="w-3.5 h-3.5" style={{ color: STITCH.primary }} strokeWidth={3} />
-              <span
-                className="text-xs font-medium uppercase tracking-widest"
-                style={{ color: STITCH.primary }}
-              >
-                {lang === 'he' ? 'מאומת' : 'Authenticated'}
-              </span>
-            </div>
-          )}
+          {/* Authenticity-aware badge */}
+          {(() => {
+            const auth = result.authenticity;
+            const status = auth?.authenticityStatus;
+            const risk = auth?.authenticityRisk;
+            if (status === 'verified_by_serial' || status === 'verified_by_documents') {
+              return (
+                <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: STITCH.GLASS_BG, backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR }}>
+                  <Shield className="w-3.5 h-3.5" style={{ color: STITCH.primary }} strokeWidth={3} />
+                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: STITCH.primary }}>
+                    {lang === 'he' ? 'אומת ✓' : status === 'verified_by_serial' ? 'Serial ✓' : 'Docs ✓'}
+                  </span>
+                </div>
+              );
+            }
+            if (status === 'suspected_fake' || status === 'possible_replica') {
+              return (
+                <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: 'rgba(239,68,68,0.15)', backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR, border: '1px solid rgba(239,68,68,0.30)' }}>
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-400" strokeWidth={2.5} />
+                  <span className="text-xs font-medium uppercase tracking-widest text-red-300">
+                    {status === 'suspected_fake'
+                      ? (lang === 'he' ? 'חשד לזיוף' : 'Suspected Fake')
+                      : (lang === 'he' ? 'ייתכן רפליקה' : 'Possible Replica')}
+                  </span>
+                </div>
+              );
+            }
+            if (risk === 'high' && (!status || status === 'unknown')) {
+              return (
+                <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: 'rgba(251,191,36,0.12)', backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR, border: '1px solid rgba(251,191,36,0.25)' }}>
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-400" strokeWidth={2.5} />
+                  <span className="text-xs font-medium uppercase tracking-widest text-amber-300">
+                    {lang === 'he' ? 'נדרש אימות' : 'Verify'}
+                  </span>
+                </div>
+              );
+            }
+            if (tier === 'high' && (!risk || risk === 'low') && (!status || status === 'not_required' || status === 'likely_original')) {
+              return (
+                <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: STITCH.GLASS_BG, backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR }}>
+                  <Check className="w-3.5 h-3.5" style={{ color: STITCH.primary }} strokeWidth={3} />
+                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: STITCH.primary }}>
+                    {lang === 'he' ? 'מאומת' : 'Authenticated'}
+                  </span>
+                </div>
+              );
+            }
+            return null;
+          })()}
           {/* Photo counter dots — bottom center like Stitch */}
           {images.length > 1 && (
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
@@ -1103,7 +1133,11 @@ export function ResultsView() {
             className="text-base font-medium tracking-wide"
             style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
           >
-            {tier === 'very_low'
+            {result.authenticity?.pricingMode === 'replica_adjusted'
+              ? (lang === 'he' ? 'ערך משוער — רפליקה' : 'Replica Estimate')
+              : result.authenticity?.pricingMode === 'verification_required'
+              ? (lang === 'he' ? 'הערכה מותנית' : 'Conditional Estimate')
+              : tier === 'very_low'
               ? (lang === 'he' ? 'טווח מחירים משוער' : 'Estimated Price Range')
               : (lang === 'he' ? 'ערך משוער' : 'Estimated Value')}
           </h2>
@@ -1141,7 +1175,11 @@ export function ResultsView() {
           )}
           {priceMethod && (
             <p className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
-              {priceMethod === 'comp_based'
+              {result.authenticity?.pricingMode === 'verification_required'
+                ? (lang === 'he' ? 'מחיר תלוי אימות אותנטיות' : 'Price subject to authenticity verification')
+                : result.authenticity?.pricingMode === 'replica_adjusted'
+                ? (lang === 'he' ? 'מחיר מותאם לרפליקה' : 'Replica-adjusted estimate')
+                : priceMethod === 'comp_based'
                 ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
                 : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
             </p>
@@ -1220,6 +1258,72 @@ export function ResultsView() {
           </div>
         </FadeIn>
       )}
+
+      {/* ═══ AUTHENTICITY CARD — high-risk items ═══ */}
+      {result.authenticity && result.authenticity.authenticityRisk !== 'low' && (() => {
+        const auth = result.authenticity;
+        const isReplica = auth.authenticityStatus === 'suspected_fake' || auth.authenticityStatus === 'possible_replica';
+        const isVerified = auth.authenticityStatus === 'verified_by_serial' || auth.authenticityStatus === 'verified_by_documents';
+        const needsProof = auth.pricingMode === 'verification_required' || auth.pricingMode === 'conditional';
+
+        const cardBg = isReplica ? 'rgba(239,68,68,0.06)' : isVerified ? 'rgba(111,238,225,0.06)' : 'rgba(251,191,36,0.06)';
+        const cardBorder = isReplica ? 'rgba(239,68,68,0.20)' : isVerified ? 'rgba(111,238,225,0.20)' : 'rgba(251,191,36,0.20)';
+        const accentColor = isReplica ? '#ef4444' : isVerified ? STITCH.primary : '#fbbf24';
+
+        return (
+          <FadeIn delay={63}>
+            <div className="rounded-2xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${cardBorder}` }}>
+              <div className="px-4 pt-3 pb-2">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: accentColor }} strokeWidth={2} />
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-xs font-semibold mb-0.5" style={{ color: accentColor }}>
+                      {isReplica
+                        ? (lang === 'he' ? 'סימנים לרפליקה אפשרית' : auth.authenticityStatus === 'suspected_fake' ? 'Suspected Fake' : 'Possible Replica')
+                        : isVerified
+                        ? (lang === 'he' ? 'אותנטיות אומתה' : 'Authenticity Verified')
+                        : (lang === 'he' ? 'נדרש אימות אותנטיות' : 'Authenticity Unverified')}
+                    </span>
+                    <p className="text-[11px] leading-relaxed" style={{ color: STITCH.onSurfaceVariant }}>
+                      {isReplica
+                        ? (lang === 'he' ? 'הניתוח החזותי זיהה אלמנטים שעשויים להצביע על עותק. המחיר הותאם.' : 'Visual analysis detected elements suggesting a replica. Price adjusted accordingly.')
+                        : isVerified
+                        ? (lang === 'he' ? 'הפריט אומת באמצעות מספר סידורי או מסמכים.' : 'Item authenticated via serial number or documentation.')
+                        : (lang === 'he' ? 'עבור פריטים יקרים/ממותגים, המחיר מותנה באימות. AI בלבד — לא הערכת מומחה.' : 'For luxury/branded items, price is conditional on verified authenticity.')}
+                    </p>
+                    {needsProof && auth.requiredVerificationPhotos?.length > 0 && (
+                      <div className="mt-2">
+                        <span className="block text-[10px] font-medium mb-1" style={{ color: STITCH.onSurfaceVariant }}>
+                          {lang === 'he' ? 'תמונות מומלצות לאימות:' : 'Recommended verification photos:'}
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {auth.requiredVerificationPhotos.slice(0, 5).map((photo, i) => (
+                            <span key={i} className="inline-block text-[10px] px-2 py-0.5 rounded-full" style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>
+                              {photo}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    {auth.authenticityNotes?.length > 0 && (
+                      <div className="mt-1.5">
+                        {auth.authenticityNotes.slice(0, 3).map((note, i) => (
+                          <p key={i} className="text-[10px] leading-relaxed" style={{ color: STITCH.onSurfaceVariant }}>• {note}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="px-4 pb-2.5">
+                <p className="text-[9px]" style={{ color: STITCH.onSurfaceVariant, opacity: 0.55 }}>
+                  {lang === 'he' ? '* הערכת AI בלבד. אימות סופי מצריך מומחה מוסמך.' : '* AI estimate only. Final authentication requires a qualified expert.'}
+                </p>
+              </div>
+            </div>
+          </FadeIn>
+        );
+      })()}
 
       {/* ═══ STITCH ACTION GRID: Add Photo + Add Serial ═══ */}
       {/* Hidden file input for serial — kept with the grid for clarity */}

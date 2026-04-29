@@ -25,6 +25,12 @@ const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same im
 const VISION_TRIGGER_THRESHOLD = 0.60;       // Only call Vision when Stage 1 confidence is below this
 
 // ═══════════════════════════════════════════════════════
+// AUTHENTICITY — high-risk brands / categories
+// ═══════════════════════════════════════════════════════
+const AUTHENTICITY_HIGH_RISK_BRANDS = /\b(rolex|omega|cartier|audemars piguet|ap royal oak|patek philippe|richard mille|jaeger|iwc|breitling|tag heuer|hublot|chanel|louis vuitton|lv|gucci|prada|hermes|herm[eè]s|dior|versace|burberry|balenciaga|off-white|supreme|yeezy|bape|comme des gar[cç]ons|cdg|givenchy|bottega veneta|celine|saint laurent|ysl|goyard|rimowa|tiffany|van cleef|bulgari|chopard|a. lange|lange|montblanc|tudor|zenith|girard-perregaux|jordan|travis scott|fragment|nike sb|nike dunk|adidas yeezy|air jordan|limited edition collab)\b/i;
+const AUTHENTICITY_HIGH_RISK_CATEGORIES = new Set(['watches', 'jewelry', 'bags', 'handbags', 'perfumes', 'collectibles', 'sneakers', 'clothing', 'accessories']);
+
+// ═══════════════════════════════════════════════════════
 // RETRY HELPER
 // ═══════════════════════════════════════════════════════
 
@@ -302,6 +308,17 @@ VERIFICATION RULES:
 - NEVER exceed 95% final confidence
 - NEVER fabricate a brand that wasn't found in OCR or DB
 
+AUTHENTICITY ASSESSMENT (for watches, designer bags, sneakers, jewelry, perfumes, collectibles):
+- Required for: Rolex, Omega, Cartier, Patek, AP, IWC, Breitling, Tag Heuer, Hublot, Tudor, Chanel, Louis Vuitton, Gucci, Prada, Hermès, Dior, Balenciaga, Off-White, Supreme, Yeezy, Jordan, and similar luxury/limited brands
+- DEFAULT status is "unknown" — do NOT assume authentic without evidence
+- Signs of REPLICA: incorrect font weight/spacing on dial or logo, misaligned text, wrong proportions, cheap visible materials inconsistent with claimed brand, incorrect engraving depth, wrong color tones for model, incorrect seconds hand behavior
+- Signs of AUTHENTIC: correct proportions/finishing quality visible, proper engraving depth, correct serial format visible, consistent details with known authentic references
+- "likely_original": require at LEAST 2-3 consistent authentic details — logo alone is NOT enough
+- "suspected_fake": clear counterfeit markers visible (wrong dial font, misaligned logo, obvious quality issues)
+- "possible_replica": some suspicious elements but not conclusive
+- For luxury watches: always flag "unknown" unless case-back serial AND dial are both clearly visible and consistent
+- NEVER set "likely_original" for Rolex, Omega, Cartier, Patek, AP based on a single photo of the dial — too easy to fake
+
 ISRAELI MARKET PRICING RULES:
 - All prices in Israeli New Shekel (₪)
 - Electronics typically 20-40% more than US retail
@@ -335,7 +352,13 @@ Respond ONLY with valid JSON:
   "selling_tips": "${isHe ? 'טיפ' : 'tip'}",
   "israeli_market_notes": "notes",
   "price_factors": [{"factor":"condition","impact":"-₪100"}],
-  "comparable_items": [{"name":"Similar Item","price":400,"source":"Yad2"}]
+  "comparable_items": [{"name":"Similar Item","price":400,"source":"Yad2"}],
+  "authenticity_assessment": {
+    "status": "not_required|unknown|likely_original|possible_replica|suspected_fake",
+    "confidence": 0.0,
+    "red_flags": ["e.g. dial font spacing irregular"],
+    "green_flags": ["e.g. case finishing consistent with authentic"]
+  }
 }`;
 }
 
@@ -930,6 +953,23 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
     }
   }
 
+  // RULE 9: Authenticity penalty — high-risk unverified items
+  const authAssessment = verification.authenticity_assessment;
+  if (authAssessment && brand.toLowerCase() !== 'unidentified') {
+    if (authAssessment.status === 'unknown' && AUTHENTICITY_HIGH_RISK_BRANDS.test(brand)) {
+      conf = Math.min(conf, 0.72);
+      console.log(`[Calibrate] Auth: high-risk brand "${brand}" unverified → cap 0.72`);
+    }
+    if (authAssessment.status === 'possible_replica') {
+      conf = Math.min(conf, 0.55);
+      console.log(`[Calibrate] Auth: possible_replica → cap 0.55`);
+    }
+    if (authAssessment.status === 'suspected_fake') {
+      conf = Math.min(conf, 0.35);
+      console.log(`[Calibrate] Auth: suspected_fake → cap 0.35`);
+    }
+  }
+
   conf = Math.min(Math.max(conf, 0.10), 0.95);
 
   return { ...verification, raw_match_confidence: verification.match_confidence, match_confidence: round(conf), confidence_calibrated: true };
@@ -1019,8 +1059,66 @@ async function writeBack(recognition, verification, embedding) {
 // §9  NORMALIZE
 // ═══════════════════════════════════════════════════════
 
+function assessAuthenticity(recognition, verification) {
+  const cat = (verification.final_category || recognition.category || '').toLowerCase();
+  const brand = (verification.final_brand || '').toLowerCase();
+  const subcategory = (recognition.subcategory || '').toLowerCase();
+
+  const isBrandHighRisk = brand !== 'unidentified' && AUTHENTICITY_HIGH_RISK_BRANDS.test(brand);
+  const isCategoryHighRisk = AUTHENTICITY_HIGH_RISK_CATEGORIES.has(cat)
+    || cat.includes('watch') || cat.includes('bag') || cat.includes('jewel');
+  const isLuxuryWatch = (cat.includes('watch') || subcategory.includes('watch')) && isBrandHighRisk;
+  const isDesignerBag = (cat.includes('bag') || subcategory.includes('bag') || subcategory.includes('handbag')) && isBrandHighRisk;
+  const isLimitedSneaker = (cat.includes('sneak') || cat.includes('shoe') || subcategory.includes('sneak')) && isBrandHighRisk;
+
+  let authenticityRisk = 'low';
+  if (isBrandHighRisk || isLuxuryWatch || isDesignerBag || isLimitedSneaker) authenticityRisk = 'high';
+  else if (isCategoryHighRisk) authenticityRisk = 'medium';
+
+  const aiAuth = verification.authenticity_assessment || {};
+  const authenticityStatus = aiAuth.status || (authenticityRisk === 'low' ? 'not_required' : 'unknown');
+  const authenticityConfidence = typeof aiAuth.confidence === 'number' ? aiAuth.confidence : (authenticityRisk === 'low' ? 1.0 : 0.0);
+
+  let requiredVerificationPhotos = [];
+  if (isLuxuryWatch) {
+    requiredVerificationPhotos = ['Dial close-up', 'Case back', 'Clasp & bracelet', 'Serial/reference number'];
+    if (authenticityStatus === 'unknown') requiredVerificationPhotos.push('Box & papers');
+  } else if (isDesignerBag) {
+    requiredVerificationPhotos = ['Logo close-up', 'Stitching', 'Hardware', 'Date code / serial tag'];
+    if (authenticityStatus === 'unknown') requiredVerificationPhotos.push('Dust bag & box');
+  } else if (isLimitedSneaker) {
+    requiredVerificationPhotos = ['Label/tag inside tongue', 'Sole', 'Box with barcode', 'Stitching detail'];
+  } else if (isBrandHighRisk) {
+    requiredVerificationPhotos = ['Brand label', 'Serial number', 'Packaging'];
+  }
+
+  let pricingMode = 'normal';
+  if (authenticityRisk === 'high' && (authenticityStatus === 'unknown' || !authenticityStatus || authenticityStatus === 'not_required')) {
+    pricingMode = 'verification_required';
+  } else if (authenticityRisk === 'medium' && authenticityStatus === 'unknown') {
+    pricingMode = 'conditional';
+  } else if (authenticityStatus === 'suspected_fake' || authenticityStatus === 'possible_replica') {
+    pricingMode = 'replica_adjusted';
+  }
+
+  const authenticityNotes = [
+    ...(aiAuth.red_flags || []),
+    ...(aiAuth.green_flags || []),
+  ];
+
+  return { authenticityRisk, authenticityStatus, authenticityConfidence, requiredVerificationPhotos, authenticityNotes, pricingMode };
+}
+
+
 function normalizeForUI(recognition, verification, tierInfo, visionUsed = false) {
   const ocr = recognition.ocr_text || {};
+  const auth = assessAuthenticity(recognition, verification);
+
+  // Price multiplier for suspected replicas/fakes
+  const priceMultiplier = auth.authenticityStatus === 'suspected_fake' ? 0.08
+    : auth.authenticityStatus === 'possible_replica' ? 0.20
+    : 1.0;
+
   return {
     name: verification.full_name || (verification.final_brand !== 'unidentified'
       ? `${verification.final_brand} ${verification.final_model}`.trim()
@@ -1031,12 +1129,13 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
     isSellable: verification.is_sellable ?? true,
     condition: verification.condition || recognition.visual_features?.condition || 'unknown',
     marketValue: {
-      low: verification.price_estimate_low,
-      mid: verification.price_estimate_mid,
-      high: verification.price_estimate_high,
+      low: Math.round((verification.price_estimate_low || 0) * priceMultiplier),
+      mid: Math.round((verification.price_estimate_mid || 0) * priceMultiplier),
+      high: Math.round((verification.price_estimate_high || 0) * priceMultiplier),
       currency: 'ILS',
       newRetailPrice: verification.new_retail_price_ils || 0,
       price_method: verification.price_method || 'ai_estimate',
+      pricingMode: auth.pricingMode,
     },
     details: {
       description: verification.israeli_market_notes || '',
@@ -1079,6 +1178,7 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
     confidence_calibrated: true,
     raw_confidence: verification.raw_match_confidence ?? verification.match_confidence,
     needsConfirmation: tierInfo.needsConfirmation,
+    authenticity: auth,
     comparable_items: verification.comparable_items || [],
     _pipeline: {
       version: 'v2',
