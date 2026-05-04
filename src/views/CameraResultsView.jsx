@@ -67,16 +67,6 @@ export function CameraView() {
 
   const [cameraReady, setCameraReady] = React.useState(false);
 
-  // Inject Manrope + Inter fonts
-  useEffect(() => {
-    if (document.getElementById('stitch-fonts')) return;
-    const link = document.createElement('link');
-    link.id = 'stitch-fonts';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap';
-    document.head.appendChild(link);
-  }, []);
-
   useEffect(() => {
     const video = videoRef.current;
     camLog(`CameraView mounted — videoRef=${!!video}`);

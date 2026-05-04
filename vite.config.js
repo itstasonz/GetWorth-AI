@@ -68,14 +68,10 @@ export default defineConfig({
         // Cache strategies
         runtimeCaching: [
           {
-            // Cache API calls (analyze endpoint) — network first, fall back to cache
+            // Analyze endpoint — NetworkOnly. Results are image-specific and must never
+            // be served from cache (stale response from a different image would be wrong).
             urlPattern: /\/api\/analyze/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 }, // 1 hour
-              networkTimeoutSeconds: 30,
-            },
+            handler: 'NetworkOnly',
           },
           {
             // Supabase data — stale-while-revalidate: serve cache instantly, refresh in background

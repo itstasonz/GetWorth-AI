@@ -14,49 +14,53 @@ export default function AnalyticsView() {
     setLoading(true);
     setErr(null);
     try {
-      let totalUsers = 0, totalListings = 0, activeListings = 0, totalConvos = 0, totalMsgs = 0, totalSaved = 0, totalValue = 0;
-      const categories = {};
+      const [
+        profilesCount,
+        recentProfiles,
+        listingsCount,
+        recentListings,
+        convosCount,
+        msgsCount,
+        savedCount,
+      ] = await Promise.all([
+        supabase.from('profiles').select('id', { count: 'exact', head: true }),
+        supabase.from('profiles').select('full_name, created_at').order('created_at', { ascending: false }).limit(5),
+        supabase.from('listings').select('id', { count: 'exact', head: true }),
+        supabase.from('listings').select('title, title_hebrew, category, price, status, created_at').order('created_at', { ascending: false }).limit(500),
+        supabase.from('conversations').select('id', { count: 'exact', head: true }),
+        supabase.from('messages').select('id', { count: 'exact', head: true }),
+        supabase.from('saved_items').select('id', { count: 'exact', head: true }),
+      ]);
+
       const activities = [];
+      (recentProfiles.data || []).forEach(u => {
+        activities.push({ type: 'user', text: (lang === 'he' ? 'משתמש: ' : 'User: ') + (u.full_name || 'Anonymous'), time: ago(u.created_at) });
+      });
 
-      try {
-        const r = await supabase.from('profiles').select('full_name, created_at');
-        totalUsers = r.data?.length || 0;
-        (r.data || []).slice(-5).reverse().forEach(u => {
-          activities.push({ type: 'user', text: (lang === 'he' ? 'משתמש: ' : 'User: ') + (u.full_name || 'Anonymous'), time: ago(u.created_at) });
-        });
-      } catch(e) { console.warn('profiles failed', e); }
-
-      try {
-        const r = await supabase.from('listings').select('title, title_hebrew, category, price, status, created_at');
-        totalListings = r.data?.length || 0;
-        (r.data || []).forEach(l => {
-          if (l.status === 'active') activeListings++;
-          totalValue += (l.price || 0);
-          categories[l.category || 'Other'] = (categories[l.category || 'Other'] || 0) + 1;
-        });
-        (r.data || []).slice(-5).reverse().forEach(l => {
-          activities.push({ type: 'listing', text: (lang === 'he' ? 'פריט: ' : 'Item: ') + ((lang === 'he' ? l.title_hebrew : l.title) || l.title), time: ago(l.created_at) });
-        });
-      } catch(e) { console.warn('listings failed', e); }
-
-      try {
-        const r = await supabase.from('conversations').select('id', { count: 'exact', head: true });
-        totalConvos = r.count || 0;
-      } catch(e) {}
-
-      try {
-        const r = await supabase.from('messages').select('id', { count: 'exact', head: true });
-        totalMsgs = r.count || 0;
-      } catch(e) {}
-
-      try {
-        const r = await supabase.from('saved_items').select('id', { count: 'exact', head: true });
-        totalSaved = r.count || 0;
-      } catch(e) {}
+      let activeListings = 0, totalValue = 0;
+      const categories = {};
+      (recentListings.data || []).forEach(l => {
+        if (l.status === 'active') { activeListings++; totalValue += (l.price || 0); }
+        categories[l.category || 'Other'] = (categories[l.category || 'Other'] || 0) + 1;
+      });
+      (recentListings.data || []).slice(0, 5).forEach(l => {
+        activities.push({ type: 'listing', text: (lang === 'he' ? 'פריט: ' : 'Item: ') + ((lang === 'he' ? l.title_hebrew : l.title) || l.title), time: ago(l.created_at) });
+      });
 
       const catList = Object.entries(categories).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count);
 
-      setStats({ totalUsers, totalListings, activeListings, totalConvos, totalMsgs, totalSaved, totalValue, avgPrice: activeListings > 0 ? Math.round(totalValue / activeListings) : 0, categories: catList, activities: activities.slice(0, 8) });
+      setStats({
+        totalUsers: profilesCount.count || 0,
+        totalListings: listingsCount.count || 0,
+        activeListings,
+        totalConvos: convosCount.count || 0,
+        totalMsgs: msgsCount.count || 0,
+        totalSaved: savedCount.count || 0,
+        totalValue,
+        avgPrice: activeListings > 0 ? Math.round(totalValue / activeListings) : 0,
+        categories: catList,
+        activities: activities.slice(0, 8),
+      });
     } catch (e) {
       console.error('Analytics error:', e);
       setErr(e.message);

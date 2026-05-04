@@ -30,15 +30,6 @@ export default function AdminPanel() {
   const [allOrders, setAllOrders] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
 
-  if (!profile?.is_admin) {
-    return (
-      <div className="text-center py-20">
-        <Shield className="w-12 h-12 text-red-400 mx-auto mb-3" />
-        <p className="text-red-300 font-semibold">{lang === 'he' ? 'אין הרשאה' : 'Access Denied'}</p>
-      </div>
-    );
-  }
-
   // ─── Load Overview Stats ───
   const loadStats = async () => {
     try {
@@ -201,14 +192,25 @@ export default function AdminPanel() {
 
   // Auto-load on tab change
   useEffect(() => {
+    if (!profile?.is_admin) return;
     if (tab === 'overview') loadStats();
     if (tab === 'verify') loadVerifications();
     if (tab === 'reports') loadReports();
     if (tab === 'orders') loadAllOrders();
     if (tab === 'users') loadAllUsers();
-  }, [tab]);
+  }, [tab, profile?.is_admin]);
 
   const t = (en, he) => lang === 'he' ? he : en;
+
+  // Guard is here — after all hooks — so React hook call count stays constant.
+  if (!profile?.is_admin) {
+    return (
+      <div className="text-center py-20">
+        <Shield className="w-12 h-12 text-red-400 mx-auto mb-3" />
+        <p className="text-red-300 font-semibold">{lang === 'he' ? 'אין הרשאה' : 'Access Denied'}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">

@@ -911,11 +911,14 @@ async function generateQueryEmbedding(text) {
 // §5  RETRIEVAL — Supabase Vector Search + Text Fallback
 // ═══════════════════════════════════════════════════════
 
+let _supabaseClient = null;
 function getSupabase() {
+  if (_supabaseClient) return _supabaseClient;
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
-  return createClient(url, key);
+  _supabaseClient = createClient(url, key);
+  return _supabaseClient;
 }
 
 async function retrieveCandidates(recognition, queryEmbedding, visionData = null) {
@@ -930,23 +933,59 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   let textResults = [];
   let ocrResults = [];
 
-  // ── Strategy 1: Vector search ──
-  if (queryEmbedding) {
-    try {
-      const { data, error } = await supa.rpc('match_products', {
-        query_embedding: queryEmbedding,
-        similarity_threshold: 0.60,
-        match_limit: 10,
-      });
-      if (!error && data) {
-        vectorResults = data.map((r) => ({ ...r, _source: 'vector', similarity: r.similarity }));
-      }
-    } catch (err) {
-      console.warn('[Retrieve] Vector search failed:', err.message);
-    }
-  }
+  // Build OCR keyword list once (shared by strategy 3)
+  const ocrTexts = recognition.ocr_text?.raw_texts || [];
+  const modelCandidates = recognition.model_candidates?.map(m => m.model) || [];
+  const visionText = visionData?.text || [];
+  const visionLogos = (visionData?.logos || []).map(l => l.description);
+  const visionLabels = (visionData?.labels || []).map(l => l.description);
+  const keywords = [
+    ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
+    ...modelCandidates.map(m => m.toLowerCase()),
+    ...(topBrand && topBrand.toLowerCase() !== 'unidentified' ? [topBrand.toLowerCase()] : []),
+    ...visionText.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
+    ...visionLogos.map(l => l.toLowerCase()),
+    ...visionLabels.slice(0, 3).map(l => l.toLowerCase()),
+  ].filter(Boolean);
+  const uniqueKeywords = [...new Set(keywords)].slice(0, 25);
 
-  // ── Strategy 2: Text search ──
+  // ── Strategies 1 + 3 run in parallel (both use precomputed inputs) ──
+  const [vectorRes, ocrRes] = await Promise.all([
+    // Strategy 1: Vector search
+    queryEmbedding
+      ? supa.rpc('match_products', {
+          query_embedding: queryEmbedding,
+          similarity_threshold: 0.60,
+          match_limit: 10,
+        }).then(({ data, error }) => {
+          if (!error && data) return data.map(r => ({ ...r, _source: 'vector', similarity: r.similarity }));
+          return [];
+        }).catch(err => { console.warn('[Retrieve] Vector search failed:', err.message); return []; })
+      : Promise.resolve([]),
+
+    // Strategy 3: OCR keyword match
+    uniqueKeywords.length > 0
+      ? supa.rpc('match_products_by_ocr', { p_keywords: uniqueKeywords, p_limit: 5 })
+          .then(({ data, error }) => {
+            if (!error && data?.length) {
+              console.log(`[Retrieve] OCR matched ${data.length} products (keywords: ${uniqueKeywords.slice(0, 5).join(', ')})`);
+              return data.map(r => ({
+                ...r,
+                _source: 'ocr_' + r.match_type,
+                similarity: r.match_type === 'model_number' ? 0.92
+                          : r.match_type === 'ocr_keyword'  ? 0.80
+                          : 0.75,
+              }));
+            }
+            return [];
+          }).catch(err => { console.warn('[Retrieve] OCR keyword search failed:', err.message); return []; })
+      : Promise.resolve([]),
+  ]);
+
+  vectorResults = vectorRes;
+  ocrResults = ocrRes;
+
+  // ── Strategy 2: Text search (serial — depends on vector results for category fallback gate) ──
   try {
     if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
       let q = supa.from('products').select('*').ilike('brand', `%${topBrand}%`);
@@ -984,46 +1023,6 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     }
   } catch (err) {
     console.warn('[Retrieve] Text search failed:', err.message);
-  }
-
-  // ── Strategy 3: OCR keyword match (Phase 2 + Phase 3 Vision enrichment) ──
-  try {
-    const ocrTexts = recognition.ocr_text?.raw_texts || [];
-    const modelCandidates = recognition.model_candidates?.map(m => m.model) || [];
-
-    // Phase 3: enrich keywords with Google Vision findings
-    const visionText = visionData?.text || [];
-    const visionLogos = (visionData?.logos || []).map(l => l.description);
-    const visionLabels = (visionData?.labels || []).map(l => l.description);
-
-    const keywords = [
-      ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
-      ...modelCandidates.map(m => m.toLowerCase()),
-      ...(topBrand && topBrand.toLowerCase() !== 'unidentified' ? [topBrand.toLowerCase()] : []),
-      ...visionText.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
-      ...visionLogos.map(l => l.toLowerCase()),
-      ...visionLabels.slice(0, 3).map(l => l.toLowerCase()),
-    ].filter(Boolean);
-
-    if (keywords.length > 0) {
-      const uniqueKeywords = [...new Set(keywords)].slice(0, 25);
-      const { data, error } = await supa.rpc('match_products_by_ocr', {
-        p_keywords: uniqueKeywords,
-        p_limit: 5,
-      });
-      if (!error && data?.length) {
-        ocrResults = data.map((r) => ({
-          ...r,
-          _source: 'ocr_' + r.match_type,
-          similarity: r.match_type === 'model_number' ? 0.92
-                    : r.match_type === 'ocr_keyword' ? 0.80
-                    : 0.75,
-        }));
-        console.log(`[Retrieve] OCR matched ${ocrResults.length} products (keywords: ${uniqueKeywords.slice(0, 5).join(', ')})`);
-      }
-    }
-  } catch (err) {
-    console.warn('[Retrieve] OCR keyword search failed:', err.message);
   }
 
   // ── Merge + deduplicate ──
@@ -1704,13 +1703,13 @@ export default async function handler(req) {
     blog(`[Pipeline] Response sent — total=${totalMs}ms budget_used=${round(totalMs / BUDGET_MS * 100)}%${totalMs > 16_000 ? ' ⚠ SLOW' : ''}`);
 
     // ── WRITE-BACK — always fire-and-forget, never blocks the response ──
+    // Reuse queryEmbedding from the pipeline rather than making a duplicate paid API call.
+    // generateEmbedding (document type) would produce a marginally different vector, but
+    // the difference is negligible for write-back storage purposes.
     const writeBackAsync = async () => {
       const wbT = Date.now();
       try {
-        const docEmbedding = queryEmbedding
-          ? await withTimeout(generateEmbedding(embeddingText), 6_000, 'doc embedding').catch(() => null)
-          : null;
-        await withTimeout(writeBack(recognition, verification, docEmbedding), 8_000, 'writeBack');
+        await withTimeout(writeBack(recognition, verification, queryEmbedding), 8_000, 'writeBack');
         console.log(`[WriteBack] Done in ${Date.now() - wbT}ms`);
       } catch (e) {
         console.warn(`[WriteBack] Failed in ${Date.now() - wbT}ms:`, e.message);

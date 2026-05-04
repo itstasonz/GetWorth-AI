@@ -15,7 +15,7 @@ export const camLog = (msg) => {
   console.log('[CAM]', entry);
   camLogs.push(entry);
   if (camLogs.length > 30) camLogs.shift();
-  window.__camLogs = camLogs;
+  if (DEV) window.__camLogs = camLogs;
 };
 
 export const useApp = () => {
@@ -342,7 +342,7 @@ export function AppProvider({ children }) {
     if (!user) return;
 
     const channel = supabase
-      .channel(`rt-msgs-${user.id}-${Date.now()}`)
+      .channel(`rt-msgs-${user.id}`)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -396,7 +396,22 @@ export function AppProvider({ children }) {
               });
             }
           }
-          loadConversations(true);
+          // Update the conversation preview in-place — avoids a full network reload
+          // on every incoming message. Only fall back to a reload if the conversation
+          // isn't in state yet (e.g. a brand-new thread the user hasn't seen).
+          setConversations(prev => {
+            const idx = prev.findIndex(c => c.id === newMsg.conversation_id);
+            if (idx === -1) {
+              // New conversation not in list yet — trigger a full reload
+              loadConversations(true);
+              return prev;
+            }
+            const updated = { ...prev[idx], updated_at: newMsg.created_at, messages: [newMsg] };
+            const next = [...prev];
+            next.splice(idx, 1);
+            return [updated, ...next];
+          });
+          setUnreadCount(prev => isInThisChat ? prev : prev + 1);
         }
       )
       .on(
@@ -457,7 +472,7 @@ export function AppProvider({ children }) {
     loadNotifications();
 
     const notifChannel = supabase
-      .channel(`rt-notifs-${user.id}-${Date.now()}`)
+      .channel(`rt-notifs-${user.id}`)
       // New notification inserted → show toast + update badge
       .on(
         'postgres_changes',
@@ -695,7 +710,7 @@ export function AppProvider({ children }) {
       .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
       .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false, referencedTable: 'messages' })
-      .limit(20, { referencedTable: 'messages' });
+      .limit(1, { referencedTable: 'messages' });
     if (data) {
       setConversations(data);
       conversationsLastLoadRef.current = Date.now();
@@ -1960,37 +1975,33 @@ export function AppProvider({ children }) {
     setPublishing(true);
     setError(null);
     try {
-      let imageUrls = [];
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        if (!img || typeof img !== 'string' || img.length < 100) continue; // Skip empty/broken images
-        if (img.startsWith('data:')) {
+      const uploadTs = Date.now();
+      const uploadResults = await Promise.all(
+        images.map(async (img, i) => {
+          if (!img || typeof img !== 'string' || img.length < 100) return null;
+          if (!img.startsWith('data:')) return img; // Already a URL
           try {
             const response = await fetch(img);
             const blob = await response.blob();
-            // Skip tiny blobs (likely blank/black captures from camera issues)
             if (blob.size < 1000) {
               if (DEV) console.warn(`[Publish] Skipping image ${i}: too small (${blob.size} bytes)`);
-              continue;
+              return null;
             }
-            const fileName = `${user.id}/${Date.now()}-${i}.jpg`;
+            const fileName = `${user.id}/${uploadTs}-${i}.jpg`;
             const { error: uploadError } = await supabase.storage.from('listings').upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
             if (uploadError) {
               if (DEV) console.warn(`[Publish] Upload failed for image ${i}:`, uploadError.message);
-              // Don't store base64 in DB — it's too large and causes rendering issues
-              continue;
+              return null;
             }
             const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
-            imageUrls.push(publicUrl);
+            return publicUrl;
           } catch (err) {
             if (DEV) console.warn(`[Publish] Image ${i} processing error:`, err);
-            continue; // Skip broken images instead of storing base64
+            return null;
           }
-        } else {
-          // Already a URL (not base64)
-          imageUrls.push(img);
-        }
-      }
+        })
+      );
+      let imageUrls = uploadResults.filter(Boolean);
       if (imageUrls.length === 0) {
         imageUrls = images.length > 0 ? images : [];
         if (imageUrls.length === 0) throw new Error(lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required');
@@ -2115,7 +2126,8 @@ export function AppProvider({ children }) {
         .from('orders')
         .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_profile_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_profile_fkey(id, full_name, avatar_url, is_verified)')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false })
+        .limit(50);
 
       if (err) {
         if (DEV) console.warn('[Orders] Profile join failed, trying without:', err.message);
@@ -2123,7 +2135,8 @@ export function AppProvider({ children }) {
           .from('orders')
           .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id)')
           .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-          .order('created_at', { ascending: false }));
+          .order('created_at', { ascending: false })
+          .limit(50));
         if (err) throw err;
       }
 

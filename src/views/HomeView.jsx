@@ -71,16 +71,6 @@ function useAutoScroll(speed = 0.4) {
 export default function HomeView() {
   const { lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
 
-  // Inject Manrope + Inter fonts once (no index.html edit required)
-  useEffect(() => {
-    if (document.getElementById('stitch-fonts')) return;
-    const link = document.createElement('link');
-    link.id = 'stitch-fonts';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap';
-    document.head.appendChild(link);
-  }, []);
-
   // Build carousel items from real listings + samples, triple for seamless loop
   const carouselItems = [
     ...listings.slice(0, 8),
