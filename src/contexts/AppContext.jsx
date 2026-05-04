@@ -1120,9 +1120,13 @@ export function AppProvider({ children }) {
           : { imageData: base64Array[0], lang, corrections };
         if (refineModel) body.refineModel = refineModel;
 
+        const { data: { session: _analyzeSession } } = await supabase.auth.getSession();
+        const analyzeHeaders = { 'Content-Type': 'application/json' };
+        if (_analyzeSession?.access_token) analyzeHeaders['Authorization'] = `Bearer ${_analyzeSession.access_token}`;
+
         const res = await fetch('/api/analyze', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: analyzeHeaders,
           body: JSON.stringify(body),
           signal: attemptCtrl.signal,
         });
@@ -2432,9 +2436,12 @@ export function AppProvider({ children }) {
 
       // Use Claude to OCR the serial label
       const tApi = performance.now();
+      const { data: { session: _serialSession } } = await supabase.auth.getSession();
+      const serialHeaders = { 'Content-Type': 'application/json' };
+      if (_serialSession?.access_token) serialHeaders['Authorization'] = `Bearer ${_serialSession.access_token}`;
       const res = await fetch('/api/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: serialHeaders,
         body: JSON.stringify({
           imageData: base64,
           lang,

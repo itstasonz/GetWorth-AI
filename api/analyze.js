@@ -17,6 +17,118 @@ export const config = { runtime: 'edge' };
 import { createClient } from '@supabase/supabase-js';
 
 // ═══════════════════════════════════════════════════════
+// SECURITY HELPERS
+// ═══════════════════════════════════════════════════════
+
+// CORS — echo origin back only if it is in the allow-list.
+// Set ALLOWED_ORIGIN=https://yourapp.com (comma-separated) in Vercel env vars.
+function getCorsHeaders(requestOrigin) {
+  const configured = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+  const allowed = new Set([
+    ...configured,
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://localhost:4173',
+  ]);
+  const headers = {
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Cache-Control': 'no-store, no-cache, must-revalidate',
+    'Vary': 'Origin',
+  };
+  if (requestOrigin && allowed.has(requestOrigin)) {
+    headers['Access-Control-Allow-Origin'] = requestOrigin;
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
+  return headers;
+}
+
+// JWT — verify the Supabase Bearer token using the anon client.
+// Returns the authenticated user object or null.
+async function verifySupabaseJWT(authHeader) {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+
+  const url     = process.env.SUPABASE_URL     || process.env.VITE_SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    console.error('[Auth] SUPABASE_URL / SUPABASE_ANON_KEY not configured');
+    return null;
+  }
+
+  try {
+    const client = createClient(url, anonKey);
+    const { data: { user }, error } = await client.auth.getUser(token);
+    if (error || !user) return null;
+    return user;
+  } catch (err) {
+    console.warn('[Auth] JWT verification error:', err.message);
+    return null;
+  }
+}
+
+// Image validation — magic-byte check + 5 MB cap.
+// Client strips the data URI prefix before sending (raw base64 only).
+const IMAGE_MAX_DECODED_BYTES = 5 * 1024 * 1024;
+
+function validateImages(imageList) {
+  if (!Array.isArray(imageList) || imageList.length === 0) return 'No image data provided';
+  if (imageList.length > 5) return 'Too many images (max 5)';
+
+  for (let i = 0; i < imageList.length; i++) {
+    const img = imageList[i];
+    if (typeof img !== 'string' || img.length < 24) return `Image ${i + 1} is invalid or empty`;
+
+    // Strip data URI prefix if it slipped through
+    const base64 = img.includes(',') ? img.split(',')[1] : img;
+
+    // Approximate decoded size: base64_length * 0.75 ≈ bytes
+    if (base64.length * 0.75 > IMAGE_MAX_DECODED_BYTES) {
+      return `Image ${i + 1} exceeds the 5 MB size limit`;
+    }
+
+    // Magic byte check — first 24 base64 chars decode to 18 bytes
+    try {
+      const h = atob(base64.slice(0, 24));
+      const b = [...h].map(c => c.charCodeAt(0));
+      const isJpeg = b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF;
+      const isPng  = b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47;
+      const isWebp = b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+                  && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50;
+      // HEIC: 'ftyp' box starts at byte offset 4
+      const isHeic = b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70;
+      if (!isJpeg && !isPng && !isWebp && !isHeic) {
+        return `Image ${i + 1} is not a supported format (jpeg, png, webp, or heic)`;
+      }
+    } catch {
+      return `Image ${i + 1} contains invalid base64 data`;
+    }
+  }
+  return null; // null = all images valid
+}
+
+// ═══════════════════════════════════════════════════════
+// TIMEOUT HELPER
+// ═══════════════════════════════════════════════════════
+
+// Races a promise against a hard deadline.
+// On timeout: rejects with a labelled Error so callers can distinguish
+// a real failure from a budget overrun and decide whether to skip gracefully.
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(
+      () => reject(new Error(`[Timeout] ${label} exceeded ${ms}ms`)),
+      ms
+    );
+    promise.then(
+      (v) => { clearTimeout(id); resolve(v); },
+      (e) => { clearTimeout(id); reject(e); }
+    );
+  });
+}
+
+// ═══════════════════════════════════════════════════════
 // PHASE 3: COST PROTECTION CONSTANTS
 // ═══════════════════════════════════════════════════════
 const VISION_DAILY_LIMIT = 1500;             // Hard cap per day across all users
@@ -34,7 +146,11 @@ const AUTHENTICITY_HIGH_RISK_CATEGORIES = new Set(['watches', 'jewelry', 'bags',
 // RETRY HELPER
 // ═══════════════════════════════════════════════════════
 
-async function fetchWithRetry(url, options, maxRetries = 3) {
+// maxRetries reduced from 3 → 1: with no per-attempt timeout guard, 3 retries
+// meant Claude hangs could consume 3 × (hang time) before falling back.
+// Each attempt gets its own AbortController capped at attemptTimeoutMs so a
+// stalled upstream never blocks the full pipeline budget.
+async function fetchWithRetry(url, options, maxRetries = 1, attemptTimeoutMs = 12000) {
   const delays = [1000, 2500, 5000];
   let lastResponse, lastError;
 
@@ -44,8 +160,13 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
       console.log(`[Pipeline] Retry ${attempt}/${maxRetries} after ${delay}ms...`);
       await new Promise(r => setTimeout(r, delay));
     }
+
+    const attemptCtrl = new AbortController();
+    const timeoutId = setTimeout(() => attemptCtrl.abort(), attemptTimeoutMs);
+
     try {
-      lastResponse = await fetch(url, options);
+      lastResponse = await fetch(url, { ...options, signal: attemptCtrl.signal });
+      clearTimeout(timeoutId);
       if (lastResponse.ok) return lastResponse;
       if ([529, 500, 502, 503].includes(lastResponse.status)) {
         lastError = await lastResponse.json().catch(() => ({}));
@@ -55,8 +176,10 @@ async function fetchWithRetry(url, options, maxRetries = 3) {
         return lastResponse;
       }
     } catch (err) {
+      clearTimeout(timeoutId);
       lastError = { error: { message: err.message } };
-      console.warn(`[Pipeline] Attempt ${attempt + 1} network error:`, err.message);
+      const tag = err.name === 'AbortError' ? 'timed out' : 'network error';
+      console.warn(`[Pipeline] Attempt ${attempt + 1} ${tag}:`, err.message);
       if (attempt < maxRetries) continue;
     }
   }
@@ -489,7 +612,8 @@ async function incrementVisionDailyCounter(supa) {
 }
 
 async function checkRateLimit(supa, ip) {
-  if (!supa || !ip) return true;
+  // No DB client = fail closed: we cannot verify the rate, so deny
+  if (!supa || !ip) return false;
 
   const oneMinAgo = new Date(Date.now() - 60_000).toISOString();
 
@@ -505,11 +629,16 @@ async function checkRateLimit(supa, ip) {
       return false;
     }
 
-    supa.from('scan_rate_log').insert({ ip, created_at: new Date().toISOString() }).then(() => {}).catch(() => {});
+    // Non-blocking insert — errors are logged, not swallowed
+    supa.from('scan_rate_log')
+      .insert({ ip, created_at: new Date().toISOString() })
+      .then(({ error }) => { if (error) console.error('[RateLimit] Insert failed:', error.message); })
+      .catch(err => console.error('[RateLimit] Insert exception:', err.message));
     return true;
   } catch (err) {
-    console.warn('[RateLimit] Check failed (allowing):', err.message);
-    return true;
+    // DB check failed — deny rather than allow (fail closed)
+    console.error('[RateLimit] DB check failed — denying request:', err.message);
+    return false;
   }
 }
 
@@ -1305,15 +1434,28 @@ async function ocrSerialLabel(imageBase64, apiKey) {
 // ═══════════════════════════════════════════════════════
 
 export default async function handler(req) {
-  const cors = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Cache-Control': 'no-store, no-cache, must-revalidate',
-  };
+  // CORS: reflect origin only when it is in the allow-list
+  const cors = getCorsHeaders(req.headers.get('origin') || '');
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 200, headers: cors });
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405, cors);
+
+  // ── GLOBAL BUDGET CLOCK ──
+  // Starts before auth so every ms of overhead is accounted for.
+  // rem() = how many ms we have left before we must respond.
+  // All stage decisions and timeouts are derived from this single source of truth.
+  const TREQ      = Date.now();
+  const BUDGET_MS = 18_000;   // hard ceiling — must respond before this
+  const rem  = () => BUDGET_MS - (Date.now() - TREQ);
+  const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
+
+  // ── AUTH — require a valid Supabase JWT (4 s cap, fail closed) ──
+  const authUser = await withTimeout(
+    verifySupabaseJWT(req.headers.get('authorization')),
+    4_000,
+    'JWT verification'
+  ).catch(err => { blog(`[Auth] Timed out: ${err.message}`); return null; });
+  if (!authUser) return json({ error: 'Unauthorized — valid session required' }, 401, cors);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);
@@ -1322,15 +1464,12 @@ export default async function handler(req) {
     const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false } = await req.json();
     const clientHints = clientCorrections.length > 0 ? clientCorrections : hints;
     const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
-    if (!imageList.length) return json({ error: 'No image data provided' }, 400, cors);
 
-    // ── SERIAL OCR EARLY EXIT — skip full pipeline ──
-    if (serialOCR) {
-      const ocrText = await ocrSerialLabel(imageList[0], apiKey);
-      return json({ ocrText, raw_texts: [ocrText] }, 200, cors);
-    }
+    // ── IMAGE VALIDATION — magic bytes + 5 MB cap ──
+    const imgErr = validateImages(imageList);
+    if (imgErr) return json({ error: imgErr }, 400, cors);
 
-    // ── PHASE 3: RATE LIMITING ──
+    // ── PHASE 3: RATE LIMITING — fail closed on DB error ──
     const supa = getSupabase();
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
             || req.headers.get('x-real-ip')
@@ -1345,15 +1484,39 @@ export default async function handler(req) {
       }, 429, cors);
     }
 
-    const t0 = Date.now();
+    // ── SERIAL OCR EARLY EXIT — skip full pipeline (rate-limited above) ──
+    if (serialOCR) {
+      const ocrText = await ocrSerialLabel(imageList[0], apiKey);
+      return json({ ocrText, raw_texts: [ocrText] }, 200, cors);
+    }
 
-    // ── STAGE 1: RECOGNIZE ──
+    // ── PIPELINE STAGES ──
+    // Every stage reads rem() before starting and uses Math.min(ideal, rem()-reserve)
+    // as its timeout cap. Stages are skipped — not timed out — when budget is tight.
+    // Rule of thumb for reserves:
+    //   Stage 2 needs at least 8 s  → reserve 8 s before starting Stage 2
+    //   Embed+retrieve need ~2 s typical → reserve 9 s (8 + 1 buffer) before them
+    //   Vision can use up to 5 s → requires 12 s remaining (5 vision + 7 embed/retrieve/stage2)
+
+    const plog = (stage, extra = '') =>
+      blog(`[Pipeline] ${stage}${extra ? ' — ' + extra : ''}`);
+
+    // ── STAGE 1: RECOGNIZE (Claude Vision) — REQUIRED ──
+    // Cap shrinks with budget so Stage 1 never eats into Stage 2's 8 s minimum.
+    // Floor: 3 s — gives Claude a real attempt even when budget is tight.
+    const stage1Cap = Math.max(Math.min(9_000, rem() - 9_000), 3_000);
+    plog('Stage 1 start', `images=${imageList.length} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
+
     let recognition;
     try {
-      recognition = await recognize(imageList, lang, apiKey);
+      recognition = await withTimeout(
+        recognize(imageList, lang, apiKey),
+        stage1Cap,
+        'Stage 1 recognition'
+      );
       recognition = calibrateRecognition(recognition);
     } catch (stage1Err) {
-      console.error('[Pipeline] Stage 1 failed:', stage1Err.message);
+      blog(`[Pipeline] Stage 1 FAILED — using generic fallback: ${stage1Err.message}`);
       recognition = {
         category: 'Other', category_hebrew: 'אחר', category_confidence: 0.20,
         brand_candidates: [], model_candidates: [],
@@ -1361,68 +1524,111 @@ export default async function handler(req) {
         visual_features: {}, subcategory: '', embedding_text: '',
       };
     }
+    plog('Stage 1 end', `brand=${recognition.brand_candidates?.[0]?.brand || 'none'} conf=${round(recognition.category_confidence * 100)}% rem=${rem()}ms`);
 
-    const t1 = Date.now();
-    console.log(`[Pipeline] Stage 1 done in ${t1 - t0}ms — ${recognition.brand_candidates?.[0]?.brand || 'no brand'} (${round(recognition.category_confidence * 100)}%)`);
-
-    // ── PHASE 3: VISION FALLBACK (only if Stage 1 confidence is low) ──
-    let visionData = null;
-    if (recognition.category_confidence < VISION_TRIGGER_THRESHOLD) {
-      console.log(`[Pipeline] Stage 1 confidence ${round(recognition.category_confidence * 100)}% < ${VISION_TRIGGER_THRESHOLD * 100}% → triggering Vision fallback`);
-      visionData = await fallbackVision(imageList[0], supa);
-    } else {
-      console.log(`[Pipeline] Stage 1 confidence sufficient (${round(recognition.category_confidence * 100)}%) — skipping Vision fallback`);
-    }
-
-    const t1b = Date.now();
-    if (visionData) console.log(`[Pipeline] Vision fallback done in ${t1b - t1}ms`);
-
-    // ── GENERATE EMBEDDING + FETCH CORRECTIONS (parallel) ──
+    // embeddingText is computed once and reused by embedding + writeBack
     const embeddingText = recognition.embedding_text
       || [recognition.brand_candidates?.[0]?.brand, recognition.model_candidates?.[0]?.model, recognition.category, ...(recognition.visual_features?.materials || [])].filter(Boolean).join(' ');
 
-    const [queryEmbedding, corrections] = await Promise.all([
-      generateQueryEmbedding(embeddingText),
-      clientHints.length > 0 ? Promise.resolve(clientHints) : fetchCorrections().catch(() => []),
-    ]);
-    recognition._embedding_used = !!queryEmbedding;
+    // ── VISION FALLBACK — OPTIONAL, requires >= 12 s remaining ──
+    // Skip when: confidence is sufficient, OR budget too tight.
+    // Timeout cap = rem - 10 s (preserve 10 s for embed+retrieve+Stage2).
+    let visionData = null;
+    const needsVision = recognition.category_confidence < VISION_TRIGGER_THRESHOLD;
+    if (needsVision && rem() >= 12_000) {
+      const visionCap = Math.min(5_000, rem() - 10_000);
+      plog('Vision start', `conf=${round(recognition.category_confidence * 100)}% cap=${visionCap}ms rem=${rem()}ms`);
+      visionData = await withTimeout(fallbackVision(imageList[0], supa), visionCap, 'Vision fallback')
+        .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; });
+      plog('Vision end', visionData ? `labels=${visionData.labels?.length} text=${visionData.text?.length} rem=${rem()}ms` : `no data rem=${rem()}ms`);
+    } else if (!needsVision) {
+      plog('Vision skip', `conf sufficient (${round(recognition.category_confidence * 100)}%) rem=${rem()}ms`);
+    } else {
+      plog('Vision SKIPPED — budget', `rem=${rem()}ms < 12000ms required`);
+    }
 
-    const t2 = Date.now();
-    if (queryEmbedding) console.log(`[Pipeline] Embedding + corrections fetched in ${t2 - t1b}ms`);
+    // ── EMBEDDING + CORRECTIONS — OPTIONAL, requires >= 9 s remaining ──
+    // Both are non-critical — Stage 2 works without them, just produces a broader estimate.
+    let queryEmbedding = null;
+    let corrections    = clientHints.length > 0 ? clientHints : [];
+    if (rem() >= 9_000) {
+      const embCap  = Math.min(3_500, rem() - 8_000);
+      const corrCap = Math.min(2_500, rem() - 8_000);
+      plog('Embedding start', `embCap=${embCap}ms corrCap=${corrCap}ms rem=${rem()}ms`);
+      [queryEmbedding, corrections] = await Promise.all([
+        withTimeout(generateQueryEmbedding(embeddingText), embCap, 'query embedding')
+          .catch(err => { blog(`[Embedding] SKIPPED — ${err.message}`); return null; }),
+        clientHints.length > 0
+          ? Promise.resolve(clientHints)
+          : withTimeout(fetchCorrections(), corrCap, 'corrections').catch(() => []),
+      ]);
+      recognition._embedding_used = !!queryEmbedding;
+      plog('Embedding end', `embedding=${!!queryEmbedding} corrections=${corrections.length} rem=${rem()}ms`);
+    } else {
+      plog('Embedding/Corrections SKIPPED — budget', `rem=${rem()}ms < 9000ms`);
+    }
 
-    // ── RETRIEVE CANDIDATES (Phase 3: Vision-enriched) ──
-    const candidates = await retrieveCandidates(recognition, queryEmbedding, visionData);
+    // ── RETRIEVAL — OPTIONAL, requires >= 9 s remaining (same gate as embedding) ──
+    let candidates = [];
+    if (rem() >= 9_000) {
+      const retrievalCap = Math.min(4_500, rem() - 8_000);
+      plog('Retrieval start', `cap=${retrievalCap}ms rem=${rem()}ms`);
+      candidates = await withTimeout(
+        retrieveCandidates(recognition, queryEmbedding, visionData),
+        retrievalCap,
+        'DB retrieval'
+      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return []; });
+      plog('Retrieval end', `${candidates.length} candidates rem=${rem()}ms`);
+    } else {
+      plog('Retrieval SKIPPED — budget', `rem=${rem()}ms < 9000ms`);
+    }
 
-    const t3 = Date.now();
-    console.log(`[Pipeline] Retrieved ${candidates.length} candidates in ${t3 - t2}ms`);
-
-    // ── STAGE 2: VERIFY + PRICE (Phase 3: Vision data injected) ──
+    // ── STAGE 2: VERIFY + PRICE — REQUIRED but skippable ──
+    // If < 8 s remaining: skip Stage 2, return rough estimate from Stage 1.
+    // A rough result delivered in time is better than a 504.
     let verification;
-    try {
-      verification = await verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData);
-    } catch (err) {
-      console.error('[Pipeline] Stage 2 failed:', err.message);
+    if (rem() < 8_000) {
+      blog(`[Pipeline] Stage 2 SKIPPED — returning rough estimate (rem=${rem()}ms < 8000ms)`);
       verification = buildFallback(recognition, lang);
+    } else {
+      // Leave at least 1 s for calibration + normalise + JSON encode + response write
+      const stage2Cap = Math.min(9_000, rem() - 1_000);
+      plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
+      try {
+        verification = await withTimeout(
+          verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData),
+          stage2Cap,
+          'Stage 2 verification'
+        );
+      } catch (err) {
+        blog(`[Pipeline] Stage 2 FAILED — using rough estimate: ${err.message}`);
+        verification = buildFallback(recognition, lang);
+      }
     }
 
     verification = calibrateVerification(verification, recognition, candidates, visionData);
     const tierInfo = getConfidenceTier(verification.match_confidence);
-
-    const t4 = Date.now();
-    console.log(`[Pipeline] Stage 2 done in ${t4 - t3}ms — ${verification.full_name || verification.final_brand} ₪${verification.price_estimate_mid} (${round(verification.match_confidence * 100)}% ${tierInfo.tier})`);
-    console.log(`[Pipeline] Total: ${t4 - t0}ms ${visionData ? '(with Vision)' : ''}`);
-
-    // ── WRITE-BACK (non-blocking) ──
-    const writeBackAsync = async () => {
-      const docEmbedding = queryEmbedding
-        ? await generateEmbedding(embeddingText).catch(() => null)
-        : null;
-      await writeBack(recognition, verification, docEmbedding);
-    };
-    writeBackAsync().catch((e) => console.warn('[WriteBack]', e.message));
+    plog('Stage 2 end', `${verification.full_name || verification.final_brand} ₪${verification.price_estimate_mid} conf=${round(verification.match_confidence * 100)}% tier=${tierInfo.tier} rem=${rem()}ms`);
 
     // ── NORMALIZE + RESPOND ──
-    const result = normalizeForUI(recognition, verification, tierInfo, !!visionData);
+    const result  = normalizeForUI(recognition, verification, tierInfo, !!visionData);
+    const totalMs = Date.now() - TREQ;
+    blog(`[Pipeline] Response sent — total=${totalMs}ms budget_used=${round(totalMs / BUDGET_MS * 100)}%${totalMs > 16_000 ? ' ⚠ SLOW' : ''}`);
+
+    // ── WRITE-BACK — always fire-and-forget, never blocks the response ──
+    const writeBackAsync = async () => {
+      const wbT = Date.now();
+      try {
+        const docEmbedding = queryEmbedding
+          ? await withTimeout(generateEmbedding(embeddingText), 6_000, 'doc embedding').catch(() => null)
+          : null;
+        await withTimeout(writeBack(recognition, verification, docEmbedding), 8_000, 'writeBack');
+        console.log(`[WriteBack] Done in ${Date.now() - wbT}ms`);
+      } catch (e) {
+        console.warn(`[WriteBack] Failed in ${Date.now() - wbT}ms:`, e.message);
+      }
+    };
+    writeBackAsync().catch(() => {});
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
 
