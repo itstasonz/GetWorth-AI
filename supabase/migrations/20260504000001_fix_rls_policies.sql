@@ -46,14 +46,16 @@
 --     removed, audit them and add them to the IN list if buyers need to see them.
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- Step 1a: drop the permissive "true" SELECT policy by its exact name.
--- ⚠ Replace the name in quotes with the ACTUAL name from pg_policies output above.
+-- Step 1a: drop all known permissive SELECT policies (actual names from pg_policies).
 DROP POLICY IF EXISTS "Enable read access for all users" ON listings;
 DROP POLICY IF EXISTS "Public listings are visible to everyone" ON listings;
 DROP POLICY IF EXISTS "Anyone can view listings" ON listings;
--- Add more DROP lines here if pg_policies shows additional permissive SELECT policies.
+DROP POLICY IF EXISTS "Public read listings" ON listings;
 
--- Step 1b: create the scoped SELECT policy.
+-- Step 1b: idempotency — drop new policy name so re-running this file never fails.
+DROP POLICY IF EXISTS "listings_select_scoped" ON listings;
+
+-- Step 1c: create the scoped SELECT policy.
 CREATE POLICY "listings_select_scoped"
   ON listings
   FOR SELECT
@@ -101,14 +103,16 @@ CREATE POLICY "listings_select_scoped"
 --     seller profile pages and chat user names will break.
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- Step 2a: drop duplicate SELECT policies.
--- ⚠ Replace names with ACTUAL names from pg_policies.
+-- Step 2a: drop all known duplicate SELECT policies (actual names from pg_policies).
 DROP POLICY IF EXISTS "Users can view their own profile" ON profiles;
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON profiles;
 DROP POLICY IF EXISTS "Profiles are publicly readable" ON profiles;
--- Add more DROP lines for any additional SELECT duplicates found.
+DROP POLICY IF EXISTS "Anyone can read profiles" ON profiles;
 
--- Step 2b: create ONE clean public read policy.
+-- Step 2b: idempotency — drop new policy name so re-running this file never fails.
+DROP POLICY IF EXISTS "profiles_select_public" ON profiles;
+
+-- Step 2c: create ONE clean public read policy.
 CREATE POLICY "profiles_select_public"
   ON profiles
   FOR SELECT
@@ -151,13 +155,17 @@ CREATE POLICY "profiles_select_public"
 --     should remain — this policy does not replace it.
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- Step 3a: drop existing INSERT policy.
--- ⚠ Replace name with ACTUAL name from pg_policies.
+-- Step 3a: drop all known INSERT policies (actual names from pg_policies).
 DROP POLICY IF EXISTS "Users can insert reviews" ON reviews;
 DROP POLICY IF EXISTS "Authenticated users can insert reviews" ON reviews;
 DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON reviews;
+DROP POLICY IF EXISTS "Buyers create reviews" ON reviews;
+DROP POLICY IF EXISTS "Users can create reviews" ON reviews;
 
--- Step 3b: create hardened INSERT policy.
+-- Step 3b: idempotency — drop new policy name so re-running this file never fails.
+DROP POLICY IF EXISTS "reviews_insert_order_party_only" ON reviews;
+
+-- Step 3c: create hardened INSERT policy.
 CREATE POLICY "reviews_insert_order_party_only"
   ON reviews
   FOR INSERT
@@ -208,13 +216,16 @@ CREATE POLICY "reviews_insert_order_party_only"
 --     switch them to the service role key instead.
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- Step 4a: drop existing permissive INSERT policy.
--- ⚠ Replace name with ACTUAL name from pg_policies.
+-- Step 4a: drop all known INSERT policies (actual names from pg_policies).
 DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON notifications;
 DROP POLICY IF EXISTS "Users can insert notifications" ON notifications;
 DROP POLICY IF EXISTS "Authenticated users can create notifications" ON notifications;
+DROP POLICY IF EXISTS "Authenticated users can insert notifications" ON notifications;
 
--- Step 4b: create scoped INSERT policy.
+-- Step 4b: idempotency — drop new policy name so re-running this file never fails.
+DROP POLICY IF EXISTS "notifications_insert_self_or_order_party" ON notifications;
+
+-- Step 4c: create scoped INSERT policy.
 CREATE POLICY "notifications_insert_self_or_order_party"
   ON notifications
   FOR INSERT
