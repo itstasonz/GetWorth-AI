@@ -24,7 +24,60 @@ const STITCH = {
 };
 
 export function AuthView() {
-  const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail } = useApp();
+  const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset } = useApp();
+  const [resetEmail, setResetEmail] = React.useState('');
+
+  // Forgot-password mode: simple email form, no Google button
+  if (authMode === 'forgot') {
+    return (
+      <div className="space-y-6 pt-4">
+        <FadeIn className="text-center space-y-2">
+          <h2 className="text-3xl font-bold">{lang === 'he' ? 'שכחת סיסמה?' : 'Forgot Password?'}</h2>
+          <p className="text-slate-400">{lang === 'he' ? 'נשלח לך קישור לאיפוס סיסמה' : "We'll send you a reset link"}</p>
+        </FadeIn>
+
+        {authError && (
+          <FadeIn>
+            <Card className="p-4" gradient="linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))">
+              <p className="text-sm text-red-300">{authError}</p>
+            </Card>
+          </FadeIn>
+        )}
+
+        <FadeIn delay={100}>
+          <form onSubmit={(e) => { e.preventDefault(); sendPasswordReset(resetEmail); }} className="space-y-4">
+            <InputField
+              label={t.email}
+              type="email"
+              rtl={rtl}
+              value={resetEmail}
+              onChange={(e) => setResetEmail(e.target.value)}
+              required
+            />
+            <Btn primary className="w-full py-4" disabled={authLoading || !resetEmail.trim()}>
+              {authLoading
+                ? <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</>
+                : (lang === 'he' ? 'שלח קישור לאיפוס' : 'Send Reset Link')
+              }
+            </Btn>
+          </form>
+        </FadeIn>
+
+        <FadeIn delay={150}>
+          <p className="text-center text-sm text-slate-400">
+            <button
+              onClick={() => { setAuthMode('login'); setAuthError(null); setResetEmail(''); }}
+              className="font-medium hover:opacity-80 transition-opacity"
+              style={{ color: '#6FEEE1' }}
+              disabled={authLoading}
+            >
+              {lang === 'he' ? '← חזור להתחברות' : '← Back to Sign In'}
+            </button>
+          </p>
+        </FadeIn>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pt-4">
@@ -58,7 +111,21 @@ export function AuthView() {
         <form onSubmit={signInEmail} className="space-y-4">
           {authMode === 'signup' && <InputField label={t.name} icon={User} rtl={rtl} value={authForm.name} onChange={(e) => setAuthForm({ ...authForm, name: e.target.value })} />}
           <InputField label={t.email} type="email" rtl={rtl} value={authForm.email} onChange={(e) => setAuthForm({ ...authForm, email: e.target.value })} required />
-          <InputField label={t.password} type="password" rtl={rtl} value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required minLength={6} />
+          <div className="space-y-1">
+            <InputField label={t.password} type="password" rtl={rtl} value={authForm.password} onChange={(e) => setAuthForm({ ...authForm, password: e.target.value })} required minLength={6} />
+            {authMode === 'login' && (
+              <div className={`flex ${rtl ? 'justify-start' : 'justify-end'}`}>
+                <button
+                  type="button"
+                  onClick={() => { setAuthMode('forgot'); setAuthError(null); }}
+                  className="text-xs text-slate-400 hover:text-slate-200 transition-colors py-1"
+                  disabled={authLoading}
+                >
+                  {lang === 'he' ? 'שכחת סיסמה?' : 'Forgot password?'}
+                </button>
+              </div>
+            )}
+          </div>
           <Btn primary className="w-full py-4" disabled={authLoading}>
             {authLoading ? (
               <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'מתחבר...' : 'Signing in...'}</>

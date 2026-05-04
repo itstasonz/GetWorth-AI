@@ -474,8 +474,8 @@ export function OrderDetailView() {
               </Btn>
             )}
 
-            {/* EITHER: Complete after received */}
-            {order.status === 'delivered' && (
+            {/* BUYER ONLY: Complete after received — seller cannot trigger this */}
+            {order.status === 'delivered' && isBuyer && (
               <Btn primary className="w-full py-4" onClick={() => handleAction('completed')} disabled={updating}>
                 {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                 {lang === 'he' ? 'אשר והשלם עסקה' : 'Complete Transaction'}
@@ -545,7 +545,7 @@ export function OrderDetailView() {
             <Btn primary className="w-full py-3.5" disabled={reviewRating === 0 || reviewSubmitting}
               onClick={async () => {
                 setReviewSubmitting(true);
-                const ok = await submitReview(order.id, order.listing_id, order.seller_id, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
+                const ok = await submitReview(order.id, order.listing_id, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
                 setReviewSubmitting(false);
                 if (ok) setReviewDone(true);
               }}>

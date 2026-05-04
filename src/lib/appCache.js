@@ -34,3 +34,14 @@ export async function cacheSet(key, value) {
     });
   } catch {}
 }
+
+export async function cacheDelete(key) {
+  try {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const req = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(key);
+      req.onsuccess = () => resolve();
+      req.onerror = () => resolve();
+    });
+  } catch {}
+}

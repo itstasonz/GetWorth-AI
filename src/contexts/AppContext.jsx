@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
 import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
-import { cacheGet, cacheSet } from '../lib/appCache';
+import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -842,7 +842,35 @@ export function AppProvider({ children }) {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut(); setTab('home'); setView('home'); showToastMsg('Signed out');
+    // Clear user-specific IDB entries so the next user on this device doesn't see stale data
+    if (user) {
+      await Promise.all([
+        cacheDelete(`mylistings-${user.id}`),
+        cacheDelete(`saved-${user.id}`),
+        cacheDelete(`conv-${user.id}`),
+        cacheDelete(`orders-${user.id}`),
+      ]).catch(() => {});
+    }
+    await supabase.auth.signOut();
+    setTab('home');
+    setView('home');
+    showToastMsg(lang === 'he' ? 'התנתקת' : 'Signed out');
+  };
+
+  const sendPasswordReset = async (email) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+        redirectTo: window.location.origin,
+      });
+      if (err) throw err;
+      showToastMsg(lang === 'he' ? 'קישור לאיפוס נשלח לאימייל!' : 'Reset link sent! Check your email');
+      setAuthMode('login');
+    } catch (err) {
+      setAuthError(lang === 'he' ? 'שליחה נכשלה. בדוק את כתובת האימייל.' : 'Failed to send. Check the email address.');
+    }
+    setAuthLoading(false);
   };
 
   // ─── AVATAR UPLOAD ─────────────────────────────────
@@ -2234,10 +2262,23 @@ export function AppProvider({ children }) {
         // RPC not found → fallback to direct update
         if (rpcE.message?.includes('function') || rpcE.code === '42883') {
           if (DEV) console.warn('[Orders] RPC not found, using direct update');
+
+          // Role-based authorization — mirrors transition_order RPC rules
+          const targetOrder = prevOrders.find(o => o.id === orderId) || prevActiveOrder;
+          const SELLER_ONLY = ['accepted', 'declined', 'shipped', 'ready_pickup'];
+          const BUYER_ONLY  = ['delivered', 'completed'];
+          if (targetOrder) {
+            if (SELLER_ONLY.includes(newStatus) && targetOrder.seller_id !== user.id)
+              throw new Error(lang === 'he' ? 'רק המוכר יכול לבצע פעולה זו' : 'Only the seller can perform this action');
+            if (BUYER_ONLY.includes(newStatus) && targetOrder.buyer_id !== user.id)
+              throw new Error(lang === 'he' ? 'רק הקונה יכול לבצע פעולה זו' : 'Only the buyer can perform this action');
+          }
+
           const { error: directErr } = await supabase
             .from('orders')
             .update({ status: newStatus, updated_at: now, ...timestamps })
-            .eq('id', orderId);
+            .eq('id', orderId)
+            .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`);
 
           if (directErr) throw directErr;
 
@@ -2307,14 +2348,29 @@ export function AppProvider({ children }) {
   const [reviewsLoading, setReviewsLoading] = useState(false);
 
   // Submit a review for a completed order (buyer rates seller, or seller rates buyer)
-  const submitReview = useCallback(async (orderId, listingId, sellerId, rating, comment, reviewerRole = 'buyer') => {
+  // seller_id / reviewed_user_id is derived from the order in the DB — never trusted from the caller
+  const submitReview = useCallback(async (orderId, listingId, rating, comment, reviewerRole = 'buyer') => {
     if (!user) return false;
     try {
+      // Fetch order to derive the reviewed party server-side
+      const { data: orderData, error: orderErr } = await supabase
+        .from('orders')
+        .select('seller_id, buyer_id')
+        .eq('id', orderId)
+        .single();
+      if (orderErr || !orderData) {
+        showToastMsg(lang === 'he' ? 'שגיאה: ההזמנה לא נמצאה' : 'Error: Order not found');
+        return false;
+      }
+      // Buyer reviews the seller; seller reviews the buyer
+      const reviewedUserId = reviewerRole === 'buyer' ? orderData.seller_id : orderData.buyer_id;
+
       // Check if already reviewed this order in this role
       const { data: existing } = await supabase
         .from('reviews')
         .select('id')
         .eq('order_id', orderId)
+        .eq('reviewer_id', user.id)
         .eq('reviewer_role', reviewerRole)
         .limit(1);
       if (existing?.length > 0) {
@@ -2326,7 +2382,7 @@ export function AppProvider({ children }) {
         order_id: orderId,
         listing_id: listingId,
         reviewer_id: user.id,
-        seller_id: sellerId,
+        seller_id: reviewedUserId,
         rating,
         comment: comment?.trim() || null,
         reviewer_role: reviewerRole,
@@ -2508,7 +2564,7 @@ export function AppProvider({ children }) {
   const value = {
     lang, setLang, t, rtl,
     user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading,
-    signInGoogle, signInEmail, signOut,
+    signInGoogle, signInEmail, signOut, sendPasswordReset,
     uploadAvatar, avatarUploading, refreshProfile,
     requestVerification, verificationUploading,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,
