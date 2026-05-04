@@ -43,27 +43,110 @@ function getCorsHeaders(requestOrigin) {
   return headers;
 }
 
-// JWT — verify the Supabase Bearer token using the anon client.
-// Returns the authenticated user object or null.
-async function verifySupabaseJWT(authHeader) {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+// ── JWT VERIFICATION ──────────────────────────────────────────────────────
+//
+// Fast path  (SUPABASE_JWT_SECRET configured — server-only env var):
+//   HMAC-SHA256 local verify via Web Crypto — zero network, ~1 ms.
+//   Expired token  → sentinel { _expired: true }  → 401 SESSION_EXPIRED.
+//   Invalid sig    → null  (fail closed, no fallback — forged token stays rejected).
+//
+// Fallback path (secret absent — local dev / bootstrap):
+//   Supabase auth.getUser() with 5 s cap.
+//   Slower, but only used until SUPABASE_JWT_SECRET is set in Vercel.
+// ──────────────────────────────────────────────────────────────────────────
+
+function b64urlDecode(str) {
+  const b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+  return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
+}
+
+async function verifyJWTLocally(token, secret) {
+  const parts = token.split('.');
+  if (parts.length !== 3) throw new Error('Malformed JWT');
+
+  const [hB64, pB64, sB64] = parts;
+
+  // Validate algorithm
+  const header = JSON.parse(new TextDecoder().decode(b64urlDecode(hB64)));
+  if (header.alg !== 'HS256') throw new Error(`Unsupported alg: ${header.alg}`);
+
+  // Decode payload
+  const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(pB64)));
+
+  // Check expiry before touching crypto (cheap early exit)
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (payload.exp && payload.exp < nowSec) {
+    const e = new Error('Token expired');
+    e.code = 'TOKEN_EXPIRED';
+    throw e;
+  }
+
+  // Verify HMAC-SHA256 signature
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['verify'],
+  );
+  const ok = await crypto.subtle.verify(
+    'HMAC', key,
+    b64urlDecode(sB64),
+    new TextEncoder().encode(`${hB64}.${pB64}`),
+  );
+  if (!ok) throw new Error('Invalid signature');
+
+  if (!payload.sub) throw new Error('Missing sub claim');
+  return payload;
+}
+
+async function verifyJWT(authHeader) {
+  if (!authHeader?.startsWith('Bearer ')) return null;
   const token = authHeader.slice(7).trim();
   if (!token) return null;
 
+  const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+
+  // ── Fast path: local HMAC-SHA256 ──
+  if (jwtSecret) {
+    const t0 = Date.now();
+    console.log('[Auth] local-verify start');
+    try {
+      const payload = await verifyJWTLocally(token, jwtSecret);
+      console.log(`[Auth] local-verify OK ${Date.now() - t0}ms method=local sub=${payload.sub}`);
+      return { id: payload.sub, email: payload.email, role: payload.role, _authMethod: 'local' };
+    } catch (err) {
+      if (err.code === 'TOKEN_EXPIRED') {
+        console.warn(`[Auth] local-verify EXPIRED ${Date.now() - t0}ms`);
+        return { _expired: true };
+      }
+      // Bad signature or malformed — fail closed, never fallback to network
+      console.error(`[Auth] local-verify FAILED ${Date.now() - t0}ms: ${err.message}`);
+      return null;
+    }
+  }
+
+  // ── Fallback: Supabase auth.getUser() (no secret configured) ──
   const url     = process.env.SUPABASE_URL     || process.env.VITE_SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !anonKey) {
-    console.error('[Auth] SUPABASE_URL / SUPABASE_ANON_KEY not configured');
+    console.error('[Auth] SUPABASE_JWT_SECRET and SUPABASE_URL/ANON_KEY both missing');
     return null;
   }
-
+  const t0 = Date.now();
+  console.log('[Auth] network-fallback auth.getUser start');
   try {
     const client = createClient(url, anonKey);
     const { data: { user }, error } = await client.auth.getUser(token);
-    if (error || !user) return null;
-    return user;
+    if (error || !user) {
+      console.warn(`[Auth] network-fallback FAILED ${Date.now() - t0}ms: ${error?.message}`);
+      return null;
+    }
+    console.log(`[Auth] network-fallback OK ${Date.now() - t0}ms method=network sub=${user.id}`);
+    return { ...user, _authMethod: 'network' };
   } catch (err) {
-    console.warn('[Auth] JWT verification error:', err.message);
+    console.warn(`[Auth] network-fallback exception ${Date.now() - t0}ms: ${err.message}`);
     return null;
   }
 }
@@ -1449,13 +1532,18 @@ export default async function handler(req) {
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
 
-  // ── AUTH — require a valid Supabase JWT (4 s cap, fail closed) ──
+  // ── AUTH — local HMAC-SHA256 (fast path) or network fallback ──
+  // Local verify: ~1 ms, zero network. Fallback: up to 5 s (only when
+  // SUPABASE_JWT_SECRET is not set — configure it in Vercel to eliminate fallback).
   const authUser = await withTimeout(
-    verifySupabaseJWT(req.headers.get('authorization')),
-    4_000,
+    verifyJWT(req.headers.get('authorization')),
+    5_000,
     'JWT verification'
-  ).catch(err => { blog(`[Auth] Timed out: ${err.message}`); return null; });
+  ).catch(err => { blog(`[Auth] verify timed out: ${err.message}`); return null; });
+
   if (!authUser) return json({ error: 'Unauthorized — valid session required' }, 401, cors);
+  if (authUser._expired) return json({ error: 'Session expired — please sign in again', code: 'SESSION_EXPIRED' }, 401, cors);
+  blog(`[Auth] OK method=${authUser._authMethod} uid=${authUser.id}`);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);

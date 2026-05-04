@@ -873,6 +873,22 @@ export function AppProvider({ children }) {
     setAuthLoading(false);
   };
 
+  // Returns a fresh access_token, proactively refreshing if within 60s of expiry.
+  // Avoids sending a stale token that the server will reject with SESSION_EXPIRED.
+  const getFreshToken = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return null;
+      const secsLeft = (session.expires_at || 0) - Math.floor(Date.now() / 1000);
+      if (secsLeft < 60) {
+        const { data: { session: refreshed }, error } = await supabase.auth.refreshSession();
+        if (error || !refreshed) return null;
+        return refreshed.access_token;
+      }
+      return session.access_token;
+    } catch { return null; }
+  };
+
   // ─── AVATAR UPLOAD ─────────────────────────────────
   const [avatarUploading, setAvatarUploading] = useState(false);
 
@@ -1148,9 +1164,9 @@ export function AppProvider({ children }) {
           : { imageData: base64Array[0], lang, corrections };
         if (refineModel) body.refineModel = refineModel;
 
-        const { data: { session: _analyzeSession } } = await supabase.auth.getSession();
+        const _accessToken = await getFreshToken();
         const analyzeHeaders = { 'Content-Type': 'application/json' };
-        if (_analyzeSession?.access_token) analyzeHeaders['Authorization'] = `Bearer ${_analyzeSession.access_token}`;
+        if (_accessToken) analyzeHeaders['Authorization'] = `Bearer ${_accessToken}`;
 
         const res = await fetch('/api/analyze', {
           method: 'POST',
@@ -1164,6 +1180,14 @@ export function AppProvider({ children }) {
         if (DEV) console.log(`[Analyze] Attempt ${attempt + 1}: HTTP ${res.status} in ${(performance.now() - t0).toFixed(0)}ms`);
 
         if (!res.ok) {
+          if (res.status === 401) {
+            let errBody = {};
+            try { errBody = await res.json(); } catch {}
+            const msg = errBody.code === 'SESSION_EXPIRED'
+              ? (lang === 'he' ? 'פג תוקף החיבור — התחבר מחדש' : 'Session expired — please sign in again')
+              : (lang === 'he' ? 'יש להתחבר כדי לסרוק' : 'Sign in required to scan');
+            throw new Error(msg);
+          }
           // Retry server errors, not client errors
           if (res.status >= 500 && attempt < maxRetries) {
             lastError = new Error(`Server error (${res.status})`);
@@ -2492,9 +2516,9 @@ export function AppProvider({ children }) {
 
       // Use Claude to OCR the serial label
       const tApi = performance.now();
-      const { data: { session: _serialSession } } = await supabase.auth.getSession();
+      const _serialToken = await getFreshToken();
       const serialHeaders = { 'Content-Type': 'application/json' };
-      if (_serialSession?.access_token) serialHeaders['Authorization'] = `Bearer ${_serialSession.access_token}`;
+      if (_serialToken) serialHeaders['Authorization'] = `Bearer ${_serialToken}`;
       const res = await fetch('/api/analyze', {
         method: 'POST',
         headers: serialHeaders,
