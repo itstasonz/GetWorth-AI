@@ -2029,36 +2029,11 @@ export function AppProvider({ children }) {
           serial_type: serialData.type || 'serial',
         }),
       };
-      let insertResult = await supabase.from('listings').insert(listingRow).select();
-      // Fallback: if quality_score column doesn't exist, retry without it
-      if (insertResult.error && insertResult.error.message?.includes('quality_score')) {
-        if (DEV) console.warn('[Publish] quality_score column missing, retrying without it');
-        delete listingRow.quality_score;
-        insertResult = await supabase.from('listings').insert(listingRow).select();
+      const insertResult = await supabase.from('listings').insert(listingRow).select();
+      if (insertResult.error) {
+        console.error('[Publish] Insert failed:', insertResult.error.message);
+        throw insertResult.error;
       }
-      // Fallback: if attributes column doesn't exist yet, retry without it
-      if (insertResult.error && insertResult.error.message?.includes('attributes')) {
-        if (DEV) console.warn('[Publish] attributes column missing, retrying without it');
-        delete listingRow.attributes;
-        insertResult = await supabase.from('listings').insert(listingRow).select();
-      }
-      // Fallback: if valuation_id column doesn't exist yet, retry without it
-      if (insertResult.error && (insertResult.error.message?.includes('valuation_id') || insertResult.error.message?.includes('ai_confidence'))) {
-        if (DEV) console.warn('[Publish] valuation columns missing, retrying without them');
-        delete listingRow.valuation_id;
-        delete listingRow.ai_confidence;
-        insertResult = await supabase.from('listings').insert(listingRow).select();
-      }
-      // Fallback: if serial columns don't exist yet, retry without them
-      if (insertResult.error && (insertResult.error.message?.includes('serial_submitted') || insertResult.error.message?.includes('serial_verified') || insertResult.error.message?.includes('serial_masked') || insertResult.error.message?.includes('serial_type'))) {
-        if (DEV) console.warn('[Publish] serial columns missing, retrying without them');
-        delete listingRow.serial_submitted;
-        delete listingRow.serial_verified;
-        delete listingRow.serial_masked;
-        delete listingRow.serial_type;
-        insertResult = await supabase.from('listings').insert(listingRow).select();
-      }
-      if (insertResult.error) throw insertResult.error;
 
       // Link valuation → listing (back-reference for feedback loop)
       const newListingId = insertResult.data?.[0]?.id;
