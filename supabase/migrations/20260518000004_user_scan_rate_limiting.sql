@@ -83,21 +83,18 @@ ALTER TABLE scan_daily_usage ENABLE ROW LEVEL SECURITY;
 
 -- ── 5. Scheduled cleanup for scan_daily_usage ──────────────────────────────
 --
--- Keep 30 days of history (useful for quota dashboards), then purge.
-
-DO $$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
-    PERFORM cron.schedule(
-      'cleanup-scan-daily-usage',
-      '30 2 * * *',   -- 02:30 UTC daily
-      $$DELETE FROM scan_daily_usage WHERE date < CURRENT_DATE - INTERVAL '30 days'$$
-    );
-  ELSE
-    RAISE NOTICE 'pg_cron not available — schedule scan_daily_usage cleanup manually';
-  END IF;
-END;
-$$;
+-- pg_cron scheduling is intentionally omitted from this migration to avoid
+-- the nested dollar-quote conflict in Supabase SQL Editor.
+-- Add cleanup separately once pg_cron availability is confirmed:
+--
+--   SELECT cron.schedule(
+--     'cleanup-scan-daily-usage',
+--     '30 2 * * *',
+--     'DELETE FROM scan_daily_usage WHERE date < CURRENT_DATE - INTERVAL ''30 days'''
+--   );
+--
+-- Until then, run the DELETE manually as needed:
+--   DELETE FROM scan_daily_usage WHERE date < CURRENT_DATE - INTERVAL '30 days';
 
 
 -- ── 6. Verify ──────────────────────────────────────────────────────────────
