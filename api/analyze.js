@@ -219,6 +219,9 @@ const VISION_RATE_PER_MIN = 5;               // Per-IP scan rate limit
 const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same image
 const VISION_TRIGGER_THRESHOLD = 0.60;       // Only call Vision when Stage 1 confidence is below this
 
+const USER_RATE_PER_MIN = 5;                 // Per-user per-minute scan limit
+const USER_DAILY_LIMIT   = 50;               // Per-user daily scan quota (beta)
+
 // ═══════════════════════════════════════════════════════
 // AUTHENTICITY — high-risk brands / categories
 // ═══════════════════════════════════════════════════════
@@ -694,36 +697,69 @@ async function incrementVisionDailyCounter(supa) {
   }
 }
 
-async function checkRateLimit(supa, ip) {
+async function checkRateLimit(supa, ip, userId) {
   // No DB client = fail closed: we cannot verify the rate, so deny
-  if (!supa || !ip) return false;
+  if (!supa || !ip) return { allowed: false, reason: 'ip_rate' };
 
   const oneMinAgo = new Date(Date.now() - 60_000).toISOString();
 
   try {
-    const { count } = await supa
+    // ── IP per-minute check (unchanged behaviour) ──
+    const { count: ipCount } = await supa
       .from('scan_rate_log')
       .select('*', { count: 'exact', head: true })
       .eq('ip', ip)
       .gte('created_at', oneMinAgo);
 
-    if ((count || 0) >= VISION_RATE_PER_MIN) {
+    if ((ipCount || 0) >= VISION_RATE_PER_MIN) {
       console.warn(`[RateLimit] IP ${ip} exceeded ${VISION_RATE_PER_MIN}/min`);
-      return false;
+      return { allowed: false, reason: 'ip_rate' };
     }
 
-    // Non-blocking insert — errors are logged, not swallowed
+    // ── User per-minute check ──
+    if (userId) {
+      const { count: userMinCount } = await supa
+        .from('scan_rate_log')
+        .select('*', { count: 'exact', head: true })
+        .eq('user_id', userId)
+        .gte('created_at', oneMinAgo);
+
+      if ((userMinCount || 0) >= USER_RATE_PER_MIN) {
+        console.warn(`[RateLimit] User ${userId} exceeded ${USER_RATE_PER_MIN}/min`);
+        return { allowed: false, reason: 'user_rate' };
+      }
+
+      // ── Atomic daily increment — blocking, fail closed ──
+      // Increment BEFORE the pipeline runs. The RPC returns the new count post-increment.
+      // If the RPC errors for any reason, deny (fail closed — billing leakage not acceptable).
+      // Over-limit requests also increment; abusers cannot probe the boundary by spamming.
+      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+      const { data: newDailyCount, error: rpcErr } = await supa
+        .rpc('increment_user_daily_scan', { p_user_id: userId, p_date: today });
+      if (rpcErr) {
+        console.error('[RateLimit] Daily increment RPC failed — denying:', rpcErr.message);
+        return { allowed: false, reason: 'quota_error' };
+      }
+      if ((newDailyCount || 0) > USER_DAILY_LIMIT) {
+        console.warn(`[RateLimit] User ${userId} daily limit hit (count=${newDailyCount}/${USER_DAILY_LIMIT})`);
+        return { allowed: false, reason: 'user_daily' };
+      }
+    }
+
+    // Non-blocking insert — records this scan for per-minute window checks
     supa.from('scan_rate_log')
-      .insert({ ip, created_at: new Date().toISOString() })
+      .insert({ ip, user_id: userId || null, created_at: new Date().toISOString() })
       .then(({ error }) => { if (error) console.error('[RateLimit] Insert failed:', error.message); })
       .catch(err => console.error('[RateLimit] Insert exception:', err.message));
-    return true;
+
+    return { allowed: true, reason: null };
   } catch (err) {
     // DB check failed — deny rather than allow (fail closed)
     console.error('[RateLimit] DB check failed — denying request:', err.message);
-    return false;
+    return { allowed: false, reason: 'ip_rate' };
   }
 }
+
 
 async function getCachedVisionResult(supa, hash) {
   if (!supa) return null;
@@ -1562,12 +1598,16 @@ export default async function handler(req) {
             || req.headers.get('x-real-ip')
             || 'unknown';
 
-    const rateOk = await checkRateLimit(supa, ip);
+    const { allowed: rateOk, reason: rateReason } = await checkRateLimit(supa, ip, authUser.id);
     if (!rateOk) {
+      const errorMsg = rateReason === 'user_daily'
+        ? 'Daily scan limit reached. Try again tomorrow.'
+        : 'Too many scans. Please wait a moment and try again.';
       return json({
-        error: 'Too many scans. Please wait a moment and try again.',
-        retryable: true,
+        error: errorMsg,
+        retryable: rateReason !== 'user_daily',
         rateLimited: true,
+        reason: rateReason,
       }, 429, cors);
     }
 
