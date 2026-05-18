@@ -1006,16 +1006,13 @@ export function AppProvider({ children }) {
 
       if (uploadErr) throw uploadErr;
 
-      // Get URL (private — only admins can access)
-      const { data: urlData } = supabase.storage.from('verification-photos').getPublicUrl(filePath);
-      if (!urlData?.publicUrl) throw new Error('Failed to get verification photo URL');
-
-      // Update profile status
+      // Store only the storage path — never a public URL.
+      // Admins retrieve a short-lived signed URL server-side; the bucket must be private.
       const { error: updateErr } = await supabase
         .from('profiles')
         .update({
           verification_status: 'pending',
-          verification_photo_url: urlData.publicUrl,
+          verification_photo_path: filePath,
         })
         .eq('id', user.id);
 

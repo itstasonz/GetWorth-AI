@@ -75,7 +75,7 @@ export default function AdminPanel() {
     setLoading(true);
     const { data } = await supabase
       .from('profiles')
-      .select('id, full_name, email, avatar_url, verification_status, verification_photo_url, created_at')
+      .select('id, full_name, email, avatar_url, verification_status, verification_photo_path, created_at')
       .eq('verification_status', 'pending')
       .order('updated_at', { ascending: true });
     setPendingVerifications(data || []);
@@ -408,7 +408,22 @@ export default function AdminPanel() {
 // ─── Verification Card ───
 function VerificationCard({ user, lang, onApprove, onReject }) {
   const [expanded, setExpanded] = useState(false);
+  const [signedUrl, setSignedUrl] = useState(null);
+  const [loadingPhoto, setLoadingPhoto] = useState(false);
   const t = (en, he) => lang === 'he' ? he : en;
+
+  useEffect(() => {
+    if (!expanded || !user.verification_photo_path || signedUrl) return;
+    setLoadingPhoto(true);
+    // Signed URL is generated server-side via Edge Function.
+    // The function re-verifies is_admin from the DB before using the service role key.
+    supabase.functions
+      .invoke('admin-get-verification-url', { body: { userId: user.id } })
+      .then(({ data, error }) => {
+        if (!error && data?.signedUrl) setSignedUrl(data.signedUrl);
+        setLoadingPhoto(false);
+      });
+  }, [expanded, user.verification_photo_path, signedUrl]);
 
   return (
     <FadeIn>
@@ -435,10 +450,16 @@ function VerificationCard({ user, lang, onApprove, onReject }) {
             </button>
           </div>
 
-          {/* Selfie preview */}
-          {expanded && user.verification_photo_url && (
-            <div className="mt-3 rounded-xl overflow-hidden border border-white/10">
-              <img src={user.verification_photo_url} alt="Verification selfie" className="w-full max-h-64 object-contain bg-black" />
+          {/* Selfie preview — signed URL only, never a public URL */}
+          {expanded && user.verification_photo_path && (
+            <div className="mt-3 rounded-xl overflow-hidden border border-white/10 min-h-[3rem] bg-black flex items-center justify-center">
+              {loadingPhoto ? (
+                <Loader2 className="w-5 h-5 animate-spin text-slate-400 my-6" />
+              ) : signedUrl ? (
+                <img src={signedUrl} alt="Verification selfie" className="w-full max-h-64 object-contain" />
+              ) : (
+                <p className="text-xs text-slate-500 py-6">{t('Photo unavailable', 'התמונה אינה זמינה')}</p>
+              )}
             </div>
           )}
 
