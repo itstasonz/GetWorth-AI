@@ -68,22 +68,22 @@ export default defineConfig({
         // Cache strategies
         runtimeCaching: [
           {
-            // Analyze endpoint — NetworkOnly. Results are image-specific and must never
-            // be served from cache (stale response from a different image would be wrong).
-            urlPattern: /\/api\/analyze/,
+            // NetworkOnly: all Supabase traffic (REST /rest/v1/, auth /auth/v1/,
+            // Edge Functions /functions/v1/, and storage).
+            // Must come before the image rule so Supabase storage images also go
+            // NetworkOnly — signed verification URLs must never be served from cache.
+            urlPattern: /supabase\.co/,
             handler: 'NetworkOnly',
           },
           {
-            // Supabase data — stale-while-revalidate: serve cache instantly, refresh in background
-            urlPattern: /xbwxbdxuklrbnkpgonjc\.supabase\.co/,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'supabase-cache',
-              expiration: { maxEntries: 100, maxAgeSeconds: 60 * 10 }, // 10 min
-            },
+            // NetworkOnly: all Vercel serverless/edge API routes.
+            // Results are request-specific and must never be served stale.
+            urlPattern: /\/api\//,
+            handler: 'NetworkOnly',
           },
           {
-            // Cache listing images — cache first (images don't change)
+            // CacheFirst: images from non-Supabase origins (CDN, external).
+            // Supabase storage images are excluded by the NetworkOnly rule above.
             urlPattern: /\.(?:png|jpg|jpeg|webp|gif|svg)$/i,
             handler: 'CacheFirst',
             options: {

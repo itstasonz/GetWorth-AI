@@ -146,6 +146,7 @@ export function AppProvider({ children }) {
   const [authForm, setAuthForm] = useState({ name: '', email: '', password: '' });
   const [authError, setAuthError] = useState(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [signInAction, setSignInAction] = useState(null);
   const [showContact, setShowContact] = useState(false);
@@ -279,6 +280,13 @@ export function AppProvider({ children }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (!mounted) return;
+      if (event === 'PASSWORD_RECOVERY') {
+        setUser(session.user);
+        setPasswordRecovery(true);
+        setAuthMode('recovery');
+        setShowSignInModal(true);
+        return;
+      }
       if (session?.user) {
         setUser(session.user);
         supabase.rpc('get_own_profile').single()
@@ -884,6 +892,27 @@ export function AppProvider({ children }) {
       setAuthMode('login');
     } catch (err) {
       setAuthError(lang === 'he' ? 'שליחה נכשלה. בדוק את כתובת האימייל.' : 'Failed to send. Check the email address.');
+    }
+    setAuthLoading(false);
+  };
+
+  const updatePassword = async (newPassword) => {
+    setAuthLoading(true);
+    setAuthError(null);
+    try {
+      const { error: err } = await supabase.auth.updateUser({ password: newPassword });
+      if (err) throw err;
+      setPasswordRecovery(false);
+      setAuthMode('login');
+      setShowSignInModal(false);
+      supabase.rpc('get_own_profile').single()
+        .then(({ data }) => { if (data) setProfile(data); })
+        .catch(() => {});
+      setView('profile');
+      setTab('profile');
+      showToastMsg(lang === 'he' ? 'הסיסמה עודכנה' : 'Password updated');
+    } catch {
+      setAuthError(lang === 'he' ? 'עדכון נכשל. נסה שוב.' : 'Update failed. Please try again.');
     }
     setAuthLoading(false);
   };
@@ -2514,7 +2543,7 @@ export function AppProvider({ children }) {
   const value = {
     lang, setLang, t, rtl,
     user, profile, loading, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading,
-    signInGoogle, signInEmail, signOut, sendPasswordReset,
+    signInGoogle, signInEmail, signOut, sendPasswordReset, updatePassword, passwordRecovery,
     uploadAvatar, avatarUploading, refreshProfile,
     requestVerification, verificationUploading,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,

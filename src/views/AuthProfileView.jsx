@@ -24,8 +24,73 @@ const STITCH = {
 };
 
 export function AuthView() {
-  const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset } = useApp();
+  const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset, updatePassword } = useApp();
   const [resetEmail, setResetEmail] = React.useState('');
+  const [newPassword, setNewPassword] = React.useState('');
+  const [confirmPassword, setConfirmPassword] = React.useState('');
+  const [localError, setLocalError] = React.useState(null);
+
+  // Password recovery mode — shown when user arrives via reset-link email
+  if (authMode === 'recovery') {
+    const handleRecovery = (e) => {
+      e.preventDefault();
+      setLocalError(null);
+      if (newPassword.length < 8) {
+        setLocalError(lang === 'he' ? 'הסיסמה חייבת להכיל לפחות 8 תווים' : 'Password must be at least 8 characters');
+        return;
+      }
+      if (newPassword !== confirmPassword) {
+        setLocalError(lang === 'he' ? 'הסיסמאות אינן תואמות' : 'Passwords do not match');
+        return;
+      }
+      updatePassword(newPassword);
+    };
+    return (
+      <div className="space-y-6 pt-4">
+        <FadeIn className="text-center space-y-2">
+          <h2 className="text-3xl font-bold">{lang === 'he' ? 'הגדר סיסמה חדשה' : 'Set New Password'}</h2>
+          <p className="text-slate-400">{lang === 'he' ? 'בחר סיסמה חדשה לחשבונך' : 'Choose a new password for your account'}</p>
+        </FadeIn>
+
+        {(authError || localError) && (
+          <FadeIn>
+            <Card className="p-4" gradient="linear-gradient(135deg, rgba(239,68,68,0.15), rgba(239,68,68,0.05))">
+              <p className="text-sm text-red-300">{authError || localError}</p>
+            </Card>
+          </FadeIn>
+        )}
+
+        <FadeIn delay={100}>
+          <form onSubmit={handleRecovery} className="space-y-4">
+            <InputField
+              label={lang === 'he' ? 'סיסמה חדשה' : 'New password'}
+              type="password"
+              rtl={rtl}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+            <InputField
+              label={lang === 'he' ? 'אימות סיסמה' : 'Confirm password'}
+              type="password"
+              rtl={rtl}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              required
+              minLength={8}
+            />
+            <Btn primary className="w-full py-4" disabled={authLoading || !newPassword || !confirmPassword}>
+              {authLoading
+                ? <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'מעדכן...' : 'Updating...'}</>
+                : (lang === 'he' ? 'עדכן סיסמה' : 'Update Password')
+              }
+            </Btn>
+          </form>
+        </FadeIn>
+      </div>
+    );
+  }
 
   // Forgot-password mode: simple email form, no Google button
   if (authMode === 'forgot') {

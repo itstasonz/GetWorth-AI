@@ -1584,6 +1584,13 @@ export default async function handler(req) {
   if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);
 
   try {
+    // Reject oversized bodies before JSON parsing (5 images × 5 MB + envelope).
+    // Content-Length may be absent on chunked transfers; skip the check if so.
+    const bodyLen = parseInt(req.headers.get('content-length') || '0', 10);
+    if (bodyLen > 26_214_400) {
+      return json({ error: 'Request body too large' }, 413, cors);
+    }
+
     const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false } = await req.json();
     const clientHints = clientCorrections.length > 0 ? clientCorrections : hints;
     const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
