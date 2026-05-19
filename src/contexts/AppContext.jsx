@@ -2166,29 +2166,14 @@ export function AppProvider({ children }) {
       return null;
     }
     try {
-      // Check for existing active order
-      const { data: existing } = await supabase
-        .from('orders')
-        .select('id, status')
-        .eq('listing_id', listingId)
-        .eq('buyer_id', user.id)
-        .not('status', 'in', '("cancelled","completed","declined")')
-        .limit(1);
-      if (existing?.length > 0) {
-        showToastMsg(lang === 'he' ? 'כבר יש לך הזמנה פעילה למוצר הזה' : 'You already have an active order for this item');
-        return null;
-      }
-
-      const { data, error: err } = await supabase.from('orders').insert({
-        listing_id: listingId,
-        buyer_id: user.id,
-        seller_id: sellerId,
-        price,
-        delivery_method: deliveryMethod,
-        shipping_address: shippingAddress || null,
-        buyer_note: buyerNote || null,
-        status: 'pending',
-      }).select().single();
+      const { data, error: err } = await supabase.rpc('create_order', {
+        p_listing_id:       listingId,
+        p_seller_id:        sellerId,
+        p_price:            price,
+        p_delivery_method:  deliveryMethod,
+        p_shipping_address: shippingAddress || null,
+        p_buyer_note:       buyerNote || null,
+      });
 
       if (err) throw err;
 
@@ -2208,14 +2193,15 @@ export function AppProvider({ children }) {
       return data;
     } catch (e) {
       console.error('[Orders] Create error:', e);
-      setError(lang === 'he' ? 'שגיאה ביצירת הזמנה' : 'Failed to create order');
+      const msg = e?.message || (lang === 'he' ? 'שגיאה ביצירת הזמנה' : 'Failed to create order');
+      showToastMsg(lang === 'he' ? `שגיאה: ${msg}` : `Error: ${msg}`);
       return null;
     }
   }, [user, lang, showToastMsg, playSound, loadOrders, fetchOrderById]);
 
   // Update order status via server-side RPC (validates transitions)
   // OPTIMISTIC: updates local state FIRST, then calls backend. Rolls back on error.
-  const updateOrderStatus = useCallback(async (orderId, newStatus) => {
+  const updateOrderStatus = useCallback(async (orderId, newStatus, meta = {}) => {
     if (!user || !orderId) return false;
 
     // ── Step 1: Optimistic local update (instant UI feedback) ──
@@ -2246,102 +2232,36 @@ export function AppProvider({ children }) {
       cancelled: lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled',
     };
 
-    // ── Step 2: Backend call (RPC with fallback to direct update) ──
+    // ── Step 2: Backend call ──────────────────────────────────────────────────
     try {
-      let success = false;
+      const { error: rpcErr } = await supabase.rpc('transition_order', {
+        p_order_id:   orderId,
+        p_new_status: newStatus,
+        p_meta:       meta,
+      });
 
-      // Try RPC first
-      try {
-        const { data: rpcResult, error: rpcErr } = await supabase.rpc('transition_order', {
-          p_order_id: orderId,
-          p_new_status: newStatus,
-          p_meta: {},
-        });
+      if (rpcErr) throw rpcErr;
 
-        if (rpcErr) throw rpcErr;
+      showToastMsg(statusLabels[newStatus] || (lang === 'he' ? 'עודכן' : 'Updated'));
+      playSound(newStatus === 'completed' ? 'coin' : 'tap');
 
-        if (rpcResult?.error) {
-          // RPC returned a business logic error (e.g., invalid transition)
-          throw new Error(rpcResult.error);
-        }
-
-        success = true;
-        if (DEV) console.log(`[Orders] RPC transition OK: ${newStatus}`, rpcResult);
-      } catch (rpcE) {
-        // RPC not found → fallback to direct update
-        if (rpcE.message?.includes('function') || rpcE.code === '42883') {
-          if (DEV) console.warn('[Orders] RPC not found, using direct update');
-
-          // Role-based authorization — mirrors transition_order RPC rules
-          const targetOrder = prevOrders.find(o => o.id === orderId) || prevActiveOrder;
-          const SELLER_ONLY = ['accepted', 'declined', 'shipped', 'ready_pickup'];
-          const BUYER_ONLY  = ['delivered', 'completed'];
-          if (targetOrder) {
-            if (SELLER_ONLY.includes(newStatus) && targetOrder.seller_id !== user.id)
-              throw new Error(lang === 'he' ? 'רק המוכר יכול לבצע פעולה זו' : 'Only the seller can perform this action');
-            if (BUYER_ONLY.includes(newStatus) && targetOrder.buyer_id !== user.id)
-              throw new Error(lang === 'he' ? 'רק הקונה יכול לבצע פעולה זו' : 'Only the buyer can perform this action');
-          }
-
-          const { error: directErr } = await supabase
-            .from('orders')
-            .update({ status: newStatus, updated_at: now, ...timestamps })
-            .eq('id', orderId)
-            .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`);
-
-          if (directErr) throw directErr;
-
-          // Mark listing as sold on completion
-          if (newStatus === 'completed' && activeOrder) {
-            supabase.from('listings').update({ status: 'sold', sold_to: activeOrder.buyer_id, sold_at: now })
-              .eq('id', activeOrder.listing_id).then(() => {});
-          }
-
-          // Create notification manually (since RPC trigger didn't fire)
-          const notifTargetId = newStatus === 'delivered' || newStatus === 'completed'
-            ? (activeOrder?.seller_id || prevActiveOrder?.seller_id)
-            : (activeOrder?.buyer_id || prevActiveOrder?.buyer_id);
-          if (notifTargetId && notifTargetId !== user.id) {
-            supabase.from('notifications').insert({
-              user_id: notifTargetId,
-              type: `ORDER_${newStatus.toUpperCase()}`,
-              title: statusLabels[newStatus] || 'Order updated',
-              body: '',
-              data: { order_id: orderId, new_status: newStatus },
-            }).then(() => {});
-          }
-
-          success = true;
-        } else {
-          throw rpcE;
-        }
-      }
-
-      if (success) {
-        showToastMsg(statusLabels[newStatus] || (lang === 'he' ? 'עודכן' : 'Updated'));
-        playSound(newStatus === 'completed' ? 'coin' : 'tap');
-
-        // Background refresh (non-blocking) — realtime will also sync
-        loadOrders(true).catch(() => {});
-        return true;
-      }
+      // Background refresh (non-blocking) — realtime will also sync
+      loadOrders(true).catch(() => {});
+      return true;
     } catch (e) {
       // ── Step 3: ROLLBACK optimistic update on any error ──
       console.error('[Orders] Transition FAILED:', e);
       setOrders(prevOrders);
       setActiveOrder(prevActiveOrder);
-      loadOrders(true).catch(() => {}); // re-sync from server in case prevOrders is stale
+      loadOrders(true).catch(() => {}); // re-sync from server
       showToastMsg(lang === 'he' ? `שגיאה: ${e.message || 'עדכון נכשל'}` : `Error: ${e.message || 'Update failed'}`);
       return false;
     }
-
-    return false;
   }, [user, lang, orders, activeOrder, showToastMsg, playSound, loadOrders]);
 
-  // Cancel order (via RPC or direct fallback)
   const cancelOrder = useCallback(async (orderId, reason) => {
     if (!user || !orderId) return false;
-    return updateOrderStatus(orderId, 'cancelled');
+    return updateOrderStatus(orderId, 'cancelled', reason ? { cancel_reason: reason } : {});
   }, [user, updateOrderStatus]);
 
   // View an order's detail
@@ -2361,14 +2281,18 @@ export function AppProvider({ children }) {
   const submitReview = useCallback(async (orderId, listingId, rating, comment, reviewerRole = 'buyer') => {
     if (!user) return false;
     try {
-      // Fetch order to derive the reviewed party server-side
+      // Fetch order to derive the reviewed party server-side and verify completion
       const { data: orderData, error: orderErr } = await supabase
         .from('orders')
-        .select('seller_id, buyer_id')
+        .select('seller_id, buyer_id, status')
         .eq('id', orderId)
         .single();
       if (orderErr || !orderData) {
         showToastMsg(lang === 'he' ? 'שגיאה: ההזמנה לא נמצאה' : 'Error: Order not found');
+        return false;
+      }
+      if (orderData.status !== 'completed') {
+        showToastMsg(lang === 'he' ? 'ניתן לדרג רק עסקאות שהושלמו' : 'Reviews require a completed order');
         return false;
       }
       // Buyer reviews the seller; seller reviews the buyer
