@@ -134,3 +134,63 @@ export const BackButton = ({ onClick, rtl, label }) => {
     </button>
   );
 };
+
+// Haptic feedback — safe wrapper, no-ops on unsupported browsers
+export const haptic = (pattern = 10) => {
+  if (navigator.vibrate) navigator.vibrate(pattern);
+};
+
+// Unified empty state — consistent across all views
+export const EmptyState = ({ icon: Icon, title, subtitle, cta, className = '' }) => (
+  <FadeIn className={`flex flex-col items-center justify-center text-center py-16 ${className}`}>
+    {Icon && (
+      <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+        <Icon className="w-10 h-10 text-slate-600" />
+      </div>
+    )}
+    {title && <p className="text-slate-300 font-semibold mb-1">{title}</p>}
+    {subtitle && <p className="text-slate-500 text-sm mb-5 max-w-[240px] leading-relaxed">{subtitle}</p>}
+    {cta}
+  </FadeIn>
+);
+
+// Destructive action confirmation sheet
+export const ConfirmSheet = ({ open, icon, title, body, confirmLabel = 'Confirm', cancelLabel = 'Cancel', onClose, onConfirm }) => {
+  if (!open) return null;
+  const handleConfirm = () => { haptic(15); onConfirm(); };
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm animate-fadeIn"
+      onClick={onClose}
+    >
+      <SlideUp className="w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-5">
+          <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+          <div className="text-center space-y-3">
+            {icon && (
+              <div className="w-16 h-16 rounded-2xl bg-red-500/15 flex items-center justify-center mx-auto">
+                {icon}
+              </div>
+            )}
+            <h3 className="text-lg font-bold">{title}</h3>
+            {body && <p className="text-sm text-slate-400 leading-relaxed">{body}</p>}
+          </div>
+          <div className="flex gap-3 pt-1">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3.5 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-slate-300 hover:bg-white/10 transition-all active:scale-95"
+            >
+              {cancelLabel}
+            </button>
+            <button
+              onClick={handleConfirm}
+              className="flex-1 py-3.5 rounded-xl bg-red-500 hover:bg-red-400 text-sm font-bold text-white transition-all active:scale-[0.97]"
+            >
+              {confirmLabel}
+            </button>
+          </div>
+        </div>
+      </SlideUp>
+    </div>
+  );
+};

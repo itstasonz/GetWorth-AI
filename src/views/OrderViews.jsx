@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
-import { Card, Btn, Badge, FadeIn, SlideUp, InputField } from '../components/ui';
+import { Card, Btn, Badge, FadeIn, SlideUp, InputField, EmptyState, haptic } from '../components/ui';
 import { formatPrice, timeAgo } from '../lib/utils';
 
 // ═══════════════════════════════════════════════════════
@@ -107,12 +107,12 @@ export function CheckoutSheet() {
               placeholder={lang === 'he' ? 'למשל: זמין בערבים...' : 'e.g. Available evenings...'}
               className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-[#6FEEE1]/50" rows={2} />
           </div>
-          <Card className="p-4" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
+          <Card className="p-4" gradient="linear-gradient(135deg, rgba(111,238,225,0.08), rgba(111,238,225,0.02))">
             <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+              <Shield className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#6FEEE1' }} />
               <div>
-                <p className="text-sm font-medium text-amber-200">{lang === 'he' ? 'תשלום מחוץ לאפליקציה' : 'Payment outside the app'}</p>
-                <p className="text-xs text-slate-400 mt-1">{lang === 'he' ? 'התשלום ישירות (מזומן, ביט, העברה). אשר קבלה אחרי שתקבל.' : 'Payment arranged directly. Confirm receipt after you get the item.'}</p>
+                <p className="text-sm font-semibold" style={{ color: '#6FEEE1' }}>{lang === 'he' ? 'איך התשלום עובד' : 'How payment works'}</p>
+                <p className="text-xs text-slate-400 mt-1">{lang === 'he' ? 'סיכמו על אופן התשלום ישירות (מזומן, ביט, העברה). לאחר קבלת הפריט, אשרו קבלה באפליקציה.' : 'Agree on payment directly with the seller (cash, Bit, transfer). Once you receive the item, confirm receipt in the app.'}</p>
               </div>
             </div>
           </Card>
@@ -122,7 +122,7 @@ export function CheckoutSheet() {
           </div>
           <div className="flex gap-3">
             <button onClick={() => setShowCheckout(false)} className="flex-1 py-3.5 rounded-xl bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 transition-all">{lang === 'he' ? 'ביטול' : 'Cancel'}</button>
-            <Btn primary className="flex-1 py-3.5" onClick={handleSubmit} disabled={submitting || (deliveryMethod === 'shipping' && !shippingAddress.trim())}>
+            <Btn primary className="flex-1 py-3.5" onClick={() => { haptic(12); handleSubmit(); }} disabled={submitting || (deliveryMethod === 'shipping' && !shippingAddress.trim())}>
               {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</> : <><ShoppingBag className="w-4 h-4" />{lang === 'he' ? 'שלח הזמנה' : 'Place Order'}</>}
             </Btn>
           </div>
@@ -231,12 +231,28 @@ export function OrdersView() {
       </div>
 
       {ordersLoading ? (
-        <div className="text-center py-12"><Loader2 className="w-8 h-8 animate-spin text-[#6FEEE1] mx-auto" /></div>
+        <div className="space-y-3">
+          {[0, 1, 2].map(i => (
+            <div key={i} className="rounded-3xl overflow-hidden bg-white/5 relative animate-fadeIn" style={{ animationDelay: `${i * 60}ms` }}>
+              <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent z-10 pointer-events-none" />
+              <div className="p-4 flex items-center gap-4">
+                <div className="w-14 h-14 rounded-xl bg-white/5 flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-white/5 rounded-xl w-3/4" />
+                  <div className="h-6 bg-white/5 rounded-xl w-1/3" />
+                  <div className="h-3 bg-white/5 rounded-xl w-1/2" />
+                </div>
+                <div className="w-5 h-5 bg-white/5 rounded-lg" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : currentList.length === 0 ? (
-        <FadeIn><div className="text-center py-16 space-y-3">
-          <Package className="w-12 h-12 text-slate-600 mx-auto" />
-          <p className="text-slate-400">{activeTab === 'buying' ? (lang === 'he' ? 'אין קניות' : 'No purchases yet') : activeTab === 'requests' ? (lang === 'he' ? 'אין בקשות חדשות' : 'No pending requests') : (lang === 'he' ? 'אין מכירות' : 'No sales yet')}</p>
-        </div></FadeIn>
+        <EmptyState
+          icon={Package}
+          title={activeTab === 'buying' ? (lang === 'he' ? 'אין קניות עדיין' : 'No purchases yet') : activeTab === 'requests' ? (lang === 'he' ? 'אין בקשות חדשות' : 'No pending requests') : (lang === 'he' ? 'אין מכירות עדיין' : 'No sales yet')}
+          subtitle={activeTab === 'buying' ? (lang === 'he' ? 'כשתקנה פריט הוא יופיע כאן' : 'Items you buy will appear here') : activeTab === 'requests' ? (lang === 'he' ? 'בקשות קנייה חדשות יופיעו כאן' : 'New purchase requests will appear here') : (lang === 'he' ? 'כשמישהו יקנה ממך הוא יופיע כאן' : 'When someone buys from you it will show here')}
+        />
       ) : (
         <div className="space-y-3">{activeTab === 'requests' ? currentList.map(renderPendingRequest) : currentList.map(renderOrder)}</div>
       )}

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Heart, MapPin, Clock, CheckCircle, Camera } from 'lucide-react';
-import { Card } from './ui';
+import { Card, haptic } from './ui';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getQualityBadge } from '../lib/utils';
 
 const QUALITY_COLORS = {
@@ -68,9 +68,9 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
           
           {/* Save button */}
-          <button 
-            onClick={(e) => { e.stopPropagation(); toggleSave(item); }} 
-            className={`absolute top-3 ${rtl ? 'left-3' : 'right-3'} w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 backdrop-blur-md ${isSaved ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'} ${heartAnim === item.id ? 'animate-heartPop' : ''}`}
+          <button
+            onClick={(e) => { e.stopPropagation(); haptic(isSaved ? 8 : 12); toggleSave(item); }}
+            className={`absolute top-3 ${rtl ? 'left-3' : 'right-3'} w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 backdrop-blur-md active:scale-90 ${isSaved ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'} ${heartAnim === item.id ? 'animate-heartPop' : ''}`}
           >
             <Heart className={`w-5 h-5 transition-all ${isSaved ? 'fill-current scale-110' : ''}`} />
           </button>

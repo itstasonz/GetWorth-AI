@@ -18,7 +18,7 @@ const SELL_STITCH = {
   FONT_BODY:               '"Inter", system-ui, -apple-system, sans-serif',
 };
 import { useApp } from '../contexts/AppContext';
-import { Card, Btn, Badge, FadeIn, ScaleIn, InputField, BackButton } from '../components/ui';
+import { Card, Btn, Badge, FadeIn, ScaleIn, InputField, BackButton, ConfirmSheet, EmptyState, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
@@ -26,6 +26,7 @@ import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
 export function MyListingsView() {
   const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
   const [activeTab, setActiveTab] = useState('active');
+  const [deleteTarget, setDeleteTarget] = useState(null);
 
   // ─── Derived data ───
   const pendingRequests = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending');
@@ -248,8 +249,8 @@ export function MyListingsView() {
                           <Pencil className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={e => { e.stopPropagation(); deleteListing(item.id); }}
-                          className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-red-500/15"
+                          onClick={e => { e.stopPropagation(); setDeleteTarget(item.id); }}
+                          className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-red-500/15 active:scale-90"
                           style={{ color: '#f87171' }}>
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -262,30 +263,33 @@ export function MyListingsView() {
           })}
         </div>
       ) : (
-        <FadeIn delay={100}>
-          <div className="p-10 rounded-2xl text-center"
-            style={{ background: 'rgba(59,130,246,0.06)', border: '1px solid rgba(59,130,246,0.1)' }}>
-            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-              style={{ background: 'rgba(59,130,246,0.12)' }}>
-              <ShoppingBag className="w-8 h-8" style={{ color: '#6FEEE1' }} />
-            </div>
-            <p className="mb-4 text-sm" style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY }}>
-              {activeTab === 'sold'
-                ? (lang === 'he' ? 'עדיין לא מכרת פריטים.' : 'No sold items yet.')
-                : t.noListings}
-            </p>
-            {activeTab !== 'sold' && (
-              <button
-                onClick={() => goTab('home')}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm active:scale-95 transition-transform"
-                style={{ background: SELL_STITCH.GRADIENT_PRIMARY, color: SELL_STITCH.onPrimary, fontFamily: SELL_STITCH.FONT_BODY }}>
-                <Scan className="w-4 h-4" />
-                {lang === 'he' ? 'סרוק פריט' : 'Scan an item'}
-              </button>
-            )}
-          </div>
-        </FadeIn>
+        <EmptyState
+          icon={ShoppingBag}
+          title={activeTab === 'sold' ? (lang === 'he' ? 'עדיין לא מכרת פריטים' : 'No sold items yet') : (lang === 'he' ? 'אין מודעות פעילות' : 'No active listings')}
+          subtitle={activeTab !== 'sold' ? (lang === 'he' ? 'סרוק פריט כדי לפרסם מודעה' : 'Scan an item to create your first listing') : undefined}
+          cta={activeTab !== 'sold' && (
+            <button
+              onClick={() => goTab('home')}
+              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+              style={{ background: SELL_STITCH.GRADIENT_PRIMARY, color: SELL_STITCH.onPrimary, fontFamily: SELL_STITCH.FONT_BODY }}
+            >
+              <Scan className="w-4 h-4" />
+              {lang === 'he' ? 'סרוק פריט' : 'Scan an item'}
+            </button>
+          )}
+        />
       )}
+
+      <ConfirmSheet
+        open={deleteTarget !== null}
+        icon={<Trash2 className="w-8 h-8 text-red-400" />}
+        title={lang === 'he' ? 'מחיקת מודעה' : 'Delete Listing'}
+        body={lang === 'he' ? 'המודעה תוסר לצמיתות. לא ניתן לשחזר פריטים שנמחקו.' : 'This listing will be permanently removed. Buyers who saved it will no longer see it.'}
+        confirmLabel={lang === 'he' ? 'מחק מודעה' : 'Delete Listing'}
+        cancelLabel={lang === 'he' ? 'ביטול' : 'Cancel'}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => { deleteListing(deleteTarget); setDeleteTarget(null); }}
+      />
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, CheckCircle, Loader2, Flag, Car, Gem, BookOpen, Gift, Home as HomeIcon, Wrench } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { Card, Btn, Badge, FadeIn, SlideUp } from '../components/ui';
+import { Card, Btn, Badge, FadeIn, SlideUp, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import ImageGallery from '../components/ImageGallery';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, getQualityBadge, computeSellerTrust, STAT_COLORS } from '../lib/utils';
@@ -410,7 +410,7 @@ export function DetailView() {
             <Btn className="flex-1 py-4 bg-white/5 border border-white/10" onClick={contactSeller}>
               <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
             </Btn>
-            <Btn onClick={() => !selected.id?.toString().startsWith('s') && toggleSave(selected)} className="px-5">
+            <Btn onClick={() => { if (!selected.id?.toString().startsWith('s')) { haptic(savedIds?.has(selected?.id) ? 8 : 12); toggleSave(selected); } }} className="px-5">
               <Heart className={`w-5 h-5 ${savedIds?.has(selected?.id) ?? false ? 'fill-current text-red-400' : ''}`} />
             </Btn>
           </div>
