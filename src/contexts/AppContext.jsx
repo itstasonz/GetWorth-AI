@@ -1048,7 +1048,16 @@ export function AppProvider({ children }) {
   }, [user, savedIds, showToastMsg]);
 
   const deleteListing = async (id) => {
+    const { data: listing } = await supabase
+      .from('listings').select('images').eq('id', id).eq('seller_id', user.id).single();
     await supabase.from('listings').update({ status: 'deleted' }).eq('id', id).eq('seller_id', user.id);
+    if (listing?.images?.length) {
+      const prefix = '/storage/v1/object/public/listings/';
+      const paths = listing.images
+        .map(url => { try { const idx = url.indexOf(prefix); return idx !== -1 ? url.slice(idx + prefix.length) : null; } catch { return null; } })
+        .filter(Boolean);
+      if (paths.length) supabase.storage.from('listings').remove(paths).catch(() => {});
+    }
     loadUserData(); showToastMsg('Deleted');
   };
 
@@ -1976,12 +1985,20 @@ export function AppProvider({ children }) {
       const uploadResults = await Promise.all(
         images.map(async (img, i) => {
           if (!img || typeof img !== 'string' || img.length < 100) return null;
-          if (!img.startsWith('data:')) return img; // Already a URL
+          if (!img.startsWith('data:')) {
+            // Only allow URLs already in our own listings storage bucket
+            const storagePrefix = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/listings/`;
+            return img.startsWith(storagePrefix) ? img : null;
+          }
           try {
             const response = await fetch(img);
             const blob = await response.blob();
             if (blob.size < 1000) {
               if (DEV) console.warn(`[Publish] Skipping image ${i}: too small (${blob.size} bytes)`);
+              return null;
+            }
+            if (blob.size > 5 * 1024 * 1024) {
+              if (DEV) console.warn(`[Publish] Skipping image ${i}: too large (${blob.size} bytes)`);
               return null;
             }
             const fileName = `${user.id}/${uploadTs}-${i}.jpg`;
