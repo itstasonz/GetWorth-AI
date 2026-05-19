@@ -214,7 +214,7 @@ export function AppProvider({ children }) {
   const refreshProfile = useCallback(async () => {
     if (!user) return;
     if (profileLastLoadRef.current > 0 && (Date.now() - profileLastLoadRef.current < 60000)) return;
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    const { data } = await supabase.rpc('get_own_profile').single();
     if (data) { setProfile(data); profileLastLoadRef.current = Date.now(); }
   }, [user]);
 
@@ -262,7 +262,7 @@ export function AppProvider({ children }) {
 
         if (mounted && sessionResult.data?.session?.user) {
           setUser(sessionResult.data.session.user);
-          supabase.from('profiles').select('*').eq('id', sessionResult.data.session.user.id).single()
+          supabase.rpc('get_own_profile').single()
             .then(({ data }) => { if (mounted && data) setProfile(data); })
             .catch(() => {});
         }
@@ -281,7 +281,7 @@ export function AppProvider({ children }) {
       if (!mounted) return;
       if (session?.user) {
         setUser(session.user);
-        supabase.from('profiles').select('*').eq('id', session.user.id).single()
+        supabase.rpc('get_own_profile').single()
           .then(({ data }) => { if (mounted && data) setProfile(data); })
           .catch(err => { if (DEV) console.error('[Auth] Profile fetch failed:', err); });
       } else { setUser(null); setProfile(null); }
@@ -659,7 +659,7 @@ export function AppProvider({ children }) {
     setLoadingSeller(true);
     setView('sellerProfile');
     const [{ data: profileData, error: profileErr }, { data: listingsData, error: listingsErr }] = await Promise.all([
-      supabase.from('profiles').select('*').eq('id', sellerId).single(),
+      supabase.from('profiles').select('id, full_name, avatar_url, is_verified, rating, review_count, bio, badge, total_sales, created_at').eq('id', sellerId).single(),
       supabase.from('listings')
         .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
         .eq('seller_id', sellerId).eq('status', 'active')

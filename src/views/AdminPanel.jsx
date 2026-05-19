@@ -73,11 +73,7 @@ export default function AdminPanel() {
   // ─── Load Verifications ───
   const loadVerifications = async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from('profiles')
-      .select('id, full_name, email, avatar_url, verification_status, verification_photo_path, created_at')
-      .eq('verification_status', 'pending')
-      .order('updated_at', { ascending: true });
+    const { data } = await supabase.rpc('admin_list_pending_verifications');
     setPendingVerifications(data || []);
     setLoading(false);
   };
@@ -161,11 +157,7 @@ export default function AdminPanel() {
   const loadAllUsers = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, avatar_url, is_verified, is_admin, rating, review_count, total_sales, badge, created_at')
-        .order('created_at', { ascending: false })
-        .limit(100);
+      const { data } = await supabase.rpc('admin_list_users');
       setAllUsers(data || []);
     } catch (e) {
       console.error('[Admin] Users error:', e);
