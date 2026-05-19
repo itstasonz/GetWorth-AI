@@ -1048,7 +1048,7 @@ export function AppProvider({ children }) {
   }, [user, savedIds, showToastMsg]);
 
   const deleteListing = async (id) => {
-    await supabase.from('listings').update({ status: 'deleted' }).eq('id', id);
+    await supabase.from('listings').update({ status: 'deleted' }).eq('id', id).eq('seller_id', user.id);
     loadUserData(); showToastMsg('Deleted');
   };
 
