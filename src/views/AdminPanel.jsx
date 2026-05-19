@@ -85,11 +85,10 @@ export default function AdminPanel() {
   // ─── Approve / Reject Verification ───
   const handleVerification = async (userId, approve) => {
     try {
-      const update = approve
-        ? { verification_status: 'verified', is_verified: true, verified_at: new Date().toISOString() }
-        : { verification_status: 'rejected' };
-
-      const { error } = await supabase.from('profiles').update(update).eq('id', userId);
+      const { error } = await supabase.rpc('admin_verify_user', {
+        p_user_id: userId,
+        p_approve: approve,
+      });
       if (error) throw error;
 
       showToastMsg(approve
@@ -121,7 +120,8 @@ export default function AdminPanel() {
   // ─── Remove listing ───
   const removeListing = async (listingId) => {
     try {
-      await supabase.from('listings').update({ status: 'removed' }).eq('id', listingId);
+      const { error } = await supabase.rpc('admin_remove_listing', { p_listing_id: listingId });
+      if (error) throw error;
       showToastMsg(lang === 'he' ? 'המודעה הוסרה' : 'Listing removed');
       loadReports();
     } catch (e) {
@@ -132,7 +132,8 @@ export default function AdminPanel() {
   // ─── Dismiss report ───
   const dismissReport = async (reportId) => {
     try {
-      await supabase.from('reports').delete().eq('id', reportId);
+      const { error } = await supabase.rpc('admin_dismiss_report', { p_report_id: reportId });
+      if (error) throw error;
       setReports(prev => prev.filter(r => r.id !== reportId));
       showToastMsg(lang === 'he' ? 'הדיווח נמחק' : 'Report dismissed');
     } catch (e) {
@@ -175,14 +176,11 @@ export default function AdminPanel() {
   // ─── Admin override order status ───
   const adminUpdateOrder = async (orderId, newStatus) => {
     try {
-      const timestamps = {};
-      if (newStatus === 'completed') timestamps.completed_at = new Date().toISOString();
-      if (newStatus === 'cancelled') {
-        timestamps.cancelled_at = new Date().toISOString();
-        timestamps.cancelled_by = profile.id;
-        timestamps.cancel_reason = 'Admin action';
-      }
-      await supabase.from('orders').update({ status: newStatus, ...timestamps }).eq('id', orderId);
+      const { error } = await supabase.rpc('admin_update_order_status', {
+        p_order_id: orderId,
+        p_new_status: newStatus,
+      });
+      if (error) throw error;
       showToastMsg(`Order → ${newStatus}`);
       loadAllOrders();
     } catch (e) {
