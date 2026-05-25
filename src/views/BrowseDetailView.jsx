@@ -590,9 +590,7 @@ export function SellerProfileView() {
               <span className="text-xs">{sellerListings.length} {lang === 'he' ? 'פריטים' : 'items'}</span>
             </div>
           </div>
-          {sellerProfile.bio && (
-            <p className="text-sm text-slate-400 mt-3 max-w-xs mx-auto">{sellerProfile.bio}</p>
-          )}
+          {/* bio column removed from live schema — section hidden */}
         </Card>
       </FadeIn>
 

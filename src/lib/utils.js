@@ -244,7 +244,7 @@ export const computeSellerTrust = (seller, listingsCount = 0) => {
   const result = computeTrustScore({
     hasFullName:     !!(seller.full_name && seller.full_name.length > 2),
     hasAvatar:       !!seller.avatar_url,
-    hasBio:          !!seller.bio,
+    hasBio:          false, // bio column removed from live schema
     isVerified:      !!seller.is_verified,
     isPhoneVerified: !!seller.phone_verified,
     listingsCount,

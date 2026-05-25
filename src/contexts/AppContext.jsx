@@ -354,8 +354,9 @@ export function AppProvider({ children }) {
   useEffect(() => {
     if (!user) return;
 
+    const msgChannelName = `rt-msgs-${user.id}-${Date.now()}`;
     const channel = supabase
-      .channel(`rt-msgs-${user.id}`)
+      .channel(msgChannelName)
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'messages' },
@@ -435,12 +436,17 @@ export function AppProvider({ children }) {
           setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
         }
       )
-      .subscribe((status) => {
+      .subscribe((status, err) => {
+        console.log('[Realtime] rt-msgs status:', status, 'user:', user.id, err || '');
         if (status === 'SUBSCRIBED') console.log('✅ Realtime connected for', user.id);
-        else if (status === 'CHANNEL_ERROR') console.error('❌ Realtime channel error');
+        else if (status === 'CHANNEL_ERROR') console.error('❌ Realtime channel error', { channel: msgChannelName, status, err });
+        else if (status === 'TIMED_OUT') console.error('❌ Realtime channel timed out', { channel: msgChannelName });
       });
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      console.log('[Realtime] removing channel:', msgChannelName);
+      supabase.removeChannel(channel);
+    };
   }, [user?.id]);
 
   // ═══════════════════════════════════════════════════════
@@ -484,8 +490,9 @@ export function AppProvider({ children }) {
     // Initial load
     loadNotifications();
 
+    const notifChannelName = `rt-notifs-${user.id}-${Date.now()}`;
     const notifChannel = supabase
-      .channel(`rt-notifs-${user.id}`)
+      .channel(notifChannelName)
       // New notification inserted → show toast + update badge
       .on(
         'postgres_changes',
@@ -527,11 +534,17 @@ export function AppProvider({ children }) {
           }
         }
       )
-      .subscribe((status) => {
-        if (status === 'SUBSCRIBED' && DEV) console.log('✅ Notifs realtime connected');
+      .subscribe((status, err) => {
+        console.log('[Realtime] rt-notifs status:', status, 'user:', user.id, err || '');
+        if (status === 'SUBSCRIBED') console.log('✅ Notifs realtime connected for', user.id);
+        else if (status === 'CHANNEL_ERROR') console.error('❌ Realtime notifs channel error', { channel: notifChannelName, status, err });
+        else if (status === 'TIMED_OUT') console.error('❌ Realtime notifs channel timed out', { channel: notifChannelName });
       });
 
-    return () => { supabase.removeChannel(notifChannel); };
+    return () => {
+      console.log('[Realtime] removing channel:', notifChannelName);
+      supabase.removeChannel(notifChannel);
+    };
   }, [user?.id]);
 
   // Tap notification banner → open that conversation
@@ -673,7 +686,7 @@ export function AppProvider({ children }) {
     setLoadingSeller(true);
     setView('sellerProfile');
     const [{ data: profileData, error: profileErr }, { data: listingsData, error: listingsErr }] = await Promise.all([
-      supabase.from('profiles').select('id, full_name, avatar_url, is_verified, rating, review_count, bio, badge, total_sales, created_at').eq('id', sellerId).single(),
+      supabase.from('profiles').select('id, full_name, avatar_url, is_verified, rating, review_count, badge, total_sales, reputation_points, response_rate, created_at').eq('id', sellerId).single(),
       supabase.from('listings')
         .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
         .eq('seller_id', sellerId).eq('status', 'active')
