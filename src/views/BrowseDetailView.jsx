@@ -240,8 +240,13 @@ export function DetailView() {
     completed:    { en: 'Completed',           he: 'הושלם',           color: 'emerald' },
   };
 
-  const quality = selected.quality_score != null && selected.quality_score > 0 ? getQualityBadge(selected.quality_score, lang) : null;
+  // Only surface quality badge to buyers if it's genuinely high — the "Improve"
+  // label (red, !) refers to listing description quality, not item condition.
+  // Showing a red "!" badge on a listing misleads buyers into thinking the item is damaged.
+  const qualityRaw = selected.quality_score != null && selected.quality_score > 0 ? getQualityBadge(selected.quality_score, lang) : null;
+  const quality = qualityRaw?.color === 'green' ? qualityRaw : null; // only show the ✓ green badge
   const sellerTrust = selected.seller ? computeSellerTrust(selected.seller) : null;
+  const serialVerified = selected.serial_verified === true;
 
   const handleReport = async () => {
     if (!reportReason.trim()) return;
@@ -318,27 +323,43 @@ export function DetailView() {
                       </span>
                     </div>
                   )}
-                  <div className="flex items-center gap-3 mt-2">
+                  {/* Rating + review count */}
+                <div className="flex items-center gap-3 mt-2">
                     {selected.seller.rating > 0 && (
                       <div className="flex items-center gap-1">
                         <Star className="w-4 h-4 text-yellow-400 fill-current" />
                         <span className="text-sm font-semibold">{selected.seller.rating}</span>
                         {selected.seller.review_count > 0 && (
-                          <span className="text-xs text-slate-400">({selected.seller.review_count})</span>
+                          <span className="text-xs text-slate-400">({selected.seller.review_count} {lang === 'he' ? 'ביקורות' : 'reviews'})</span>
                         )}
                       </div>
                     )}
-                    {selected.seller.total_sales > 0 && (
-                      <div className="flex items-center gap-1 text-slate-400">
-                        <ShoppingBag className="w-3.5 h-3.5" />
-                        <span className="text-xs">{selected.seller.total_sales} {lang === 'he' ? 'מכירות' : 'sales'}</span>
-                      </div>
+                    {selected.seller.review_count === 0 && (
+                      <span className="text-xs text-slate-500">{lang === 'he' ? 'מוכר חדש' : 'New seller'}</span>
                     )}
                   </div>
+                {/* Trust chips */}
+                <div className="flex flex-wrap gap-1.5 mt-2.5">
+                  {selected.seller.is_verified && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(111,238,225,0.12)', color: '#6FEEE1', border: '1px solid rgba(111,238,225,0.25)' }}>
+                      <Shield className="w-2.5 h-2.5" />{lang === 'he' ? 'זהות מאומתת' : 'Verified ID'}
+                    </span>
+                  )}
+                  {serialVerified && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)' }}>
+                      <Check className="w-2.5 h-2.5" />{lang === 'he' ? 'מספר סידורי אומת' : 'Serial verified'}
+                    </span>
+                  )}
+                  {selected.seller.review_count >= 3 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>
+                      <Star className="w-2.5 h-2.5 fill-current" />{selected.seller.review_count} {lang === 'he' ? 'קונים דירגו' : 'buyers rated'}
+                    </span>
+                  )}
+                </div>
                 </div>
                 <ChevronRight className="w-5 h-5 text-slate-500" />
               </div>
-              <p className="text-[10px] text-slate-500 mt-2 text-center">{lang === 'he' ? 'לחץ לצפייה בפרופיל ובפריטים' : 'Tap to view profile & listings'}</p>
+              <p className="text-[10px] text-slate-500 mt-2 text-center">{lang === 'he' ? 'לחץ לצפיית הפרופיל המלא' : 'Tap for full profile & all listings'}</p>
             </Card>
           </FadeIn>
         )}
@@ -408,7 +429,7 @@ export function DetailView() {
           )}
           <div className="flex gap-3">
             <Btn className="flex-1 py-4 bg-white/5 border border-white/10" onClick={contactSeller}>
-              <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'צור קשר' : 'Contact'}
+              <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'הודעה למוכר' : 'Message Seller'}
             </Btn>
             <Btn onClick={() => { if (!selected.id?.toString().startsWith('s')) { haptic(savedIds?.has(selected?.id) ? 8 : 12); toggleSave(selected); } }} className="px-5">
               <Heart className={`w-5 h-5 ${savedIds?.has(selected?.id) ?? false ? 'fill-current text-red-400' : ''}`} />

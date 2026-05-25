@@ -388,14 +388,26 @@ export function ChatView() {
         </button>
 
         <div className="flex-1 min-w-0">
-          <p className="font-semibold truncate">
-            {activeChat.otherUser?.full_name || activeChat.seller?.full_name || (lang === 'he' ? 'משתמש' : 'User')}
-          </p>
-          <p className="text-xs text-slate-400 truncate">{activeChat.listing?.title}</p>
+          <div className="flex items-center gap-1.5">
+            <p className="font-semibold truncate">
+              {activeChat.otherUser?.full_name || activeChat.seller?.full_name || (lang === 'he' ? 'משתמש' : 'User')}
+            </p>
+            {/* Trust indicators sourced from active chat state */}
+            {activeChat.otherUser?.is_verified && (
+              <Shield className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#6FEEE1' }} />
+            )}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs text-slate-400 truncate">{activeChat.listing?.title}</p>
+            {activeChat.otherUser?.rating > 0 && (
+              <span className="text-[10px] text-yellow-400 flex-shrink-0">★ {activeChat.otherUser.rating}</span>
+            )}
+          </div>
         </div>
 
         <div className="flex-shrink-0 text-right">
           <p className="text-lg font-bold text-green-400">{formatPrice(activeChat.listing?.price)}</p>
+          <p className="text-[10px] text-slate-500">{lang === 'he' ? 'מחיר מבוקש' : 'asking'}</p>
         </div>
       </div>
 
@@ -447,6 +459,11 @@ export function ChatView() {
                   ? 'שאל על זמינות, מצב הפריט, או שלח הצעת מחיר.'
                   : 'Ask about availability, condition, or make an offer.'}
               </p>
+              {/* Safety nudge — one line, non-intrusive */}
+              <div className="mt-5 flex items-center gap-1.5 px-4 py-2 rounded-full" style={{ background: 'rgba(111,238,225,0.06)', border: '1px solid rgba(111,238,225,0.12)' }}>
+                <Shield className="w-3 h-3 flex-shrink-0" style={{ color: '#6FEEE1' }} />
+                <p className="text-[10px] text-slate-400">{lang === 'he' ? 'שלם רק לאחר קבלת הפריט' : 'Pay only after receiving the item'}</p>
+              </div>
             </div>
           ) : null}
 
@@ -469,31 +486,40 @@ export function ChatView() {
                 else                            radius = 'rounded-2xl rounded-l-sm';
               }
 
+              // Offer messages get a distinct amber card treatment — not just a tinted bubble
+              const isOffer = msg.is_offer && msg.offer_amount;
+
               return (
                 <div
                   key={msg.id}
                   className={`flex ${isMe ? 'justify-end' : 'justify-start'} ${msg.isStart ? 'mt-3' : 'mt-0.5'}`}
                 >
                   <div
-                    className={`max-w-[80%] px-4 py-2.5 ${radius}`}
-                    style={isMe
-                      ? { background: 'rgba(111,238,225,0.18)', border: '1px solid rgba(111,238,225,0.35)' }
-                      : { background: 'rgba(255,255,255,0.10)' }
+                    className={`max-w-[80%] ${isOffer ? 'p-0 overflow-hidden' : `px-4 py-2.5 ${radius}`}`}
+                    style={isOffer
+                      ? { borderRadius: '16px', border: '1.5px solid rgba(251,191,36,0.45)', background: isMe ? 'rgba(251,191,36,0.1)' : 'rgba(251,191,36,0.07)' }
+                      : isMe
+                        ? { background: 'rgba(111,238,225,0.18)', border: '1px solid rgba(111,238,225,0.35)' }
+                        : { background: 'rgba(255,255,255,0.10)' }
                     }
                   >
-                    {msg.is_offer && (
-                      <div className={`text-xs mb-1 ${isMe ? 'text-[#6FEEE1]/80' : 'text-slate-400'}`}>
-                        💰 {lang === 'he' ? 'הצעת מחיר' : 'Price Offer'}
+                    {isOffer ? (
+                      /* ── Premium offer card ── */
+                      <div className="px-4 pt-3 pb-3">
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <span className="text-xs">💰</span>
+                          <span className="text-[10px] font-bold uppercase tracking-wide text-amber-400">{lang === 'he' ? 'הצעת מחיר' : 'Price Offer'}</span>
+                        </div>
+                        <p className="text-2xl font-bold text-amber-300 mb-1">₪{msg.offer_amount.toLocaleString()}</p>
+                        {msg.content && <p className="text-xs text-slate-300 leading-relaxed">{msg.content}</p>}
                       </div>
+                    ) : (
+                      <p className="text-sm leading-relaxed">{msg.content}</p>
                     )}
-                    {msg.is_offer && msg.offer_amount && (
-                      <p className="text-xl font-bold text-green-400 mb-1">₪{msg.offer_amount.toLocaleString()}</p>
-                    )}
-                    <p className="text-sm leading-relaxed">{msg.content}</p>
 
                     {/* Timestamp + read receipt — only on last bubble in a group */}
                     {msg.isEnd && (
-                      <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`flex items-center gap-1 ${isOffer ? 'px-4 pb-2 pt-1' : 'mt-1'} ${isMe ? 'justify-end' : 'justify-start'}`}>
                         <span className={`text-[10px] ${isMe ? 'text-[#6FEEE1]/70' : 'text-slate-500'}`}>
                           {formatMessageTime(msg.created_at, lang)}
                         </span>
