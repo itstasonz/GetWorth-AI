@@ -4,6 +4,7 @@ import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
 import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
+import { useUrlSync } from '../lib/urlSync';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -2539,6 +2540,21 @@ export function AppProvider({ children }) {
     });
     showToastMsg(lang === 'he' ? 'מספר סידורי נוסף ✓' : 'Serial number added ✓');
   }, [lang, showToastMsg]);
+
+  // ─── URL SYNC (Phase 3A) ─────────────────────────────────────────────────
+  // Bridges view/tab state to the browser History API.
+  // Android back, browser back, and URL-based refresh all work via this hook.
+  useUrlSync({
+    view, setView, tab, setTab,
+    selected, setSelected,
+    activeChat, setActiveChat,
+    activeOrder, setActiveOrder,
+    stopCamera, cancelPipeline,
+    showSignInModal, setShowSignInModal,
+    showCheckout, setShowCheckout,
+    showContact, setShowContact,
+    user,
+  });
 
   const value = {
     lang, setLang, t, rtl,
