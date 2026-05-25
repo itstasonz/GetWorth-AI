@@ -23,89 +23,6 @@ const STITCH = {
   FONT_BODY:     '"Inter", system-ui, -apple-system, sans-serif',
 };
 
-// ═══════════════════════════════════════════════════════════════════════
-// VERIFY DEBUG PANEL — temporary, remove before release
-// Fixed bottom overlay; LTR; selectable text; Copy+Clear buttons
-// ═══════════════════════════════════════════════════════════════════════
-function VerifyDebugPanel({ log, onClear }) {
-  if (!log || log.length === 0) return null;
-
-  const copyAll = () => {
-    const text = [...log].reverse().map(e =>
-      `[${e.ts}] step=${e.step} status=${e.status}\n` +
-      `  code=${e.code}  msg=${e.message}\n` +
-      `  details=${e.details}\n` +
-      `  path=${e.path ?? '—'}\n` +
-      `  session_uid=${e.sessionUid ?? '—'}  react_uid=${e.reactUid ?? '—'}\n` +
-      (e.note ? `  note=${e.note}\n` : '')
-    ).join('---\n');
-    navigator.clipboard?.writeText(text).catch(() => {});
-  };
-
-  const S = {
-    wrap: {
-      position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
-      background: '#0d0d0d', borderTop: '2px solid #e53e3e',
-      maxHeight: 340, overflowY: 'auto',
-      fontFamily: 'ui-monospace,SFMono-Regular,Menlo,monospace',
-      fontSize: 11, color: '#e2e8f0',
-      userSelect: 'text', WebkitUserSelect: 'text',
-      direction: 'ltr', textAlign: 'left',
-    },
-    header: {
-      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
-      background: '#1a1a1a', position: 'sticky', top: 0,
-      borderBottom: '1px solid #333',
-    },
-    title: { color: '#fc8181', fontWeight: 700, flex: 1, fontSize: 12 },
-    btn: (color) => ({
-      background: '#2d3748', color, border: 'none', borderRadius: 4,
-      padding: '3px 9px', cursor: 'pointer', fontSize: 11, fontWeight: 600,
-    }),
-    row: (status) => ({
-      padding: '5px 10px', borderBottom: '1px solid #1a1a1a',
-      background: status === 'error' ? 'rgba(229,62,62,0.1)'
-                : status === 'ok'    ? 'rgba(72,187,120,0.07)'
-                : 'transparent',
-    }),
-    badge: (status) => ({
-      display: 'inline-block',
-      background: status === 'error' ? '#c53030' : status === 'ok' ? '#276749' : '#2d3748',
-      color: '#fff', borderRadius: 3, padding: '0 5px', marginRight: 5,
-    }),
-    label: { color: '#718096' },
-    val:   (status) => ({
-      color: status === 'error' ? '#fc8181' : status === 'ok' ? '#68d391' : '#e2e8f0',
-    }),
-  };
-
-  return (
-    <div style={S.wrap}>
-      <div style={S.header}>
-        <span style={S.title}>⬛ Verify Debug — {log.length} event{log.length !== 1 ? 's' : ''}</span>
-        <button style={S.btn('#90cdf4')} onClick={copyAll}>Copy All</button>
-        <button style={S.btn('#fc8181')} onClick={onClear}>Clear</button>
-      </div>
-      {[...log].reverse().map((e, i) => (
-        <div key={i} style={S.row(e.status)}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 2 }}>
-            <span style={S.label}>{e.ts}</span>
-            <span style={S.badge(e.status)}>{e.step}</span>
-            <span style={{ ...S.val(e.status), fontWeight: 700 }}>{e.status.toUpperCase()}</span>
-          </div>
-          {e.code    !== '—' && <div><span style={S.label}>code: </span>{e.code}</div>}
-          {e.message !== '—' && <div><span style={S.label}>msg: </span>{e.message}</div>}
-          {e.details !== '—' && <div><span style={S.label}>details: </span>{e.details}</div>}
-          {e.path               && <div><span style={S.label}>path: </span>{e.path}</div>}
-          {e.sessionUid         && <div><span style={S.label}>session_uid: </span>{e.sessionUid}</div>}
-          {e.reactUid           && <div><span style={S.label}>react_uid: </span>{e.reactUid}</div>}
-          {e.note               && <div style={{ color: '#faf089' }}><span style={S.label}>note: </span>{e.note}</div>}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export function AuthView() {
   const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset, updatePassword } = useApp();
   const [resetEmail, setResetEmail] = React.useState('');
@@ -301,7 +218,6 @@ export function ProfileView() {
     t, lang, rtl, user, profile, signOut, myListings, savedItems, setView,
     uploadAvatar, avatarUploading,
     requestVerification, verificationUploading,
-    verifyDbgLog, clearVerifyDbg,
     loadOrders,
     valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
     myReviews: myReviewsRaw, loadMyReviews,
@@ -961,8 +877,6 @@ export function ProfileView() {
         </button>
       </FadeIn>
 
-      {/* ── TEMP: verification debug panel — remove before release ── */}
-      <VerifyDebugPanel log={verifyDbgLog} onClear={clearVerifyDbg} />
     </div>
   );
 }

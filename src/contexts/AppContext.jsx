@@ -1034,49 +1034,26 @@ export function AppProvider({ children }) {
 
   // ─── VERIFICATION ──────────────────────────────────
   const [verificationUploading, setVerificationUploading] = useState(false);
-  // ── DEBUG log — remove before release ────────────
-  const [verifyDbgLog, setVerifyDbgLog] = useState([]);
-  const clearVerifyDbg = useCallback(() => setVerifyDbgLog([]), []);
 
   const requestVerification = useCallback(async (file) => {
     if (!user || !file) return;
-
-    // ── DEBUG accumulator — remove before release ──────────────────────────
-    let _filePath = null;
-    let _jwtUid   = null;
-    const _push = (step, status, fields = {}) => {
-      const entry = {
-        ts:         new Date().toISOString().slice(11, 23),
-        step, status,
-        code:       fields.code       ?? '—',
-        message:    fields.message    ?? '—',
-        details:    fields.details    ?? '—',
-        path:       fields.path       ?? _filePath,
-        sessionUid: fields.sessionUid ?? _jwtUid,
-        reactUid:   fields.reactUid   ?? user?.id ?? '—',
-        note:       fields.note       ?? null,
-      };
-      console.log('[Verify]', step, status, entry);
-      setVerifyDbgLog(prev => [...prev.slice(-9), entry]);
-    };
-    // ───────────────────────────────────────────────────────────────────────
 
     // ── 1. File type check ──────────────────────────────────────────────────
     const typeByMime = !!file.type && file.type.startsWith('image/');
     const typeByExt  = /\.(jpe?g|png|webp|heic|heif|gif|avif)$/i.test(file.name ?? '');
     const isImage    = typeByMime || typeByExt || !file.type;
     if (!isImage) {
-      _push('file_validation', 'error', { message: `type="${file.type}" name="${file.name}" — not accepted` });
+      showToastMsg(lang === 'he' ? 'קובץ לא תקין. בחר תמונה' : 'Invalid file. Please choose an image.', 'error');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      _push('file_validation', 'error', { message: `size ${file.size} > 10 MB` });
+      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי (מקסימום 10MB)' : 'File too large (max 10 MB)', 'error');
       return;
     }
 
     setVerificationUploading(true);
     try {
-      // ── 2. Compression ───────────────────────────────────────────────────
+      // ── 2. Compress to JPEG ────────────────────────────────────────────────
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target.result);
@@ -1086,41 +1063,23 @@ export function AppProvider({ children }) {
       const compressed = await compressImage(dataUrl, 1024, 0.85);
       const res  = await fetch(compressed);
       const blob = await res.blob();
-      _push('compression', 'ok', { note: `blob ${blob.size}B type=${blob.type}` });
 
-      // ── 3. Live session check — get Bearer token for Edge Function ──────────
+      // ── 3. Require active session ─────────────────────────────────────────
       if (!user.id) {
-        _push('session_check', 'error', { code: 'NO_UID', message: 'user.id null — session lost' });
-        showToastMsg('Please sign in again before verifying.', 'error');
+        showToastMsg(lang === 'he' ? 'יש להתחבר מחדש לפני האימות' : 'Please sign in again before verifying.', 'error');
         setVerificationUploading(false);
         return;
       }
-      _filePath = `${user.id}/selfie.jpg`;
-
       const { data: { session: liveSession } } = await supabase.auth.getSession();
-      _jwtUid = liveSession?.user?.id ?? null;
-      const uidMatch = _jwtUid === user.id;
-      _push('session_check', uidMatch ? 'ok' : 'error', {
-        sessionUid: _jwtUid ?? '(none)',
-        reactUid:   user.id,
-        note: uidMatch ? 'uid match ✓' : '⚠ UID MISMATCH',
-      });
-      if (!liveSession) {
-        showToastMsg('Please sign in again before verifying.', 'error');
-        setVerificationUploading(false);
-        return;
-      }
-      if (!uidMatch) {
+      if (!liveSession || liveSession.user.id !== user.id) {
+        showToastMsg(lang === 'he' ? 'יש להתחבר מחדש לפני האימות' : 'Please sign in again before verifying.', 'error');
         setVerificationUploading(false);
         return;
       }
 
-      // ── 4. Send to Edge Function — server handles storage + profile write ──
-      // Direct client Storage upload is unreliable on iOS Safari PWA due to
-      // RLS policy evaluation differences. The Edge Function uses the service
-      // role key to bypass Storage RLS entirely while still verifying the JWT.
-      _push('edge_fn_call', 'ok', { note: 'sending to submit-verification-selfie…' });
-
+      // ── 4. Submit via Edge Function ───────────────────────────────────────
+      // Server verifies JWT, uploads to private bucket with service role key,
+      // and sets verification_status = 'pending' — bypasses Storage RLS.
       const formData = new FormData();
       formData.append('file', new File([blob], 'selfie.jpg', { type: 'image/jpeg' }));
 
@@ -1130,65 +1089,35 @@ export function AppProvider({ children }) {
       );
 
       if (fnErr || !fnData?.ok) {
-        const errMsg = fnData?.error ?? fnErr?.message ?? 'Edge Function failed';
-        const detail = fnData?.detail ?? fnErr?.context ?? '—';
-        _push('edge_fn_call', 'error', {
-          code:    fnErr?.status ?? fnData?.status ?? '—',
-          message: errMsg,
-          details: detail,
-        });
+        const errMsg = fnData?.error ?? fnErr?.message
+          ?? (lang === 'he' ? 'שגיאה בשליחת הסלפי' : 'Failed to submit selfie. Please try again.');
+        console.error('[requestVerification] edge fn error:', fnErr, fnData);
         showToastMsg(errMsg, 'error');
         setVerificationUploading(false);
         return;
       }
-      _push('edge_fn_call', 'ok', {
-        note: `fn ok — status=${fnData.verification_status} path=${fnData.verification_photo_path}`,
-      });
 
-      // ── 5. Refetch profile so local state matches DB ───────────────────────
+      // ── 5. Sync local profile from DB ─────────────────────────────────────
       const { data: freshProfile, error: fetchErr } = await supabase.rpc('get_own_profile').single();
       if (fetchErr || !freshProfile) {
-        _push('profile_refetch', 'error', {
-          code:    fetchErr?.code    ?? '—',
-          message: fetchErr?.message ?? 'get_own_profile returned null',
-        });
-        // Non-fatal — patch from function response
+        console.error('[requestVerification] profile refetch failed:', fetchErr);
+        // Non-fatal — patch optimistically from function response
         setProfile(prev => ({
           ...prev,
           verification_status:     fnData.verification_status,
           verification_photo_path: fnData.verification_photo_path,
         }));
         profileLastLoadRef.current = 0;
-        showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
-        setVerificationUploading(false);
-        return;
+      } else {
+        setProfile(freshProfile);
+        profileLastLoadRef.current = Date.now();
       }
-      _push('profile_refetch', 'ok', {
-        note: `status=${freshProfile.verification_status} path=${freshProfile.verification_photo_path}`,
-      });
 
-      // ── 6. DB verify ──────────────────────────────────────────────────────
-      if (freshProfile.verification_status !== 'pending' || !freshProfile.verification_photo_path) {
-        _push('db_verify', 'error', {
-          code:    'DB_MISMATCH',
-          message: `status="${freshProfile.verification_status}" path="${freshProfile.verification_photo_path}"`,
-        });
-        setVerificationUploading(false);
-        return;
-      }
-      _push('db_verify', 'ok', { note: 'pending ✓ path ✓' });
-
-      // ── Success ───────────────────────────────────────────────────────────
-      setProfile(freshProfile);
-      profileLastLoadRef.current = Date.now();
       showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
 
     } catch (e) {
-      _push('catch', 'error', {
-        code:    e?.code    ?? e?.statusCode ?? '—',
-        message: e?.message ?? String(e)     ?? '—',
-        details: e?.details ?? e?.hint       ?? '—',
-      });
+      console.error('[requestVerification] unexpected error:', e);
+      showToastMsg(lang === 'he' ? 'שגיאה בשליחת הסלפי' : 'Failed to submit selfie. Please try again.', 'error');
     }
     setVerificationUploading(false);
   }, [user, lang, showToastMsg]);
@@ -2700,7 +2629,6 @@ export function AppProvider({ children }) {
     signInGoogle, signInEmail, signOut, sendPasswordReset, updatePassword, passwordRecovery,
     uploadAvatar, avatarUploading, refreshProfile,
     requestVerification, verificationUploading,
-    verifyDbgLog, clearVerifyDbg,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,
     tab, setTab, view, setView, goTab, reset,
     listings, myListings, savedIds, savedItems,
