@@ -1078,25 +1078,48 @@ export function AppProvider({ children }) {
       const res  = await fetch(compressed);
       const blob = await res.blob();
 
-      // ── Guard: user.id must be a real UUID before upload ─────────────────
+      // ── Guard: user.id must be a real UUID ──────────────────────────────
       if (!user.id) {
         showToastMsg('Please sign in again before verifying.', 'error');
-        setError('DBG [storage_upload] user.id is null/undefined — session lost');
+        setError('DBG user.id is null — session lost');
         setVerificationUploading(false);
         return;
       }
 
       const filePath = `${user.id}/selfie.jpg`;
 
-      // ── DEBUG: show path/uid/bucket before upload attempt ────────────────
-      setError(`DBG upload path: ${filePath} | user.id: ${user.id} | bucket: verification-photos`);
-      console.log('[Verify] pre-upload', { filePath, userId: user.id, bucket: 'verification-photos' });
+      // ── DEBUG: verify live session JWT uid matches React state uid ────────
+      _dbgStep = 'session_check';
+      const { data: { session: liveSession } } = await supabase.auth.getSession();
+      const jwtUid = liveSession?.user?.id ?? '(no session)';
+      const uidMatch = jwtUid === user.id;
+      setError(`DBG session.uid: ${jwtUid} | react uid: ${user.id} | match: ${uidMatch}`);
+      console.log('[Verify] session check', { jwtUid, reactUid: user.id, uidMatch, filePath });
 
-      // ── 3. Storage upload ────────────────────────────────────────────────
+      if (!liveSession) {
+        showToastMsg('Please sign in again before verifying.', 'error');
+        setVerificationUploading(false);
+        return;
+      }
+      if (!uidMatch) {
+        showToastMsg(`[session_mismatch] JWT uid: ${jwtUid} ≠ react uid: ${user.id}`, 'error');
+        setVerificationUploading(false);
+        return;
+      }
+
+      // ── 3. Storage upload — remove then insert to avoid upsert ambiguity ──
+      _dbgStep = 'storage_remove';
+      // Best-effort: remove existing selfie so the following INSERT is always new.
+      // Ignore error — file may not exist on first upload.
+      const { error: removeErr } = await supabase.storage
+        .from('verification-photos')
+        .remove([filePath]);
+      console.log('[Verify] remove result', removeErr ?? 'ok');
+
       _dbgStep = 'storage_upload';
       const { error: uploadErr } = await supabase.storage
         .from('verification-photos')
-        .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
+        .upload(filePath, blob, { contentType: 'image/jpeg', upsert: false });
 
       if (uploadErr) {
         _dbgErr(uploadErr);
@@ -1104,6 +1127,9 @@ export function AppProvider({ children }) {
         setVerificationUploading(false);
         return;
       }
+
+      setError(`DBG [storage_upload] success — path: ${filePath}`);
+      console.log('[Verify] upload success', filePath);
 
       // ── 4. Profile update ────────────────────────────────────────────────
       _dbgStep = 'profile_update';
