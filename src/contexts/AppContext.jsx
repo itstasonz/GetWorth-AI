@@ -1088,7 +1088,7 @@ export function AppProvider({ children }) {
       const blob = await res.blob();
       _push('compression', 'ok', { note: `blob ${blob.size}B type=${blob.type}` });
 
-      // ── Guard: user.id must be a real UUID ──────────────────────────────
+      // ── 3. Live session check — get Bearer token for Edge Function ──────────
       if (!user.id) {
         _push('session_check', 'error', { code: 'NO_UID', message: 'user.id null — session lost' });
         showToastMsg('Please sign in again before verifying.', 'error');
@@ -1097,7 +1097,6 @@ export function AppProvider({ children }) {
       }
       _filePath = `${user.id}/selfie.jpg`;
 
-      // ── 3. Live session check ────────────────────────────────────────────
       const { data: { session: liveSession } } = await supabase.auth.getSession();
       _jwtUid = liveSession?.user?.id ?? null;
       const uidMatch = _jwtUid === user.id;
@@ -1116,56 +1115,49 @@ export function AppProvider({ children }) {
         return;
       }
 
-      // ── 4. Upsert — INSERT on first upload, UPDATE on re-upload ─────────
-      // upsert:true relies on INSERT + UPDATE storage policies both being present.
-      // cacheControl:'0' prevents CDN/edge from serving a stale cached version.
-      // Do NOT use remove+upload(upsert:false) — remove() has eventual consistency
-      // lag that causes a 409 when the upload runs before the delete propagates.
-      const { error: uploadErr } = await supabase.storage
-        .from('verification-photos')
-        .upload(_filePath, blob, { contentType: 'image/jpeg', upsert: true, cacheControl: '0' });
-      if (uploadErr) {
-        _push('storage_upload', 'error', {
-          code:    uploadErr.code       ?? uploadErr.statusCode ?? '—',
-          message: uploadErr.message    ?? '—',
-          details: uploadErr.details    ?? uploadErr.hint       ?? '—',
-        });
-        setVerificationUploading(false);
-        return;
-      }
-      _push('storage_upload', 'ok', { note: 'file uploaded ✓' });
+      // ── 4. Send to Edge Function — server handles storage + profile write ──
+      // Direct client Storage upload is unreliable on iOS Safari PWA due to
+      // RLS policy evaluation differences. The Edge Function uses the service
+      // role key to bypass Storage RLS entirely while still verifying the JWT.
+      _push('edge_fn_call', 'ok', { note: 'sending to submit-verification-selfie…' });
 
-      // ── 5. Profile update ────────────────────────────────────────────────
-      const { data: updatedRows, error: updateErr } = await supabase
-        .from('profiles')
-        .update({ verification_status: 'pending', verification_photo_path: _filePath })
-        .eq('id', user.id)
-        .select('id');
-      if (updateErr) {
-        _push('profile_update', 'error', {
-          code:    updateErr.code    ?? updateErr.statusCode ?? '—',
-          message: updateErr.message ?? '—',
-          details: updateErr.details ?? updateErr.hint       ?? '—',
-        });
-        setVerificationUploading(false);
-        return;
-      }
-      if (!updatedRows?.length) {
-        _push('profile_update', 'error', { code: '0_ROWS', message: 'RLS or privilege blocked write' });
-        setVerificationUploading(false);
-        return;
-      }
-      _push('profile_update', 'ok', { note: `${updatedRows.length} row(s) updated` });
+      const formData = new FormData();
+      formData.append('file', new File([blob], 'selfie.jpg', { type: 'image/jpeg' }));
 
-      // ── 6. Profile re-fetch ──────────────────────────────────────────────
+      const { data: fnData, error: fnErr } = await supabase.functions.invoke(
+        'submit-verification-selfie',
+        { body: formData },
+      );
+
+      if (fnErr || !fnData?.ok) {
+        const errMsg = fnData?.error ?? fnErr?.message ?? 'Edge Function failed';
+        const detail = fnData?.detail ?? fnErr?.context ?? '—';
+        _push('edge_fn_call', 'error', {
+          code:    fnErr?.status ?? fnData?.status ?? '—',
+          message: errMsg,
+          details: detail,
+        });
+        showToastMsg(errMsg, 'error');
+        setVerificationUploading(false);
+        return;
+      }
+      _push('edge_fn_call', 'ok', {
+        note: `fn ok — status=${fnData.verification_status} path=${fnData.verification_photo_path}`,
+      });
+
+      // ── 5. Refetch profile so local state matches DB ───────────────────────
       const { data: freshProfile, error: fetchErr } = await supabase.rpc('get_own_profile').single();
       if (fetchErr || !freshProfile) {
         _push('profile_refetch', 'error', {
           code:    fetchErr?.code    ?? '—',
           message: fetchErr?.message ?? 'get_own_profile returned null',
         });
-        // Non-fatal — optimistic local update
-        setProfile(prev => ({ ...prev, verification_status: 'pending', verification_photo_path: _filePath }));
+        // Non-fatal — patch from function response
+        setProfile(prev => ({
+          ...prev,
+          verification_status:     fnData.verification_status,
+          verification_photo_path: fnData.verification_photo_path,
+        }));
         profileLastLoadRef.current = 0;
         showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
         setVerificationUploading(false);
@@ -1175,7 +1167,7 @@ export function AppProvider({ children }) {
         note: `status=${freshProfile.verification_status} path=${freshProfile.verification_photo_path}`,
       });
 
-      // ── 7. DB verify ─────────────────────────────────────────────────────
+      // ── 6. DB verify ──────────────────────────────────────────────────────
       if (freshProfile.verification_status !== 'pending' || !freshProfile.verification_photo_path) {
         _push('db_verify', 'error', {
           code:    'DB_MISMATCH',
@@ -1186,7 +1178,7 @@ export function AppProvider({ children }) {
       }
       _push('db_verify', 'ok', { note: 'pending ✓ path ✓' });
 
-      // ── Success ──────────────────────────────────────────────────────────
+      // ── Success ───────────────────────────────────────────────────────────
       setProfile(freshProfile);
       profileLastLoadRef.current = Date.now();
       showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
