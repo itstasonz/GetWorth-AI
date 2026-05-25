@@ -813,18 +813,27 @@ export function AppProvider({ children }) {
     const optimisticMsg = { id: optimisticId, conversation_id: activeChat.id, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount, created_at: new Date().toISOString(), is_read: false };
     setMessages((prev) => [...prev, optimisticMsg]);
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    const payload = { conversation_id: activeChat.id, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount };
     try {
-      const { data, error: msgError } = await supabase.from('messages')
-        .insert({ conversation_id: activeChat.id, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount })
-        .select().single();
+      // Use .select() WITHOUT .single() so a RETURNING result filtered by the
+      // messages_select_participants RLS policy (nested conversation lookup) returns
+      // an empty array — not a PGRST116 error — and the optimistic message stays visible.
+      const { data: rows, error: msgError } = await supabase.from('messages')
+        .insert(payload)
+        .select();
       if (msgError) throw msgError;
+      const data = rows?.[0] ?? null;
       if (data) {
+        // RETURNING gave us the real row — swap optimistic for authoritative.
         setMessages((prev) => prev.map((m) => m.id === optimisticId ? data : m));
-        const { error: convUpdateErr } = await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
-        if (convUpdateErr) console.warn('Conversation timestamp update failed:', convUpdateErr.message);
       }
+      // Always refresh conversation timestamp (best-effort; error is non-fatal).
+      const { error: convUpdateErr } = await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
+      if (convUpdateErr) console.warn('[Chat] Conversation timestamp update failed:', convUpdateErr.message);
     } catch (e) {
-      console.error('Send message error:', e);
+      console.error('[Chat] sendMessage failed:', e);
+      console.error('[Chat] activeChat:', activeChat);
+      console.error('[Chat] payload:', payload);
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setNewMessage(text);
       setError(lang === 'he' ? 'שליחת ההודעה נכשלה' : 'Failed to send message');
