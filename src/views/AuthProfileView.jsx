@@ -250,7 +250,7 @@ export function ProfileView() {
   if (!user) return null;
 
   const vStatus = profile?.verification_status || 'unverified';
-  const isVerified = vStatus === 'verified' || profile?.is_verified;
+  const isVerified = ['verified', 'approved'].includes(vStatus) || profile?.is_verified;
 
   const handleAvatarPick = (e) => {
     const file = e.target.files?.[0];
@@ -414,7 +414,7 @@ export function ProfileView() {
           </Card>
         )}
 
-        {vStatus === 'verified' && (
+        {(vStatus === 'verified' || vStatus === 'approved') && (
           <Card className="p-4" gradient="linear-gradient(135deg, rgba(16,185,129,0.1), rgba(16,185,129,0.02))">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center flex-shrink-0">

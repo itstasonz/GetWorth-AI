@@ -73,17 +73,25 @@ export default function AdminPanel() {
   // ─── Load Verifications ───
   const loadVerifications = async () => {
     setLoading(true);
-    const { data } = await supabase.rpc('admin_list_pending_verifications');
-    setPendingVerifications(data || []);
+    const { data, error } = await supabase.rpc('admin_list_pending_verifications');
+    if (error) {
+      console.error('[Admin] Verifications RPC error:', error);
+      showToastMsg(lang === 'he' ? 'שגיאה בטעינת בקשות האימות' : 'Failed to load verifications', 'error');
+      setPendingVerifications([]);
+    } else {
+      console.log('[Admin] Verifications loaded:', data?.length ?? 0, 'rows', data?.[0] ?? null);
+      setPendingVerifications(data || []);
+    }
     setLoading(false);
   };
 
   // ─── Approve / Reject Verification ───
-  const handleVerification = async (userId, approve) => {
+  const handleVerification = async (userId, approve, rejectionReason) => {
     try {
       const { error } = await supabase.rpc('admin_verify_user', {
         p_user_id: userId,
         p_approve: approve,
+        p_rejection_reason: rejectionReason || null,
       });
       if (error) throw error;
 
@@ -93,6 +101,7 @@ export default function AdminPanel() {
       setPendingVerifications(prev => prev.filter(p => p.id !== userId));
     } catch (e) {
       console.error('[Admin] Verify error:', e);
+      showToastMsg(lang === 'he' ? 'שגיאה בעדכון האימות' : 'Failed to update verification', 'error');
     }
   };
 
@@ -297,7 +306,7 @@ export default function AdminPanel() {
                 user={user}
                 lang={lang}
                 onApprove={() => handleVerification(user.id, true)}
-                onReject={() => handleVerification(user.id, false)}
+                onReject={(reason) => handleVerification(user.id, false, reason)}
               />
             ))
           )}
@@ -400,6 +409,8 @@ function VerificationCard({ user, lang, onApprove, onReject }) {
   const [expanded, setExpanded] = useState(false);
   const [signedUrl, setSignedUrl] = useState(null);
   const [loadingPhoto, setLoadingPhoto] = useState(false);
+  const [rejecting, setRejecting] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState('');
   const t = (en, he) => lang === 'he' ? he : en;
 
   useEffect(() => {
@@ -454,20 +465,47 @@ function VerificationCard({ user, lang, onApprove, onReject }) {
           )}
 
           {/* Actions */}
-          <div className="flex gap-2 mt-3">
-            <button
-              onClick={onApprove}
-              className="flex-1 py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-sm font-semibold text-emerald-300 flex items-center justify-center gap-1.5 hover:bg-emerald-600/30 transition-all"
-            >
-              <CheckCircle className="w-4 h-4" />{t('Approve', 'אשר')}
-            </button>
-            <button
-              onClick={onReject}
-              className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-sm font-semibold text-red-300 flex items-center justify-center gap-1.5 hover:bg-red-600/30 transition-all"
-            >
-              <XCircle className="w-4 h-4" />{t('Reject', 'דחה')}
-            </button>
-          </div>
+          {!rejecting ? (
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={onApprove}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600/20 border border-emerald-500/30 text-sm font-semibold text-emerald-300 flex items-center justify-center gap-1.5 hover:bg-emerald-600/30 transition-all"
+              >
+                <CheckCircle className="w-4 h-4" />{t('Approve', 'אשר')}
+              </button>
+              <button
+                onClick={() => setRejecting(true)}
+                className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-sm font-semibold text-red-300 flex items-center justify-center gap-1.5 hover:bg-red-600/30 transition-all"
+              >
+                <XCircle className="w-4 h-4" />{t('Reject', 'דחה')}
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 space-y-2">
+              <textarea
+                value={rejectionReason}
+                onChange={(e) => setRejectionReason(e.target.value)}
+                placeholder={t('Reason for rejection (optional)', 'סיבת הדחייה (אופציונלי)')}
+                rows={2}
+                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-400/40 resize-none"
+                dir="auto"
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={() => { onReject(rejectionReason.trim() || null); setRejecting(false); setRejectionReason(''); }}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600/20 border border-red-500/30 text-sm font-semibold text-red-300 flex items-center justify-center gap-1.5 hover:bg-red-600/30 transition-all"
+                >
+                  <XCircle className="w-4 h-4" />{t('Confirm Reject', 'אשר דחייה')}
+                </button>
+                <button
+                  onClick={() => { setRejecting(false); setRejectionReason(''); }}
+                  className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-400 hover:bg-white/10 transition-all"
+                >
+                  {t('Cancel', 'ביטול')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </Card>
     </FadeIn>
