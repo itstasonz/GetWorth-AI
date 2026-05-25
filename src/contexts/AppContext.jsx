@@ -1116,17 +1116,14 @@ export function AppProvider({ children }) {
         return;
       }
 
-      // ── 4. Remove existing + fresh INSERT (avoids upsert DELETE path) ────
-      const { error: removeErr } = await supabase.storage
-        .from('verification-photos').remove([_filePath]);
-      _push('storage_remove', removeErr ? 'error' : 'ok', {
-        code:    removeErr?.code    ?? '—',
-        message: removeErr?.message ?? 'removed or not found',
-      });
-
+      // ── 4. Upsert — INSERT on first upload, UPDATE on re-upload ─────────
+      // upsert:true relies on INSERT + UPDATE storage policies both being present.
+      // cacheControl:'0' prevents CDN/edge from serving a stale cached version.
+      // Do NOT use remove+upload(upsert:false) — remove() has eventual consistency
+      // lag that causes a 409 when the upload runs before the delete propagates.
       const { error: uploadErr } = await supabase.storage
         .from('verification-photos')
-        .upload(_filePath, blob, { contentType: 'image/jpeg', upsert: false });
+        .upload(_filePath, blob, { contentType: 'image/jpeg', upsert: true, cacheControl: '0' });
       if (uploadErr) {
         _push('storage_upload', 'error', {
           code:    uploadErr.code       ?? uploadErr.statusCode ?? '—',
