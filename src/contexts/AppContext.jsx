@@ -1034,19 +1034,30 @@ export function AppProvider({ children }) {
 
   // ─── VERIFICATION ──────────────────────────────────
   const [verificationUploading, setVerificationUploading] = useState(false);
+  // ── DEBUG log — remove before release ────────────
+  const [verifyDbgLog, setVerifyDbgLog] = useState([]);
+  const clearVerifyDbg = useCallback(() => setVerifyDbgLog([]), []);
 
   const requestVerification = useCallback(async (file) => {
     if (!user || !file) return;
 
-    // ── DEBUG: step tracker — remove before release ─────────────────────────
-    let _dbgStep = 'file_validation';
-    const _dbgErr = (e) => {
-      const code    = e?.code    ?? e?.statusCode ?? '—';
-      const msg     = e?.message ?? String(e)     ?? '—';
-      const details = e?.details ?? e?.hint       ?? '—';
-      const info    = `[${_dbgStep}] ${code}: ${msg} | details: ${details}`;
-      console.error('[Verify]', info, e);
-      setError(`DBG ${info}`);
+    // ── DEBUG accumulator — remove before release ──────────────────────────
+    let _filePath = null;
+    let _jwtUid   = null;
+    const _push = (step, status, fields = {}) => {
+      const entry = {
+        ts:         new Date().toISOString().slice(11, 23),
+        step, status,
+        code:       fields.code       ?? '—',
+        message:    fields.message    ?? '—',
+        details:    fields.details    ?? '—',
+        path:       fields.path       ?? _filePath,
+        sessionUid: fields.sessionUid ?? _jwtUid,
+        reactUid:   fields.reactUid   ?? user?.id ?? '—',
+        note:       fields.note       ?? null,
+      };
+      console.log('[Verify]', step, status, entry);
+      setVerifyDbgLog(prev => [...prev.slice(-9), entry]);
     };
     // ───────────────────────────────────────────────────────────────────────
 
@@ -1055,139 +1066,140 @@ export function AppProvider({ children }) {
     const typeByExt  = /\.(jpe?g|png|webp|heic|heif|gif|avif)$/i.test(file.name ?? '');
     const isImage    = typeByMime || typeByExt || !file.type;
     if (!isImage) {
-      showToastMsg(`[file_validation] type="${file.type}" name="${file.name}" — not accepted`, 'error');
+      _push('file_validation', 'error', { message: `type="${file.type}" name="${file.name}" — not accepted` });
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      showToastMsg(`[file_validation] size ${file.size} > 10 MB`, 'error');
+      _push('file_validation', 'error', { message: `size ${file.size} > 10 MB` });
       return;
     }
 
     setVerificationUploading(true);
     try {
       // ── 2. Compression ───────────────────────────────────────────────────
-      _dbgStep = 'compression';
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target.result);
         reader.onerror = () => reject(new Error('FileReader failed'));
         reader.readAsDataURL(file);
       });
-
       const compressed = await compressImage(dataUrl, 1024, 0.85);
       const res  = await fetch(compressed);
       const blob = await res.blob();
+      _push('compression', 'ok', { note: `blob ${blob.size}B type=${blob.type}` });
 
       // ── Guard: user.id must be a real UUID ──────────────────────────────
       if (!user.id) {
+        _push('session_check', 'error', { code: 'NO_UID', message: 'user.id null — session lost' });
         showToastMsg('Please sign in again before verifying.', 'error');
-        setError('DBG user.id is null — session lost');
         setVerificationUploading(false);
         return;
       }
+      _filePath = `${user.id}/selfie.jpg`;
 
-      const filePath = `${user.id}/selfie.jpg`;
-
-      // ── DEBUG: verify live session JWT uid matches React state uid ────────
-      _dbgStep = 'session_check';
+      // ── 3. Live session check ────────────────────────────────────────────
       const { data: { session: liveSession } } = await supabase.auth.getSession();
-      const jwtUid = liveSession?.user?.id ?? '(no session)';
-      const uidMatch = jwtUid === user.id;
-      setError(`DBG session.uid: ${jwtUid} | react uid: ${user.id} | match: ${uidMatch}`);
-      console.log('[Verify] session check', { jwtUid, reactUid: user.id, uidMatch, filePath });
-
+      _jwtUid = liveSession?.user?.id ?? null;
+      const uidMatch = _jwtUid === user.id;
+      _push('session_check', uidMatch ? 'ok' : 'error', {
+        sessionUid: _jwtUid ?? '(none)',
+        reactUid:   user.id,
+        note: uidMatch ? 'uid match ✓' : '⚠ UID MISMATCH',
+      });
       if (!liveSession) {
         showToastMsg('Please sign in again before verifying.', 'error');
         setVerificationUploading(false);
         return;
       }
       if (!uidMatch) {
-        showToastMsg(`[session_mismatch] JWT uid: ${jwtUid} ≠ react uid: ${user.id}`, 'error');
         setVerificationUploading(false);
         return;
       }
 
-      // ── 3. Storage upload — remove then insert to avoid upsert ambiguity ──
-      _dbgStep = 'storage_remove';
-      // Best-effort: remove existing selfie so the following INSERT is always new.
-      // Ignore error — file may not exist on first upload.
+      // ── 4. Remove existing + fresh INSERT (avoids upsert DELETE path) ────
       const { error: removeErr } = await supabase.storage
-        .from('verification-photos')
-        .remove([filePath]);
-      console.log('[Verify] remove result', removeErr ?? 'ok');
+        .from('verification-photos').remove([_filePath]);
+      _push('storage_remove', removeErr ? 'error' : 'ok', {
+        code:    removeErr?.code    ?? '—',
+        message: removeErr?.message ?? 'removed or not found',
+      });
 
-      _dbgStep = 'storage_upload';
       const { error: uploadErr } = await supabase.storage
         .from('verification-photos')
-        .upload(filePath, blob, { contentType: 'image/jpeg', upsert: false });
-
+        .upload(_filePath, blob, { contentType: 'image/jpeg', upsert: false });
       if (uploadErr) {
-        _dbgErr(uploadErr);
-        showToastMsg(`[storage_upload] ${uploadErr.message}`, 'error');
+        _push('storage_upload', 'error', {
+          code:    uploadErr.code       ?? uploadErr.statusCode ?? '—',
+          message: uploadErr.message    ?? '—',
+          details: uploadErr.details    ?? uploadErr.hint       ?? '—',
+        });
         setVerificationUploading(false);
         return;
       }
+      _push('storage_upload', 'ok', { note: 'file uploaded ✓' });
 
-      setError(`DBG [storage_upload] success — path: ${filePath}`);
-      console.log('[Verify] upload success', filePath);
-
-      // ── 4. Profile update ────────────────────────────────────────────────
-      _dbgStep = 'profile_update';
+      // ── 5. Profile update ────────────────────────────────────────────────
       const { data: updatedRows, error: updateErr } = await supabase
         .from('profiles')
-        .update({ verification_status: 'pending', verification_photo_path: filePath })
+        .update({ verification_status: 'pending', verification_photo_path: _filePath })
         .eq('id', user.id)
         .select('id');
-
       if (updateErr) {
-        _dbgErr(updateErr);
-        showToastMsg(`[profile_update] ${updateErr.message}`, 'error');
+        _push('profile_update', 'error', {
+          code:    updateErr.code    ?? updateErr.statusCode ?? '—',
+          message: updateErr.message ?? '—',
+          details: updateErr.details ?? updateErr.hint       ?? '—',
+        });
         setVerificationUploading(false);
         return;
       }
-
       if (!updatedRows?.length) {
-        const info = '[profile_update] 0 rows — RLS or privilege blocked write';
-        console.error('[Verify]', info);
-        setError(`DBG ${info}`);
-        showToastMsg(info, 'error');
+        _push('profile_update', 'error', { code: '0_ROWS', message: 'RLS or privilege blocked write' });
         setVerificationUploading(false);
         return;
       }
+      _push('profile_update', 'ok', { note: `${updatedRows.length} row(s) updated` });
 
-      // ── 5. Profile re-fetch ──────────────────────────────────────────────
-      _dbgStep = 'profile_refetch';
+      // ── 6. Profile re-fetch ──────────────────────────────────────────────
       const { data: freshProfile, error: fetchErr } = await supabase.rpc('get_own_profile').single();
-
       if (fetchErr || !freshProfile) {
-        _dbgErr(fetchErr ?? new Error('get_own_profile returned null'));
-        setProfile(prev => ({ ...prev, verification_status: 'pending', verification_photo_path: filePath }));
+        _push('profile_refetch', 'error', {
+          code:    fetchErr?.code    ?? '—',
+          message: fetchErr?.message ?? 'get_own_profile returned null',
+        });
+        // Non-fatal — optimistic local update
+        setProfile(prev => ({ ...prev, verification_status: 'pending', verification_photo_path: _filePath }));
         profileLastLoadRef.current = 0;
         showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
         setVerificationUploading(false);
         return;
       }
+      _push('profile_refetch', 'ok', {
+        note: `status=${freshProfile.verification_status} path=${freshProfile.verification_photo_path}`,
+      });
 
-      // ── 6. DB verify ─────────────────────────────────────────────────────
-      _dbgStep = 'db_verify';
+      // ── 7. DB verify ─────────────────────────────────────────────────────
       if (freshProfile.verification_status !== 'pending' || !freshProfile.verification_photo_path) {
-        const info = `[db_verify] status="${freshProfile.verification_status}" path="${freshProfile.verification_photo_path}"`;
-        console.error('[Verify]', info);
-        setError(`DBG ${info}`);
-        showToastMsg(info, 'error');
+        _push('db_verify', 'error', {
+          code:    'DB_MISMATCH',
+          message: `status="${freshProfile.verification_status}" path="${freshProfile.verification_photo_path}"`,
+        });
         setVerificationUploading(false);
         return;
       }
+      _push('db_verify', 'ok', { note: 'pending ✓ path ✓' });
 
       // ── Success ──────────────────────────────────────────────────────────
-      setError(null); // clear any debug banner
       setProfile(freshProfile);
       profileLastLoadRef.current = Date.now();
       showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
 
     } catch (e) {
-      _dbgErr(e);
-      showToastMsg(`[${_dbgStep}] ${e?.message ?? String(e)}`, 'error');
+      _push('catch', 'error', {
+        code:    e?.code    ?? e?.statusCode ?? '—',
+        message: e?.message ?? String(e)     ?? '—',
+        details: e?.details ?? e?.hint       ?? '—',
+      });
     }
     setVerificationUploading(false);
   }, [user, lang, showToastMsg]);
@@ -2699,6 +2711,7 @@ export function AppProvider({ children }) {
     signInGoogle, signInEmail, signOut, sendPasswordReset, updatePassword, passwordRecovery,
     uploadAvatar, avatarUploading, refreshProfile,
     requestVerification, verificationUploading,
+    verifyDbgLog, clearVerifyDbg,
     showSignInModal, setShowSignInModal, signInAction, setSignInAction,
     tab, setTab, view, setView, goTab, reset,
     listings, myListings, savedIds, savedItems,
