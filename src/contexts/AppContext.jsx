@@ -2211,7 +2211,7 @@ export function AppProvider({ children }) {
     try {
       let { data, error: err } = await supabase
         .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_profile_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_profile_fkey(id, full_name, avatar_url, is_verified)')
+        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!buyer_id(id, full_name, avatar_url, is_verified), seller:profiles!seller_id(id, full_name, avatar_url, is_verified)')
         .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
         .order('created_at', { ascending: false })
         .limit(50);
@@ -2251,7 +2251,7 @@ export function AppProvider({ children }) {
       // Try full query with profile joins
       let { data, error } = await supabase
         .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!orders_buyer_profile_fkey(id, full_name, avatar_url, is_verified), seller:profiles!orders_seller_profile_fkey(id, full_name, avatar_url, is_verified)')
+        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!buyer_id(id, full_name, avatar_url, is_verified), seller:profiles!seller_id(id, full_name, avatar_url, is_verified)')
         .eq('id', orderId)
         .single();
 
