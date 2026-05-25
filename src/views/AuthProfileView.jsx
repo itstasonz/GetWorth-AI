@@ -396,7 +396,7 @@ export function ProfileView() {
                 <><Upload className="w-4 h-4" />{lang === 'he' ? 'העלה סלפי לאימות' : 'Upload selfie to verify'}</>
               )}
             </button>
-            <input ref={verifyInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="user" className="hidden" onChange={handleVerifyPick} />
+            <input ref={verifyInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handleVerifyPick} />
           </Card>
         )}
 
@@ -450,7 +450,7 @@ export function ProfileView() {
                 <><Upload className="w-4 h-4" />{lang === 'he' ? 'נסה שוב' : 'Try again'}</>
               )}
             </button>
-            <input ref={verifyInputRef} type="file" accept="image/jpeg,image/png,image/webp" capture="user" className="hidden" onChange={handleVerifyPick} />
+            <input ref={verifyInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handleVerifyPick} />
           </Card>
         )}
       </FadeIn>
