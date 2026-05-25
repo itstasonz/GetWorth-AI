@@ -1,6 +1,25 @@
 import React, { useEffect } from 'react';
 import { CheckCircle, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
 import { BADGE_COLORS } from '../lib/utils';
+import { navDirectionRef } from '../lib/urlSync';
+
+// ── ScreenTransition ──────────────────────────────────────────────────────────
+// Direction-aware view transition wrapper.
+// Reads navDirectionRef.current at render time (ref written synchronously before
+// setView is called, so this always has the correct value on mount).
+//
+// Use with key={view} on the parent so each view change triggers a fresh mount:
+//   <ScreenTransition key={view}>  ← new instance = new animation
+//
+// CSS classes + @media prefers-reduced-motion are defined in App.jsx <style>.
+export const ScreenTransition = ({ children, className = '' }) => {
+  const dir = navDirectionRef.current;
+  const animClass =
+    dir === 'push' ? 'animate-slideInRight' :
+    dir === 'pop'  ? 'animate-slideInLeft'  :
+                     'animate-crossfade';   // tab, replace, modal, default
+  return <div className={`${animClass} ${className}`}>{children}</div>;
+};
 
 // Animated wrappers
 export const FadeIn = ({ children, delay = 0, className = '' }) => (

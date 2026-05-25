@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react
 import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
-import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn } from './components/ui';
+import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn, ScreenTransition } from './components/ui';
 import { formatPrice, getSellerBadgeStyle } from './lib/utils';
 
 export const BUILD_VERSION = '2.2.0-20260429';
@@ -441,9 +441,10 @@ function AppShell() {
         </Suspense>
 
         {/* Content - View Router */}
-        <main className="flex-1 px-5 pb-4 overflow-y-auto">
+        {/* overflow-x: hidden clips the slideInRight/Left translate without a horizontal scrollbar */}
+        <main className="flex-1 px-5 pb-4 overflow-y-auto overflow-x-hidden">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-          <div key={view} className="animate-viewFade">
+          <ScreenTransition key={view}>
             {view === 'home' && <HomeView />}
             {view === 'browse' && !selected && <BrowseView />}
             {view === 'detail' && selected && <DetailView />}
@@ -462,7 +463,7 @@ function AppShell() {
               {view === 'orderDetail' && <LazyOrderDetailView />}
               {view === 'notifications' && <LazyNotificationsView />}
             </Suspense>
-          </div>
+          </ScreenTransition>
         </main>
 
         {/* Checkout Sheet (modal overlay, lazy) */}
@@ -573,6 +574,25 @@ function AppShell() {
         .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
         @keyframes viewFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .animate-viewFade { animation: viewFade 0.22s ease-out forwards; }
+
+        /* ── Phase 3D: direction-aware screen transitions ── */
+        /* Push  – new view slides in from the right (forward navigation) */
+        @keyframes slideInRight { from { opacity: 0.3; transform: translateX(100%); } to { opacity: 1; transform: translateX(0); } }
+        /* Pop   – new view slides in from the left (back navigation, partial parallax) */
+        @keyframes slideInLeft  { from { opacity: 0.3; transform: translateX(-38%); } to { opacity: 1; transform: translateX(0); } }
+        /* Tab / replace – fast crossfade, no slide (tab switches feel instant) */
+        @keyframes crossfade    { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-slideInRight { animation: slideInRight 0.26s cubic-bezier(0.32,0.72,0,1) forwards; will-change: transform; }
+        .animate-slideInLeft  { animation: slideInLeft  0.24s cubic-bezier(0.32,0.72,0,1) forwards; will-change: transform; }
+        .animate-crossfade    { animation: crossfade    0.18s ease-out forwards; }
+
+        /* ── prefers-reduced-motion: collapse all animation durations ── */
+        @media (prefers-reduced-motion: reduce) {
+          .animate-slideInRight, .animate-slideInLeft, .animate-crossfade,
+          .animate-viewFade, .animate-fadeIn, .animate-slideUp, .animate-slideDown,
+          .animate-scaleIn, .animate-toastIn { animation-duration: 0.01ms !important; animation-delay: 0ms !important; }
+        }
+
         .btn-spring { transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease; -webkit-tap-highlight-color: transparent; will-change: transform; }
         .btn-spring:active { transform: scale(0.95); transition-duration: 0.08s; transition-timing-function: ease; }
         .btn-spring-primary:active { box-shadow: 0 0 20px rgba(111,238,225,0.35), 0 0 40px rgba(111,238,225,0.15) !important; }

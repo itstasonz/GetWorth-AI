@@ -22,6 +22,13 @@
 
 import { useEffect, useRef } from 'react';
 
+// ── Navigation direction — module-level ref ───────────────────────────────────
+// Written synchronously by AppContext navigation functions BEFORE calling setView,
+// so ScreenTransition reads the correct value during the render that follows.
+// Values: 'push' | 'pop' | 'tab' | 'replace'
+export const navDirectionRef = { current: 'replace' };
+export const setNavDirection  = (dir) => { navDirectionRef.current = dir; };
+
 // ── View hierarchy depth ──────────────────────────────────────────────────────
 // -1 ephemeral: never own a real URL entry; push a same-URL sentinel instead
 //  0 app root
@@ -249,6 +256,9 @@ export function useUrlSync({
 
       const { view: tv, tab: tt } = parseUrlToState(window.location.pathname);
       const rv = tv === 'profile' && !user ? 'auth' : tv;
+
+      // Signal pop direction before React re-renders
+      setNavDirection('pop');
 
       // Pre-update tracking refs so URL sync skips when it fires
       lastUrlRef.current   = window.location.pathname;

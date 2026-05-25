@@ -4,7 +4,7 @@ import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
 import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
-import { useUrlSync } from '../lib/urlSync';
+import { useUrlSync, setNavDirection } from '../lib/urlSync';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -539,7 +539,7 @@ export function AppProvider({ children }) {
       const otherUser = conv.buyer_id === user.id ? conv.seller : conv.buyer;
       setActiveChat({ ...conv, otherUser });
       loadMessages(conv.id);
-      setView('chat');
+      setNavDirection('push'); setView('chat');
       setTab('messages');
       return;
     }
@@ -552,7 +552,7 @@ export function AppProvider({ children }) {
       const otherUser = data.buyer_id === user.id ? data.seller : data.buyer;
       setActiveChat({ ...data, otherUser });
       loadMessages(data.id);
-      setView('chat');
+      setNavDirection('push'); setView('chat');
       setTab('messages');
       loadConversations(true);
     }
@@ -665,6 +665,7 @@ export function AppProvider({ children }) {
   // ─── SELLER PROFILE ──────────────────────────────────
   const viewSellerProfile = async (sellerId) => {
     if (!sellerId) return;
+    setNavDirection('push');
     setLoadingSeller(true);
     setView('sellerProfile');
     const [{ data: profileData, error: profileErr }, { data: listingsData, error: listingsErr }] = await Promise.all([
@@ -753,7 +754,7 @@ export function AppProvider({ children }) {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
     if (item.id?.toString().startsWith('s')) {
       setActiveChat({ id: `demo-${item.id}`, listing: item, seller: item.seller, otherUser: item.seller, isDemo: true });
-      setMessages([]); setView('chat'); return;
+      setNavDirection('push'); setMessages([]); setView('chat'); return;
     }
     const sellerId = item.seller_id || item.seller?.id;
     if (sellerId === user.id) {
@@ -767,7 +768,7 @@ export function AppProvider({ children }) {
       const otherUserId = existing.buyer_id === user.id ? existing.seller_id : existing.buyer_id;
       const otherProfile = await getCachedProfile(otherUserId);
       setActiveChat({ ...existing, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
-      loadMessages(existing.id); setView('chat'); return;
+      setNavDirection('push'); loadMessages(existing.id); setView('chat'); return;
     }
     if (!sellerId) { setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation'); return; }
     const { data: newConv, error: convError } = await supabase.from('conversations')
@@ -780,13 +781,13 @@ export function AppProvider({ children }) {
         const otherUserId = retry.buyer_id === user.id ? retry.seller_id : retry.buyer_id;
         const otherProfile = await getCachedProfile(otherUserId);
         setActiveChat({ ...retry, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
-        loadMessages(retry.id); setView('chat'); return;
+        setNavDirection('push'); loadMessages(retry.id); setView('chat'); return;
       }
       setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation'); return;
     }
     if (newConv) {
       setActiveChat({ ...newConv, listing: item, seller: item.seller, otherUser: item.seller });
-      setMessages([]); setView('chat'); loadConversations(true);
+      setNavDirection('push'); setMessages([]); setView('chat'); loadConversations(true);
     }
   };
 
@@ -2313,6 +2314,7 @@ export function AppProvider({ children }) {
 
   // View an order's detail
   const viewOrder = useCallback((order) => {
+    setNavDirection('push');
     setActiveOrder(order);
     setActiveOrderId(order?.id || null);
     setView('orderDetail');
@@ -2415,6 +2417,7 @@ export function AppProvider({ children }) {
   const reset = () => {
     // Cancel any in-flight pipeline
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    setNavDirection('pop');
     setPipelineState('idle');
     setPipelineError(null);
     setAddPhotoMode(false);
@@ -2426,6 +2429,7 @@ export function AppProvider({ children }) {
   };
 
   const goTab = useCallback((newTab) => {
+    setNavDirection('tab');
     setTab(newTab);
     setSelected(null);
     setActiveChat(null);
@@ -2437,7 +2441,7 @@ export function AppProvider({ children }) {
     else if (newTab === 'profile') { setView(user ? 'profile' : 'auth'); if (user) refreshProfile(); }
   }, [user, loadConversations, loadOrders, refreshProfile]);
 
-  const viewItem = useCallback((item) => { setSelected(item); setView('detail'); }, []);
+  const viewItem = useCallback((item) => { setNavDirection('push'); setSelected(item); setView('detail'); }, []);
 
   const contactSeller = useCallback(() => {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return; }
@@ -2447,7 +2451,7 @@ export function AppProvider({ children }) {
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
-    setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setView('listing');
+    setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
   };
 
   const selectCondition = (c) => {

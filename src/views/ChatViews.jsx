@@ -347,7 +347,7 @@ export function ChatView() {
     // height: 100dvh shrinks with keyboard on iOS 15.4+; visualViewport listener handles older browsers.
     <div
       ref={containerRef}
-      className="fixed left-0 right-0 z-[45] flex flex-col animate-slideUp"
+      className="fixed left-0 right-0 z-[45] flex flex-col animate-slideInRight"
       style={{
         top: 0,
         height: '100dvh',
