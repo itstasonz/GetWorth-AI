@@ -771,12 +771,20 @@ export function AppProvider({ children }) {
       setNavDirection('push'); loadMessages(existing.id); setView('chat'); return;
     }
     if (!sellerId) { setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation'); return; }
-    const { data: newConv, error: convError } = await supabase.from('conversations')
-      .insert({ listing_id: item.id, buyer_id: user.id, seller_id: sellerId }).select().single();
+    const payload = { listing_id: item.id, buyer_id: user.id, seller_id: sellerId };
+    // Use .select() WITHOUT .single() — same pattern as messages.
+    // If RETURNING is filtered to 0 rows by the conversations SELECT RLS policy,
+    // .single() would throw PGRST116 and falsely report failure even though the
+    // INSERT succeeded.
+    const { data: rows, error: convError } = await supabase.from('conversations')
+      .insert(payload).select();
     if (convError) {
-      console.error('Conversation create error:', convError);
-      const { data: retry } = await supabase.from('conversations').select('*')
-        .eq('listing_id', item.id).or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`).limit(1).single();
+      console.error('[Chat] startConversation failed:', convError);
+      console.error('[Chat] error code:', convError.code, '| message:', convError.message);
+      // Fallback: conversation may already exist (race, duplicate key, etc.)
+      const { data: retryRows } = await supabase.from('conversations').select('*')
+        .eq('listing_id', item.id).or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`).limit(1);
+      const retry = retryRows?.[0];
       if (retry) {
         const otherUserId = retry.buyer_id === user.id ? retry.seller_id : retry.buyer_id;
         const otherProfile = await getCachedProfile(otherUserId);
@@ -785,9 +793,24 @@ export function AppProvider({ children }) {
       }
       setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation'); return;
     }
+    const newConv = rows?.[0] ?? null;
     if (newConv) {
       setActiveChat({ ...newConv, listing: item, seller: item.seller, otherUser: item.seller });
       setNavDirection('push'); setMessages([]); setView('chat'); loadConversations(true);
+    } else {
+      // INSERT succeeded (no error) but RETURNING was filtered by RLS SELECT policy.
+      // Fetch the row directly — buyer_id = auth.uid() so SELECT policy must pass.
+      console.error('[Chat] INSERT ok but RETURNING empty — fetching conversation directly');
+      const { data: fetchRows } = await supabase.from('conversations').select('*')
+        .eq('listing_id', item.id).eq('buyer_id', user.id).eq('seller_id', sellerId).limit(1);
+      const fetched = fetchRows?.[0];
+      if (fetched) {
+        setActiveChat({ ...fetched, listing: item, seller: item.seller, otherUser: item.seller });
+        setNavDirection('push'); setMessages([]); setView('chat'); loadConversations(true);
+      } else {
+        console.error('[Chat] Could not fetch conversation after INSERT');
+        setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation');
+      }
     }
   };
 

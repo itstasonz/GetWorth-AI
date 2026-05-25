@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { supabase } from '../lib/supabase';
+import { setNavDirection } from '../lib/urlSync';
 import { Card, Btn, Badge, FadeIn, SlideUp, InputField, EmptyState, haptic } from '../components/ui';
 import { formatPrice, timeAgo } from '../lib/utils';
 
@@ -287,7 +288,7 @@ export function OrdersView() {
 // ORDER DETAIL — timeline + actions for BOTH sides
 // ═══════════════════════════════════════════════════════
 export function OrderDetailView() {
-  const { lang, user, activeOrder, activeOrderId, updateOrderStatus, cancelOrder, setView, startConversation, submitReview, loadOrders, fetchOrderById, setActiveOrder } = useApp();
+  const { lang, user, activeOrder, activeOrderId, updateOrderStatus, cancelOrder, setView, startConversation, submitReview, loadOrders, fetchOrderById, setActiveOrder, setActiveChat, loadMessages } = useApp();
   const [updating, setUpdating] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
@@ -368,7 +369,46 @@ export function OrderDetailView() {
   };
   const handleContact = async () => {
     if (!listing) return;
-    isBuyer ? await startConversation(listing) : await startConversation({ ...listing, seller_id: order.buyer_id, seller: order.buyer });
+    if (isBuyer) {
+      // Buyer contacting seller: standard flow — startConversation creates or opens the thread.
+      await startConversation(listing);
+    } else {
+      // Seller contacting buyer: look for the existing conversation with CORRECT roles
+      // (buyer_id = order.buyer_id, seller_id = user.id).  We cannot call startConversation()
+      // with a reversed seller_id because conversations_insert_buyer RLS validates that
+      // conversations.seller_id matches listings.seller_id in the DB — swapping breaks that check.
+      const { data: rows } = await supabase
+        .from('conversations').select('*')
+        .eq('listing_id', listing.id)
+        .eq('buyer_id', order.buyer_id)
+        .eq('seller_id', user.id)
+        .limit(1);
+      const conv = rows?.[0];
+      if (conv) {
+        setActiveChat({ ...conv, listing, seller: order.seller, otherUser: order.buyer });
+        setNavDirection('push');
+        loadMessages(conv.id);
+        setView('chat');
+      } else {
+        // No existing conversation — seller initiates one.
+        // conversations_insert_seller RLS policy (migration 20260525000001) allows this
+        // when an order exists for this listing connecting the two parties.
+        const { data: newRows, error: insertErr } = await supabase
+          .from('conversations')
+          .insert({ listing_id: listing.id, buyer_id: order.buyer_id, seller_id: user.id })
+          .select();
+        if (insertErr) {
+          console.error('[OrderDetail] Seller conversation create failed:', insertErr);
+          return;
+        }
+        const newConv = newRows?.[0];
+        if (newConv) {
+          setActiveChat({ ...newConv, listing, seller: order.seller, otherUser: order.buyer });
+          setNavDirection('push');
+          setView('chat');
+        }
+      }
+    }
   };
 
   const stepLabels = {
