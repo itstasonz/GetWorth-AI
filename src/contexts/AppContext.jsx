@@ -1078,7 +1078,19 @@ export function AppProvider({ children }) {
       const res  = await fetch(compressed);
       const blob = await res.blob();
 
+      // ── Guard: user.id must be a real UUID before upload ─────────────────
+      if (!user.id) {
+        showToastMsg('Please sign in again before verifying.', 'error');
+        setError('DBG [storage_upload] user.id is null/undefined — session lost');
+        setVerificationUploading(false);
+        return;
+      }
+
       const filePath = `${user.id}/selfie.jpg`;
+
+      // ── DEBUG: show path/uid/bucket before upload attempt ────────────────
+      setError(`DBG upload path: ${filePath} | user.id: ${user.id} | bucket: verification-photos`);
+      console.log('[Verify] pre-upload', { filePath, userId: user.id, bucket: 'verification-photos' });
 
       // ── 3. Storage upload ────────────────────────────────────────────────
       _dbgStep = 'storage_upload';
