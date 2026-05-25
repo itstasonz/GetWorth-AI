@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   MessageCircle, ChevronRight, ChevronLeft,
-  DollarSign, Loader2, Send, Check, CheckCheck, X, ArrowDown,
+  DollarSign, Loader2, Send, Check, CheckCheck, X, ArrowDown, Shield,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, FadeIn, SlideUp } from '../components/ui';
