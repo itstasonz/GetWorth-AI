@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { CheckCircle, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { CheckCircle, AlertCircle, Info, AlertTriangle, X, ChevronRight, ChevronLeft } from 'lucide-react';
 import { BADGE_COLORS } from '../lib/utils';
 import { navDirectionRef } from '../lib/urlSync';
 
@@ -34,29 +34,101 @@ export const ScaleIn = ({ children, delay = 0, className = '' }) => (
   <div className={`animate-scaleIn ${className}`} style={{ animationDelay: `${delay}ms` }}>{children}</div>
 );
 
-// Toast notification — supports success (green) and error (red) variants
-export const Toast = ({ message, type = 'success', onClose }) => {
-  const duration = type === 'error' ? 4500 : 2500;
-  useEffect(() => { const t = setTimeout(onClose, duration); return () => clearTimeout(t); }, [onClose, duration]);
+// ── Toast system ─────────────────────────────────────────────────────────────
+// Severity types: success | info | warning | error | critical
+// critical = no auto-dismiss; must be manually closed.
+// RTL/LTR: auto-detected from message content (Hebrew chars → rtl).
+// Stacking: App.jsx renders up to 4 toasts in a flex-col container.
 
-  const isError = type === 'error';
-  const Icon = isError ? AlertCircle : CheckCircle;
-  const gradientClass = isError
-    ? 'bg-gradient-to-r from-red-600 to-red-500 shadow-red-600/30'
-    : 'bg-gradient-to-r from-green-500 to-emerald-500 shadow-green-500/30';
+const TOAST_CFG = {
+  success:  { ms: 4500,  bg: 'linear-gradient(135deg,#059669,#10b981)', glow: 'rgba(16,185,129,0.30)', Icon: CheckCircle   },
+  info:     { ms: 4500,  bg: 'linear-gradient(135deg,#1d4ed8,#3b82f6)', glow: 'rgba(59,130,246,0.30)',  Icon: Info          },
+  warning:  { ms: 7000,  bg: 'linear-gradient(135deg,#b45309,#f59e0b)', glow: 'rgba(245,158,11,0.30)',  Icon: AlertTriangle },
+  error:    { ms: 9500,  bg: 'linear-gradient(135deg,#b91c1c,#ef4444)', glow: 'rgba(239,68,68,0.30)',   Icon: AlertCircle   },
+  critical: { ms: null,  bg: 'linear-gradient(135deg,#7c3aed,#b91c1c)', glow: 'rgba(185,28,28,0.40)',   Icon: AlertCircle   },
+};
+
+export const Toast = ({ id, message, type = 'success', rtl: appRtl = false, onDismiss }) => {
+  const [leaving, setLeaving] = useState(false);
+  const cfg = TOAST_CFG[type] ?? TOAST_CFG.success;
+
+  // Auto-dismiss
+  useEffect(() => {
+    if (!cfg.ms) return;
+    const t = setTimeout(handleDismiss, cfg.ms);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cfg.ms]);
+
+  const handleDismiss = () => {
+    if (leaving) return;
+    setLeaving(true);
+    setTimeout(onDismiss, 230); // matches toastOut animation duration
+  };
+
+  // Hebrew text → RTL layout; technical ASCII text → LTR even in Hebrew UI
+  const hasHebrew = /[֐-׿]/.test(message);
+  const dir = hasHebrew ? 'rtl' : 'ltr';
 
   return (
     <div
-      className="fixed left-4 right-4 z-[100] animate-toastIn"
-      style={{ top: 'max(80px, calc(env(safe-area-inset-top) + 64px))' }}
+      role="alert"
+      aria-live="assertive"
+      className={leaving ? 'animate-toastOut' : 'animate-toastIn'}
+      style={{
+        background:   cfg.bg,
+        boxShadow:    `0 8px 24px ${cfg.glow}, 0 2px 8px rgba(0,0,0,0.25)`,
+        borderRadius: 16,
+        padding:      '11px 12px',
+        display:      'flex',
+        alignItems:   'flex-start',
+        gap:          9,
+        direction:    dir,
+        color:        '#fff',
+        minHeight:    48,
+        cursor:       'default',
+        userSelect:   'none',
+        WebkitUserSelect: 'none',
+      }}
     >
-      <div
-        className={`w-full px-4 py-3 rounded-2xl text-white text-sm font-semibold shadow-xl ${gradientClass} flex items-start gap-3`}
-        onClick={onClose}
+      {/* Severity icon */}
+      <cfg.Icon style={{ width: 18, height: 18, flexShrink: 0, marginTop: 2, opacity: 0.92 }} />
+
+      {/* Message — multiline, wraps naturally */}
+      <span style={{
+        flex:         1,
+        fontSize:     14,
+        fontWeight:   600,
+        lineHeight:   1.45,
+        wordBreak:    'break-word',
+        overflowWrap: 'break-word',
+        textAlign:    dir === 'rtl' ? 'right' : 'left',
+      }}>
+        {message}
+      </span>
+
+      {/* Dismiss button */}
+      <button
+        onClick={handleDismiss}
+        aria-label="Dismiss"
+        style={{
+          flexShrink:      0,
+          background:      'rgba(255,255,255,0.18)',
+          border:          'none',
+          borderRadius:    8,
+          width:           26,
+          height:          26,
+          display:         'flex',
+          alignItems:      'center',
+          justifyContent:  'center',
+          cursor:          'pointer',
+          color:           '#fff',
+          marginTop:       -1,
+          WebkitTapHighlightColor: 'transparent',
+        }}
       >
-        <Icon className="w-4 h-4 flex-shrink-0 mt-0.5" />
-        <span className="flex-1 leading-relaxed break-words">{message}</span>
-      </div>
+        <X style={{ width: 14, height: 14 }} />
+      </button>
     </div>
   );
 };

@@ -195,7 +195,7 @@ function AppShell() {
     lang, setLang, t, rtl,
     user, profile, loading,
     tab, view, goTab, reset, handleFile,
-    error, setError, toast, setToast,
+    error, setError, toasts, dismissToast,
     soundEnabled, setSoundEnabled,
     // Modals
     showSignInModal, setShowSignInModal, signInAction,
@@ -256,12 +256,16 @@ function AppShell() {
         lang={lang}
       />
 
-      {toast && (
-        <Toast
-          message={typeof toast === 'string' ? toast : toast.message}
-          type={typeof toast === 'string' ? 'success' : (toast.type || 'success')}
-          onClose={() => setToast(null)}
-        />
+      {/* Toast stack — newest at top, max 4 visible, stacked with gap */}
+      {toasts.length > 0 && (
+        <div
+          className="fixed left-3 right-3 z-[100] flex flex-col gap-2"
+          style={{ top: 'max(76px, calc(env(safe-area-inset-top) + 60px))' }}
+        >
+          {toasts.slice(-4).map((t) => (
+            <Toast key={t.id} {...t} rtl={rtl} onDismiss={() => dismissToast(t.id)} />
+          ))}
+        </div>
       )}
 
       {error && (
@@ -546,7 +550,8 @@ function AppShell() {
         @keyframes slideUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: translateY(0); } }
         @keyframes slideDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
         @keyframes scaleIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: scale(1); } }
-        @keyframes toastIn { 0% { opacity: 0; transform: translate(-50%, -20px) scale(0.9); } 100% { opacity: 1; transform: translate(-50%, 0) scale(1); } }
+        @keyframes toastIn  { from { opacity: 0; transform: translateY(-10px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        @keyframes toastOut { from { opacity: 1; transform: translateY(0) scale(1); } to { opacity: 0; transform: translateY(-6px) scale(0.96); } }
         @keyframes heartPop { 0%, 100% { transform: scale(1); } 25% { transform: scale(1.3); } 50% { transform: scale(0.95); } 75% { transform: scale(1.15); } }
         @keyframes shimmer { 100% { transform: translateX(100%); } }
         @keyframes shimmer-fast { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
@@ -560,7 +565,8 @@ function AppShell() {
         .animate-slideUp { animation: slideUp 0.4s ease-out forwards; }
         .animate-slideDown { animation: slideDown 0.3s ease-out forwards; }
         .animate-scaleIn { animation: scaleIn 0.3s ease-out forwards; }
-        .animate-toastIn { animation: toastIn 0.3s ease-out forwards; }
+        .animate-toastIn  { animation: toastIn  0.28s cubic-bezier(0.34,1.20,0.64,1) forwards; }
+        .animate-toastOut { animation: toastOut 0.23s ease-in forwards; }
         .animate-heartPop { animation: heartPop 0.6s ease-in-out; }
         .animate-shimmer { animation: shimmer 2s infinite; }
         .animate-shimmer-fast { animation: shimmer-fast 1.5s infinite; }
@@ -590,7 +596,7 @@ function AppShell() {
         @media (prefers-reduced-motion: reduce) {
           .animate-slideInRight, .animate-slideInLeft, .animate-crossfade,
           .animate-viewFade, .animate-fadeIn, .animate-slideUp, .animate-slideDown,
-          .animate-scaleIn, .animate-toastIn { animation-duration: 0.01ms !important; animation-delay: 0ms !important; }
+          .animate-scaleIn, .animate-toastIn, .animate-toastOut { animation-duration: 0.01ms !important; animation-delay: 0ms !important; }
         }
 
         .btn-spring { transition: transform 0.35s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease; -webkit-tap-highlight-color: transparent; will-change: transform; }

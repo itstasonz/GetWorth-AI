@@ -80,7 +80,7 @@ export function AppProvider({ children }) {
   const [tab, setTab] = useState('home');
   const [view, setView] = useState('home');
   const [error, setError] = useState(null);
-  const [toast, setToast] = useState(null);
+  const [toasts, setToasts] = useState([]);
 
   // Listings state
   const [listings, setListings] = useState([]);
@@ -210,7 +210,11 @@ export function AppProvider({ children }) {
     }
   }, [soundEnabled]);
 
-  const showToastMsg = useCallback((msg, type = 'success') => setToast({ message: msg, type }), []);
+  const showToastMsg = useCallback((msg, type = 'success') => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    setToasts(prev => [...prev.slice(-3), { id, message: msg, type }]); // keep max 4
+  }, []);
+  const dismissToast = useCallback((id) => setToasts(prev => prev.filter(t => t.id !== id)), []);
 
   // ─── Refresh current user's profile from DB — 60s TTL to avoid hitting network on every tab tap ───
   const refreshProfile = useCallback(async () => {
@@ -2676,7 +2680,7 @@ export function AppProvider({ children }) {
     messagesEndRef,
     // Notification system
     msgNotification, openNotification, dismissNotification,
-    error, setError, toast, setToast, showToastMsg,
+    error, setError, toasts, dismissToast, showToastMsg,
     soundEnabled, setSoundEnabled, playSound,
     fileRef, videoRef, canvasRef,
   };
