@@ -73,13 +73,21 @@ export default function AdminPanel() {
   // ─── Load Verifications ───
   const loadVerifications = async () => {
     setLoading(true);
+    console.log('[Admin] calling admin_list_pending_verifications…');
     const { data, error } = await supabase.rpc('admin_list_pending_verifications');
     if (error) {
-      console.error('[Admin] Verifications RPC error:', error);
+      // Log every field so we can diagnose the exact DB error in the console
+      console.error('[Admin] loadVerifications failed', {
+        code:    error.code,
+        message: error.message,
+        details: error.details,
+        hint:    error.hint,
+        full:    error,
+      });
       showToastMsg(lang === 'he' ? 'שגיאה בטעינת בקשות האימות' : 'Failed to load verifications', 'error');
       setPendingVerifications([]);
     } else {
-      console.log('[Admin] Verifications loaded:', data?.length ?? 0, 'rows', data?.[0] ?? null);
+      console.log('[Admin] loadVerifications OK — rows:', data?.length ?? 0, 'first:', data?.[0] ?? null);
       setPendingVerifications(data || []);
     }
     setLoading(false);
@@ -441,7 +449,10 @@ function VerificationCard({ user, lang, onApprove, onReject }) {
             <div className="flex-1 min-w-0">
               <p className="font-semibold">{user.full_name || 'Anonymous'}</p>
               <p className="text-xs text-slate-400">{user.email}</p>
-              <p className="text-[10px] text-slate-500 mt-0.5">{t('Joined', 'הצטרף')} {timeAgo(user.created_at, { ago: t('ago', 'לפני') })}</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">
+                {t('Submitted', 'הוגש')} {timeAgo(user.updated_at || user.created_at, { ago: t('ago', 'לפני') })}
+                {' · '}{t('Joined', 'הצטרף')} {timeAgo(user.created_at, { ago: t('ago', 'לפני') })}
+              </p>
             </div>
             <button
               onClick={() => setExpanded(!expanded)}
