@@ -1038,31 +1038,39 @@ export function AppProvider({ children }) {
   const requestVerification = useCallback(async (file) => {
     if (!user || !file) return;
 
+    // ── DEBUG: step tracker — remove before release ─────────────────────────
+    let _dbgStep = 'file_validation';
+    const _dbgErr = (e) => {
+      const code    = e?.code    ?? e?.statusCode ?? '—';
+      const msg     = e?.message ?? String(e)     ?? '—';
+      const details = e?.details ?? e?.hint       ?? '—';
+      const info    = `[${_dbgStep}] ${code}: ${msg} | details: ${details}`;
+      console.error('[Verify]', info, e);
+      setError(`DBG ${info}`);
+    };
+    // ───────────────────────────────────────────────────────────────────────
+
     // ── 1. File type check ──────────────────────────────────────────────────
-    // Safari/iOS PWA with capture="user" delivers files with file.type=""
-    // (empty string) or "image/heic".  The old startsWith check rejected both,
-    // then called showToastMsg with no type arg — defaulting to type='success'
-    // (green toast).  Users read green = success but nothing was uploaded.
-    // Accept: any image/* MIME, known image extensions, OR empty type (Safari camera).
     const typeByMime = !!file.type && file.type.startsWith('image/');
     const typeByExt  = /\.(jpe?g|png|webp|heic|heif|gif|avif)$/i.test(file.name ?? '');
-    const isImage    = typeByMime || typeByExt || !file.type; // empty = Safari camera JPEG
+    const isImage    = typeByMime || typeByExt || !file.type;
     if (!isImage) {
-      showToastMsg(lang === 'he' ? 'קובץ לא תקין' : 'Invalid file type', 'error');
+      showToastMsg(`[file_validation] type="${file.type}" name="${file.name}" — not accepted`, 'error');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי (עד 10MB)' : 'File too large (max 10MB)', 'error');
+      showToastMsg(`[file_validation] size ${file.size} > 10 MB`, 'error');
       return;
     }
 
     setVerificationUploading(true);
     try {
-      // ── 2. Read + compress ───────────────────────────────────────────────
+      // ── 2. Compression ───────────────────────────────────────────────────
+      _dbgStep = 'compression';
       const dataUrl = await new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => resolve(e.target.result);
-        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.onerror = () => reject(new Error('FileReader failed'));
         reader.readAsDataURL(file);
       });
 
@@ -1072,22 +1080,21 @@ export function AppProvider({ children }) {
 
       const filePath = `${user.id}/selfie.jpg`;
 
-      // ── 3. Upload to private bucket ─────────────────────────────────────
+      // ── 3. Storage upload ────────────────────────────────────────────────
+      _dbgStep = 'storage_upload';
       const { error: uploadErr } = await supabase.storage
         .from('verification-photos')
         .upload(filePath, blob, { contentType: 'image/jpeg', upsert: true });
 
       if (uploadErr) {
-        console.error('[Verify] storage upload error:', uploadErr);
-        showToastMsg(lang === 'he' ? 'שגיאה בהעלאת התמונה' : 'Photo upload failed — try again', 'error');
+        _dbgErr(uploadErr);
+        showToastMsg(`[storage_upload] ${uploadErr.message}`, 'error');
         setVerificationUploading(false);
         return;
       }
 
-      // ── 4. Update profile row (store path only, never a public URL) ─────
-      // Use .select('id') so PostgREST sends RETURNING — a silent 0-row update
-      // (RLS-blocked or privilege issue) would be invisible with return=minimal
-      // ({data:null,error:null} for both success and blocked writes).
+      // ── 4. Profile update ────────────────────────────────────────────────
+      _dbgStep = 'profile_update';
       const { data: updatedRows, error: updateErr } = await supabase
         .from('profiles')
         .update({ verification_status: 'pending', verification_photo_path: filePath })
@@ -1095,57 +1102,54 @@ export function AppProvider({ children }) {
         .select('id');
 
       if (updateErr) {
-        console.error('[Verify] profile update error:', updateErr);
-        showToastMsg(lang === 'he' ? 'שגיאה בעדכון הפרופיל' : 'Profile update failed — try again', 'error');
+        _dbgErr(updateErr);
+        showToastMsg(`[profile_update] ${updateErr.message}`, 'error');
         setVerificationUploading(false);
         return;
       }
 
       if (!updatedRows?.length) {
-        // UPDATE completed without error but touched 0 rows — RLS or privilege blocked it.
-        console.error('[Verify] profile update: 0 rows affected — RLS or privilege issue');
-        showToastMsg(lang === 'he' ? 'שגיאה בעדכון הפרופיל' : 'Profile update blocked — contact support', 'error');
+        const info = '[profile_update] 0 rows — RLS or privilege blocked write';
+        console.error('[Verify]', info);
+        setError(`DBG ${info}`);
+        showToastMsg(info, 'error');
         setVerificationUploading(false);
         return;
       }
 
-      // ── 5. Verify DB truth before declaring success ─────────────────────
-      // SECURITY DEFINER RPC bypasses column-level SELECT revokes so it always
-      // returns verification_status + verification_photo_path.
-      // This also fixes the iOS PWA resume problem: re-init() can fire after
-      // the camera closes and overwrite optimistic state.  Using DB ground-truth
-      // here and resetting the throttle means whatever loads next matches reality.
+      // ── 5. Profile re-fetch ──────────────────────────────────────────────
+      _dbgStep = 'profile_refetch';
       const { data: freshProfile, error: fetchErr } = await supabase.rpc('get_own_profile').single();
 
       if (fetchErr || !freshProfile) {
-        // Profile fetch failed but upload + update succeeded — treat as success.
-        console.error('[Verify] post-upload profile fetch failed:', fetchErr);
+        _dbgErr(fetchErr ?? new Error('get_own_profile returned null'));
         setProfile(prev => ({ ...prev, verification_status: 'pending', verification_photo_path: filePath }));
-        profileLastLoadRef.current = 0; // force next load to re-fetch
+        profileLastLoadRef.current = 0;
         showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
         setVerificationUploading(false);
         return;
       }
 
+      // ── 6. DB verify ─────────────────────────────────────────────────────
+      _dbgStep = 'db_verify';
       if (freshProfile.verification_status !== 'pending' || !freshProfile.verification_photo_path) {
-        console.error('[Verify] DB check failed after update:', {
-          verification_status: freshProfile.verification_status,
-          has_path: !!freshProfile.verification_photo_path,
-        });
-        showToastMsg(lang === 'he' ? 'שגיאה בעדכון הפרופיל' : 'Profile update did not persist — try again', 'error');
+        const info = `[db_verify] status="${freshProfile.verification_status}" path="${freshProfile.verification_photo_path}"`;
+        console.error('[Verify]', info);
+        setError(`DBG ${info}`);
+        showToastMsg(info, 'error');
         setVerificationUploading(false);
         return;
       }
 
-      // ── 6. Commit DB truth to local state ──────────────────────────────
+      // ── Success ──────────────────────────────────────────────────────────
+      setError(null); // clear any debug banner
       setProfile(freshProfile);
-      profileLastLoadRef.current = Date.now(); // throttle reset with fresh data
-
+      profileLastLoadRef.current = Date.now();
       showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
 
     } catch (e) {
-      console.error('[Verify] Unexpected error:', e);
-      showToastMsg(lang === 'he' ? 'שגיאה בשליחת הבקשה' : 'Failed to submit — try again', 'error');
+      _dbgErr(e);
+      showToastMsg(`[${_dbgStep}] ${e?.message ?? String(e)}`, 'error');
     }
     setVerificationUploading(false);
   }, [user, lang, showToastMsg]);
