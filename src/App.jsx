@@ -360,7 +360,7 @@ function AppShell() {
         {/* Header */}
         {/* ═══ STITCH TOPBAR — faithful port of HTML header ═══ */}
         <header
-          className="sticky top-0 w-full z-50"
+          className={`sticky top-0 w-full z-50 ${view === 'chat' ? 'hidden' : ''}`}
           style={{
             background: 'rgba(19, 19, 19, 0.60)',
             backdropFilter: 'blur(24px)',
