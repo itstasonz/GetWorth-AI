@@ -2067,6 +2067,51 @@ export function ResultsView() {
         </FadeIn>
       )}
 
+      {/* ═══ PIPELINE DEBUG PANEL — always shown when _debug present ═══ */}
+      {result._debug && (() => {
+        const d = result._debug;
+        const s1 = d.stage1 || {};
+        const s2 = d.stage2 || {};
+        const ret = d.retrieval || {};
+        const pip = d.pipeline || {};
+        const s1Failed = s1.failed || (s1.brand === 'none' && !s1.ocr);
+        const noDb = ret.candidates_count === 0;
+        return (
+          <FadeIn delay={400}>
+            <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,100,100,0.30)' }}>
+              <div className="px-3 pt-2 pb-1 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#ff6464' }}>🔬 Pipeline Debug</span>
+                <span className="text-[9px] text-slate-500">{pip.total_ms}ms · {pip.images_count} img(s){pip.vision_used ? ' · Vision' : ''}</span>
+              </div>
+              <div className="px-3 py-2 space-y-2 font-mono">
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 1 — Recognition</p>
+                  <p className="text-[10px]" style={{ color: s1Failed ? '#f87171' : '#86efac' }}>cat: {s1.category} ({Math.round((s1.category_confidence||0)*100)}%)</p>
+                  <p className="text-[10px]" style={{ color: s1.brand==='none' ? '#f87171' : '#fbbf24' }}>brand: {s1.brand} ({Math.round((s1.brand_conf||0)*100)}% / {s1.brand_evidence||'?'})</p>
+                  <p className="text-[10px]" style={{ color: s1.model==='none' ? '#f87171' : '#6feee1' }}>model: {s1.model} ({Math.round((s1.model_conf||0)*100)}% / {s1.model_evidence||'?'})</p>
+                  {s1.model_candidates && <p className="text-[10px] text-slate-400">all models: {s1.model_candidates}</p>}
+                  <p className="text-[10px]" style={{ color: s1.ocr ? '#a78bfa' : '#f87171' }}>ocr: {s1.ocr || '⚠ EMPTY'}{s1.logos ? ` | logos: ${s1.logos}` : ''}</p>
+                  {s1.failed && <p className="text-[10px] font-semibold text-red-400">⛔ Stage 1 failed / timed out — used fallback</p>}
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">DB Retrieval</p>
+                  <p className="text-[10px]" style={{ color: noDb ? '#f87171' : '#86efac' }}>
+                    {noDb ? '⚠ 0 candidates — all strategies empty (RPC missing? Product not in DB?)' : `${ret.candidates_count} found: ${ret.top3}`}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 2 — Verification</p>
+                  <p className="text-[10px] text-slate-300">{s2.final_brand} {s2.final_model} / {s2.final_category}</p>
+                  <p className="text-[10px]" style={{ color: '#fbbf24' }}>{s2.brand_confidence} · {s2.identification_method}</p>
+                  <p className="text-[10px]" style={{ color: '#6feee1' }}>conf: raw={Math.round((s2.raw_confidence||0)*100)}% → cal={Math.round((s2.calibrated_confidence||0)*100)}%</p>
+                  {s2.reasoning && <p className="text-[10px] text-slate-500 italic break-words">{s2.reasoning}</p>}
+                </div>
+              </div>
+            </div>
+          </FadeIn>
+        );
+      })()}
+
     </div>
   );
 }

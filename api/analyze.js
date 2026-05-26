@@ -409,7 +409,7 @@ EXTRACTION STEPS (follow in order):
 4. MODEL CANDIDATES — List possible models (max 5) with confidence + evidence
 
    DISAMBIGUATION RULES (apply when multiple similar models exist in a family):
-   - Gaming mice (Logitech G-series, Razer, SteelSeries, etc.): G502/G500/G900/G903/G502X/G305/G603/G703 are nearly indistinguishable from above without a label. Top-down photo → list ALL visually plausible models at max 0.50 confidence. NEVER pick one definitively from shape alone.
+   - Gaming mice (Logitech G-series, Razer, SteelSeries, etc.): G502/G500/G900/G903/G502X/G305/G603/G703 are nearly indistinguishable by shape alone. SHAPE-ONLY photo (no visible text on label/sticker) → list ALL plausible models at max 0.50 each. LABEL/STICKER EXCEPTION: If you directly read a model string from a label or sticker via OCR (e.g. "G900" is printed on a sticker), that is text-confirmed — assign that model ≥0.85 confidence. Text evidence always overrides shape ambiguity. Label photos are NOT subject to the 0.50 cap.
    - Smartphones: iPhone 13/14/15 rear panels look near-identical. Count rear camera lenses and note ring thickness + color as clues. Without visible text/logo, cap each model at 0.55.
    - Gaming controllers: PS4 DualShock vs PS5 DualSense differ in touchpad width and share-button position. Xbox One vs Series X controllers differ mainly in Share/Menu button layout.
    - Laptops/MacBooks: Notch presence (2021+), port count, and trackpad size visible from above. Cap at 0.60 without visible text.
@@ -977,16 +977,12 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   const topModel = recognition.model_candidates?.[0]?.model;
   const category = recognition.category;
 
-  let vectorResults = [];
-  let textResults = [];
-  let ocrResults = [];
-
-  // Build OCR keyword list once (shared by strategy 3)
   const ocrTexts = recognition.ocr_text?.raw_texts || [];
   const modelCandidates = recognition.model_candidates?.map(m => m.model) || [];
   const visionText = visionData?.text || [];
   const visionLogos = (visionData?.logos || []).map(l => l.description);
   const visionLabels = (visionData?.labels || []).map(l => l.description);
+
   const keywords = [
     ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
     ...modelCandidates.map(m => m.toLowerCase()),
@@ -997,76 +993,153 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   ].filter(Boolean);
   const uniqueKeywords = [...new Set(keywords)].slice(0, 25);
 
-  // ── Strategies 1 + 3 run in parallel (both use precomputed inputs) ──
-  const [vectorRes, ocrRes] = await Promise.all([
-    // Strategy 1: Vector search
-    queryEmbedding
-      ? supa.rpc('match_products', {
-          query_embedding: queryEmbedding,
-          similarity_threshold: 0.60,
-          match_limit: 10,
-        }).then(({ data, error }) => {
-          if (!error && data) return data.map(r => ({ ...r, _source: 'vector', similarity: r.similarity }));
-          return [];
-        }).catch(err => { console.warn('[Retrieve] Vector search failed:', err.message); return []; })
-      : Promise.resolve([]),
+  console.log(`[Retrieve] brand="${topBrand}" model="${topModel}" category="${category}"`);
+  console.log(`[Retrieve] OCR texts: [${ocrTexts.join(' | ')}]`);
+  console.log(`[Retrieve] model candidates: [${modelCandidates.join(', ')}]`);
+  console.log(`[Retrieve] keywords: [${uniqueKeywords.slice(0, 10).join(', ')}]`);
 
-    // Strategy 3: OCR keyword match
-    uniqueKeywords.length > 0
-      ? supa.rpc('match_products_by_ocr', { p_keywords: uniqueKeywords, p_limit: 5 })
-          .then(({ data, error }) => {
-            if (!error && data?.length) {
-              console.log(`[Retrieve] OCR matched ${data.length} products (keywords: ${uniqueKeywords.slice(0, 5).join(', ')})`);
-              return data.map(r => ({
-                ...r,
-                _source: 'ocr_' + r.match_type,
-                similarity: r.match_type === 'model_number' ? 0.92
-                          : r.match_type === 'ocr_keyword'  ? 0.80
-                          : 0.75,
-              }));
-            }
-            return [];
-          }).catch(err => { console.warn('[Retrieve] OCR keyword search failed:', err.message); return []; })
-      : Promise.resolve([]),
-  ]);
+  let vectorResults = [];
+  let textResults = [];
+  let ocrResults = [];
 
-  vectorResults = vectorRes;
-  ocrResults = ocrRes;
+  // ── Strategy 1: Vector similarity search ──
+  if (queryEmbedding) {
+    const { data: vecData, error: vecError } = await supa.rpc('match_products', {
+      query_embedding: queryEmbedding,
+      similarity_threshold: 0.60,
+      match_limit: 10,
+    }).catch(err => ({ data: null, error: err }));
 
-  // ── Strategy 2: Text search (serial — depends on vector results for category fallback gate) ──
+    if (!vecError && vecData?.length) {
+      vectorResults = vecData.map(r => ({ ...r, _source: 'vector', similarity: r.similarity }));
+      console.log(`[Retrieve] Vector: ${vectorResults.length} results (top sim=${vectorResults[0]?.similarity?.toFixed(2)})`);
+    } else if (vecError) {
+      console.warn('[Retrieve] Vector RPC failed:', vecError.message || vecError);
+    }
+  }
+
+  // ── Strategy 3: OCR keyword RPC (with direct ILIKE fallback when RPC absent) ──
+  if (uniqueKeywords.length > 0) {
+    const { data: ocrData, error: ocrError } = await supa
+      .rpc('match_products_by_ocr', { p_keywords: uniqueKeywords, p_limit: 6 })
+      .catch(err => ({ data: null, error: err }));
+
+    if (!ocrError && ocrData?.length) {
+      ocrResults = ocrData.map(r => ({
+        ...r,
+        _source: 'ocr_' + (r.match_type || 'keyword'),
+        similarity: r.match_type === 'model_number' ? 0.92
+                  : r.match_type === 'ocr_keyword'  ? 0.80
+                  : 0.75,
+      }));
+      console.log(`[Retrieve] OCR RPC: ${ocrResults.length} results`);
+    } else {
+      // RPC doesn't exist or failed — direct ILIKE fallback
+      if (ocrError) console.warn('[Retrieve] OCR RPC failed:', ocrError.message || String(ocrError), '— using direct ILIKE fallback');
+
+      try {
+        // Pick the most significant keywords: model numbers (alphanumeric with digits), brand
+        const modelTokens = ocrTexts
+          .flatMap(t => t.split(/\s+/))
+          .filter(w => /[A-Za-z][0-9]|[0-9]{3,}/.test(w) && w.length >= 3)
+          .slice(0, 5);
+        const searchModels = [...new Set([
+          ...(topModel && topModel.toLowerCase() !== 'unidentified' ? [topModel] : []),
+          ...modelCandidates.filter(m => m && m.toLowerCase() !== 'unidentified'),
+          ...modelTokens,
+        ])].slice(0, 6);
+
+        console.log(`[Retrieve] OCR direct fallback tokens: [${searchModels.join(', ')}]`);
+
+        for (const token of searchModels) {
+          let q = supa.from('products').select('*');
+          if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
+            q = q.ilike('brand', `%${topBrand}%`);
+          }
+          q = q.or(`model.ilike.%${token}%,name.ilike.%${token}%`).limit(3);
+          const { data: fallback } = await q;
+          if (fallback?.length) {
+            ocrResults.push(...fallback.map(r => ({ ...r, _source: 'ocr_direct_fallback', similarity: 0.78 })));
+          }
+        }
+
+        // Also try brand-only search if model search yielded nothing
+        if (ocrResults.length === 0 && topBrand && topBrand.toLowerCase() !== 'unidentified') {
+          const { data: brandOnly } = await supa.from('products').select('*')
+            .ilike('brand', `%${topBrand}%`)
+            .order('popularity_score', { ascending: false })
+            .limit(4);
+          if (brandOnly?.length) {
+            ocrResults.push(...brandOnly.map(r => ({ ...r, _source: 'ocr_brand_fallback', similarity: 0.60 })));
+          }
+        }
+
+        if (ocrResults.length > 0) {
+          // Dedupe by id before logging
+          const seen = new Set();
+          ocrResults = ocrResults.filter(r => !seen.has(r.id) && seen.add(r.id));
+          console.log(`[Retrieve] OCR direct fallback: ${ocrResults.length} results`);
+        } else {
+          console.log('[Retrieve] OCR direct fallback: 0 results');
+        }
+      } catch (e2) {
+        console.warn('[Retrieve] OCR direct fallback error:', e2.message);
+      }
+    }
+  }
+
+  // ── Strategy 2: Text / ILIKE search ──
   try {
+    // 2a: brand + model ILIKE (primary — most precise)
     if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
       let q = supa.from('products').select('*').ilike('brand', `%${topBrand}%`);
       if (topModel && topModel.toLowerCase() !== 'unidentified') {
         q = q.ilike('model', `%${topModel}%`);
       }
-      const { data: exact } = await q.limit(5);
-      if (exact?.length) {
-        textResults.push(...exact.map((r) => ({ ...r, _source: 'text_exact', similarity: 0.85 })));
+      const { data: exact, error: exactErr } = await q.limit(5);
+      if (exactErr) {
+        console.warn('[Retrieve] brand+model exact failed:', exactErr.message);
+      } else if (exact?.length) {
+        textResults.push(...exact.map(r => ({ ...r, _source: 'text_exact', similarity: 0.88 })));
+        console.log(`[Retrieve] text_exact: ${exact.length} (brand+model ILIKE)`);
+      }
+
+      // 2a-fallback: if model field returned nothing, search model string in name column
+      if (textResults.length === 0 && topModel && topModel.toLowerCase() !== 'unidentified') {
+        const { data: nameSearch } = await supa.from('products').select('*')
+          .ilike('brand', `%${topBrand}%`)
+          .ilike('name', `%${topModel}%`)
+          .limit(5);
+        if (nameSearch?.length) {
+          textResults.push(...nameSearch.map(r => ({ ...r, _source: 'text_name', similarity: 0.82 })));
+          console.log(`[Retrieve] text_name: ${nameSearch.length} (brand + name ILIKE)`);
+        }
       }
     }
 
-    const searchTerms = [topBrand, topModel, category].filter(Boolean).join(' ');
-    if (searchTerms.trim()) {
-      const { data: fts } = await supa
-        .from('products')
-        .select('*')
-        .textSearch('name', searchTerms, { type: 'websearch' })
-        .limit(5);
-      if (fts?.length) {
-        textResults.push(...fts.map((r) => ({ ...r, _source: 'text_fts', similarity: 0.70 })));
+    // 2b: full-text search on name (skip if already have results)
+    if (textResults.length === 0) {
+      const searchTerms = [topBrand, topModel].filter(t => t && t.toLowerCase() !== 'unidentified').join(' ');
+      if (searchTerms.trim()) {
+        const { data: fts, error: ftsError } = await supa
+          .from('products').select('*')
+          .textSearch('name', searchTerms, { type: 'websearch' })
+          .limit(5);
+        if (!ftsError && fts?.length) {
+          textResults.push(...fts.map(r => ({ ...r, _source: 'text_fts', similarity: 0.70 })));
+          console.log(`[Retrieve] text_fts: ${fts.length}`);
+        } else if (ftsError) {
+          console.warn('[Retrieve] textSearch failed (no FTS index?):', ftsError.message);
+        }
       }
     }
 
-    if (textResults.length === 0 && vectorResults.length === 0 && category) {
-      // Strategy 2b: Model-candidate targeted lookup — tries each Stage 1 model candidate
-      // directly against the DB before falling back to popularity ordering.
-      // Prevents G502 (most popular Logitech mouse) winning when Stage 1 actually saw G900.
+    // 2c: model-candidate sweep (when no results yet — before popularity fallback)
+    if (textResults.length === 0 && vectorResults.length === 0 && ocrResults.length === 0 && category) {
       if (topBrand && topBrand.toLowerCase() !== 'unidentified' && modelCandidates.length > 0) {
         for (const candModel of modelCandidates.slice(0, 4)) {
           if (!candModel || candModel.toLowerCase() === 'unidentified') continue;
-          const { data: candMatch } = await supa
-            .from('products').select('*')
+          const { data: candMatch } = await supa.from('products').select('*')
             .ilike('brand', `%${topBrand}%`)
             .ilike('model', `%${candModel}%`)
             .limit(2);
@@ -1074,29 +1147,29 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
             textResults.push(...candMatch.map(r => ({ ...r, _source: 'text_candidate', similarity: 0.65 })));
           }
         }
+        if (textResults.length > 0) console.log(`[Retrieve] text_candidate: ${textResults.length}`);
       }
 
-      // Last resort: category fallback — popularity only orders within brand+category filter
+      // 2d: category fallback (last resort — brand-filtered to avoid popularity poisoning)
       if (textResults.length === 0) {
         let q = supa.from('products').select('*');
         if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
-          // Brand-filtered: avoids "most popular Gaming Mouse overall" when we know brand
           q = q.ilike('brand', `%${topBrand}%`).ilike('category', `%${category}%`);
         } else {
           q = q.ilike('category', `%${category}%`);
         }
-        const { data: catFallback } = await q
-          .order('popularity_score', { ascending: false })
-          .limit(5);
+        const { data: catFallback } = await q.order('popularity_score', { ascending: false }).limit(5);
         if (catFallback?.length) {
-          // Very low similarity — Stage 2 treats these as weak anchors, not confirmed matches
           textResults.push(...catFallback.map(r => ({ ...r, _source: 'category_fallback', similarity: 0.28 })));
+          console.log(`[Retrieve] category_fallback: ${catFallback.length}`);
         }
       }
     }
   } catch (err) {
-    console.warn('[Retrieve] Text search failed:', err.message);
+    console.warn('[Retrieve] Text search error:', err.message);
   }
+
+  console.log(`[Retrieve] Strategy totals — vector=${vectorResults.length} ocr=${ocrResults.length} text=${textResults.length}`);
 
   // ── Merge + deduplicate ──
   const seen = new Set();
@@ -1111,7 +1184,13 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   }
 
   merged.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
-  return merged.slice(0, 10);
+  const top = merged.slice(0, 10);
+  if (top.length > 0) {
+    console.log(`[Retrieve] Final: ${top.length} candidates. Top: ${top[0].brand} ${top[0].model} (${top[0]._source} sim=${top[0].similarity?.toFixed(2)})`);
+  } else {
+    console.log('[Retrieve] Final: 0 candidates — no DB matches found');
+  }
+  return top;
 }
 
 async function fetchCorrections() {
@@ -1722,7 +1801,7 @@ export default async function handler(req) {
         visual_features: {}, subcategory: '', embedding_text: '',
       };
     }
-    plog('Stage 1 end', `brand=${recognition.brand_candidates?.[0]?.brand || 'none'} conf=${round(recognition.category_confidence * 100)}% rem=${rem()}ms`);
+    plog('Stage 1 end', `brand=${recognition.brand_candidates?.[0]?.brand || 'none'}(${round((recognition.brand_candidates?.[0]?.confidence || 0)*100)}%) model=${recognition.model_candidates?.[0]?.model || 'none'}(${round((recognition.model_candidates?.[0]?.confidence || 0)*100)}%) cat=${recognition.category} catConf=${round(recognition.category_confidence * 100)}% ocr=[${(recognition.ocr_text?.raw_texts || []).join('|')}] rem=${rem()}ms`);
 
     // embeddingText is computed once and reused by embedding + writeBack
     const embeddingText = recognition.embedding_text
@@ -1812,6 +1891,45 @@ export default async function handler(req) {
     const result  = normalizeForUI(recognition, verification, tierInfo, !!visionData);
     const totalMs = Date.now() - TREQ;
     blog(`[Pipeline] Response sent — total=${totalMs}ms budget_used=${round(totalMs / BUDGET_MS * 100)}%${totalMs > 16_000 ? ' ⚠ SLOW' : ''}`);
+
+    // ── DEBUG DATA — always attached, safe to remove in prod ──
+    result._debug = {
+      stage1: {
+        category: recognition.category,
+        category_confidence: round(recognition.category_confidence),
+        brand: recognition.brand_candidates?.[0]?.brand || 'none',
+        brand_conf: round((recognition.brand_candidates?.[0]?.confidence || 0)),
+        brand_evidence: recognition.brand_candidates?.[0]?.evidence || '',
+        model: recognition.model_candidates?.[0]?.model || 'none',
+        model_conf: round((recognition.model_candidates?.[0]?.confidence || 0)),
+        model_evidence: recognition.model_candidates?.[0]?.evidence || '',
+        model_candidates: (recognition.model_candidates || []).map(m => `${m.model}(${round(m.confidence*100)}%)`).join(', '),
+        ocr: (recognition.ocr_text?.raw_texts || []).join(' | '),
+        logos: (recognition.ocr_text?.logos_detected || []).join(', '),
+        has_readable_text: recognition.ocr_text?.has_readable_text,
+        failed: !recognition.brand_candidates?.length && !recognition.ocr_text?.has_readable_text,
+      },
+      retrieval: {
+        candidates_count: candidates.length,
+        top3: candidates.slice(0, 3).map(c => `${c.brand} ${c.model}(${c._source} ${round((c.similarity||0)*100)}%)`).join(', '),
+      },
+      stage2: {
+        final_brand: verification.final_brand,
+        final_model: verification.final_model,
+        final_category: verification.final_category,
+        identification_method: verification.identification_method,
+        brand_confidence: verification.brand_confidence,
+        raw_confidence: verification.raw_match_confidence ?? verification.match_confidence,
+        calibrated_confidence: verification.match_confidence,
+        reasoning: verification.confidence_reasoning,
+      },
+      pipeline: {
+        images_count: imageList.length,
+        vision_used: !!visionData,
+        total_ms: totalMs,
+        budget_ms: BUDGET_MS,
+      },
+    };
 
     // ── WRITE-BACK — always fire-and-forget, never blocks the response ──
     // Reuse queryEmbedding from the pipeline rather than making a duplicate paid API call.
