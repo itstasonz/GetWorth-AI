@@ -3,6 +3,7 @@ import {
   MessageCircle, ChevronRight, ChevronLeft,
   DollarSign, Loader2, Send, Check, CheckCheck,
   X, ArrowDown, Shield, Search, PlusCircle,
+  Video, Phone, MoreVertical, Camera,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Btn, FadeIn, SlideUp } from '../components/ui';
@@ -181,6 +182,85 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
           </div>
         </div>
       </SlideUp>
+    </div>
+  );
+}
+
+// ─── Image message marker ─────────────────────────────────────────────────────
+// Messages sent with an attached photo are stored as `__chat_img__<url>`.
+// ChatView detects this prefix and renders an image bubble instead of text.
+const IMG_PREFIX = '__chat_img__';
+
+// ─── CallStubModal ────────────────────────────────────────────────────────────
+// Architecture stub for future WebRTC integration.
+// handleStartVideoCall / handleStartVoiceCall are prepared in ChatView;
+// this modal confirms the feature is recognised but not yet wired.
+function CallStubModal({ type, lang, onClose }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="mx-6 p-7 rounded-3xl text-center w-full max-w-[320px]"
+        style={{ background: C.surfaceLow, boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+          style={{ background: 'rgba(111,238,225,0.08)' }}
+        >
+          {type === 'video'
+            ? <Video className="w-8 h-8" style={{ color: C.primary }} />
+            : <Phone className="w-8 h-8" style={{ color: C.primary }} />
+          }
+        </div>
+        <h3
+          className="font-bold text-lg mb-2"
+          style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}
+        >
+          {type === 'video'
+            ? (lang === 'he' ? 'שיחת וידאו' : 'Video Call')
+            : (lang === 'he' ? 'שיחת קול' : 'Voice Call')
+          }
+        </h3>
+        <p className="text-sm mb-5" style={{ color: C.onSurfaceVar }}>
+          {lang === 'he' ? 'תכונה זו תגיע בקרוב' : 'This feature is coming soon.'}
+        </p>
+        <button
+          onClick={onClose}
+          className="w-full py-3 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98]"
+          style={{ background: C.surfaceHigh, color: C.onSurfaceVar }}
+        >
+          {lang === 'he' ? 'סגור' : 'Close'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── DateSeparator ────────────────────────────────────────────────────────────
+function DateSeparator({ date, lang }) {
+  const d = new Date(date);
+  const today = new Date();
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  let label;
+  if (d.toDateString() === today.toDateString()) {
+    label = lang === 'he' ? 'היום' : 'Today';
+  } else if (d.toDateString() === yesterday.toDateString()) {
+    label = lang === 'he' ? 'אתמול' : 'Yesterday';
+  } else {
+    label = d.toLocaleDateString(lang === 'he' ? 'he-IL' : 'en-US', { month: 'short', day: 'numeric' });
+  }
+  return (
+    <div className="flex justify-center my-5">
+      <span
+        className="px-4 py-1 text-[10px] font-bold uppercase tracking-widest rounded-full"
+        style={{ background: C.surfaceHigh, color: C.onSurfaceVar }}
+      >
+        {label}
+      </span>
     </div>
   );
 }
@@ -401,16 +481,21 @@ export function ChatView() {
   const {
     lang, rtl, user, activeChat, setActiveChat, setView, setSelected,
     messages, messagesLoading, newMessage, setNewMessage,
-    sendMessage, sendingMessage, messagesEndRef,
+    sendMessage, sendingMessage, sendChatImageMessage, messagesEndRef,
   } = useApp();
 
   const [showOfferSheet,   setShowOfferSheet]   = useState(false);
   const [showNewMsgBanner, setShowNewMsgBanner] = useState(false);
+  const [callModal,        setCallModal]        = useState(null);   // 'video' | 'voice' | null
+  const [imgPreview,       setImgPreview]       = useState(null);   // { file, dataUrl }
+  const [uploadingImage,   setUploadingImage]   = useState(false);
 
   const containerRef  = useRef(null);
   const scrollRef     = useRef(null);
   const nearBottomRef = useRef(true);
   const prevMsgCount  = useRef(0);
+  const fileInputRef  = useRef(null);
+  const textareaRef   = useRef(null);
 
   // ── iOS keyboard-safe height via visualViewport ──────────────────────────
   useEffect(() => {
@@ -461,12 +546,14 @@ export function ChatView() {
 
   if (!activeChat) return null;
 
-  const otherUser  = activeChat.otherUser ?? activeChat.seller ?? null;
-  const listing    = activeChat.listing ?? null;
+  const otherUser = activeChat.otherUser ?? activeChat.seller ?? null;
+  const listing   = activeChat.listing ?? null;
 
   const goToListing = () => { if (listing) { setSelected(listing); setView('detail'); } };
 
+  // ── Send handlers ────────────────────────────────────────────────────────
   const handleSend = () => {
+    if (imgPreview) { handleImageSend(); return; }
     if (!newMessage.trim() || sendingMessage) return;
     if (navigator.vibrate) navigator.vibrate(10);
     sendMessage(newMessage);
@@ -480,12 +567,58 @@ export function ChatView() {
     setShowOfferSheet(false);
   };
 
-  // ── Grouping ─────────────────────────────────────────────────────────────
+  // ── Image upload ─────────────────────────────────────────────────────────
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => setImgPreview({ file, dataUrl: ev.target.result });
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handleImageSend = async () => {
+    if (!imgPreview || uploadingImage) return;
+    setUploadingImage(true);
+    try {
+      await sendChatImageMessage(imgPreview.file);
+      setImgPreview(null);
+    } catch (err) {
+      console.error('[Chat] Image send failed:', err);
+    }
+    setUploadingImage(false);
+  };
+
+  // ── Call stubs (future WebRTC integration) ────────────────────────────────
+  const handleStartVideoCall = () => setCallModal('video');
+  const handleStartVoiceCall = () => setCallModal('voice');
+
+  // ── Textarea auto-grow ───────────────────────────────────────────────────
+  const handleTextareaInput = (e) => {
+    setNewMessage(e.target.value);
+    e.target.style.height = '';
+    e.target.style.height = `${Math.min(e.target.scrollHeight, 120)}px`;
+  };
+
+  // ── Message grouping + date separators ───────────────────────────────────
   const grouped = messages.map((msg, i) => ({
     ...msg,
     isStart: messages[i - 1]?.sender_id !== msg.sender_id,
     isEnd:   messages[i + 1]?.sender_id !== msg.sender_id,
   }));
+
+  const groupedWithDates = [];
+  let lastDateStr = null;
+  grouped.forEach(msg => {
+    const dateStr = new Date(msg.created_at).toDateString();
+    if (dateStr !== lastDateStr) {
+      groupedWithDates.push({ _type: 'date', date: msg.created_at, _key: `date-${msg.created_at}` });
+      lastDateStr = dateStr;
+    }
+    groupedWithDates.push({ _type: 'msg', ...msg });
+  });
+
+  const canSend = !uploadingImage && !sendingMessage && (!!imgPreview || !!newMessage.trim());
 
   return (
     <div
@@ -500,33 +633,40 @@ export function ChatView() {
       }}
     >
 
-      {/* ── Chat Header ── */}
-      {/* Matches Stitch: blurred dark surface, avatar + name, back button */}
+      {/* ── Chat Header — glass, avatar + online dot, name, call stubs ── */}
       <div
-        className="flex-shrink-0 flex items-center gap-3 px-4 border-b"
+        className="flex-shrink-0 flex items-center gap-2 px-3"
         style={{
-          paddingTop: 'max(env(safe-area-inset-top),14px)',
-          paddingBottom: '14px',
-          background: 'rgba(19,19,19,0.85)',
+          paddingTop: 'max(env(safe-area-inset-top),12px)',
+          paddingBottom: '12px',
+          background: 'rgba(19,19,19,0.92)',
           backdropFilter: 'blur(24px)',
           WebkitBackdropFilter: 'blur(24px)',
-          borderColor: `${C.outline}66`,
+          borderBottom: `1px solid rgba(60,73,71,0.28)`,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
         }}
       >
         {/* Back */}
         <button
           onClick={() => { setActiveChat(null); setView('inbox'); }}
-          className="flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center active:scale-90 transition-transform"
-          style={{ background: C.surfaceHigh }}
+          className="flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center active:scale-90 transition-transform"
+          style={{ color: C.onSurfaceVar }}
+          aria-label={lang === 'he' ? 'חזור' : 'Back'}
         >
-          {rtl ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
+          {rtl ? <ChevronRight className="w-6 h-6" /> : <ChevronLeft className="w-6 h-6" />}
         </button>
 
-        {/* Avatar */}
-        <UserAvatar profile={otherUser} size="sm" />
+        {/* Avatar + online indicator */}
+        <div className="relative flex-shrink-0">
+          <UserAvatar profile={otherUser} size="sm" />
+          <div
+            className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2"
+            style={{ background: C.primary, borderColor: C.surfaceDim }}
+          />
+        </div>
 
-        {/* Name + status */}
-        <div className="flex-1 min-w-0">
+        {/* Name + active status */}
+        <div className="flex-1 min-w-0 px-1">
           <div className="flex items-center gap-1.5">
             <p
               className="font-bold text-[15px] truncate leading-tight"
@@ -538,51 +678,79 @@ export function ChatView() {
               <Shield className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.primary }} />
             )}
           </div>
-          {/* Subtitle: listing title + price, or rating */}
-          {listing ? (
-            <p className="text-[11px] truncate mt-0.5" style={{ color: C.onSurfaceVar }}>
-              {lang === 'he' && listing.title_hebrew ? listing.title_hebrew : listing.title}
-              {listing.price && (
-                <span style={{ color: C.primary }}> · {formatPrice(listing.price)}</span>
-              )}
-            </p>
-          ) : otherUser?.rating > 0 ? (
-            <p className="text-[11px] mt-0.5" style={{ color: C.primary }}>
-              ★ {otherUser.rating}
-            </p>
-          ) : null}
+          <p className="text-[11px] font-medium" style={{ color: C.primary }}>
+            {lang === 'he' ? 'פעיל עכשיו' : 'Active now'}
+          </p>
+        </div>
+
+        {/* Call stub buttons + overflow */}
+        <div className="flex items-center gap-0 flex-shrink-0">
+          <button
+            onClick={handleStartVideoCall}
+            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
+            style={{ color: C.primary }}
+            aria-label={lang === 'he' ? 'שיחת וידאו' : 'Video call'}
+          >
+            <Video className="w-5 h-5" />
+          </button>
+          <button
+            onClick={handleStartVoiceCall}
+            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
+            style={{ color: C.primary }}
+            aria-label={lang === 'he' ? 'שיחת קול' : 'Voice call'}
+          >
+            <Phone className="w-5 h-5" />
+          </button>
+          <button
+            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
+            style={{ color: C.onSurfaceVar }}
+            aria-label={lang === 'he' ? 'אפשרויות' : 'More options'}
+          >
+            <MoreVertical className="w-5 h-5" />
+          </button>
         </div>
       </div>
 
-      {/* ── Listing context strip (below header, only when listing exists) ── */}
+      {/* ── Listing context strip ── */}
       {listing && (
         <button
           onClick={goToListing}
-          className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-white/[0.03]"
+          className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-white/[0.02]"
           style={{
             background: C.surfaceLow,
-            borderBottom: `1px solid ${C.outline}66`,
+            borderBottom: `1px solid rgba(60,73,71,0.22)`,
           }}
         >
           {listing.images?.[0] && (
-            <img src={listing.images[0]} alt="" className="w-9 h-9 rounded-xl object-cover flex-shrink-0" />
+            <img src={listing.images[0]} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
           )}
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-semibold truncate" style={{ color: C.onSurface }}>
+            <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: `${C.onSurfaceVar}88` }}>
+              {lang === 'he' ? 'פריט בשיחה' : 'Item in thread'}
+            </p>
+            <p className="text-sm font-semibold truncate" style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}>
               {lang === 'he' && listing.title_hebrew ? listing.title_hebrew : listing.title}
             </p>
             {listing.price && (
-              <p className="text-[11px] font-bold mt-0.5" style={{ color: C.primary }}>
+              <p className="text-[11px] font-bold" style={{ color: C.primary }}>
                 {formatPrice(listing.price)}
               </p>
             )}
           </div>
-          <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.onSurfaceVar }} />
+          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: C.onSurfaceVar }} />
         </button>
       )}
 
       {/* ── Messages area ── */}
       <div className="relative flex-1 min-h-0" style={{ background: C.surfaceLowest }}>
+        {/* Radial dot pattern — "Intelligent Void" texture */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            backgroundImage: `radial-gradient(circle, rgba(111,238,225,0.055) 1px, transparent 1px)`,
+            backgroundSize: '28px 28px',
+          }}
+        />
         <div
           ref={scrollRef}
           onScroll={onScroll}
@@ -634,16 +802,23 @@ export function ChatView() {
             </div>
           ) : null}
 
-          {/* Message bubbles */}
-          <div className="space-y-[3px] px-4">
-            {grouped.map((msg) => {
+          {/* Message bubbles with date separators */}
+          <div className="space-y-[3px] px-3">
+            {groupedWithDates.map((item, idx) => {
+              // Date separator row
+              if (item._type === 'date') {
+                return <DateSeparator key={item._key || `date-${idx}`} date={item.date} lang={lang} />;
+              }
+
+              const msg     = item;
               const isMe    = msg.sender_id === user.id;
               const isOffer = !!(msg.is_offer && msg.offer_amount);
+              const isImage = typeof msg.content === 'string' && msg.content.startsWith(IMG_PREFIX);
 
+              // ── Offer bubble ──
               if (isOffer) {
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-3'} ${msg.isStart ? 'mt-4' : 'mt-[3px]'}`}>
-                    {/* Avatar placeholder for alignment on incoming */}
+                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-5' : 'mt-[3px]'}`}>
                     {!isMe && <div className="w-8 h-8 flex-shrink-0" />}
                     <div
                       className="max-w-[72%] rounded-2xl overflow-hidden"
@@ -652,7 +827,7 @@ export function ChatView() {
                         background: isMe ? 'rgba(251,191,36,0.09)' : 'rgba(251,191,36,0.06)',
                       }}
                     >
-                      <div className="px-5 pt-3.5 pb-3">
+                      <div className="px-4 pt-3.5 pb-3">
                         <div className="flex items-center gap-1.5 mb-2">
                           <span className="text-xs">💰</span>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
@@ -662,7 +837,7 @@ export function ChatView() {
                         <p className="text-2xl font-bold text-amber-300 leading-none">
                           ₪{msg.offer_amount.toLocaleString()}
                         </p>
-                        {msg.content && (
+                        {msg.content && !msg.content.startsWith('אני מציע') && !msg.content.startsWith('I offer') && (
                           <p className="text-xs leading-relaxed mt-1.5" dir="auto" style={{ color: C.onSurfaceVar }}>
                             {msg.content}
                           </p>
@@ -682,18 +857,64 @@ export function ChatView() {
                 );
               }
 
+              // ── Image bubble ──
+              if (isImage) {
+                const imageUrl = msg.content.slice(IMG_PREFIX.length);
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-5' : 'mt-[3px]'}`}
+                  >
+                    {!isMe && (
+                      msg.isEnd
+                        ? <UserAvatar profile={otherUser} size="xs" />
+                        : <div className="w-8 h-8 flex-shrink-0" />
+                    )}
+                    <div
+                      className={`max-w-[68%] overflow-hidden ${
+                        isMe
+                          ? `rounded-2xl ${msg.isEnd ? 'rounded-br-[4px]' : ''}`
+                          : `rounded-2xl ${msg.isEnd ? 'rounded-bl-[4px]' : ''}`
+                      }`}
+                      style={{
+                        border: '1px solid rgba(111,238,225,0.12)',
+                        boxShadow: isMe ? '0 4px 20px rgba(111,238,225,0.10)' : 'none',
+                      }}
+                    >
+                      <img
+                        src={imageUrl}
+                        alt={lang === 'he' ? 'תמונה' : 'Photo'}
+                        className="w-full block object-cover"
+                        style={{ maxHeight: '240px' }}
+                        onError={e => { e.currentTarget.style.display = 'none'; }}
+                      />
+                      {msg.isEnd && (
+                        <div
+                          className={`flex items-center gap-1 px-3 py-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}
+                          style={{ background: isMe ? 'rgba(111,238,225,0.14)' : C.surfaceHigh }}
+                        >
+                          <span className="text-[10px]" style={{ color: isMe ? `${C.onPrimary}99` : C.onSurfaceVar }}>
+                            {formatMessageTime(msg.created_at, lang)}
+                          </span>
+                          {isMe && (msg.is_read
+                            ? <CheckCheck className="w-3 h-3" style={{ color: C.primary }} />
+                            : <Check className="w-3 h-3" style={{ color: `${C.onPrimary}60` }} />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
               // ── Text bubble ──
-              // Stitch: outgoing = liquid-gradient rounded-2xl rounded-br-none
-              //         incoming = surface-container-high rounded-2xl rounded-bl-none
-              //         Incoming shows small avatar (w-8) at isEnd; placeholder otherwise
               const isIncomingEnd = !isMe && msg.isEnd;
 
               return (
                 <div
                   key={msg.id}
-                  className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-3'} ${msg.isStart ? 'mt-4' : 'mt-[3px]'}`}
+                  className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-5' : 'mt-[3px]'}`}
                 >
-                  {/* Incoming avatar slot: show real avatar only at group end, placeholder otherwise */}
                   {!isMe && (
                     isIncomingEnd
                       ? <UserAvatar profile={otherUser} size="xs" />
@@ -702,17 +923,17 @@ export function ChatView() {
 
                   {/* Bubble */}
                   <div
-                    className={`max-w-[75%] px-5 py-4 ${
+                    className={`max-w-[75%] px-4 py-3 ${
                       isMe
-                        ? `rounded-2xl ${msg.isEnd ? 'rounded-br-none' : ''}`
-                        : `rounded-2xl ${msg.isEnd ? 'rounded-bl-none' : ''}`
+                        ? `rounded-2xl ${msg.isEnd ? 'rounded-br-[4px]' : ''}`
+                        : `rounded-2xl ${msg.isEnd ? 'rounded-bl-[4px]' : ''}`
                     }`}
                     style={
                       isMe
                         ? {
                             background: LIQUID_GRADIENT,
                             color: C.onPrimary,
-                            boxShadow: `0 4px 20px rgba(111,238,225,0.12)`,
+                            boxShadow: `0 4px 20px rgba(111,238,225,0.15)`,
                           }
                         : {
                             background: C.surfaceHigh,
@@ -721,9 +942,9 @@ export function ChatView() {
                     }
                   >
                     {/* dir=auto: browser auto-detects Hebrew vs English */}
-                    <p className="text-sm leading-relaxed" dir="auto">{msg.content}</p>
+                    <p className="text-[15px] leading-relaxed" dir="auto">{msg.content}</p>
                     {msg.isEnd && (
-                      <div className={`flex items-center gap-1 mt-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`flex items-center gap-1 mt-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
                         <span
                           className="text-[10px]"
                           style={{ color: isMe ? `${C.onPrimary}99` : C.onSurfaceVar }}
@@ -762,18 +983,18 @@ export function ChatView() {
 
       {/* ── Quick-reply chips ── */}
       <div
-        className="flex-shrink-0 flex gap-2 px-4 py-2.5 overflow-x-auto border-t"
+        className="flex-shrink-0 flex gap-2 px-4 py-2.5 overflow-x-auto"
         style={{
           background: C.surfaceLow,
-          borderColor: `${C.outline}66`,
+          borderTop: `1px solid rgba(60,73,71,0.22)`,
           scrollbarWidth: 'none',
           WebkitOverflowScrolling: 'touch',
         }}
       >
         {[
           { text: lang === 'he' ? 'עדיין זמין?' : 'Still available?', icon: '❓' },
-          { text: lang === 'he' ? 'מחיר סופי?'  : 'Best price?',      icon: '💰' },
-          { text: lang === 'he' ? 'איפה למסור?' : 'Where to meet?',   icon: '📍' },
+          { text: lang === 'he' ? 'מחיר סופי?'  : 'Best price?',     icon: '💰' },
+          { text: lang === 'he' ? 'איפה למסור?' : 'Where to meet?',  icon: '📍' },
         ].map((q, i) => (
           <button
             key={i}
@@ -786,68 +1007,131 @@ export function ChatView() {
         ))}
       </div>
 
-      {/* ── Composer ── */}
-      {/* Stitch: bg-surface-dim/50 wrapper, inner rounded-2xl with border */}
-      <div
-        className="flex-shrink-0 border-t px-4"
-        style={{
-          background: `${C.surfaceDim}cc`,
-          borderColor: `${C.surfaceHigh}33`,
-          paddingTop: '12px',
-          paddingBottom: 'max(env(safe-area-inset-bottom),12px)',
-        }}
-      >
+      {/* ── Image preview strip (shown above composer when photo selected) ── */}
+      {imgPreview && (
         <div
-          className="flex items-center gap-3 rounded-2xl transition-all"
+          className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5"
           style={{
-            background: C.surfaceLowest,
-            border: '1px solid rgba(255,255,255,0.06)',
-            padding: '6px 6px 6px 16px',
+            background: C.surfaceLow,
+            borderTop: `1px solid rgba(60,73,71,0.22)`,
           }}
         >
-          {/* Offer / add button */}
+          <img src={imgPreview.dataUrl} alt="" className="w-14 h-14 rounded-xl object-cover flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold" style={{ color: C.onSurface }}>
+              {lang === 'he' ? 'תמונה מוכנה' : 'Photo ready'}
+            </p>
+            <p className="text-[10px] mt-0.5" style={{ color: C.onSurfaceVar }}>
+              {lang === 'he' ? 'לחץ שלח לשיתוף' : 'Tap send to share'}
+            </p>
+          </div>
           <button
-            onClick={() => setShowOfferSheet(true)}
-            className="flex-shrink-0 transition-colors active:scale-90"
-            style={{ color: C.onSurfaceVar }}
-            aria-label={lang === 'he' ? 'הצעת מחיר' : 'Make offer'}
+            onClick={() => setImgPreview(null)}
+            className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: C.surfaceHigh }}
+            aria-label={lang === 'he' ? 'בטל תמונה' : 'Cancel photo'}
           >
-            <PlusCircle className="w-6 h-6" />
-          </button>
-
-          {/* Message input */}
-          <input
-            type="text"
-            value={newMessage}
-            onChange={e => setNewMessage(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSend()}
-            placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Type your message...'}
-            className="flex-1 py-3 bg-transparent border-none text-sm focus:outline-none focus:ring-0"
-            style={{ color: C.onSurface }}
-            dir={rtl ? 'rtl' : 'ltr'}
-          />
-
-          {/* Send button — teal rounded-xl (Stitch exact) */}
-          <button
-            onClick={handleSend}
-            disabled={!newMessage.trim() || sendingMessage}
-            className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center transition-all active:scale-95 disabled:opacity-40"
-            style={{
-              background: newMessage.trim() && !sendingMessage ? LIQUID_GRADIENT : C.surfaceHigh,
-              color: newMessage.trim() && !sendingMessage ? C.onPrimary : C.onSurfaceVar,
-            }}
-            aria-label={lang === 'he' ? 'שלח' : 'Send'}
-          >
-            {sendingMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+            <X className="w-3.5 h-3.5" style={{ color: C.onSurfaceVar }} />
           </button>
         </div>
+      )}
+
+      {/* ── Composer ── glass surface, textarea + camera, rounded send ── */}
+      <div
+        className="flex-shrink-0 px-3 flex items-end gap-2"
+        style={{
+          paddingTop: '10px',
+          paddingBottom: 'max(env(safe-area-inset-bottom),10px)',
+          background: 'rgba(28,27,27,0.97)',
+          backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)',
+          borderTop: `1px solid rgba(60,73,71,0.18)`,
+        }}
+      >
+        {/* + button → offer sheet */}
+        <button
+          onClick={() => setShowOfferSheet(true)}
+          className="flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-full transition-all active:scale-90"
+          style={{ background: C.surfaceHigh, color: C.primary }}
+          aria-label={lang === 'he' ? 'הצעת מחיר' : 'Make offer'}
+        >
+          <PlusCircle className="w-5 h-5" />
+        </button>
+
+        {/* Textarea + camera wrapper */}
+        <div
+          className="flex-1 flex items-end rounded-2xl transition-all"
+          style={{
+            background: C.surfaceLowest,
+            border: '1px solid rgba(255,255,255,0.04)',
+            padding: '6px 8px 6px 14px',
+          }}
+        >
+          <textarea
+            ref={textareaRef}
+            rows={1}
+            value={newMessage}
+            onChange={handleTextareaInput}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+            }}
+            placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Message…'}
+            className="flex-1 bg-transparent border-none text-[15px] focus:outline-none focus:ring-0 py-1.5 resize-none overflow-hidden"
+            style={{ color: C.onSurface, maxHeight: '120px', lineHeight: '1.45' }}
+            dir={rtl ? 'rtl' : 'ltr'}
+          />
+          {/* Camera / gallery button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full transition-colors active:scale-90 mb-0.5"
+            style={{ color: imgPreview ? C.primary : C.onSurfaceVar }}
+            aria-label={lang === 'he' ? 'שלח תמונה' : 'Send photo'}
+          >
+            <Camera className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Send button — round, gradient glow when active */}
+        <button
+          onClick={handleSend}
+          disabled={!canSend}
+          className="flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center transition-all active:scale-95 disabled:opacity-30"
+          style={{
+            background: canSend ? LIQUID_GRADIENT : C.surfaceHigh,
+            color:      canSend ? C.onPrimary     : C.onSurfaceVar,
+            boxShadow:  canSend ? '0 4px 20px rgba(111,238,225,0.30)' : 'none',
+          }}
+          aria-label={lang === 'he' ? 'שלח' : 'Send'}
+        >
+          {uploadingImage || sendingMessage
+            ? <Loader2 className="w-5 h-5 animate-spin" />
+            : <Send className="w-5 h-5" style={{ transform: rtl ? 'scaleX(-1)' : 'none' }} />
+          }
+        </button>
+
+        {/* Hidden file input for image picker */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
       </div>
 
+      {/* ── Modals ── */}
       {showOfferSheet && (
         <OfferSheet
           listing={listing} lang={lang} rtl={rtl}
           onClose={() => setShowOfferSheet(false)}
           onSend={handleOfferSend}
+        />
+      )}
+      {callModal && (
+        <CallStubModal
+          type={callModal}
+          lang={lang}
+          onClose={() => setCallModal(null)}
         />
       )}
     </div>

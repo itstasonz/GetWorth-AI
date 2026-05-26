@@ -881,6 +881,37 @@ export function AppProvider({ children }) {
     setSendingMessage(false);
   };
 
+  // ─── CHAT IMAGE UPLOAD ──────────────────────────────
+  // Compress file to 1024px JPEG, upload to listings bucket under user's
+  // path, then send a message containing the special __chat_img__ prefix
+  // so ChatViews.jsx can render it as an image bubble.
+  const sendChatImageMessage = async (file) => {
+    if (!file || !activeChat || !user) return;
+    // Compress
+    const canvas = document.createElement('canvas');
+    const imgEl = new Image();
+    const dataUrl = await new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.onload = e => res(e.target.result);
+      reader.onerror = rej;
+      reader.readAsDataURL(file);
+    });
+    await new Promise((res, rej) => { imgEl.onload = res; imgEl.onerror = rej; imgEl.src = dataUrl; });
+    const MAX = 1024;
+    const ratio = Math.min(MAX / imgEl.width, MAX / imgEl.height, 1);
+    canvas.width  = Math.round(imgEl.width  * ratio);
+    canvas.height = Math.round(imgEl.height * ratio);
+    canvas.getContext('2d').drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.82));
+    // Upload — keep in user's folder so existing RLS policy accepts it
+    const path = `${user.id}/chat_${Date.now()}.jpg`;
+    const { error: uploadErr } = await supabase.storage
+      .from('listings').upload(path, blob, { contentType: 'image/jpeg' });
+    if (uploadErr) throw uploadErr;
+    const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(path);
+    await sendMessage(`__chat_img__${publicUrl}`);
+  };
+
   // ─── AUTH ACTIONS ───────────────────────────────────
 
   const signInGoogle = async () => {
@@ -2682,7 +2713,7 @@ export function AppProvider({ children }) {
     showFlash, capturedImageRef,
     conversations, conversationsLoading, activeChat, setActiveChat,
     messages, setMessages, messagesLoading, newMessage, setNewMessage,
-    sendingMessage, sendMessage, unreadCount,
+    sendingMessage, sendMessage, sendChatImageMessage, unreadCount,
     loadMessages, startConversation, loadConversations,
     messagesEndRef,
     // Notification system
