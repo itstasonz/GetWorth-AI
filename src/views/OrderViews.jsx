@@ -76,7 +76,7 @@ export function CheckoutSheet() {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
       <SlideUp className="w-full max-w-md">
-        <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-5 max-h-[85vh] overflow-y-auto">
+        <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-5 max-h-[85vh] overflow-y-auto">
           <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
 
           {/* Listing + Seller identity */}
@@ -678,7 +678,7 @@ export function OrderDetailView() {
       {showCancel && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
           <SlideUp className="w-full max-w-md">
-            <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-4">
+            <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-4">
               <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
               <h3 className="text-lg font-bold text-center text-red-300">{lang === 'he' ? 'בטל הזמנה?' : 'Cancel Order?'}</h3>
               <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder={lang === 'he' ? 'סיבה (אופציונלי)' : 'Reason (optional)'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-red-500/50" rows={2} />

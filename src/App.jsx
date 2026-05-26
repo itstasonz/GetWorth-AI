@@ -236,7 +236,15 @@ function AppShell() {
 
 
   return (
-    <div className="min-h-screen text-white flex flex-col" style={{ fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif', background: '#131313' }} dir={rtl ? 'rtl' : 'ltr'}>
+    <div
+      className="text-white flex flex-col overflow-hidden"
+      style={{
+        height: '100dvh',           /* bounded to dynamic viewport — no body overflow */
+        fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif',
+        background: '#131313',
+      }}
+      dir={rtl ? 'rtl' : 'ltr'}
+    >
       
       {/* Ambient background */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
@@ -304,7 +312,7 @@ function AppShell() {
       {showContact && selected && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
           <SlideUp className="w-full max-w-md">
-            <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-5">
+            <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-5">
               <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
               <h3 className="text-2xl font-bold text-center">{lang === 'he' ? 'יצירת קשר' : 'Contact Seller'}</h3>
 
@@ -450,7 +458,7 @@ function AppShell() {
 
         {/* Content - View Router */}
         {/* overflow-x: hidden clips the slideInRight/Left translate without a horizontal scrollbar */}
-        <main className="flex-1 px-5 pb-4 overflow-y-auto overflow-x-hidden">
+        <main className="flex-1 px-5 pb-4 overflow-y-auto overflow-x-hidden overscroll-contain">
           <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
           <ScreenTransition key={view}>
             {view === 'home' && <HomeView />}

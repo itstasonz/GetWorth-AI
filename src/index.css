@@ -1,3 +1,24 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Global shell reset — prevents iOS rubber-band from revealing a mismatched
+ * document background. Every layer from html → #root must use the same colour
+ * as the React app shell (#131313 charcoal).
+ *
+ * overscroll-behavior: none on html+body prevents the document-level bounce.
+ * The inner scroll container (main) uses overscroll-behavior: contain so its
+ * own scroll boundary is absorbed without propagating further.
+ */
+html,
+body {
+  background-color: #131313;
+  overscroll-behavior: none;
+}
+
+#root {
+  background-color: #131313;
+  /* Full-height root so flex children fill the viewport correctly */
+  height: 100%;
+}

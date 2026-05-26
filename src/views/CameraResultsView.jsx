@@ -746,7 +746,7 @@ function HelpIdentifyModal() {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={() => setHelpModalOpen(false)}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-full max-w-lg mx-4 mb-4 rounded-3xl overflow-hidden bg-[#0f1729] border border-white/10 shadow-2xl"
+      <div className="relative w-full max-w-lg mx-4 mb-4 rounded-3xl overflow-hidden bg-[#1c1b1b] border border-white/10 shadow-2xl"
            onClick={(e) => e.stopPropagation()}>
         
         {/* Header */}

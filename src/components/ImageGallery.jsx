@@ -91,7 +91,7 @@ export default function ImageGallery({ images = [], aspectRatio = 'aspect-square
         </div>
 
         {/* Gradient overlay */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#060a14] via-transparent to-[#060a14]/50 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#131313] via-transparent to-[#131313]/50 pointer-events-none" />
 
         {/* Arrow buttons (desktop only, hidden on mobile) */}
         {count > 1 && (

@@ -307,7 +307,7 @@ export function DetailView() {
                 <div className={`relative w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).gradient} ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).shadow}`}>
                   {selected.seller.full_name?.charAt(0) || 'S'}
                   {selected.seller.is_verified && (
-                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 border-[#0a1020]" style={{ background: '#6FEEE1' }}>
+                    <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 border-[#131313]" style={{ background: '#6FEEE1' }}>
                       <Shield className="w-3 h-3" style={{ color: '#003733' }} />
                     </div>
                   )}
@@ -455,7 +455,7 @@ export function DetailView() {
       {showReport && (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
           <SlideUp className="w-full max-w-md">
-            <div className="bg-gradient-to-b from-[#151d30] to-[#0a1020] rounded-t-[2rem] p-6 space-y-4">
+            <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-4">
               <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
               <h3 className="text-lg font-bold text-center flex items-center justify-center gap-2">
                 <Flag className="w-5 h-5 text-red-400" />
@@ -545,7 +545,7 @@ export function SellerProfileView() {
               {sellerProfile.full_name?.charAt(0) || 'S'}
             </div>
             {sellerProfile.is_verified && (
-              <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full flex items-center justify-center border-3 border-[#060a14]" style={{ background: '#6FEEE1' }}>
+              <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full flex items-center justify-center border-3 border-[#131313]" style={{ background: '#6FEEE1' }}>
                 <Check className="w-5 h-5" style={{ color: '#003733' }} />
               </div>
             )}
