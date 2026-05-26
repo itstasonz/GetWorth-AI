@@ -1706,7 +1706,10 @@ export default async function handler(req) {
   // rem() = how many ms we have left before we must respond.
   // All stage decisions and timeouts are derived from this single source of truth.
   const TREQ      = Date.now();
-  const BUDGET_MS = 18_000;   // hard ceiling — must respond before this
+  const BUDGET_MS = 22_000;   // hard ceiling — must respond before this
+  // Raised from 18 s → 22 s: auth slow-path (network JWT, no SUPABASE_JWT_SECRET)
+  // consumes up to 5 s, leaving only 13 s for Stage 1 + retrieval + Stage 2.
+  // Stage 1 (Claude Vision) needs at least 8 s minimum to avoid constant fallback.
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
 
@@ -1780,9 +1783,13 @@ export default async function handler(req) {
 
     // ── STAGE 1: RECOGNIZE (Claude Vision) — REQUIRED ──
     // Cap shrinks with budget so Stage 1 never eats into Stage 2's 8 s minimum.
-    // Floor: 3 s — gives Claude a real attempt even when budget is tight.
-    const stage1Cap = Math.max(Math.min(9_000, rem() - 9_000), 3_000);
-    plog('Stage 1 start', `images=${imageList.length} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
+    // Floor: 8 s — Claude Vision typically needs 5-10 s; 3 s was always timing out.
+    // Formula: up to 12 s, but reserves 8 s for retrieval + Stage 2.
+    // With 22 s budget and ~1 s auth (fast path) → ~13 s remaining → cap = 12 s.
+    // With 22 s budget and ~5 s auth (network path) → ~17 s remaining → cap = 12 s.
+    const stage1Cap = Math.max(Math.min(12_000, rem() - 8_000), 8_000);
+    const imgByteEst = imageList.reduce((sum, b64) => sum + Math.round(b64.length * 0.75), 0);
+    plog('Stage 1 start', `images=${imageList.length} ~bytes=${imgByteEst} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
 
     let recognition;
     try {
@@ -1793,13 +1800,20 @@ export default async function handler(req) {
       );
       recognition = calibrateRecognition(recognition);
     } catch (stage1Err) {
-      blog(`[Pipeline] Stage 1 FAILED — using generic fallback: ${stage1Err.message}`);
-      recognition = {
-        category: 'Other', category_hebrew: 'אחר', category_confidence: 0.20,
-        brand_candidates: [], model_candidates: [],
-        ocr_text: { raw_texts: [], logos_detected: [], has_readable_text: false },
-        visual_features: {}, subcategory: '', embedding_text: '',
-      };
+      // Stage 1 failure is NOT a product classification — it is a retryable error.
+      // Return 503 so the client shows "please retry" instead of a fake "Other" result.
+      const isTimeout = stage1Err.message?.includes('Timeout') || stage1Err.name === 'AbortError';
+      blog(`[Pipeline] Stage 1 FAILED (${isTimeout ? 'timeout' : stage1Err.name}) — returning 503: ${stage1Err.message}`);
+      return json({
+        error: lang === 'he'
+          ? 'הזיהוי נכשל — אנא נסה שוב'
+          : 'Recognition timed out — please try again',
+        retryable: true,
+        code: 'STAGE1_TIMEOUT',
+        reason: stage1Err.message,
+        stage1_cap_ms: stage1Cap,
+        rem_at_failure: rem(),
+      }, 503, cors);
     }
     plog('Stage 1 end', `brand=${recognition.brand_candidates?.[0]?.brand || 'none'}(${round((recognition.brand_candidates?.[0]?.confidence || 0)*100)}%) model=${recognition.model_candidates?.[0]?.model || 'none'}(${round((recognition.model_candidates?.[0]?.confidence || 0)*100)}%) cat=${recognition.category} catConf=${round(recognition.category_confidence * 100)}% ocr=[${(recognition.ocr_text?.raw_texts || []).join('|')}] rem=${rem()}ms`);
 

@@ -1320,10 +1320,24 @@ export function AppProvider({ children }) {
               : (lang === 'he' ? 'יש להתחבר כדי לסרוק' : 'Sign in required to scan');
             throw new Error(msg);
           }
-          // Retry server errors, not client errors
-          if (res.status >= 500 && attempt < maxRetries) {
-            lastError = new Error(`Server error (${res.status})`);
-            continue;
+          // Parse error body for retryable server errors
+          if (res.status >= 500) {
+            let errBody = {};
+            try { errBody = await res.json(); } catch {}
+            // Stage 1 timeout — explicit retry message, not a generic "server error"
+            if (errBody.code === 'STAGE1_TIMEOUT' || errBody.retryable) {
+              const msg = errBody.error
+                || (lang === 'he' ? 'הזיהוי נכשל — אנא נסה שוב' : 'Recognition timed out — please try again');
+              const retryErr = new Error(msg);
+              retryErr.retryable = true;
+              retryErr.code = errBody.code || 'SERVER_ERROR';
+              if (attempt < maxRetries) { lastError = retryErr; continue; }
+              throw retryErr;
+            }
+            if (attempt < maxRetries) {
+              lastError = new Error(`Server error (${res.status})`);
+              continue;
+            }
           }
           throw new Error(lang === 'he' ? `שגיאת שרת (${res.status})` : `Server error (${res.status})`);
         }
