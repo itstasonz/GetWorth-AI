@@ -237,9 +237,9 @@ function AppShell() {
 
   return (
     <div
-      className="text-white flex flex-col overflow-hidden"
+      className="text-white flex flex-col"
       style={{
-        height: '100dvh',           /* bounded to dynamic viewport — no body overflow */
+        minHeight: '100dvh',        /* at least full viewport — never less */
         fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif',
         background: '#131313',
       }}

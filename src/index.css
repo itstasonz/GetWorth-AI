@@ -3,13 +3,18 @@
 @tailwind utilities;
 
 /*
- * Global shell reset — prevents iOS rubber-band from revealing a mismatched
- * document background. Every layer from html → #root must use the same colour
- * as the React app shell (#131313 charcoal).
+ * Shell background reset.
  *
- * overscroll-behavior: none on html+body prevents the document-level bounce.
- * The inner scroll container (main) uses overscroll-behavior: contain so its
- * own scroll boundary is absorbed without propagating further.
+ * Purpose: html/body background must match the app shell (#131313 charcoal)
+ * so iOS rubber-band overscroll never reveals a mismatched document colour.
+ *
+ * overscroll-behavior: none on html+body stops document-level bounce.
+ * Each inner scroll container that needs containment adds
+ * overscroll-behavior: contain (e.g. main in App.jsx).
+ *
+ * NO overflow:hidden here — that kills iOS touch-scroll on inner containers.
+ * NO height:100% on #root — body has no explicit height, so 100% resolves to
+ * auto; the app shell's min-height:100dvh covers the viewport independently.
  */
 html,
 body {
@@ -19,6 +24,4 @@ body {
 
 #root {
   background-color: #131313;
-  /* Full-height root so flex children fill the viewport correctly */
-  height: 100%;
 }
