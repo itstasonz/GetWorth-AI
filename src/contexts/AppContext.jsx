@@ -1469,7 +1469,8 @@ export function AppProvider({ children }) {
 
       // Perf: run compression and hints fetch concurrently
       const [compressed, hints] = await Promise.all([
-        compressImage(rawDataUrl),
+        // 1280px / 0.82: matches new capture cap (1280px), single-pass compress preserves label text
+        compressImage(rawDataUrl, 1280, 0.82),
         fetchRecognitionHints().catch(() => []),
       ]);
 
@@ -1606,12 +1607,15 @@ export function AppProvider({ children }) {
     playSound('shutter');
     setShowFlash(true);
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    canvas.getContext('2d').drawImage(video, 0, 0);
+    // Match main capture: cap at 1280px for OCR quality, 0.92 to preserve label text
+    const ADD_CAP = 1280;
+    const addScale = Math.min(1, ADD_CAP / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.round(video.videoWidth * addScale);
+    canvas.height = Math.round(video.videoHeight * addScale);
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
 
     try {
-      const rawImg = canvas.toDataURL('image/jpeg', 0.70);
+      const rawImg = canvas.toDataURL('image/jpeg', 0.92);
       if (rawImg && rawImg.length > 100) {
         setTimeout(() => {
           setShowFlash(false);
@@ -1988,8 +1992,9 @@ export function AppProvider({ children }) {
     playSound('shutter');
     setShowFlash(true);
 
-    // Cap capture resolution at 800px — eliminates the heavy decode+resize in compressImage
-    const MAX_CAP = 800;
+    // Cap capture resolution at 1280px — enough for label/serial OCR while keeping payload sane.
+    // Previously 800px; labels on electronics were too small (~30px wide) for reliable OCR.
+    const MAX_CAP = 1280;
     const capScale = Math.min(1, MAX_CAP / Math.max(video.videoWidth, video.videoHeight));
     canvas.width = Math.round(video.videoWidth * capScale);
     canvas.height = Math.round(video.videoHeight * capScale);
@@ -2025,8 +2030,9 @@ export function AppProvider({ children }) {
     };
 
     // Use toDataURL (synchronous, reliable on all browsers)
+    // 0.92 quality — preserves label/serial text for Claude Vision OCR
     try {
-      const rawImg = canvas.toDataURL('image/jpeg', 0.70);
+      const rawImg = canvas.toDataURL('image/jpeg', 0.92);
       if (rawImg && rawImg.length > 100) {
         processCapture(rawImg);
       } else {

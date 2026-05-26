@@ -1031,7 +1031,7 @@ export function ResultsView() {
                   <span className="text-xs font-medium uppercase tracking-widest text-red-300">
                     {status === 'suspected_fake'
                       ? (lang === 'he' ? 'חשד לזיוף' : 'Suspected Fake')
-                      : (lang === 'he' ? 'ייתכן רפליקה' : 'Possible Replica')}
+                      : (lang === 'he' ? '\u05D9\u05D9\u05EA\u05DB\u05DF רפליקה' : 'Possible Replica')}
                   </span>
                 </div>
               );
@@ -1140,10 +1140,28 @@ export function ResultsView() {
             </span>
           </div>
           <p
+            dir="auto"
             className="mt-4 text-2xl font-bold tracking-tight"
             style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
           >
-            {lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name}
+            {(() => {
+              const baseName = lang === 'he' && result.nameHebrew ? result.nameHebrew : result.name;
+              // Only prefix when a brand/model was actually proposed (not just "category fallback")
+              const hasBrandModel = identification.brand && identification.brand !== 'unidentified';
+              if (tier === 'high' || isConfirmed || !hasBrandModel) return baseName;
+              if (tier === 'moderate') {
+                // \u05DB\u05E0\u05E8\u05D0\u05D4 = כנראה
+                return lang === 'he' ? `\u05DB\u05E0\u05E8\u05D0\u05D4 ${baseName}` : `Likely ${baseName}`;
+              }
+              if (tier === 'low') {
+                // \u05D9\u05D9\u05EA\u05DB\u05DF = ייתכן
+                return lang === 'he' ? `\u05D9\u05D9\u05EA\u05DB\u05DF ${baseName}` : `Possibly ${baseName}`;
+              }
+              // very_low — show broad category rather than a specific (likely wrong) model
+              return lang === 'he'
+                ? (identification.generic_name_hebrew || result.category || baseName)
+                : (result.category || identification.generic_name || baseName);
+            })()}
           </p>
           {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
             <p

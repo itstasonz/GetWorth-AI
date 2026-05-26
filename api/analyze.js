@@ -408,6 +408,14 @@ EXTRACTION STEPS (follow in order):
 
 4. MODEL CANDIDATES — List possible models (max 5) with confidence + evidence
 
+   DISAMBIGUATION RULES (apply when multiple similar models exist in a family):
+   - Gaming mice (Logitech G-series, Razer, SteelSeries, etc.): G502/G500/G900/G903/G502X/G305/G603/G703 are nearly indistinguishable from above without a label. Top-down photo → list ALL visually plausible models at max 0.50 confidence. NEVER pick one definitively from shape alone.
+   - Smartphones: iPhone 13/14/15 rear panels look near-identical. Count rear camera lenses and note ring thickness + color as clues. Without visible text/logo, cap each model at 0.55.
+   - Gaming controllers: PS4 DualShock vs PS5 DualSense differ in touchpad width and share-button position. Xbox One vs Series X controllers differ mainly in Share/Menu button layout.
+   - Laptops/MacBooks: Notch presence (2021+), port count, and trackpad size visible from above. Cap at 0.60 without visible text.
+   - Headphones: WH-1000XM3/XM4/XM5, QC35/QC45/QC35II look very similar. Ear-cup shape and headband stitching are key. Cap at 0.55 without brand text.
+   - HARD RULE: NEVER assign >0.70 model confidence from silhouette/shape alone. Text or logo OCR confirmation is required to reach ≥0.75.
+
 5. CATEGORY — Classify (Electronics, Furniture, Vehicles, Watches, Clothing, Sports, Smoking, Home, Beauty, Books, Toys, Tools, Food, Other)
 
 6. CONDITION — New, Like New, Good, Fair, Poor
@@ -497,7 +505,11 @@ You are the second stage of a pipeline. Stage 1 extracted visual attributes. You
 RECOGNITION DATA FROM STAGE 1:
 - Category: ${recognition.category} (${Math.round(recognition.category_confidence * 100)}% confident)
 - Top brand: ${recognition.brand_candidates?.[0]?.brand || 'unidentified'} (${Math.round((recognition.brand_candidates?.[0]?.confidence || 0) * 100)}%, evidence: ${recognition.brand_candidates?.[0]?.evidence || 'none'})
-- Top model: ${recognition.model_candidates?.[0]?.model || 'unidentified'} (${Math.round((recognition.model_candidates?.[0]?.confidence || 0) * 100)}%)
+- Model candidates: ${recognition.model_candidates?.length > 0
+    ? recognition.model_candidates.map((m, i) =>
+        `${i === 0 ? '[top]' : `[#${i + 1}]`} ${m.model} (${Math.round(m.confidence * 100)}%${m.evidence ? ', evidence: ' + m.evidence : ''})`
+      ).join(' | ')
+    : 'unidentified'}
 - OCR text: ${recognition.ocr_text?.raw_texts?.join(', ') || 'none'}
 - Logos: ${recognition.ocr_text?.logos_detected?.join(', ') || 'none'}
 - Brand evidence: ${recognition.brand_candidates?.[0]?.evidence || 'none'}${recognition.brand_candidates?.[0]?.evidence?.includes('packaging') ? ' (RETAIL PACKAGING DETECTED — identify the product inside the box)' : ''}
@@ -1047,14 +1059,39 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     }
 
     if (textResults.length === 0 && vectorResults.length === 0 && category) {
-      const { data: catFallback } = await supa
-        .from('products')
-        .select('*')
-        .ilike('category', `%${category}%`)
-        .order('popularity_score', { ascending: false })
-        .limit(5);
-      if (catFallback?.length) {
-        textResults.push(...catFallback.map((r) => ({ ...r, _source: 'category_fallback', similarity: 0.40 })));
+      // Strategy 2b: Model-candidate targeted lookup — tries each Stage 1 model candidate
+      // directly against the DB before falling back to popularity ordering.
+      // Prevents G502 (most popular Logitech mouse) winning when Stage 1 actually saw G900.
+      if (topBrand && topBrand.toLowerCase() !== 'unidentified' && modelCandidates.length > 0) {
+        for (const candModel of modelCandidates.slice(0, 4)) {
+          if (!candModel || candModel.toLowerCase() === 'unidentified') continue;
+          const { data: candMatch } = await supa
+            .from('products').select('*')
+            .ilike('brand', `%${topBrand}%`)
+            .ilike('model', `%${candModel}%`)
+            .limit(2);
+          if (candMatch?.length) {
+            textResults.push(...candMatch.map(r => ({ ...r, _source: 'text_candidate', similarity: 0.65 })));
+          }
+        }
+      }
+
+      // Last resort: category fallback — popularity only orders within brand+category filter
+      if (textResults.length === 0) {
+        let q = supa.from('products').select('*');
+        if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
+          // Brand-filtered: avoids "most popular Gaming Mouse overall" when we know brand
+          q = q.ilike('brand', `%${topBrand}%`).ilike('category', `%${category}%`);
+        } else {
+          q = q.ilike('category', `%${category}%`);
+        }
+        const { data: catFallback } = await q
+          .order('popularity_score', { ascending: false })
+          .limit(5);
+        if (catFallback?.length) {
+          // Very low similarity — Stage 2 treats these as weak anchors, not confirmed matches
+          textResults.push(...catFallback.map(r => ({ ...r, _source: 'category_fallback', similarity: 0.28 })));
+        }
       }
     }
   } catch (err) {
@@ -1432,6 +1469,15 @@ function assessAuthenticity(recognition, verification) {
 }
 
 
+// Strip trailing variant suffixes so G502/G502 Hero/G502X all collapse to "g502"
+function normalizeModelKey(model) {
+  return (model || '')
+    .toLowerCase()
+    .replace(/\s+(hero\d?|x\s*plus|x\+|x\d?|\+|se|lite|rgb|gaming|wireless|lightspeed|edition|v\d|gen\d|mk\d|plus|pro)$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizeForUI(recognition, verification, tierInfo, visionUsed = false) {
   const ocr = recognition.ocr_text || {};
   const auth = assessAuthenticity(recognition, verification);
@@ -1477,7 +1523,25 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
       ocrText: (ocr.raw_texts || []).join(' | '),
       modelNumber: verification.final_model !== 'unidentified' ? verification.final_model : null,
       brandConfidence: verification.brand_confidence || 'unidentified',
-      alternatives: [],
+      alternatives: (() => {
+        const topBrand = recognition.brand_candidates?.[0]?.brand || '';
+        const brandOk = topBrand && topBrand.toLowerCase() !== 'unidentified';
+        // Dedupe by normalized model family — prevents G502 / G502 Hero / G502X all appearing
+        const seenKeys = new Set([normalizeModelKey(verification.final_model || '')]);
+        return (recognition.model_candidates || [])
+          .filter(c => {
+            if ((c.confidence ?? 0) < 0.25) return false;
+            const key = normalizeModelKey(c.model);
+            if (seenKeys.has(key)) return false;
+            seenKeys.add(key);
+            return true;
+          })
+          .slice(0, 3)
+          .map(c => ({
+            name: brandOk ? `${topBrand} ${c.model}`.trim() : c.model,
+            confidence: c.confidence,
+          }));
+      })(),
     },
     identification: {
       generic_name: recognition.category,
