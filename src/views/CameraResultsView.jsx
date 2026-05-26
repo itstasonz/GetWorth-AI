@@ -1116,6 +1116,30 @@ export function ResultsView() {
         </FadeIn>
       )}
 
+      {/* ═══ LOW CONFIDENCE WARNING BANNER ═══ */}
+      {(tier === 'low' || tier === 'very_low') && !isConfirmed && (
+        <FadeIn delay={20}>
+          <div
+            className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl"
+            style={{
+              background: tier === 'very_low' ? 'rgba(239,68,68,0.08)' : 'rgba(251,146,60,0.08)',
+              border: `1px solid ${tier === 'very_low' ? 'rgba(239,68,68,0.20)' : 'rgba(251,146,60,0.20)'}`,
+            }}
+          >
+            <AlertTriangle
+              className="w-3.5 h-3.5 flex-shrink-0"
+              style={{ color: tier === 'very_low' ? '#ef4444' : '#fb923c' }}
+              strokeWidth={2.5}
+            />
+            <p className="text-xs leading-snug" style={{ color: tier === 'very_low' ? '#fca5a5' : '#fdba74' }}>
+              {tier === 'very_low'
+                ? (lang === 'he' ? 'זיהוי נמוך מאוד — לא הצלחנו לזהות את המוצר בוודאות' : "Very low confidence — we couldn't identify this item clearly")
+                : (lang === 'he' ? 'זיהוי חלקי — ייתכן שהמוצר שונה מההערכה שלנו' : "Partial identification — the item may differ from our estimate")}
+            </p>
+          </div>
+        </FadeIn>
+      )}
+
       {/* ═══ STITCH ESTIMATED VALUE — centered editorial display ═══ */}
       <FadeIn delay={100}>
         <div className="text-center px-4">
@@ -1629,78 +1653,6 @@ export function ResultsView() {
         );
       })()}
 
-      {/* ═══ STITCH MARKET INSIGHT CARD ═══ */}
-      {(() => {
-        const insightText = result.israeliMarketNotes
-          || result.sellingTips
-          || (result.demandLevel === 'high'
-            ? (lang === 'he'
-              ? 'ביקוש גבוה בישראל. פריטים כאלה נמכרים בדרך כלל במהירות.'
-              : 'High demand detected in your region. Items like this typically sell quickly.')
-            : result.demandLevel === 'low'
-            ? (lang === 'he'
-              ? 'ביקוש נמוך. שקול מחיר תחרותי לזמן מכירה מהיר יותר.'
-              : 'Lower demand for this category. Consider a competitive price for faster sale.')
-            : (lang === 'he'
-              ? 'ביקוש יציב. רשום במחיר המשוער לקבלת הצעות טובות.'
-              : 'Steady demand. List at the estimated price for strong offers.')
-          );
-
-        if (!insightText) return null;
-
-        return (
-          <FadeIn delay={85}>
-            <div
-              className="p-5 rounded-2xl"
-              style={{
-                background: STITCH.surfaceContainerLowest,
-                borderLeft: `4px solid rgba(111, 238, 225, 0.40)`,
-              }}
-            >
-              <h3
-                className="font-semibold text-sm mb-2"
-                style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
-              >
-                {lang === 'he' ? 'תובנת שוק' : 'Market Insight'}
-              </h3>
-              <p
-                className="text-sm leading-relaxed"
-                style={{ color: STITCH.onSurfaceVariant }}
-              >
-                {insightText}
-              </p>
-            </div>
-          </FadeIn>
-        );
-      })()}
-
-      {/* Actions — Stitch gradient CTA */}
-      <FadeIn delay={200}>
-        <button
-          onClick={startListing}
-          className="w-full h-16 rounded-full flex items-center justify-center gap-3 font-extrabold text-lg active:scale-[0.97] transition-all"
-          style={{
-            background: STITCH.GRADIENT_PRIMARY,
-            color: STITCH.onPrimary,
-            fontFamily: STITCH.FONT_HEADLINE,
-            boxShadow: '0 20px 40px rgba(111, 238, 225, 0.20)',
-          }}
-        >
-          <span>{t.listItem}</span>
-          <Rocket className="w-5 h-5" strokeWidth={2.5} />
-        </button>
-      </FadeIn>
-
-      <FadeIn delay={300}>
-        <button
-          onClick={reset}
-          className="w-full py-3 text-sm flex items-center justify-center gap-2 transition-colors"
-          style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
-        >
-          <RefreshCw className="w-4 h-4" />{t.scanAnother}
-        </button>
-      </FadeIn>
-
       {/* ═══ TIER: Very Low (<40%) — Broad estimate, need help ═══ */}
       {tier === 'very_low' && !isConfirmed && (
         <FadeIn delay={75}>
@@ -1884,6 +1836,153 @@ export function ResultsView() {
           </Card>
         </FadeIn>
       )}
+
+      {/* ═══ STITCH MARKET INSIGHT CARD — shown only when high confidence or confirmed ═══ */}
+      {(tier === 'high' || isConfirmed) && (() => {
+        const insightText = result.israeliMarketNotes
+          || result.sellingTips
+          || (result.demandLevel === 'high'
+            ? (lang === 'he'
+              ? 'ביקוש גבוה בישראל. פריטים כאלה נמכרים בדרך כלל במהירות.'
+              : 'High demand detected in your region. Items like this typically sell quickly.')
+            : result.demandLevel === 'low'
+            ? (lang === 'he'
+              ? 'ביקוש נמוך. שקול מחיר תחרותי לזמן מכירה מהיר יותר.'
+              : 'Lower demand for this category. Consider a competitive price for faster sale.')
+            : (lang === 'he'
+              ? 'ביקוש יציב. רשום במחיר המשוער לקבלת הצעות טובות.'
+              : 'Steady demand. List at the estimated price for strong offers.')
+          );
+
+        if (!insightText) return null;
+
+        return (
+          <FadeIn delay={85}>
+            <div
+              className="p-5 rounded-2xl"
+              style={{
+                background: STITCH.surfaceContainerLowest,
+                borderLeft: `4px solid rgba(111, 238, 225, 0.40)`,
+              }}
+            >
+              <h3
+                className="font-semibold text-sm mb-2"
+                style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
+              >
+                {lang === 'he' ? 'תובנת שוק' : 'Market Insight'}
+              </h3>
+              <p
+                className="text-sm leading-relaxed"
+                style={{ color: STITCH.onSurfaceVariant }}
+              >
+                {insightText}
+              </p>
+            </div>
+          </FadeIn>
+        );
+      })()}
+
+      {/* ═══ GATED CTA — primary action varies by confidence tier ═══ */}
+      <FadeIn delay={200}>
+        {(tier === 'high' || isConfirmed) ? (
+          /* HIGH / CONFIRMED — full teal gradient */
+          <button
+            onClick={startListing}
+            className="w-full h-16 rounded-full flex items-center justify-center gap-3 font-extrabold text-lg active:scale-[0.97] transition-all"
+            style={{
+              background: STITCH.GRADIENT_PRIMARY,
+              color: STITCH.onPrimary,
+              fontFamily: STITCH.FONT_HEADLINE,
+              boxShadow: '0 20px 40px rgba(111, 238, 225, 0.20)',
+            }}
+          >
+            <span>{t.listItem}</span>
+            <Rocket className="w-5 h-5" strokeWidth={2.5} />
+          </button>
+        ) : tier === 'moderate' ? (
+          /* MODERATE — teal outline primary, ghost secondary */
+          <div className="space-y-2">
+            <button
+              onClick={startListing}
+              className="w-full h-14 rounded-full flex items-center justify-center gap-3 font-bold text-base active:scale-[0.97] transition-all"
+              style={{
+                background: 'transparent',
+                border: `2px solid ${STITCH.primary}`,
+                color: STITCH.primary,
+                fontFamily: STITCH.FONT_HEADLINE,
+              }}
+            >
+              <Check className="w-4 h-4" strokeWidth={2.5} />
+              <span>{lang === 'he' ? 'אשר ורשום' : 'Confirm & List'}</span>
+            </button>
+            <button
+              onClick={startListing}
+              className="w-full py-2.5 text-sm flex items-center justify-center gap-2 transition-colors"
+              style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
+            >
+              {lang === 'he' ? 'רשום ללא אישור' : 'List without confirming'}
+            </button>
+          </div>
+        ) : tier === 'low' ? (
+          /* LOW — green outline primary, ghost secondary */
+          <div className="space-y-2">
+            <button
+              onClick={confirmResult}
+              className="w-full h-14 rounded-full flex items-center justify-center gap-3 font-bold text-base active:scale-[0.97] transition-all"
+              style={{
+                background: 'transparent',
+                border: '2px solid rgba(74,222,128,0.60)',
+                color: 'rgb(134,239,172)',
+                fontFamily: STITCH.FONT_HEADLINE,
+              }}
+            >
+              <Check className="w-4 h-4" strokeWidth={2.5} />
+              <span>{lang === 'he' ? 'כן, זה נכון' : 'Confirm item'}</span>
+            </button>
+            <button
+              onClick={startListing}
+              className="w-full py-2.5 text-sm flex items-center justify-center gap-2 transition-colors"
+              style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY, opacity: 0.7 }}
+            >
+              {lang === 'he' ? 'רשום עם הערכה' : 'List with estimate'}
+            </button>
+          </div>
+        ) : (
+          /* VERY_LOW — charcoal primary, ghost secondary */
+          <div className="space-y-2">
+            <button
+              onClick={() => setHelpModalOpen(true)}
+              className="w-full h-14 rounded-full flex items-center justify-center gap-3 font-bold text-base active:scale-[0.97] transition-all"
+              style={{
+                background: STITCH.surfaceContainerHigh,
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: STITCH.onSurface,
+                fontFamily: STITCH.FONT_HEADLINE,
+              }}
+            >
+              <Search className="w-4 h-4" strokeWidth={2} />
+              <span>{lang === 'he' ? 'עזור לזהות' : 'Help identify'}</span>
+            </button>
+            <button
+              onClick={startListing}
+              className="w-full py-2.5 text-sm flex items-center justify-center gap-2 transition-colors"
+              style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY, opacity: 0.6 }}
+            >
+              {lang === 'he' ? 'רשום עם הערכה גסה' : 'List with rough estimate'}
+            </button>
+          </div>
+        )}
+      </FadeIn>
+
+      <FadeIn delay={300}>
+        <button
+          onClick={reset}
+          className="w-full py-3 text-sm flex items-center justify-center gap-2 transition-colors"
+          style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
+        >
+          <RefreshCw className="w-4 h-4" />{t.scanAnother}
+        </button>
+      </FadeIn>
 
       {/* Confirmed badge */}
       {isConfirmed && (
