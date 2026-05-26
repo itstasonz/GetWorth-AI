@@ -318,7 +318,7 @@ export function InboxView() {
     : conversations;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 pb-28" dir={rtl ? 'rtl' : 'ltr'}>
       <FadeIn>
         <h2 className="text-2xl font-extrabold" style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}>
           {lang === 'he' ? 'הודעות' : 'Messages'}
@@ -407,22 +407,20 @@ export function InboxView() {
               <button
                 key={conv.id}
                 onClick={() => openConv(conv)}
-                className="w-full text-left flex items-center gap-4 p-4 rounded-2xl transition-all active:scale-[0.99]"
+                className="w-full text-start flex items-center gap-3 p-3.5 rounded-2xl transition-all active:scale-[0.99]"
                 style={{ background: convUnread > 0 ? C.surfaceLow : 'transparent' }}
                 onMouseEnter={e => (e.currentTarget.style.background = C.surfaceLow)}
                 onMouseLeave={e => (e.currentTarget.style.background = convUnread > 0 ? C.surfaceLow : 'transparent')}
               >
                 {/* Avatar */}
                 <div className="relative flex-shrink-0">
-                  <UserAvatar profile={otherUser} size="md" />
-                  {/* Online dot — styled same as Stitch */}
-                  <div
-                    className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2"
-                    style={{
-                      background: convUnread > 0 ? C.primary : C.surfaceHigh,
-                      borderColor: C.surfaceDim,
-                    }}
-                  />
+                  <UserAvatar profile={otherUser} size="sm" />
+                  {convUnread > 0 && (
+                    <div
+                      className="absolute bottom-0 end-0 w-2.5 h-2.5 rounded-full border-2"
+                      style={{ background: C.primary, borderColor: C.surfaceDim }}
+                    />
+                  )}
                 </div>
 
                 {/* Content */}
@@ -790,29 +788,26 @@ export function ChatView() {
       {listing && (
         <button
           onClick={goToListing}
-          className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-white/[0.02]"
+          className="flex-shrink-0 flex items-center gap-3 px-4 py-2 text-start transition-colors active:bg-white/[0.02]"
           style={{
             background: C.surfaceLow,
             borderBottom: `1px solid rgba(60,73,71,0.22)`,
           }}
         >
           {listing.images?.[0] && (
-            <img src={listing.images[0]} alt="" className="w-10 h-10 rounded-xl object-cover flex-shrink-0" />
+            <img src={listing.images[0]} alt="" className="w-9 h-9 rounded-lg object-cover flex-shrink-0" />
           )}
-          <div className="flex-1 min-w-0">
-            <p className="text-[10px] font-bold uppercase tracking-wider mb-0.5" style={{ color: `${C.onSurfaceVar}88` }}>
-              {lang === 'he' ? 'פריט בשיחה' : 'Item in thread'}
-            </p>
-            <p className="text-sm font-semibold truncate" style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}>
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <p className="text-[13px] font-semibold truncate flex-1" style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}>
               {lang === 'he' && listing.title_hebrew ? listing.title_hebrew : listing.title}
             </p>
             {listing.price && (
-              <p className="text-[11px] font-bold" style={{ color: C.primary }}>
+              <p className="text-[12px] font-bold flex-shrink-0" style={{ color: C.primary }}>
                 {formatPrice(listing.price)}
               </p>
             )}
           </div>
-          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: C.onSurfaceVar }} />
+          <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.onSurfaceVar }} />
         </button>
       )}
 
@@ -829,12 +824,15 @@ export function ChatView() {
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className="absolute inset-0 overflow-y-auto py-4"
+          className="absolute inset-0 overflow-y-auto"
           style={{ overscrollBehavior: 'contain', WebkitOverflowScrolling: 'touch' }}
         >
+          {/* min-h-full + justify-end: messages always pile at the bottom — no dead space at top */}
+          <div className="min-h-full flex flex-col justify-end">
+
           {/* Loading skeleton */}
           {messagesLoading && messages.length === 0 ? (
-            <div className="space-y-4 px-4">
+            <div className="space-y-4 px-4 py-4">
               {[{ a: 'start', w: '62%' }, { a: 'end', w: '48%' }, { a: 'start', w: '72%' }, { a: 'end', w: '52%' }].map((s, i) => (
                 <div key={i} className={`flex items-end gap-3 ${s.a === 'end' ? 'justify-end' : 'justify-start'}`}>
                   {s.a === 'start' && <div className="w-8 h-8 rounded-full animate-pulse flex-shrink-0" style={{ background: C.surfaceHigh }} />}
@@ -849,8 +847,8 @@ export function ChatView() {
               ))}
             </div>
           ) : messages.length === 0 ? (
-            /* Empty state */
-            <div className="flex flex-col items-center justify-center min-h-[280px] text-center py-10 px-6">
+            /* Empty state — centered in available height */
+            <div className="flex flex-col items-center justify-center flex-1 text-center py-10 px-6">
               <div
                 className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
                 style={{ background: C.surfaceLow }}
@@ -878,7 +876,7 @@ export function ChatView() {
           ) : null}
 
           {/* Message bubbles with date separators */}
-          <div className="space-y-[3px] px-3">
+          <div className="space-y-[3px] px-3 pt-3 pb-4">
             {groupedWithDates.map((item, idx) => {
               // Date separator row
               if (item._type === 'date') {
@@ -893,7 +891,7 @@ export function ChatView() {
               // ── Offer bubble ──
               if (isOffer) {
                 return (
-                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-5' : 'mt-[3px]'}`}>
+                  <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-3' : 'mt-[3px]'}`}>
                     {!isMe && <div className="w-8 h-8 flex-shrink-0" />}
                     <div
                       className="max-w-[72%] rounded-2xl overflow-hidden"
@@ -938,7 +936,7 @@ export function ChatView() {
                 return (
                   <div
                     key={msg.id}
-                    className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-5' : 'mt-[3px]'}`}
+                    className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-3' : 'mt-[3px]'}`}
                   >
                     {!isMe && (
                       msg.isEnd
@@ -988,7 +986,7 @@ export function ChatView() {
               return (
                 <div
                   key={msg.id}
-                  className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-5' : 'mt-[3px]'}`}
+                  className={`flex ${isMe ? 'justify-end' : 'justify-start items-end gap-2.5'} ${msg.isStart ? 'mt-3' : 'mt-[3px]'}`}
                 >
                   {!isMe && (
                     isIncomingEnd
@@ -1039,6 +1037,7 @@ export function ChatView() {
           </div>
 
           <div ref={messagesEndRef} className="h-2" />
+          </div>{/* end min-h-full justify-end wrapper */}
         </div>
 
         {/* "New message" jump pill */}
@@ -1056,31 +1055,33 @@ export function ChatView() {
         )}
       </div>
 
-      {/* ── Quick-reply chips ── */}
-      <div
-        className="flex-shrink-0 flex gap-2 px-4 py-2.5 overflow-x-auto"
-        style={{
-          background: C.surfaceLow,
-          borderTop: `1px solid rgba(60,73,71,0.22)`,
-          scrollbarWidth: 'none',
-          WebkitOverflowScrolling: 'touch',
-        }}
-      >
-        {[
-          { text: lang === 'he' ? 'עדיין זמין?' : 'Still available?', icon: '❓' },
-          { text: lang === 'he' ? 'מחיר סופי?'  : 'Best price?',     icon: '💰' },
-          { text: lang === 'he' ? 'איפה למסור?' : 'Where to meet?',  icon: '📍' },
-        ].map((q, i) => (
-          <button
-            key={i}
-            onClick={() => { if (navigator.vibrate) navigator.vibrate(10); sendMessage(q.text); }}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs whitespace-nowrap active:scale-95 transition-all"
-            style={{ background: C.surfaceHigh, color: C.onSurfaceVar }}
-          >
-            {q.icon} {q.text}
-          </button>
-        ))}
-      </div>
+      {/* ── Quick-reply chips — shown only before first message ── */}
+      {messages.length === 0 && !messagesLoading && (
+        <div
+          className="flex-shrink-0 flex gap-2 px-4 py-2 overflow-x-auto"
+          style={{
+            background: C.surfaceLow,
+            borderTop: `1px solid rgba(60,73,71,0.22)`,
+            scrollbarWidth: 'none',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
+          {[
+            { text: lang === 'he' ? 'עדיין זמין?' : 'Still available?', icon: '❓' },
+            { text: lang === 'he' ? 'מחיר סופי?'  : 'Best price?',     icon: '💰' },
+            { text: lang === 'he' ? 'איפה למסור?' : 'Where to meet?',  icon: '📍' },
+          ].map((q, i) => (
+            <button
+              key={i}
+              onClick={() => { if (navigator.vibrate) navigator.vibrate(10); sendMessage(q.text); }}
+              className="flex-shrink-0 px-3 py-1.5 rounded-full text-xs whitespace-nowrap active:scale-95 transition-all"
+              style={{ background: C.surfaceHigh, color: C.onSurfaceVar }}
+            >
+              {q.icon} {q.text}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Image preview strip (shown above composer when photo selected) ── */}
       {imgPreview && (
