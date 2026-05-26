@@ -731,8 +731,8 @@ export function AppProvider({ children }) {
       .from('conversations')
       .select(`id, buyer_id, seller_id, updated_at,
         listing:listings(id, title, title_hebrew, price, images),
-        buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url),
-        seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url),
+        buyer:profiles!buyer_id(id, full_name, avatar_url),
+        seller:profiles!seller_id(id, full_name, avatar_url),
         messages(id, content, created_at, sender_id, is_read, is_offer, offer_amount)`)
       .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
       .order('updated_at', { ascending: false })

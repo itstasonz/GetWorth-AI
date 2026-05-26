@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   MessageCircle, ChevronRight, ChevronLeft,
-  DollarSign, Loader2, Send, Check, CheckCheck, X, ArrowDown, Shield,
+  DollarSign, Loader2, Send, Check, CheckCheck,
+  X, ArrowDown, Shield, Search,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Btn, FadeIn, SlideUp } from '../components/ui';
@@ -9,7 +10,62 @@ import { formatPrice, formatMessageTime } from '../lib/utils';
 
 const DEV = import.meta.env.DEV;
 
-// ─── Offer Bottom Sheet ──────────────────────────────────────────────────────
+// ─── UserAvatar ───────────────────────────────────────────────────────────────
+// Shows avatar_url photo; falls back to teal initials circle.
+// size: 'sm' (32) | 'md' (40) | 'lg' (52)
+function UserAvatar({ profile, size = 'md', className = '' }) {
+  const sizeMap = { sm: 'w-8 h-8 text-xs', md: 'w-10 h-10 text-sm', lg: 'w-13 h-13 text-base' };
+  const sz = sizeMap[size] || sizeMap.md;
+  const initials = (profile?.full_name || '?')
+    .split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
+
+  if (profile?.avatar_url) {
+    return (
+      <img
+        src={profile.avatar_url}
+        alt={profile.full_name || ''}
+        className={`${sz} rounded-full object-cover flex-shrink-0 ${className}`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${sz} rounded-full flex items-center justify-center font-bold flex-shrink-0 ${className}`}
+      style={{ background: 'linear-gradient(135deg,#6FEEE1 0%,#4FD1C5 100%)', color: '#003733' }}
+    >
+      {initials}
+    </div>
+  );
+}
+
+// ─── ListingContextCard ───────────────────────────────────────────────────────
+// Thin tappable strip below chat header: thumbnail · title · price → opens listing
+function ListingContextCard({ listing, lang, onClick }) {
+  if (!listing) return null;
+  const title = lang === 'he' && listing.title_hebrew ? listing.title_hebrew : listing.title;
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-2.5 px-4 py-2 border-b text-left transition-colors hover:bg-white/[0.03] active:bg-white/[0.06]"
+      style={{ background: 'rgba(0,0,0,0.25)', borderColor: 'rgba(255,255,255,0.06)' }}
+    >
+      {listing.images?.[0] && (
+        <img src={listing.images[0]} alt="" className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-xs font-medium text-slate-300 truncate leading-tight">{title}</p>
+        {listing.price && (
+          <p className="text-[11px] font-semibold mt-0.5" style={{ color: '#6FEEE1' }}>
+            {formatPrice(listing.price)}
+          </p>
+        )}
+      </div>
+      <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+    </button>
+  );
+}
+
+// ─── OfferSheet ───────────────────────────────────────────────────────────────
 function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
   const [amount, setAmount] = useState('');
   const [error, setError]   = useState('');
@@ -45,9 +101,7 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <DollarSign className="w-5 h-5" style={{ color: '#6FEEE1' }} />
-              <h3 className="text-lg font-bold">
-                {lang === 'he' ? 'שלח הצעת מחיר' : 'Make an Offer'}
-              </h3>
+              <h3 className="text-lg font-bold">{lang === 'he' ? 'שלח הצעת מחיר' : 'Make an Offer'}</h3>
             </div>
             <button
               onClick={onClose}
@@ -75,25 +129,19 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
           )}
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-slate-300">
-              {lang === 'he' ? 'הצעה שלך' : 'Your offer'}
-            </label>
+            <label className="text-sm font-medium text-slate-300">{lang === 'he' ? 'הצעה שלך' : 'Your offer'}</label>
             <div className="relative flex items-center">
               <span
                 className="absolute text-xl font-bold text-slate-400 pointer-events-none"
                 style={{ [rtl ? 'right' : 'left']: '16px' }}
-              >
-                ₪
-              </span>
+              >₪</span>
               <input
                 ref={inputRef}
-                type="number"
-                inputMode="numeric"
+                type="number" inputMode="numeric"
                 value={amount}
                 onChange={e => { setAmount(e.target.value); setError(''); }}
                 onKeyDown={e => e.key === 'Enter' && handleSend()}
-                placeholder="0"
-                min="1"
+                placeholder="0" min="1"
                 className={`w-full py-4 ${rtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} rounded-2xl bg-white/5 border border-white/10 text-2xl font-bold focus:outline-none focus:border-[#6FEEE1]/60 transition-colors text-center`}
                 style={{ color: amount && parseInt(amount, 10) > 0 ? '#6FEEE1' : undefined }}
                 dir="ltr"
@@ -113,7 +161,7 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
               onClick={handleSend}
               disabled={!amount || parseInt(amount, 10) <= 0}
               className="flex-1 py-3.5 rounded-xl text-sm font-bold transition-all active:scale-[0.97] disabled:opacity-40 flex items-center justify-center gap-2"
-              style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
+              style={{ background: 'linear-gradient(135deg,#6FEEE1 0%,#4FD1C5 100%)', color: '#003733' }}
             >
               <DollarSign className="w-4 h-4" />
               {lang === 'he' ? 'שלח הצעה' : 'Send Offer'}
@@ -125,23 +173,14 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
   );
 }
 
-// ─── Inbox View ──────────────────────────────────────────────────────────────
+// ─── InboxView ────────────────────────────────────────────────────────────────
 export function InboxView() {
   const {
     t, lang, rtl, user, conversations, conversationsLoading,
-    setActiveChat, loadMessages, setView, goTab, unreadCount,
+    setActiveChat, loadMessages, setView, goTab,
   } = useApp();
 
-  const mountedAt    = useRef(DEV ? performance.now() : 0);
-  const prevCountRef = useRef(0);
-
-  useEffect(() => { if (DEV) console.log('[Chat] InboxView mounted'); }, []);
-  useEffect(() => {
-    if (!DEV) return;
-    if (conversations.length > 0 && prevCountRef.current === 0)
-      console.log(`[Chat] First visible UI: ${conversations.length} convs after ${(performance.now() - mountedAt.current).toFixed(0)}ms`);
-    prevCountRef.current = conversations.length;
-  }, [conversations.length]);
+  const [search, setSearch] = useState('');
 
   if (!user) {
     return (
@@ -165,16 +204,46 @@ export function InboxView() {
     setView('chat');
   };
 
+  // Client-side search — name or listing title
+  const filtered = search.trim()
+    ? conversations.filter(conv => {
+        const q = search.toLowerCase();
+        const other = conv.buyer_id === user.id ? conv.seller : conv.buyer;
+        return (
+          other?.full_name?.toLowerCase().includes(q) ||
+          conv.listing?.title?.toLowerCase().includes(q) ||
+          conv.listing?.title_hebrew?.toLowerCase().includes(q)
+        );
+      })
+    : conversations;
+
   return (
     <div className="space-y-4">
       <FadeIn><h2 className="text-2xl font-bold">{lang === 'he' ? 'הודעות' : 'Messages'}</h2></FadeIn>
 
+      {/* Search input — only show once there are conversations */}
+      {conversations.length > 2 && (
+        <FadeIn>
+          <div className="relative">
+            <Search className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-3.5' : 'left-3.5'} w-4 h-4 text-slate-500 pointer-events-none`} />
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={lang === 'he' ? 'חפש שיחות...' : 'Search conversations...'}
+              className={`w-full h-10 ${rtl ? 'pr-9 pl-4' : 'pl-9 pr-4'} rounded-full bg-white/[0.06] border border-white/[0.08] text-sm focus:outline-none focus:border-[#6FEEE1]/40 placeholder:text-slate-500 transition-colors`}
+              dir={rtl ? 'rtl' : 'ltr'}
+            />
+          </div>
+        </FadeIn>
+      )}
+
       {conversationsLoading && conversations.length === 0 ? (
-        /* Loading skeleton */
+        /* Skeleton */
         <div className="rounded-2xl overflow-hidden border border-white/[0.07]">
           {[0, 1, 2].map(i => (
             <div key={i} className={`flex items-center gap-3 px-4 py-3 animate-pulse ${i > 0 ? 'border-t border-white/[0.05]' : ''}`}>
-              <div className="w-14 h-14 rounded-xl bg-white/[0.06] flex-shrink-0" />
+              <div className="w-10 h-10 rounded-full bg-white/[0.07] flex-shrink-0" />
               <div className="flex-1 space-y-2">
                 <div className="h-3.5 bg-white/[0.06] rounded w-1/3" />
                 <div className="h-3 bg-white/[0.06] rounded w-1/2" />
@@ -183,45 +252,41 @@ export function InboxView() {
             </div>
           ))}
         </div>
-      ) : conversations.length === 0 ? (
-        <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-            <MessageCircle className="w-10 h-10 text-slate-600" />
-          </div>
-          <p className="text-slate-300 font-semibold mb-2">
-            {lang === 'he' ? 'אין הודעות עדיין' : 'No messages yet'}
-          </p>
-          <p className="text-slate-500 text-sm mb-5">
-            {lang === 'he' ? 'התחל שיחה עם מוכר' : 'Start a conversation with a seller'}
-          </p>
-          <Btn primary onClick={() => goTab('browse')}>
-            {lang === 'he' ? 'חפש פריטים' : 'Browse Items'}
-          </Btn>
-        </FadeIn>
+      ) : filtered.length === 0 ? (
+        search ? (
+          <FadeIn className="text-center py-10">
+            <p className="text-slate-400 text-sm">{lang === 'he' ? 'לא נמצאו שיחות' : 'No conversations found'}</p>
+          </FadeIn>
+        ) : (
+          <FadeIn className="text-center py-16">
+            <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+              <MessageCircle className="w-10 h-10 text-slate-600" />
+            </div>
+            <p className="text-slate-300 font-semibold mb-2">{lang === 'he' ? 'אין הודעות עדיין' : 'No messages yet'}</p>
+            <p className="text-slate-500 text-sm mb-5">{lang === 'he' ? 'התחל שיחה עם מוכר' : 'Start a conversation with a seller'}</p>
+            <Btn primary onClick={() => goTab('browse')}>{lang === 'he' ? 'חפש פריטים' : 'Browse Items'}</Btn>
+          </FadeIn>
+        )
       ) : (
-        /* Conversation list — clean bordered list, no heavy Card shadow per row */
         <div className="rounded-2xl overflow-hidden border border-white/[0.07]">
-          {conversations.map((conv, i) => {
+          {filtered.map((conv, i) => {
             const otherUser  = conv.buyer_id === user.id ? conv.seller : conv.buyer;
             const lastMsg    = conv.messages?.[0] ?? null;
             const convUnread = conv.messages?.filter(m => !m.is_read && m.sender_id !== user.id).length || 0;
             const lastText   = lastMsg?.is_offer
-              ? `💰 ${lang === 'he' ? 'הצעת מחיר' : 'Price offer'}: ₪${lastMsg.offer_amount}`
+              ? `💰 ₪${lastMsg.offer_amount}`
               : lastMsg?.content || (lang === 'he' ? 'שיחה חדשה' : 'New conversation');
+            const listingTitle = lang === 'he' && conv.listing?.title_hebrew
+              ? conv.listing.title_hebrew : conv.listing?.title;
 
             return (
               <button
                 key={conv.id}
                 onClick={() => openConv(conv)}
-                className={`w-full text-left flex items-center gap-3 px-4 py-3 transition-colors hover:bg-white/[0.04] active:bg-white/[0.07] ${i > 0 ? 'border-t border-white/[0.05]' : ''}`}
+                className={`w-full text-left flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-white/[0.03] active:bg-white/[0.06] ${i > 0 ? 'border-t border-white/[0.05]' : ''}`}
               >
-                {/* Listing thumbnail */}
-                <div className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-white/[0.05]">
-                  {conv.listing?.images?.[0]
-                    ? <img src={conv.listing.images[0]} alt="" className="w-full h-full object-cover" />
-                    : <div className="w-full h-full flex items-center justify-center"><MessageCircle className="w-5 h-5 text-slate-600" /></div>
-                  }
-                </div>
+                {/* User avatar — photo or initials */}
+                <UserAvatar profile={otherUser} size="md" />
 
                 {/* Text content */}
                 <div className="flex-1 min-w-0">
@@ -233,25 +298,25 @@ export function InboxView() {
                       {lastMsg ? formatMessageTime(lastMsg.created_at, lang) : ''}
                     </span>
                   </div>
-                  <p className="text-xs text-slate-500 truncate mb-0.5">
-                    {lang === 'he' && conv.listing?.title_hebrew ? conv.listing.title_hebrew : conv.listing?.title}
-                  </p>
+                  {listingTitle && (
+                    <p className="text-[11px] text-slate-500 truncate mb-0.5">{listingTitle}</p>
+                  )}
                   <p className={`text-xs truncate ${convUnread > 0 ? 'text-slate-300 font-medium' : 'text-slate-500'}`}>
                     {lastText}
                   </p>
                 </div>
 
-                {/* Unread count — teal badge, right side, does NOT overlap thumbnail */}
-                {convUnread > 0 ? (
-                  <div
-                    className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
-                    style={{ background: '#6FEEE1', color: '#003733' }}
-                  >
-                    {convUnread > 9 ? '9+' : convUnread}
-                  </div>
-                ) : (
-                  <div className="w-5 flex-shrink-0" /> /* spacer keeps layout stable */
-                )}
+                {/* Unread badge — right edge, never overlaps avatar */}
+                <div className="flex-shrink-0 w-5 flex items-center justify-center">
+                  {convUnread > 0 && (
+                    <div
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold"
+                      style={{ background: '#6FEEE1', color: '#003733' }}
+                    >
+                      {convUnread > 9 ? '9+' : convUnread}
+                    </div>
+                  )}
+                </div>
               </button>
             );
           })}
@@ -261,7 +326,7 @@ export function InboxView() {
   );
 }
 
-// ─── Chat View ───────────────────────────────────────────────────────────────
+// ─── ChatView ─────────────────────────────────────────────────────────────────
 export function ChatView() {
   const {
     lang, rtl, user, activeChat, setActiveChat, setView, setSelected,
@@ -269,15 +334,15 @@ export function ChatView() {
     sendMessage, sendingMessage, messagesEndRef,
   } = useApp();
 
-  const [showOfferSheet,    setShowOfferSheet]    = useState(false);
-  const [showNewMsgBanner,  setShowNewMsgBanner]  = useState(false);
+  const [showOfferSheet,   setShowOfferSheet]   = useState(false);
+  const [showNewMsgBanner, setShowNewMsgBanner] = useState(false);
 
-  const containerRef   = useRef(null);
-  const scrollRef      = useRef(null);
-  const nearBottomRef  = useRef(true);
-  const prevMsgCount   = useRef(0);
+  const containerRef  = useRef(null);
+  const scrollRef     = useRef(null);
+  const nearBottomRef = useRef(true);
+  const prevMsgCount  = useRef(0);
 
-  // ── Keyboard-safe height (iOS visualViewport) ────────────────────────────
+  // ── iOS keyboard-safe height (visualViewport) ────────────────────────────
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -290,18 +355,14 @@ export function ChatView() {
     update();
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
-    return () => {
-      vv.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
-    };
+    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
   }, []);
 
-  // ── Smart scroll tracking ────────────────────────────────────────────────
+  // ── Scroll position tracking ─────────────────────────────────────────────
   const onScrollMessages = () => {
     const el = scrollRef.current;
     if (!el) return;
-    const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    nearBottomRef.current = dist < 80;
+    nearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     if (nearBottomRef.current) setShowNewMsgBanner(false);
   };
 
@@ -309,22 +370,16 @@ export function ChatView() {
   useEffect(() => {
     const count = messages.length;
     if (count === 0) { prevMsgCount.current = 0; return; }
-
     const isInitial = prevMsgCount.current === 0;
     const hasNew    = count > prevMsgCount.current;
     prevMsgCount.current = count;
 
     if (isInitial) {
-      requestAnimationFrame(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      });
+      requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; });
       return;
     }
     if (!hasNew) return;
-
-    const latest = messages[count - 1];
-    const fromMe = latest?.sender_id === user?.id;
-
+    const fromMe = messages[count - 1]?.sender_id === user?.id;
     if (nearBottomRef.current || fromMe) {
       messagesEndRef?.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     } else {
@@ -335,15 +390,13 @@ export function ChatView() {
 
   if (!activeChat) return null;
 
-  const otherUser      = activeChat.otherUser ?? activeChat.seller ?? null;
-  const listing        = activeChat.listing ?? null;
-  const listingTitle   = lang === 'he' && listing?.title_hebrew ? listing.title_hebrew : listing?.title;
+  const otherUser    = activeChat.otherUser ?? activeChat.seller ?? null;
+  const listing      = activeChat.listing ?? null;
+  const listingTitle = lang === 'he' && listing?.title_hebrew ? listing.title_hebrew : listing?.title;
 
-  const goToListing = () => {
-    if (listing) { setSelected(listing); setView('detail'); }
-  };
+  const goToListing = () => { if (listing) { setSelected(listing); setView('detail'); } };
 
-  const handleSendMessage = () => {
+  const handleSend = () => {
     if (!newMessage.trim() || sendingMessage) return;
     if (navigator.vibrate) navigator.vibrate(10);
     sendMessage(newMessage);
@@ -352,70 +405,64 @@ export function ChatView() {
   const handleOfferSend = (amount) => {
     sendMessage(
       lang === 'he' ? `אני מציע ₪${amount.toLocaleString()}` : `I offer ₪${amount.toLocaleString()}`,
-      true,
-      amount,
+      true, amount,
     );
     setShowOfferSheet(false);
   };
 
   // ── Message grouping ─────────────────────────────────────────────────────
-  const grouped = messages.map((msg, i) => {
-    const prev = messages[i - 1];
-    const next = messages[i + 1];
-    return {
-      ...msg,
-      isStart: prev?.sender_id !== msg.sender_id,
-      isEnd:   next?.sender_id !== msg.sender_id,
-    };
-  });
+  const grouped = messages.map((msg, i) => ({
+    ...msg,
+    isStart: messages[i - 1]?.sender_id !== msg.sender_id,
+    isEnd:   messages[i + 1]?.sender_id !== msg.sender_id,
+  }));
+
+  // ── Bubble radius — taper the sender-side corner in a group ─────────────
+  const getBubbleRadius = (msg, isMe) => {
+    if (msg.is_offer) return '';
+    if (isMe) {
+      if (!msg.isStart && !msg.isEnd) return 'rounded-2xl rounded-tr-[5px] rounded-br-[5px]';
+      if (!msg.isStart)               return 'rounded-2xl rounded-tr-[5px]';
+      if (!msg.isEnd)                 return 'rounded-2xl rounded-br-[5px]';
+    } else {
+      if (!msg.isStart && !msg.isEnd) return 'rounded-2xl rounded-tl-[5px] rounded-bl-[5px]';
+      if (!msg.isStart)               return 'rounded-2xl rounded-tl-[5px]';
+      if (!msg.isEnd)                 return 'rounded-2xl rounded-bl-[5px]';
+    }
+    return 'rounded-2xl';
+  };
 
   return (
     <div
       ref={containerRef}
       className="fixed left-0 right-0 z-[45] flex flex-col animate-slideInRight"
       style={{
-        top: 0,
-        height: '100dvh',
-        background: '#111',
-        paddingLeft:  'env(safe-area-inset-left)',
+        top: 0, height: '100dvh', background: '#111',
+        paddingLeft: 'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
       }}
     >
 
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      {/* Clean 2-row layout: no floating price box. Price lives in subtitle. */}
+      {/* ── Header ── */}
       <div
-        className="flex-shrink-0 flex items-center gap-3 px-4 border-b border-white/[0.08]"
+        className="flex-shrink-0 flex items-center gap-3 px-4 border-b"
         style={{
-          paddingTop:    'max(env(safe-area-inset-top), 12px)',
-          paddingBottom: '12px',
-          background:    'rgba(17,17,17,0.92)',
-          backdropFilter: 'blur(24px)',
-          WebkitBackdropFilter: 'blur(24px)',
+          paddingTop: 'max(env(safe-area-inset-top),12px)', paddingBottom: '12px',
+          background: 'rgba(15,15,15,0.95)', backdropFilter: 'blur(24px)',
+          WebkitBackdropFilter: 'blur(24px)', borderColor: 'rgba(255,255,255,0.07)',
         }}
       >
-        {/* Back */}
         <button
           onClick={() => { setActiveChat(null); setView('inbox'); }}
-          className="w-9 h-9 rounded-full bg-white/[0.07] flex items-center justify-center flex-shrink-0 active:scale-90 transition-all"
+          className="w-9 h-9 rounded-full bg-white/[0.07] flex items-center justify-center flex-shrink-0 active:scale-90 transition-transform"
         >
           {rtl ? <ChevronRight className="w-5 h-5" /> : <ChevronLeft className="w-5 h-5" />}
         </button>
 
-        {/* Listing thumbnail — tappable, opens listing */}
-        <button
-          type="button"
-          aria-label="Open listing"
-          onClick={goToListing}
-          className="w-10 h-10 rounded-xl overflow-hidden flex-shrink-0 active:scale-95 transition-transform bg-white/[0.05]"
-        >
-          {listing?.images?.[0]
-            ? <img src={listing.images[0]} alt="" className="w-full h-full object-cover" />
-            : <div className="w-full h-full bg-white/[0.08]" />
-          }
-        </button>
+        {/* User avatar (photo or initials) */}
+        <UserAvatar profile={otherUser} size="md" />
 
-        {/* Name + subtitle (listing title · price) */}
+        {/* Name + subtle subtitle */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
             <p className="font-semibold text-[15px] truncate leading-tight">
@@ -425,17 +472,16 @@ export function ChatView() {
               <Shield className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#6FEEE1' }} />
             )}
           </div>
-          <p className="text-xs text-slate-400 truncate mt-0.5">
-            {listingTitle}
-            {listing?.price ? <span className="text-slate-500"> · {formatPrice(listing.price)}</span> : null}
-            {otherUser?.rating > 0 && (
-              <span className="text-yellow-400/80"> · ★{otherUser.rating}</span>
-            )}
-          </p>
+          {otherUser?.rating > 0 && (
+            <p className="text-[11px] text-slate-500 mt-0.5">★ {otherUser.rating}</p>
+          )}
         </div>
       </div>
 
-      {/* ── Messages ─────────────────────────────────────────────────────── */}
+      {/* ── Listing context card (below header) ── */}
+      <ListingContextCard listing={listing} lang={lang} onClick={goToListing} />
+
+      {/* ── Messages ── */}
       <div className="relative flex-1 min-h-0">
         <div
           ref={scrollRef}
@@ -446,46 +492,31 @@ export function ChatView() {
           {/* Loading skeleton */}
           {messagesLoading && messages.length === 0 ? (
             <div className="space-y-3 py-4">
-              {[
-                { align: 'start', w: '60%' },
-                { align: 'end',   w: '45%' },
-                { align: 'start', w: '70%' },
-                { align: 'start', w: '50%' },
-                { align: 'end',   w: '55%' },
-              ].map((s, i) => (
-                <div key={i} className={`flex ${s.align === 'end' ? 'justify-end' : 'justify-start'}`}>
-                  <div
-                    className="rounded-2xl px-4 py-3 space-y-2 animate-pulse"
-                    style={{
-                      width: s.w, minWidth: '80px',
-                      background: s.align === 'end' ? 'rgba(111,238,225,0.07)' : 'rgba(255,255,255,0.05)',
-                    }}
-                  >
+              {[{a:'start',w:'62%'},{a:'end',w:'46%'},{a:'start',w:'70%'},{a:'start',w:'50%'},{a:'end',w:'55%'}].map((s, i) => (
+                <div key={i} className={`flex ${s.a === 'end' ? 'justify-end' : 'justify-start'}`}>
+                  <div className="rounded-2xl px-4 py-3 space-y-2 animate-pulse"
+                    style={{ width:s.w, minWidth:'80px', background: s.a==='end' ? 'rgba(111,238,225,0.07)' : 'rgba(255,255,255,0.05)' }}>
                     <div className="h-3 bg-white/10 rounded w-full" />
-                    {i % 2 === 0 && <div className="h-3 bg-white/10 rounded w-3/5" />}
+                    {i%2===0 && <div className="h-3 bg-white/10 rounded w-3/5" />}
                   </div>
                 </div>
               ))}
             </div>
           ) : messages.length === 0 ? (
             /* Empty state */
-            <div className="flex flex-col items-center justify-center min-h-[280px] text-center py-10">
-              <div className="w-16 h-16 rounded-2xl bg-white/[0.05] flex items-center justify-center mb-3">
-                <MessageCircle className="w-8 h-8 text-slate-600" />
+            <div className="flex flex-col items-center justify-center min-h-[260px] text-center py-8">
+              <div className="w-14 h-14 rounded-2xl bg-white/[0.05] flex items-center justify-center mb-3">
+                <MessageCircle className="w-7 h-7 text-slate-600" />
               </div>
-              <p className="text-slate-300 font-semibold text-sm mb-1.5">
+              <p className="text-slate-300 font-semibold text-sm mb-1">
                 {lang === 'he' ? 'התחל את השיחה' : 'Start the conversation'}
               </p>
-              <p className="text-slate-500 text-xs max-w-[200px] leading-relaxed mb-4">
-                {lang === 'he'
-                  ? 'שאל על זמינות, מצב הפריט, או שלח הצעת מחיר.'
-                  : 'Ask about availability, condition, or make an offer.'}
+              <p className="text-slate-500 text-xs max-w-[190px] leading-relaxed mb-4">
+                {lang === 'he' ? 'שאל על זמינות, מצב הפריט, או שלח הצעת מחיר.' : 'Ask about availability, condition, or make an offer.'}
               </p>
-              <div
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
-                style={{ background: 'rgba(111,238,225,0.06)', border: '1px solid rgba(111,238,225,0.14)' }}
-              >
-                <Shield className="w-3 h-3 flex-shrink-0" style={{ color: '#6FEEE1' }} />
+              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full"
+                style={{ background:'rgba(111,238,225,0.06)', border:'1px solid rgba(111,238,225,0.14)' }}>
+                <Shield className="w-3 h-3 flex-shrink-0" style={{ color:'#6FEEE1' }} />
                 <p className="text-[10px] text-slate-400">
                   {lang === 'he' ? 'שלם רק לאחר קבלת הפריט' : 'Pay only after receiving the item'}
                 </p>
@@ -497,22 +528,8 @@ export function ChatView() {
           <div>
             {grouped.map((msg) => {
               const isMe    = msg.sender_id === user.id;
-              const isOffer = msg.is_offer && msg.offer_amount;
-
-              // Bubble border-radius: taper the corner on the "sender" side for grouped messages.
-              // Alignment is always sender-based (not language-based) so this is correct for RTL too.
-              let radius = 'rounded-2xl';
-              if (!isOffer) {
-                if (isMe) {
-                  if (!msg.isStart && !msg.isEnd) radius = 'rounded-2xl rounded-tr-[6px] rounded-br-[6px]';
-                  else if (!msg.isStart)          radius = 'rounded-2xl rounded-tr-[6px]';
-                  else if (!msg.isEnd)            radius = 'rounded-2xl rounded-br-[6px]';
-                } else {
-                  if (!msg.isStart && !msg.isEnd) radius = 'rounded-2xl rounded-tl-[6px] rounded-bl-[6px]';
-                  else if (!msg.isStart)          radius = 'rounded-2xl rounded-tl-[6px]';
-                  else if (!msg.isEnd)            radius = 'rounded-2xl rounded-bl-[6px]';
-                }
-              }
+              const isOffer = !!(msg.is_offer && msg.offer_amount);
+              const radius  = getBubbleRadius(msg, isMe);
 
               return (
                 <div
@@ -522,61 +539,46 @@ export function ChatView() {
                   <div
                     className={`max-w-[75%] ${isOffer ? '' : `px-3.5 py-2.5 ${radius}`}`}
                     style={isOffer
-                      ? {
-                          borderRadius: 16,
-                          border: '1.5px solid rgba(251,191,36,0.40)',
-                          background: isMe ? 'rgba(251,191,36,0.09)' : 'rgba(251,191,36,0.06)',
-                          overflow: 'hidden',
-                        }
+                      ? { borderRadius:16, overflow:'hidden', border:'1.5px solid rgba(251,191,36,0.38)', background: isMe ? 'rgba(251,191,36,0.09)' : 'rgba(251,191,36,0.06)' }
                       : isMe
-                        ? { background: 'rgba(111,238,225,0.16)', border: '1px solid rgba(111,238,225,0.28)' }
-                        : { background: 'rgba(255,255,255,0.09)', border: '1px solid rgba(255,255,255,0.07)' }
+                        ? { background:'rgba(111,238,225,0.15)', border:'1px solid rgba(111,238,225,0.25)' }
+                        : { background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.06)' }
                     }
                   >
                     {isOffer ? (
-                      /* Offer card */
                       <div className="px-4 pt-3.5 pb-3">
-                        <div className="flex items-center gap-1.5 mb-2">
+                        <div className="flex items-center gap-1.5 mb-1.5">
                           <span className="text-xs">💰</span>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
                             {lang === 'he' ? 'הצעת מחיר' : 'Price Offer'}
                           </span>
                         </div>
-                        <p className="text-2xl font-bold text-amber-300 leading-none mb-1">
+                        <p className="text-2xl font-bold text-amber-300 leading-none">
                           ₪{msg.offer_amount.toLocaleString()}
                         </p>
                         {msg.content && (
-                          <p className="text-xs text-slate-400 leading-relaxed mt-1.5" dir="auto">
-                            {msg.content}
-                          </p>
+                          <p className="text-xs text-slate-400 leading-relaxed mt-1.5" dir="auto">{msg.content}</p>
                         )}
-                        {/* Timestamp row */}
                         <div className={`flex items-center gap-1 mt-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                          <span className="text-[10px] text-slate-500">
-                            {formatMessageTime(msg.created_at, lang)}
-                          </span>
-                          {isMe && (
-                            msg.is_read
-                              ? <CheckCheck className="w-3.5 h-3.5" style={{ color: '#6FEEE1' }} />
-                              : <Check className="w-3.5 h-3.5 text-white/25" />
+                          <span className="text-[10px] text-slate-500">{formatMessageTime(msg.created_at, lang)}</span>
+                          {isMe && (msg.is_read
+                            ? <CheckCheck className="w-3.5 h-3.5" style={{ color:'#6FEEE1' }} />
+                            : <Check className="w-3.5 h-3.5 text-white/25" />
                           )}
                         </div>
                       </div>
                     ) : (
                       <>
-                        {/* dir="auto" lets browser detect Hebrew vs English per-bubble */}
+                        {/* dir=auto: browser detects Hebrew vs English per bubble */}
                         <p className="text-sm leading-relaxed" dir="auto">{msg.content}</p>
-
-                        {/* Timestamp + read receipt — only at group end */}
                         {msg.isEnd && (
                           <div className={`flex items-center gap-1 mt-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
-                            <span className={`text-[10px] ${isMe ? 'text-[#6FEEE1]/55' : 'text-slate-500'}`}>
+                            <span className={`text-[10px] ${isMe ? 'text-[#6FEEE1]/50' : 'text-slate-500'}`}>
                               {formatMessageTime(msg.created_at, lang)}
                             </span>
-                            {isMe && (
-                              msg.is_read
-                                ? <CheckCheck className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#6FEEE1' }} />
-                                : <Check className="w-3.5 h-3.5 flex-shrink-0 text-white/25" />
+                            {isMe && (msg.is_read
+                              ? <CheckCheck className="w-3.5 h-3.5 flex-shrink-0" style={{ color:'#6FEEE1' }} />
+                              : <Check className="w-3.5 h-3.5 flex-shrink-0 text-white/25" />
                             )}
                           </div>
                         )}
@@ -591,16 +593,13 @@ export function ChatView() {
           <div ref={messagesEndRef} className="h-1" />
         </div>
 
-        {/* "New message" jump banner */}
+        {/* "New message" jump pill */}
         {showNewMsgBanner && (
-          <div className="absolute left-1/2 -translate-x-1/2 bottom-3 z-10 pointer-events-none">
+          <div className="absolute left-1/2 -translate-x-1/2 bottom-3 z-10">
             <button
-              className="pointer-events-auto flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold shadow-lg active:scale-95 transition-all"
-              style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
-              onClick={() => {
-                messagesEndRef?.current?.scrollIntoView({ behavior: 'smooth' });
-                setShowNewMsgBanner(false);
-              }}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-semibold shadow-lg active:scale-95 transition-all"
+              style={{ background:'linear-gradient(135deg,#6FEEE1 0%,#4FD1C5 100%)', color:'#003733' }}
+              onClick={() => { messagesEndRef?.current?.scrollIntoView({ behavior:'smooth' }); setShowNewMsgBanner(false); }}
             >
               <ArrowDown className="w-3.5 h-3.5" />
               {lang === 'he' ? 'הודעה חדשה' : 'New message'}
@@ -609,15 +608,10 @@ export function ChatView() {
         )}
       </div>
 
-      {/* ── Quick actions ────────────────────────────────────────────────── */}
-      {/* Visible background strip anchors chips above composer. */}
+      {/* ── Quick action chips ── */}
       <div
         className="flex-shrink-0 flex gap-2 px-4 py-2.5 overflow-x-auto border-t"
-        style={{
-          background: 'rgba(13,13,13,0.95)',
-          borderColor: 'rgba(255,255,255,0.07)',
-          scrollbarWidth: 'none',
-        }}
+        style={{ background:'rgba(10,10,10,0.97)', borderColor:'rgba(255,255,255,0.07)', scrollbarWidth:'none' }}
       >
         {[
           { text: lang === 'he' ? 'עדיין זמין?' : 'Still available?', icon: '❓' },
@@ -627,71 +621,61 @@ export function ChatView() {
           <button
             key={i}
             onClick={() => { if (navigator.vibrate) navigator.vibrate(10); sendMessage(q.text); }}
-            className="flex-shrink-0 px-3 py-1.5 rounded-full bg-white/[0.07] border border-white/[0.10] text-xs text-slate-300 hover:bg-white/[0.11] active:scale-95 transition-all whitespace-nowrap"
+            className="flex-shrink-0 px-3 py-1.5 rounded-full bg-white/[0.07] border border-white/[0.09] text-xs text-slate-300 hover:bg-white/[0.11] active:scale-95 transition-all whitespace-nowrap"
           >
             {q.icon} {q.text}
           </button>
         ))}
       </div>
 
-      {/* ── Composer ─────────────────────────────────────────────────────── */}
+      {/* ── Composer ── */}
       <div
         className="flex-shrink-0 border-t"
         style={{
-          background: 'rgba(13,13,13,0.98)',
-          borderColor: 'rgba(255,255,255,0.07)',
-          padding: '10px 16px',
-          paddingBottom: 'max(env(safe-area-inset-bottom), 12px)',
+          background: 'rgba(10,10,10,0.99)', borderColor: 'rgba(255,255,255,0.07)',
+          padding: '10px 16px', paddingBottom: 'max(env(safe-area-inset-bottom),12px)',
         }}
       >
         <div className="flex items-center gap-2">
-          {/* Offer trigger — secondary, smaller */}
+          {/* Offer button — subtle secondary */}
           <button
             onClick={() => setShowOfferSheet(true)}
-            className="w-10 h-10 flex-shrink-0 rounded-full bg-white/[0.07] border border-white/[0.10] flex items-center justify-center text-slate-400 hover:text-[#6FEEE1] hover:border-[#6FEEE1]/30 active:scale-90 transition-all"
+            className="w-10 h-10 rounded-full bg-white/[0.07] border border-white/[0.09] flex items-center justify-center text-slate-400 hover:text-[#6FEEE1] hover:border-[#6FEEE1]/30 active:scale-90 transition-all flex-shrink-0"
             aria-label={lang === 'he' ? 'הצעת מחיר' : 'Make offer'}
           >
             <DollarSign className="w-4 h-4" />
           </button>
 
-          {/* Text input */}
+          {/* Message input */}
           <input
             type="text"
             value={newMessage}
             onChange={e => setNewMessage(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSendMessage()}
+            onKeyDown={e => e.key === 'Enter' && handleSend()}
             placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Type a message...'}
-            className="flex-1 h-[44px] px-4 rounded-full bg-white/[0.07] border border-white/[0.10] focus:outline-none focus:border-[#6FEEE1]/40 focus:bg-white/[0.09] text-sm transition-colors placeholder:text-slate-500"
+            className="flex-1 h-[44px] px-4 rounded-full bg-white/[0.07] border border-white/[0.09] focus:outline-none focus:border-[#6FEEE1]/40 focus:bg-white/[0.10] text-sm transition-colors placeholder:text-slate-500"
             dir={rtl ? 'rtl' : 'ltr'}
           />
 
           {/* Send button */}
           <button
-            onClick={handleSendMessage}
+            onClick={handleSend}
             disabled={!newMessage.trim() || sendingMessage}
-            className="w-10 h-10 flex-shrink-0 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-35"
+            className="w-10 h-10 rounded-full flex items-center justify-center transition-all active:scale-90 disabled:opacity-35 flex-shrink-0"
             style={{
-              background: newMessage.trim() && !sendingMessage
-                ? 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)'
-                : 'rgba(255,255,255,0.06)',
+              background: newMessage.trim() && !sendingMessage ? 'linear-gradient(135deg,#6FEEE1 0%,#4FD1C5 100%)' : 'rgba(255,255,255,0.06)',
               color: newMessage.trim() && !sendingMessage ? '#003733' : '#64748b',
             }}
             aria-label={lang === 'he' ? 'שלח' : 'Send'}
           >
-            {sendingMessage
-              ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <Send className="w-4 h-4" />
-            }
+            {sendingMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           </button>
         </div>
       </div>
 
-      {/* Offer sheet */}
       {showOfferSheet && (
         <OfferSheet
-          listing={listing}
-          lang={lang}
-          rtl={rtl}
+          listing={listing} lang={lang} rtl={rtl}
           onClose={() => setShowOfferSheet(false)}
           onSend={handleOfferSend}
         />
