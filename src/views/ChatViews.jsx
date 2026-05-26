@@ -497,20 +497,80 @@ export function ChatView() {
   const fileInputRef  = useRef(null);
   const textareaRef   = useRef(null);
 
-  // ── iOS keyboard-safe height via visualViewport ──────────────────────────
+  // ── iOS keyboard-safe height — body-lock + height-only strategy ─────────
+  //
+  // Root cause of the "lift" bug:
+  //   When the keyboard opens, iOS auto-scrolls the layout viewport to show
+  //   the focused input. This makes vv.offsetTop > 0 each animation frame as
+  //   the keyboard slides up. The previous handler set el.style.top = vv.offsetTop
+  //   on every frame — causing the entire container to jitter/jump.
+  //
+  // Fix:
+  //   1. Lock body scroll (position:fixed + overflow:hidden) so iOS cannot shift
+  //      vv.offsetTop in the first place. Body stays at y=0 the entire time.
+  //   2. Only track vv.height — the container shrinks from the bottom as the
+  //      keyboard rises. Composer naturally moves up; header stays pinned at top:0.
+  //   3. Never set el.style.top — position:fixed;top:0 already anchors the
+  //      container to the visual viewport top when body cannot scroll.
+  //   4. Remove the vv 'scroll' listener — no longer relevant with body locked.
+  //
+  // Debug logs (DEV only): vv.height, window.innerHeight, keyboard height estimate.
   useEffect(() => {
+    // Save existing body inline styles so we can restore on unmount
+    const prev = {
+      overflow: document.body.style.overflow,
+      position: document.body.style.position,
+      width:    document.body.style.width,
+      top:      document.body.style.top,
+    };
+    // Capture current scroll so restore doesn't jump the page
+    const scrollY = window.scrollY;
+
+    // Apply scroll lock
+    document.body.style.overflow = 'hidden';
+    document.body.style.position = 'fixed';
+    document.body.style.width    = '100%';
+    document.body.style.top      = `-${scrollY}px`;
+
     const vv = window.visualViewport;
-    if (!vv) return;
+
     const update = () => {
       const el = containerRef.current;
       if (!el) return;
-      el.style.height = `${vv.height}px`;
-      el.style.top    = `${vv.offsetTop}px`;
+      // vv.height = visual viewport height excluding keyboard.
+      // Falls back to window.innerHeight on browsers without visualViewport.
+      const h = vv ? vv.height : window.innerHeight;
+      el.style.height = `${h}px`;
+      // NEVER touch el.style.top — container stays at top:0.
+
+      if (import.meta.env.DEV) {
+        const kb = Math.round(window.innerHeight - h);
+        console.log(
+          `[Chat/KB] vv.h=${Math.round(h)}  win.h=${window.innerHeight}` +
+          `  vv.offsetTop=${vv ? Math.round(vv.offsetTop) : 'n/a'}` +
+          `  keyboard≈${kb}px  chat=${activeChat ? 'open' : 'closed'}`
+        );
+      }
     };
+
     update();
-    vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+    // Only listen for resize (keyboard open/close). Scroll never fires now.
+    if (vv) vv.addEventListener('resize', update);
+    else    window.addEventListener('resize', update);
+
+    return () => {
+      // Detach listener
+      if (vv) vv.removeEventListener('resize', update);
+      else    window.removeEventListener('resize', update);
+
+      // Restore body to its original state and scroll back to where we were
+      document.body.style.overflow = prev.overflow;
+      document.body.style.position = prev.position;
+      document.body.style.width    = prev.width;
+      document.body.style.top      = prev.top;
+      if (scrollY) window.scrollTo(0, scrollY);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Scroll tracking ──────────────────────────────────────────────────────
@@ -589,6 +649,17 @@ export function ChatView() {
     setUploadingImage(false);
   };
 
+  // ── Textarea focus — freeze message list scroll position ─────────────────
+  // When the textarea is focused on iOS, the browser may call scrollIntoView
+  // internally, which can jerk the message list. We snapshot the current
+  // scrollTop and restore it in the next frame so it stays put.
+  const handleTextareaFocus = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.scrollTop;
+    requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = top; });
+  };
+
   // ── Call stubs (future WebRTC integration) ────────────────────────────────
   const handleStartVideoCall = () => setCallModal('video');
   const handleStartVoiceCall = () => setCallModal('voice');
@@ -626,10 +697,14 @@ export function ChatView() {
       className="fixed left-0 right-0 z-[45] flex flex-col"
       style={{
         top: 0,
-        height: '100dvh',
+        height: '100dvh',   // JS overrides this with vv.height when keyboard opens
         background: C.surfaceDim,
         paddingLeft:  'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
+        // Prevent the container itself from becoming a scroll origin on iOS.
+        // The message list has its own overflow-y-auto; nothing else should scroll.
+        touchAction: 'pan-y',
+        overscrollBehavior: 'none',
       }}
     >
 
@@ -1072,6 +1147,7 @@ export function ChatView() {
             rows={1}
             value={newMessage}
             onChange={handleTextareaInput}
+            onFocus={handleTextareaFocus}
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
