@@ -438,10 +438,14 @@ function AppShell() {
         </header>
 
         {/* Fullscreen overlays — lazy-loaded, rendered outside scroll container for iOS fixed-position */}
+        {/* ChatView is here too: ScreenTransition has will-change:transform which creates a new stacking  */}
+        {/* context, trapping ChatView's z-[45] inside it and letting the bottom nav (z-40, root context)  */}
+        {/* paint over the composer. Moving ChatView here puts it at root stacking level.                  */}
         <Suspense fallback={null}>
           {view === 'camera' && <LazyCameraView />}
           {view === 'analyzing' && <LazyAnalyzingView />}
           {view === 'results' && <LazyResultsView />}
+          {view === 'chat' && <LazyChatView />}
         </Suspense>
 
         {/* Content - View Router */}
@@ -458,7 +462,6 @@ function AppShell() {
             <Suspense fallback={null}>
               {view === 'saved' && <LazySavedView />}
               {view === 'inbox' && <LazyInboxView />}
-              {view === 'chat' && <LazyChatView />}
               {view === 'myListings' && <LazyMyListingsView />}
               {view === 'listing' && <LazyListingFlowView />}
               {view === 'analytics' && <LazyAnalyticsView />}
