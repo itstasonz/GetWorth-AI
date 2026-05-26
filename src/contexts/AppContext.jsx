@@ -2221,24 +2221,11 @@ export function AppProvider({ children }) {
     }
 
     // Phase 2: background network refresh
+    // Uses get_user_orders() SECURITY DEFINER RPC — single JOIN query,
+    // bypasses per-row RLS evaluation, eliminates the 57014 timeout.
     try {
-      let { data, error: err } = await supabase
-        .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!buyer_id(id, full_name, avatar_url, is_verified), seller:profiles!seller_id(id, full_name, avatar_url, is_verified)')
-        .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (err) {
-        if (DEV) console.warn('[Orders] Profile join failed, trying without:', err.message);
-        ({ data, error: err } = await supabase
-          .from('orders')
-          .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id)')
-          .or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`)
-          .order('created_at', { ascending: false })
-          .limit(50));
-        if (err) throw err;
-      }
+      const { data, error: err } = await supabase.rpc('get_user_orders');
+      if (err) throw err;
 
       const newOrders = data || [];
       if (DEV) console.log(`[Orders] Loaded ${newOrders.length} orders`);
@@ -2257,29 +2244,16 @@ export function AppProvider({ children }) {
     setOrdersLoading(false);
   }, [user]);
 
-  // Fetch a single order by ID (with full joins) — used to keep OrderDetail stable
+  // Fetch a single order by ID (with full joins) — used to keep OrderDetail stable.
+  // Uses get_order_by_id() SECURITY DEFINER RPC — same performance benefits as
+  // get_user_orders(); enforces caller-is-party check inside the function.
   const fetchOrderById = useCallback(async (orderId) => {
     if (!user || !orderId) return null;
     try {
-      // Try full query with profile joins
-      let { data, error } = await supabase
-        .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id), buyer:profiles!buyer_id(id, full_name, avatar_url, is_verified), seller:profiles!seller_id(id, full_name, avatar_url, is_verified)')
-        .eq('id', orderId)
-        .single();
-
-      // Fallback without profile joins
-      if (error) {
-        if (DEV) console.warn('[Orders] fetchById profile join failed, trying without:', error.message);
-        ({ data, error } = await supabase
-          .from('orders')
-          .select('*, listing:listings(id, title, title_hebrew, price, images, location, contact_phone, seller_id)')
-          .eq('id', orderId)
-          .single());
-        if (error) throw error;
-      }
-
-      return data;
+      const { data, error } = await supabase.rpc('get_order_by_id', { p_order_id: orderId });
+      if (error) throw error;
+      // SETOF jsonb → array of 0–1 rows; return the first element or null
+      return data?.[0] ?? null;
     } catch (e) {
       if (DEV) console.warn('[Orders] fetchById error:', e.message);
       return null;
@@ -2479,7 +2453,7 @@ export function AppProvider({ children }) {
     try {
       const { data, error: err } = await supabase
         .from('reviews')
-        .select('*, reviewer:profiles!reviews_reviewer_id_fkey(id, full_name, avatar_url), listing:listings(id, title, title_hebrew, images)')
+        .select('*, reviewer:profiles!reviewer_id(id, full_name, avatar_url), listing:listings(id, title, title_hebrew, images)')
         .eq('seller_id', sellerId)
         .order('created_at', { ascending: false })
         .limit(20);
