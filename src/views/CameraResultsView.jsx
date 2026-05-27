@@ -894,7 +894,7 @@ function PhotoStrip({ images, canAdd, onAddPhoto, lang, activeIndex = 0, onSelec
 export function ResultsView() {
   const {
     lang, t, images, result, startListing, reset,
-    refineResult, confirmResult, correctResult,
+    refineResult, confirmResult, correctResult, saveProductCandidate,
     addPhoto, setHelpModalOpen, helpModalOpen, fileRef,
     handleAdditionalFile,
     serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
@@ -1882,6 +1882,86 @@ export function ResultsView() {
         );
       })()}
 
+      {/* ═══ NOT-IN-DB BANNER — shown when item was recognized but not in product DB ═══ */}
+      {result.product_candidate_needed && !result.candidateSaved && !result.userConfirmed && (
+        <FadeIn delay={150}>
+          <div
+            className="rounded-2xl p-4 space-y-3"
+            style={{
+              background: 'rgba(111,238,225,0.05)',
+              border: '1px solid rgba(111,238,225,0.18)',
+            }}
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(111,238,225,0.12)' }}>
+                <Database className="w-4.5 h-4.5" style={{ color: STITCH.primary }} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold" style={{ color: STITCH.onSurface }}>
+                  {lang === 'he' ? 'זוהה — אך אינו במאגר שלנו עדיין' : 'Recognized, but not in our database yet'}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: STITCH.onSurfaceVariant }}>
+                  {result.candidate_payload?.name || result.name}
+                  {result.candidate_payload?.category ? ` · ${result.candidate_payload.category}` : ''}
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
+                  {lang === 'he' ? 'מקור: ' : 'Source: '}
+                  {result.recognition_source === 'ocr_label'
+                    ? (lang === 'he' ? 'טקסט על המוצר' : 'Label text')
+                    : (lang === 'he' ? 'זיהוי ויזואלי' : 'Visual match')}
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                confirmResult();
+              }}
+              className="w-full py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+              style={{
+                background: 'rgba(111,238,225,0.12)',
+                border: '1px solid rgba(111,238,225,0.25)',
+                color: STITCH.primary,
+              }}
+            >
+              <Check className="w-4 h-4" />
+              {lang === 'he' ? 'אשר — עזור לנו לשפר' : 'Confirm item — help us improve'}
+            </button>
+
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setShowCorrection(true)}
+                className="text-xs transition-colors"
+                style={{ color: STITCH.onSurfaceVariant }}
+              >
+                {lang === 'he' ? 'תקן ידנית' : 'Correct manually'}
+              </button>
+              {showCorrection && (
+                <div className="flex gap-2 flex-1">
+                  <input
+                    type="text"
+                    value={correctionInput}
+                    onChange={(e) => setCorrectionInput(e.target.value)}
+                    placeholder={lang === 'he' ? 'שם נכון...' : 'Correct name...'}
+                    className="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs focus:border-[#6FEEE1]/50 transition-all"
+                    onKeyDown={(e) => { if (e.key === 'Enter' && correctionInput.trim()) handleSubmitCorrection(); }}
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleSubmitCorrection}
+                    disabled={!correctionInput.trim()}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-30 transition-all"
+                    style={{ background: STITCH.primary, color: STITCH.onPrimary }}
+                  >
+                    {lang === 'he' ? 'עדכן' : 'Update'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </FadeIn>
+      )}
+
       {/* ═══ GATED CTA — primary action varies by confidence tier ═══ */}
       <FadeIn delay={200}>
         {(tier === 'high' || isConfirmed) ? (
@@ -2096,8 +2176,26 @@ export function ResultsView() {
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">DB Retrieval</p>
                   <p className="text-[10px]" style={{ color: noDb ? '#f87171' : '#86efac' }}>
-                    {noDb ? '⚠ 0 candidates — all strategies empty (RPC missing? Product not in DB?)' : `${ret.candidates_count} found: ${ret.top3}`}
+                    {noDb ? '⚠ 0 candidates' : `${ret.candidates_count} found: ${ret.top3}`}
                   </p>
+                  {ret.strategy_log && (() => {
+                    const sl = ret.strategy_log;
+                    const rows = [
+                      `table_ok=${sl.products_table_accessible}`,
+                      sl.vector_rpc?.attempted && `vec=${sl.vector_rpc.ok ? sl.vector_rpc.rows+'r' : 'ERR:'+sl.vector_rpc.error}`,
+                      sl.ocr_rpc?.attempted    && `ocr_rpc=${sl.ocr_rpc.ok ? sl.ocr_rpc.rows+'r' : 'ERR:'+sl.ocr_rpc.error}`,
+                      sl.ocr_direct_fallback?.attempted && `ocr_fallback=${sl.ocr_direct_fallback.rows}r tokens=[${(sl.ocr_direct_fallback.tokens_tried||[]).slice(0,3).join(',')}]`,
+                      sl.text_brand_model?.attempted && `brand_model=${sl.text_brand_model.rows}r q="${sl.text_brand_model.query}"`,
+                      sl.text_fts?.attempted && `fts=${sl.text_fts.ok ? sl.text_fts.rows+'r' : 'ERR:'+sl.text_fts.error}`,
+                      sl.category_fallback?.attempted && `cat_fallback=${sl.category_fallback.rows}r`,
+                    ].filter(Boolean);
+                    return rows.map((r, i) => (
+                      <p key={i} className="text-[9px] text-slate-500 break-all">{r}</p>
+                    ));
+                  })()}
+                  {noDb && result.product_candidate_needed && (
+                    <p className="text-[9px] font-semibold" style={{ color: '#fbbf24' }}>→ candidate_needed=true (will save on confirm)</p>
+                  )}
                 </div>
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 2 — Verification</p>

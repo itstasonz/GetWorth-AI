@@ -1791,7 +1791,46 @@ export function AppProvider({ children }) {
       result.details?.brand
     );
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
-  }, [result, user, playSound, storeConfirmation]);
+
+    // ── PRODUCT CANDIDATE: save to staging table if item was not in DB ──
+    if (result.product_candidate_needed && !result.candidateSaved && result.candidate_payload) {
+      saveProductCandidate(result.candidate_payload, null, result.valuation_id).then(() => {
+        setResult(prev => prev ? { ...prev, candidateSaved: true } : prev);
+      });
+    }
+  }, [result, user, playSound, storeConfirmation]); // saveProductCandidate added below — safe: stable ref
+
+  // ── Save product candidate to staging table (fire-and-forget, safe to retry) ──
+  const saveProductCandidate = useCallback(async (candidatePayload, correctionText, valuationId) => {
+    if (!candidatePayload) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const headers = { 'Content-Type': 'application/json' };
+      if (session?.access_token) headers['Authorization'] = `Bearer ${session.access_token}`;
+
+      const res = await fetch('/api/submit-candidate', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          candidate:       candidatePayload,
+          valuation_id:    valuationId || null,
+          correction_text: correctionText || null,
+        }),
+      });
+      const data = await res.json();
+      if (DEV) console.log('[Candidate] Saved:', data.status, data.candidate_id);
+      if (res.ok) {
+        showToastMsg(
+          lang === 'he'
+            ? 'תודה — זה עוזר לשפר סריקות עתידיות!'
+            : 'Thanks — this helps improve future scans!',
+          'success'
+        );
+      }
+    } catch (err) {
+      if (DEV) console.warn('[Candidate] Save failed:', err.message);
+    }
+  }, [lang, showToastMsg]);
 
   // ── Correct: user types the correct model manually ──
   const correctResult = useCallback(async (userInput) => {
@@ -2706,7 +2745,7 @@ export function AppProvider({ children }) {
     captureAdditionalPhoto, handleAdditionalFile, submitBrandHint,
     helpModalOpen, setHelpModalOpen,
     // Recognition refinement
-    refineResult, confirmResult, correctResult,
+    refineResult, confirmResult, correctResult, saveProductCandidate,
     valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
     // Torch
     torchSupported, torchOn, toggleTorch,

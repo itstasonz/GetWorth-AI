@@ -2005,6 +2005,46 @@ export default async function handler(req) {
 
     // ── NORMALIZE + RESPOND ──
     const result  = normalizeForUI(recognition, verification, tierInfo, !!visionData);
+
+    // ── DB LEARNING FLAGS ──
+    // db_match_found: were any product rows retrieved?
+    // product_candidate_needed: no DB match but Stage 1 has useful recognition data
+    const dbMatchFound = candidates.length > 0;
+    const _brand = recognition.brand_candidates?.[0]?.brand;
+    const _model = recognition.model_candidates?.[0]?.model;
+    const hasUsefulRecognition = !!(
+      (_brand && _brand.toLowerCase() !== 'unidentified') ||
+      (_model && _model.toLowerCase() !== 'unidentified') ||
+      recognition.ocr_text?.has_readable_text
+    );
+    result.db_match_found = dbMatchFound;
+    result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
+    result.recognition_source = (() => {
+      const m = verification.identification_method || 'generic_only';
+      if (m === 'ocr_confirmed')                        return 'ocr_label';
+      if (m === 'visual_match' || m === 'packaging_recognized') return 'visual';
+      return 'ocr_label';
+    })();
+
+    // candidate_payload: pre-filled data the frontend sends to /api/submit-candidate
+    if (result.product_candidate_needed) {
+      const cpBrand = verification.final_brand && verification.final_brand.toLowerCase() !== 'unidentified'
+        ? verification.final_brand : null;
+      const cpModel = verification.final_model && verification.final_model.toLowerCase() !== 'unidentified'
+        ? verification.final_model : null;
+      result.candidate_payload = {
+        brand:        cpBrand,
+        model:        cpModel,
+        name:         verification.full_name || [cpBrand, cpModel].filter(Boolean).join(' ') || null,
+        category:     verification.final_category || recognition.category || null,
+        subcategory:  recognition.subcategory || null,
+        product_type: null,
+        ocr_text:     (recognition.ocr_text?.raw_texts || []).join(' | ') || null,
+        confidence:   verification.match_confidence,
+        source:       result.recognition_source,
+      };
+    }
+
     const totalMs = Date.now() - TREQ;
     blog(`[Pipeline] Response sent — total=${totalMs}ms budget_used=${round(totalMs / BUDGET_MS * 100)}%${totalMs > 16_000 ? ' ⚠ SLOW' : ''}`);
 
