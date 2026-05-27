@@ -695,10 +695,10 @@ function getConfidenceStyles(tier) {
 
 function getConfidenceLabel(tier, lang) {
   const labels = {
-    high:     { en: 'High confidence', he: 'ביטחון גבוה' },
-    moderate: { en: 'Verify identification', he: 'אמת את הזיהוי' },
-    low:      { en: 'Low confidence', he: 'ביטחון נמוך' },
-    very_low: { en: 'Rough estimate', he: 'הערכה גסה' },
+    high:     { en: 'Strong match',        he: 'התאמה מדויקת'      },
+    moderate: { en: 'Confirm to improve',  he: 'אשר לשיפור הדיוק'  },
+    low:      { en: 'Needs confirmation',  he: 'זקוק לאישור'        },
+    very_low: { en: 'Estimated range',      he: 'הערכת טווח'         },
   };
   return labels[tier]?.[lang === 'he' ? 'he' : 'en'] || labels.moderate.en;
 }
@@ -1141,8 +1141,8 @@ export function ResultsView() {
             />
             <p className="text-xs leading-snug" style={{ color: tier === 'very_low' ? '#fca5a5' : '#fdba74' }}>
               {tier === 'very_low'
-                ? (lang === 'he' ? 'זיהוי נמוך מאוד — לא הצלחנו לזהות את המוצר בוודאות' : "Very low confidence — we couldn't identify this item clearly")
-                : (lang === 'he' ? 'זיהוי חלקי — ייתכן שהמוצר שונה מההערכה שלנו' : "Partial identification — the item may differ from our estimate")}
+                ? (lang === 'he' ? 'לא הצלחנו לזהות את הפריט בבירור. נסה תמונה קרובה יותר של התווית.' : "We couldn't clearly identify this item. Try a closer photo of the label.")
+                : (lang === 'he' ? 'ההערכה עשויה להיות חלקית. אישור יסייע לשפר את הדיוק.' : "Our estimate may not be fully accurate. Confirming helps improve pricing.")}
             </p>
           </div>
         </FadeIn>
@@ -1166,7 +1166,7 @@ export function ResultsView() {
           <div className="mt-1 flex items-baseline justify-center gap-1">
             {result.marketValue?.pricing_status === 'manual_required' ? (
               <span className="text-xl font-semibold text-amber-400 text-center px-2">
-                {lang === 'he' ? 'לא ניתן להעריך — הזן מחיר ידנית' : 'Cannot estimate — enter price manually'}
+                {lang === 'he' ? 'קבע מחיר ידנית' : 'Set your own price'}
               </span>
             ) : (
               <span
@@ -1226,12 +1226,12 @@ export function ResultsView() {
                 : result.authenticity?.pricingMode === 'replica_adjusted'
                 ? (lang === 'he' ? 'מחיר מותאם לרפליקה' : 'Replica-adjusted estimate')
                 : result.marketValue?.pricing_status === 'category_fallback'
-                ? (lang === 'he' ? 'הערכה גסה לפי קטגוריה — אשר לדיוק' : 'Rough category estimate — confirm for accuracy')
+                ? (lang === 'he' ? 'הערכה לפי קטגוריה' : 'Estimated from category data')
                 : result.marketValue?.pricing_status === 'manual_required'
-                ? (lang === 'he' ? 'נדרש מחיר ידני' : 'Manual price required')
+                ? (lang === 'he' ? 'קבע מחיר ידנית' : 'Set your own price')
                 : priceMethod === 'comp_based'
                 ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
-                : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
+                : (lang === 'he' ? 'הערכת שוק' : 'Market estimate')}
             </p>
           )}
         </div>
@@ -1249,7 +1249,7 @@ export function ResultsView() {
                 className="text-xs font-semibold uppercase tracking-wider"
                 style={{ color: STITCH.onSurfaceVariant }}
               >
-                {lang === 'he' ? 'ציון ביטחון' : 'Confidence Score'}
+                {lang === 'he' ? 'דיוק זיהוי' : 'Scan accuracy'}
               </p>
               <p
                 className="text-3xl font-bold mt-1"
@@ -1348,7 +1348,7 @@ export function ResultsView() {
                           : auth.replicaTier === 'mid_replica'
                           ? (lang === 'he' ? 'רפליקה אפשרית' : 'Possible Replica')
                           : auth.replicaTier === 'high_end_replica'
-                          ? (lang === 'he' ? 'רפליקה איכותית — נדרש אימות' : 'High-End Replica — Verify')
+                          ? (lang === 'he' ? 'רפליקה איכותית' : 'High-End Replica')
                           : auth.authenticityStatus === 'suspected_fake'
                           ? (lang === 'he' ? 'חשד לזיוף' : 'Suspected Fake')
                           : (lang === 'he' ? 'ייתכן רפליקה' : 'Possible Replica'))
@@ -1374,7 +1374,7 @@ export function ResultsView() {
                 {/* ── Signal conflict warning ── */}
                 {hasConflict && auth.signalConflict.reasons?.length > 0 && (
                   <div className="mb-2 px-2.5 py-1.5 rounded-xl" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.15)' }}>
-                    <p className="text-[10px] font-semibold text-red-400 mb-0.5">{lang === 'he' ? '⚠ סתירת אותות' : '⚠ Signal conflict'}</p>
+                    <p className="text-[10px] font-semibold text-red-400 mb-0.5">{lang === 'he' ? '⚠ אותות סותרים' : '⚠ Mixed signals'}</p>
                     {auth.signalConflict.reasons.slice(0, 2).map((r, i) => (
                       <p key={i} className="text-[10px] leading-snug" style={{ color: STITCH.onSurfaceVariant }}>• {r}</p>
                     ))}
@@ -1686,7 +1686,7 @@ export function ResultsView() {
                     : `This looks like a ${identification.generic_name || result.category}, but we couldn't identify the brand`}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {lang === 'he' ? 'המחירים הם הערכה גסה — עזור לנו לדייק' : 'Prices are a rough estimate — help us be more accurate'}
+                  {lang === 'he' ? 'הוסף מותג ודגם לקבלת מחיר מדויק יותר.' : 'Add the brand and model for a more accurate price.'}
                 </p>
               </div>
             </div>
@@ -1721,7 +1721,7 @@ export function ResultsView() {
             )}
 
             <button onClick={confirmResult} className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-              {lang === 'he' ? 'דלג — הצג הערכה בלבד' : 'Skip — show estimate only'}
+              {lang === 'he' ? 'דלג' : 'Skip for now'}
             </button>
           </Card>
         </FadeIn>
@@ -1738,8 +1738,8 @@ export function ResultsView() {
               <div>
                 <p className="text-sm font-semibold">
                   {lang === 'he'
-                    ? `אנחנו חושבים שזה ${result.nameHebrew || result.name} — נכון?`
-                    : `We think this might be ${result.name} — is that right?`}
+                    ? `זה ${result.nameHebrew || result.name}?`
+                    : `Is this ${/^[aeiou]/i.test(result.name || '') ? 'an' : 'a'} ${result.name}?`}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   {lang === 'he' ? 'אשר או תקן לקבלת מחיר מדויק יותר' : 'Confirm or correct for more accurate pricing'}
@@ -1772,7 +1772,7 @@ export function ResultsView() {
             {!showCorrection ? (
               <div className="flex items-center gap-3">
                 <button onClick={() => setShowCorrection(true)} className="text-xs transition-colors" style={{ color: '#6FEEE1' }}>
-                  {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
+                  {lang === 'he' ? 'זה משהו אחר' : 'Not quite right'}
                 </button>
                 <span className="text-slate-700">|</span>
                 <button onClick={() => setHelpModalOpen(true)} className="text-xs text-purple-400 hover:text-purple-300 transition-colors">
@@ -1916,17 +1916,14 @@ export function ResultsView() {
               </div>
               <div className="min-w-0">
                 <p className="text-sm font-semibold" style={{ color: STITCH.onSurface }}>
-                  {lang === 'he' ? 'זוהה — אך אינו במאגר שלנו עדיין' : 'Recognized, but not in our database yet'}
+                  {lang === 'he' ? 'פריט חדש בקטלוג שלנו' : 'New to our catalog'}
                 </p>
                 <p className="text-xs mt-0.5" style={{ color: STITCH.onSurfaceVariant }}>
                   {result.candidate_payload?.name || result.name}
                   {result.candidate_payload?.category ? ` · ${result.candidate_payload.category}` : ''}
                 </p>
                 <p className="text-[11px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
-                  {lang === 'he' ? 'מקור: ' : 'Source: '}
-                  {result.recognition_source === 'ocr_label'
-                    ? (lang === 'he' ? 'טקסט על המוצר' : 'Label text')
-                    : (lang === 'he' ? 'זיהוי ויזואלי' : 'Visual match')}
+                  {lang === 'he' ? 'אשר כדי לשפר זיהויים עתידיים.' : 'Help improve recognition.'}
                 </p>
               </div>
             </div>
@@ -1943,7 +1940,7 @@ export function ResultsView() {
               }}
             >
               <Check className="w-4 h-4" />
-              {lang === 'he' ? 'אשר — עזור לנו לשפר' : 'Confirm item — help us improve'}
+              {lang === 'he' ? 'כן, זה נכון' : 'Yes, this is correct'}
             </button>
 
             <div className="flex items-center gap-3">

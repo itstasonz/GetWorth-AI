@@ -125,10 +125,10 @@ export function CheckoutSheet() {
               <p className="text-xs font-bold uppercase tracking-wide" style={{ color: '#6FEEE1' }}>{lang === 'he' ? 'מה קורה עכשיו' : 'What happens next'}</p>
             </div>
             {[
-              { n: '1', en: 'Request sent — seller gets notified',   he: 'הבקשה נשלחת — המוכר מקבל התראה' },
-              { n: '2', en: 'Seller accepts & arranges meetup',      he: 'המוכר מאשר ומתאם מסירה' },
-              { n: '3', en: 'Meet, inspect, pay — cash / Bit / wire', he: 'פגישה, בדיקה, תשלום (מזומן / ביט)' },
-              { n: '4', en: 'Confirm receipt in app — deal done ✓',  he: 'אשר קבלה באפליקציה — הסתיים ✓' },
+              { n: '1', en: 'Request sent to seller',                he: 'הבקשה נשלחת למוכר' },
+              { n: '2', en: 'Seller accepts and arranges a meetup',  he: 'המוכר מאשר ומתאם מסירה' },
+              { n: '3', en: 'Meet, inspect and pay in person',       he: 'פגישה, בדיקה, תשלום (מזומן / ביט)' },
+              { n: '4', en: 'Confirm receipt in the app to complete ✓', he: 'אשר קבלה באפליקציה לסיום ✓' },
             ].map(s => (
               <div key={s.n} className="flex items-start gap-3 px-4 py-2.5 border-t border-white/5">
                 <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 text-slate-300">{s.n}</span>
@@ -605,7 +605,7 @@ export function OrderDetailView() {
           <Card className="p-6 text-center space-y-2" gradient="linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.06))">
             <div className="text-4xl mb-1">🎉</div>
             <h3 className="text-xl font-bold text-emerald-300">{lang === 'he' ? 'עסקה הושלמה בהצלחה!' : 'Deal Complete!'}</h3>
-            <p className="text-sm text-slate-400">{lang === 'he' ? `שילמת ${formatPrice(order.price)} — תודה שהשתמשת ב-GetWorth` : `You paid ${formatPrice(order.price)} — thanks for using GetWorth`}</p>
+            <p className="text-sm text-slate-400">{lang === 'he' ? `שילמת ${formatPrice(order.price)}. תודה שהשתמשת ב-GetWorth!` : `You paid ${formatPrice(order.price)}. Thanks for using GetWorth!`}</p>
           </Card>
         </FadeIn>
       )}
