@@ -482,6 +482,16 @@ ${candidates.map((c, i) => `${i + 1}. [ID:${c.id}] ${c.brand} ${c.model || ''} �
 ${corrections.map(c => `- AI said "${c.original}" → user corrected to "${c.corrected}" (happened ${c.count}x)`).join('\n')}`
     : '';
 
+  // User correction — mandatory identity override when present
+  const userCorrectionBlock = recognition._user_correction
+    ? `\nUSER CORRECTION — MANDATORY OVERRIDE (HIGHEST PRIORITY):
+The user has explicitly identified this product as: "${recognition._user_correction}"
+- You MUST set final_brand and final_model to match this identity exactly.
+- This overrides Stage 1 vision, OCR, and DB candidates.
+- Use your knowledge of this product for Israeli used-goods market pricing.
+- Set identification_method = "user_correction".`
+    : '';
+
   // Phase 3: Google Vision findings as a 3rd opinion
   const visionBlock = visionData
     ? `\nGOOGLE VISION ANALYSIS (independent second opinion — use to confirm/reject Stage 1):
@@ -519,6 +529,7 @@ RECOGNITION DATA FROM STAGE 1:
 ${candidateBlock}
 ${visionBlock}
 ${correctionBlock}
+${userCorrectionBlock}
 
 VERIFICATION RULES:
 - If a DB candidate matches with >70% similarity AND brand/model aligns with Stage 1 → use its pricing → price_method = "comp_based"
@@ -1767,7 +1778,7 @@ export default async function handler(req) {
       return json({ error: 'Request body too large' }, 413, cors);
     }
 
-    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false } = await req.json();
+    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null } = await req.json();
     const clientHints = clientCorrections.length > 0 ? clientCorrections : hints;
     const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
 
@@ -1829,6 +1840,31 @@ export default async function handler(req) {
         'Stage 1 recognition'
       );
       recognition = calibrateRecognition(recognition);
+
+      // ── USER CORRECTION INJECTION — highest-priority signal ──
+      // When the user explicitly selects an alternative or types a correction,
+      // refineModel carries their intent (e.g. "Logitech G900").
+      // Override Stage 1 so Stage 2 treats this as a mandatory identity.
+      if (refineModel) {
+        const corrText = refineModel.trim();
+        const spaceIdx = corrText.indexOf(' ');
+        const corrBrand = spaceIdx > 0
+          ? corrText.slice(0, spaceIdx)
+          : (recognition.brand_candidates?.[0]?.brand || null);
+        const corrModel = spaceIdx > 0 ? corrText.slice(spaceIdx + 1) : corrText;
+
+        recognition.brand_candidates = [
+          { brand: corrBrand || 'Unknown', confidence: 0.96, evidence: 'user_correction' },
+          ...(recognition.brand_candidates || []),
+        ];
+        recognition.model_candidates = [
+          { model: corrModel, confidence: 0.96, evidence: 'user_correction' },
+          ...(recognition.model_candidates || []),
+        ];
+        recognition._user_correction = corrText;
+        recognition._correction_source = 'user_selected';
+        console.log(`[Analyze correction received] refineModel="${corrText}" → brand="${corrBrand}" model="${corrModel}"`);
+      }
     } catch (stage1Err) {
       // Stage 1 failure is NOT a product classification — it is a retryable error.
       // Return 503 so the client shows "please retry" instead of a fake "Other" result.
@@ -1972,6 +2008,13 @@ export default async function handler(req) {
     result.candidate_source_table  = candidateSourceTable;  // 'products' | 'product_candidates' | 'none'
     result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
     result.stage2_timeout = stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded');
+
+    // User correction passthrough — frontend uses these for display + debug
+    if (recognition._user_correction) {
+      result.user_correction   = recognition._user_correction;
+      result.correction_source = recognition._correction_source;
+    }
+
     result.recognition_source = (() => {
       // When there is no DB match, always tag source as 'db_missing' so the
       // submit_product_candidate RPC receives the correct CHECK constraint value.
@@ -1984,20 +2027,36 @@ export default async function handler(req) {
 
     // candidate_payload: pre-filled data the frontend sends to /api/submit-candidate
     if (result.product_candidate_needed) {
-      const cpBrand = verification.final_brand && verification.final_brand.toLowerCase() !== 'unidentified'
+      let cpBrand = verification.final_brand && verification.final_brand.toLowerCase() !== 'unidentified'
         ? verification.final_brand : null;
-      const cpModel = verification.final_model && verification.final_model.toLowerCase() !== 'unidentified'
+      let cpModel = verification.final_model && verification.final_model.toLowerCase() !== 'unidentified'
         ? verification.final_model : null;
+
+      // User correction takes priority over Stage 2 output — parse the corrected text directly
+      if (recognition._user_correction) {
+        const corrText = recognition._user_correction.trim();
+        const spaceIdx = corrText.indexOf(' ');
+        if (spaceIdx > 0) {
+          cpBrand = corrText.slice(0, spaceIdx);
+          cpModel = corrText.slice(spaceIdx + 1);
+        } else {
+          cpModel = corrText;
+        }
+      }
+
       result.candidate_payload = {
         brand:        cpBrand,
         model:        cpModel,
-        name:         verification.full_name || [cpBrand, cpModel].filter(Boolean).join(' ') || null,
+        name:         recognition._user_correction
+                        || verification.full_name
+                        || [cpBrand, cpModel].filter(Boolean).join(' ')
+                        || null,
         category:     verification.final_category || recognition.category || null,
         subcategory:  recognition.subcategory || null,
         product_type: null,
         ocr_text:     (recognition.ocr_text?.raw_texts || []).join(' | ') || null,
-        confidence:   verification.match_confidence,
-        source:       result.recognition_source,
+        confidence:   recognition._user_correction ? 0.96 : verification.match_confidence,
+        source:       recognition._user_correction ? 'manual_correction' : result.recognition_source,
       };
     }
 
@@ -2020,6 +2079,8 @@ export default async function handler(req) {
         logos: (recognition.ocr_text?.logos_detected || []).join(', '),
         has_readable_text: recognition.ocr_text?.has_readable_text,
         failed: !recognition.brand_candidates?.length && !recognition.ocr_text?.has_readable_text,
+        user_correction: recognition._user_correction || null,
+        correction_source: recognition._correction_source || null,
       },
       retrieval: {
         db_match_found:       dbMatchFound,

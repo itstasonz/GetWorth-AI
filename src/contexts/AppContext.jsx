@@ -1325,7 +1325,10 @@ export function AppProvider({ children }) {
         const body = base64Array.length > 1
           ? { images: base64Array, lang, corrections }
           : { imageData: base64Array[0], lang, corrections };
-        if (refineModel) body.refineModel = refineModel;
+        if (refineModel) {
+          body.refineModel = refineModel;
+          console.log(`[Analyze correction] Sending refineModel="${refineModel}" to backend`);
+        }
 
         const _accessToken = await getFreshToken();
         const analyzeHeaders = { 'Content-Type': 'application/json' };

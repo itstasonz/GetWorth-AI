@@ -2189,6 +2189,11 @@ export function ResultsView() {
                   <p className="text-[10px]" style={{ color: s1.model==='none' ? '#f87171' : '#6feee1' }}>model: {s1.model} ({Math.round((s1.model_conf||0)*100)}% / {s1.model_evidence||'?'})</p>
                   {s1.model_candidates && <p className="text-[10px] text-slate-400">all models: {s1.model_candidates}</p>}
                   <p className="text-[10px]" style={{ color: s1.ocr ? '#a78bfa' : '#f87171' }}>ocr: {s1.ocr || '⚠ EMPTY'}{s1.logos ? ` | logos: ${s1.logos}` : ''}</p>
+                  {s1.user_correction && (
+                    <p className="text-[10px] font-semibold" style={{ color: '#f472b6' }}>
+                      ✏ user_correction="{s1.user_correction}" source={s1.correction_source}
+                    </p>
+                  )}
                   {s1.failed && <p className="text-[10px] font-semibold text-red-400">⛔ Stage 1 failed / timed out — used fallback</p>}
                 </div>
 
