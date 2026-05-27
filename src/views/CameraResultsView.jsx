@@ -1156,12 +1156,18 @@ export function ResultsView() {
               : (lang === 'he' ? 'ערך משוער' : 'Estimated Value')}
           </h2>
           <div className="mt-1 flex items-baseline justify-center gap-1">
-            <span
-              className="text-5xl md:text-6xl font-extrabold tracking-tighter"
-              style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
-            >
-              {formatPrice(result.marketValue?.mid)}
-            </span>
+            {result.marketValue?.pricing_status === 'manual_required' ? (
+              <span className="text-xl font-semibold text-amber-400 text-center px-2">
+                {lang === 'he' ? 'לא ניתן להעריך — הזן מחיר ידנית' : 'Cannot estimate — enter price manually'}
+              </span>
+            ) : (
+              <span
+                className="text-5xl md:text-6xl font-extrabold tracking-tighter"
+                style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
+              >
+                {formatPrice(result.marketValue?.mid)}
+              </span>
+            )}
           </div>
           <p
             dir="auto"
@@ -1195,7 +1201,7 @@ export function ResultsView() {
               {lang === 'he' ? 'דגם' : 'Ref.'} {recognition.modelNumber || identification.model}
             </p>
           )}
-          {result.marketValue?.low > 0 && (
+          {result.marketValue?.low > 0 && result.marketValue?.pricing_status !== 'manual_required' && (
             <p className="text-sm mt-3" style={{ color: STITCH.onSurfaceVariant }}>
               {t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}
             </p>
@@ -1205,12 +1211,16 @@ export function ResultsView() {
               {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
             </p>
           )}
-          {priceMethod && (
+          {(priceMethod || result.marketValue?.pricing_status) && (
             <p className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
               {result.authenticity?.pricingMode === 'verification_required'
                 ? (lang === 'he' ? 'מחיר תלוי אימות אותנטיות' : 'Price subject to authenticity verification')
                 : result.authenticity?.pricingMode === 'replica_adjusted'
                 ? (lang === 'he' ? 'מחיר מותאם לרפליקה' : 'Replica-adjusted estimate')
+                : result.marketValue?.pricing_status === 'category_fallback'
+                ? (lang === 'he' ? 'הערכה גסה לפי קטגוריה — אשר לדיוק' : 'Rough category estimate — confirm for accuracy')
+                : result.marketValue?.pricing_status === 'manual_required'
+                ? (lang === 'he' ? 'נדרש מחיר ידני' : 'Manual price required')
                 : priceMethod === 'comp_based'
                 ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
                 : (lang === 'he' ? 'הערכת AI' : 'AI estimate')}
@@ -2227,17 +2237,35 @@ export function ResultsView() {
                 {/* Pricing */}
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Pricing</p>
-                  {pri.stage2_fallback_used
-                    ? <p className="text-[10px] font-bold text-red-400">⛔ Stage 2 FALLBACK — prices are 0 (reason: {pri.stage2_fallback_reason || 'unknown'})</p>
+                  {/* Stage 2 status */}
+                  {pri.stage2_timeout
+                    ? <p className="text-[10px] font-bold text-red-400">⏱ Stage 2 TIMEOUT — {pri.stage2_fallback_reason}</p>
+                    : pri.stage2_fallback_used
+                    ? <p className="text-[10px] font-bold" style={{ color: '#f97316' }}>⚠ Stage 2 SKIPPED — {pri.stage2_fallback_reason}</p>
                     : <p className="text-[10px]" style={{ color: '#86efac' }}>✓ Stage 2 ran — {pri.price_method}</p>
                   }
+                  {/* Pricing status */}
+                  <p className="text-[10px]" style={{
+                    color: pri.pricing_status === 'manual_required' ? '#f87171'
+                         : pri.pricing_status === 'category_fallback' ? '#fbbf24'
+                         : pri.pricing_status === 'db_based' ? '#86efac'
+                         : '#6feee1'
+                  }}>
+                    status: {pri.pricing_status || 'unknown'}
+                    {pri.fallback_key ? ` [${pri.fallback_key}]` : ''}
+                  </p>
+                  {/* Price range */}
                   <p className="text-[10px]" style={{ color: pri.price_zero ? '#f87171' : '#6feee1' }}>
                     ₪{pri.price_low} / ₪{pri.price_mid} / ₪{pri.price_high}
-                    {pri.price_zero ? ' ⚠ ALL ZERO' : ''}
+                    {pri.price_zero && pri.pricing_status !== 'manual_required' ? ' ⚠ ZERO' : ''}
                   </p>
-                  <p className="text-[9px] text-slate-500">source: {pri.db_candidate_used}</p>
+                  {/* Warning */}
+                  {pri.pricing_warning && (
+                    <p className="text-[9px] text-amber-400 italic break-words">{pri.pricing_warning}</p>
+                  )}
+                  <p className="text-[9px] text-slate-500">db: {pri.db_candidate_used}</p>
                   {pri.silent_fail && (
-                    <p className="text-[10px] font-semibold text-red-400">⛔ SILENT FAIL — pricing did not complete</p>
+                    <p className="text-[10px] font-semibold text-red-400">⛔ SILENT FAIL — Stage 2 ran but price=0</p>
                   )}
                 </div>
 

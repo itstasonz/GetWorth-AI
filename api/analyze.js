@@ -1682,6 +1682,9 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
       newRetailPrice: verification.new_retail_price_ils || 0,
       price_method: verification.price_method || 'ai_estimate',
       pricingMode: auth.pricingMode,
+      // Populated when Stage 2 fallback is used; null means Stage 2 ran normally
+      pricing_status:  verification._pricing_meta?.pricing_status  || (verification.price_method === 'comp_based' ? 'db_based' : 'ai_estimate'),
+      pricing_warning: verification._pricing_meta?.pricing_warning || null,
     },
     details: {
       description: verification.israeli_market_notes || '',
@@ -1986,7 +1989,7 @@ export default async function handler(req) {
       stage2FallbackUsed = true;
       stage2FallbackReason = `budget_exhausted rem=${rem()}ms`;
       blog(`[Pipeline] Stage 2 SKIPPED — returning rough estimate (rem=${rem()}ms < 8000ms)`);
-      verification = buildFallback(recognition, lang);
+      verification = buildFallback(recognition, lang, stage2FallbackReason);
     } else {
       // Leave at least 1 s for calibration + normalise + JSON encode + response write
       const stage2Cap = Math.min(9_000, rem() - 1_000);
@@ -2001,7 +2004,7 @@ export default async function handler(req) {
         stage2FallbackUsed = true;
         stage2FallbackReason = err.message;
         blog(`[Pipeline] Stage 2 FAILED — using rough estimate: ${err.message}`);
-        verification = buildFallback(recognition, lang);
+        verification = buildFallback(recognition, lang, stage2FallbackReason);
       }
     }
 
@@ -2012,9 +2015,10 @@ export default async function handler(req) {
     // ── NORMALIZE + RESPOND ──
     const result  = normalizeForUI(recognition, verification, tierInfo, !!visionData);
 
-    // ── DB LEARNING FLAGS ──
+    // ── DB LEARNING FLAGS + PRICING FLAGS ──
     // db_match_found: were any product rows retrieved?
     // product_candidate_needed: no DB match but Stage 1 has useful recognition data
+    // stage2_timeout: Stage 2 was skipped/timed out — pricing came from category fallback
     const dbMatchFound = candidates.length > 0;
     const _brand = recognition.brand_candidates?.[0]?.brand;
     const _model = recognition.model_candidates?.[0]?.model;
@@ -2025,6 +2029,7 @@ export default async function handler(req) {
     );
     result.db_match_found = dbMatchFound;
     result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
+    result.stage2_timeout = stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded');
     result.recognition_source = (() => {
       // When there is no DB match, always tag source as 'db_missing' so the
       // submit_product_candidate RPC receives the correct CHECK constraint value.
@@ -2081,20 +2086,21 @@ export default async function handler(req) {
         strategy_log: retrievalStrategyLog,
       },
       pricing: {
-        // stage2_fallback_used = true means buildFallback() was used: prices will be 0
-        // and price_method='ai_estimate' does NOT mean real pricing — it means failure.
-        // Use this flag, NOT price_method, to detect silent pricing failure.
-        stage2_fallback_used: stage2FallbackUsed,
+        stage2_fallback_used:   stage2FallbackUsed,
         stage2_fallback_reason: stage2FallbackReason,
-        price_method: verification.price_method || 'ai_estimate',
-        price_low:    verification.price_estimate_low,
-        price_mid:    verification.price_estimate_mid,
-        price_high:   verification.price_estimate_high,
-        price_zero:   verification.price_estimate_mid === 0,
-        db_candidate_used: dbMatchFound
+        stage2_timeout:         stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded'),
+        pricing_status:         result.marketValue.pricing_status,
+        pricing_warning:        result.marketValue.pricing_warning,
+        fallback_key:           verification._pricing_meta?.fallback_key || null,
+        price_method:           verification.price_method || 'ai_estimate',
+        price_low:              verification.price_estimate_low,
+        price_mid:              verification.price_estimate_mid,
+        price_high:             verification.price_estimate_high,
+        price_zero:             verification.price_estimate_mid === 0,
+        db_candidate_used:      dbMatchFound
           ? `${candidates[0]?.brand} ${candidates[0]?.model} (${candidates[0]?._source})`
           : 'none — db_missing',
-        silent_fail: stage2FallbackUsed || (!stage2FallbackUsed && verification.price_estimate_mid === 0),
+        silent_fail: !stage2FallbackUsed && verification.price_estimate_mid === 0,
       },
       stage2: {
         final_brand: verification.final_brand,
@@ -2173,10 +2179,137 @@ function parseJSON(raw, stage) {
   }
 }
 
-function buildFallback(recognition, lang) {
+// ── Category fallback price map (ILS, used goods, Israeli market) ──────────
+// Prices are ROUGH category-level estimates only. Used when Stage 2 fails.
+// null → manual_required (too variable to estimate from category alone).
+const FALLBACK_PRICE_MAP = {
+  'electronics:iphone':         { low: 400,  mid: 1200, high: 3000 },
+  'electronics:macbook':        { low: 800,  mid: 2500, high: 5000 },
+  'electronics:ipad':           { low: 200,  mid: 700,  high: 2000 },
+  'electronics:smartwatch':     { low: 80,   mid: 350,  high: 1200 },
+  'electronics:smartphone':     { low: 150,  mid: 450,  high: 1200 },
+  'electronics:cordless phone': { low: 30,   mid: 60,   high: 150  },
+  'electronics:home phone':     { low: 20,   mid: 50,   high: 120  },
+  'electronics:laptop':         { low: 400,  mid: 1200, high: 3000 },
+  'electronics:tablet':         { low: 150,  mid: 450,  high: 1500 },
+  'electronics:headphones':     { low: 50,   mid: 200,  high: 600  },
+  'electronics:earbuds':        { low: 30,   mid: 150,  high: 500  },
+  'electronics:gaming console': { low: 400,  mid: 900,  high: 1800 },
+  'electronics:gaming mouse':   { low: 50,   mid: 150,  high: 400  },
+  'electronics:keyboard':       { low: 30,   mid: 100,  high: 400  },
+  'electronics:monitor':        { low: 200,  mid: 600,  high: 1500 },
+  'electronics:tv':             { low: 200,  mid: 700,  high: 2500 },
+  'electronics:camera':         { low: 200,  mid: 700,  high: 2500 },
+  'electronics:speaker':        { low: 50,   mid: 200,  high: 800  },
+  'electronics:printer':        { low: 50,   mid: 150,  high: 500  },
+  'electronics:drone':          { low: 200,  mid: 600,  high: 2000 },
+  'electronics':                { low: 50,   mid: 200,  high: 800  },
+  'watches:luxury':             { low: 500,  mid: 2500, high: 10000 },
+  'watches':                    { low: 50,   mid: 200,  high: 800  },
+  'home:kitchen appliance':     { low: 50,   mid: 200,  high: 600  },
+  'home:cleaning':              null,
+  'home':                       { low: 30,   mid: 150,  high: 600  },
+  'furniture':                  { low: 100,  mid: 500,  high: 2000 },
+  'sports':                     { low: 30,   mid: 150,  high: 600  },
+  'clothing':                   { low: 20,   mid: 100,  high: 400  },
+  'bags':                       { low: 30,   mid: 150,  high: 600  },
+  'jewelry':                    null,
+  'books':                      { low: 5,    mid: 20,   high: 60   },
+  'toys':                       { low: 20,   mid: 80,   high: 300  },
+  'tools':                      { low: 30,   mid: 150,  high: 600  },
+  'beauty':                     { low: 10,   mid: 50,   high: 200  },
+  'smoking':                    { low: 20,   mid: 80,   high: 300  },
+  'vehicles':                   null,
+  'food':                       null,
+};
+
+// Returns { price_estimate_low, price_estimate_mid, price_estimate_high,
+//           pricing_status, pricing_warning, fallback_key }
+function getCategoryFallbackPricing(recognition, failReason) {
+  const cat  = (recognition.category    || '').toLowerCase();
+  const sub  = (recognition.subcategory || '').toLowerCase();
+  const pt   = (recognition.product_type || '').toLowerCase();
+  const mdl  = (recognition.model_candidates?.[0]?.model || '').toLowerCase();
+  const brnd = (recognition.brand_candidates?.[0]?.brand  || '').toLowerCase();
+  const ocr  = (recognition.ocr_text?.raw_texts || []).join(' ').toLowerCase();
+  const sig  = `${sub} ${pt} ${mdl} ${ocr}`;
+
+  // Ordered matchers — first match wins
+  const MATCHERS = [
+    ['electronics:iphone',         () => cat.includes('electron') && (brnd.includes('apple') || sig.includes('iphone'))],
+    ['electronics:macbook',        () => cat.includes('electron') && sig.includes('macbook')],
+    ['electronics:ipad',           () => cat.includes('electron') && sig.includes('ipad')],
+    ['electronics:smartwatch',     () => cat.includes('electron') && (sig.includes('smartwatch') || /garmin|fitbit|apple watch|galaxy watch/.test(sig))],
+    ['electronics:smartphone',     () => cat.includes('electron') && (sub.includes('phone') || sub.includes('mobile') || sub.includes('smartphone') || pt.includes('smartphone') || /galaxy|pixel|oneplus/.test(sig))],
+    ['electronics:cordless phone', () => cat.includes('electron') && (sig.includes('cordless') || /kx-t|kx-p|dect/.test(sig) || (brnd.includes('panasonic') && sig.includes('phone')))],
+    ['electronics:home phone',     () => cat.includes('electron') && (sig.includes('home phone') || sig.includes('landline') || sig.includes('telephone'))],
+    ['electronics:laptop',         () => cat.includes('electron') && (sub.includes('laptop') || sub.includes('notebook') || /thinkpad|latitude|elitebook|ideapad|zenbook/.test(sig))],
+    ['electronics:tablet',         () => cat.includes('electron') && (sub.includes('tablet') || pt.includes('tablet'))],
+    ['electronics:headphones',     () => cat.includes('electron') && (sub.includes('headphone') || sub.includes('earphone') || /wh-|qc\d|airpods|earbuds/.test(sig))],
+    ['electronics:earbuds',        () => cat.includes('electron') && (sig.includes('earbuds') || sig.includes('tws') || sig.includes('in-ear'))],
+    ['electronics:gaming console', () => cat.includes('electron') && /playstation|xbox|nintendo|ps4|ps5/.test(sig)],
+    ['electronics:gaming mouse',   () => cat.includes('electron') && ((sig.includes('gaming') && sig.includes('mouse')) || /g502|g pro|g305|razer deathadder|steelseries/.test(sig))],
+    ['electronics:keyboard',       () => cat.includes('electron') && (sub.includes('keyboard') || pt.includes('keyboard'))],
+    ['electronics:monitor',        () => cat.includes('electron') && (sub.includes('monitor') || sub.includes('display') || pt.includes('monitor'))],
+    ['electronics:tv',             () => cat.includes('electron') && (sub.includes('tv') || sub.includes('television') || pt.includes('television'))],
+    ['electronics:camera',         () => cat.includes('electron') && (sub.includes('camera') || /canon|nikon|sony a\d|fuji/.test(sig))],
+    ['electronics:speaker',        () => cat.includes('electron') && (sub.includes('speaker') || /sonos|jbl|bose/.test(sig))],
+    ['electronics:printer',        () => cat.includes('electron') && (sub.includes('printer') || pt.includes('printer'))],
+    ['electronics:drone',          () => cat.includes('electron') && (sig.includes('drone') || sig.includes('dji'))],
+    ['electronics',                () => cat.includes('electron')],
+    ['watches:luxury',             () => (cat.includes('watch') || sub.includes('watch')) && /rolex|omega|cartier|patek|audemars|breitling|tag heuer|hublot|iwc|tudor/.test(brnd)],
+    ['watches',                    () => cat.includes('watch') || sub.includes('watch')],
+    ['home:cleaning',              () => (cat.includes('home') || cat.includes('clean')) && (/ajax|fairy|ariel|persil|sano/.test(brnd) || /clean|detergent|soap|bleach|disinfect/.test(sig))],
+    ['home:kitchen appliance',     () => (cat.includes('home') || cat.includes('kitchen')) && /blender|mixer|toaster|coffee|espresso|microwave|oven/.test(sig)],
+    ['home',                       () => cat.includes('home') || cat.includes('household')],
+    ['furniture',                  () => cat.includes('furni') || cat.includes('sofa') || cat.includes('chair') || cat.includes('table')],
+    ['sports',                     () => cat.includes('sport') || cat.includes('fitness') || cat.includes('outdoor')],
+    ['clothing',                   () => cat.includes('cloth') || cat.includes('fashion') || cat.includes('apparel')],
+    ['bags',                       () => cat.includes('bag') || sub.includes('bag') || sub.includes('backpack')],
+    ['jewelry',                    () => cat.includes('jewel') || sub.includes('jewel') || /ring|necklace|bracelet/.test(sub)],
+    ['books',                      () => cat.includes('book')],
+    ['toys',                       () => cat.includes('toy') || (cat.includes('game') && !cat.includes('gaming'))],
+    ['tools',                      () => cat.includes('tool') || cat.includes('hardware')],
+    ['beauty',                     () => cat.includes('beauty') || cat.includes('cosmetic')],
+    ['smoking',                    () => cat.includes('smoking') || cat.includes('tobacco') || cat.includes('vape')],
+    ['vehicles',                   () => cat.includes('vehicle') || cat.includes('car') || cat.includes('motor')],
+    ['food',                       () => cat.includes('food') || cat.includes('beverage')],
+  ];
+
+  let matchedKey = null;
+  for (const [key, test] of MATCHERS) {
+    if (test()) { matchedKey = key; break; }
+  }
+
+  const prices = matchedKey ? FALLBACK_PRICE_MAP[matchedKey] : undefined;
+  const reason = failReason ? `Stage 2 failed (${failReason}). ` : '';
+
+  if (!prices) {
+    return {
+      price_estimate_low:  0,
+      price_estimate_mid:  0,
+      price_estimate_high: 0,
+      pricing_status:   'manual_required',
+      pricing_warning:  `${reason}Cannot estimate price from category alone. Please enter a price manually.`,
+      fallback_key:     matchedKey || cat || 'unknown',
+    };
+  }
+
+  return {
+    price_estimate_low:  prices.low,
+    price_estimate_mid:  prices.mid,
+    price_estimate_high: prices.high,
+    pricing_status:   'category_fallback',
+    pricing_warning:  `${reason}Rough estimate based on category "${matchedKey}". Confirm item for accurate pricing.`,
+    fallback_key:     matchedKey,
+  };
+}
+
+function buildFallback(recognition, lang, failReason = null) {
   const isHe = lang === 'he';
   const brand = recognition.brand_candidates?.[0]?.brand || 'unidentified';
   const model = recognition.model_candidates?.[0]?.model || 'unidentified';
+  const fp = getCategoryFallbackPricing(recognition, failReason);
   return {
     final_category: recognition.category,
     final_category_hebrew: recognition.category_hebrew || '',
@@ -2189,9 +2322,12 @@ function buildFallback(recognition, lang) {
     matched_product_ids: [],
     identification_method: brand !== 'unidentified' ? 'visual_match' : 'generic_only',
     brand_confidence: 'unidentified',
-    price_estimate_low: 0, price_estimate_mid: 0, price_estimate_high: 0,
+    price_estimate_low:  fp.price_estimate_low,
+    price_estimate_mid:  fp.price_estimate_mid,
+    price_estimate_high: fp.price_estimate_high,
     new_retail_price_ils: 0,
     price_method: 'ai_estimate',
+    _pricing_meta: fp,   // consumed by normalizeForUI
     currency: 'ILS',
     condition: recognition.visual_features?.condition || 'unknown',
     is_sellable: true,
