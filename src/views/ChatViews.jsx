@@ -39,6 +39,81 @@ const C = {
 // liquid-gradient: Stitch's signature outgoing bubble — bright teal
 const LIQUID_GRADIENT = `linear-gradient(135deg, ${C.primary} 0%, ${C.primaryCont} 100%)`;
 
+// ─── DebugKbPanel ─────────────────────────────────────────────────────────────
+// DEV-only floating panel that surfaces visualViewport values on a real device.
+// Renders in the bottom-right corner so it doesn't block UI during testing.
+// Remove (or keep — it only mounts when import.meta.env.DEV is true) before ship.
+function DebugKbPanel({ containerRef, composerRef }) {
+  const [vals, setVals] = useState({});
+  const [inputFocused, setInputFocused] = useState(false);
+
+  useEffect(() => {
+    const vv = window.visualViewport;
+    const snap = () => {
+      const el   = containerRef.current;
+      const comp = composerRef.current;
+      const elRect   = el   ? el.getBoundingClientRect()   : null;
+      const compRect = comp ? comp.getBoundingClientRect() : null;
+      setVals({
+        winH:      window.innerHeight,
+        vvH:       vv ? Math.round(vv.height)    : 'n/a',
+        vvOTop:    vv ? Math.round(vv.offsetTop) : 'n/a',
+        kbEst:     vv ? Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height)) : 'n/a',
+        scrollY:   Math.round(window.scrollY),
+        chatTop:   elRect   ? Math.round(elRect.top)    : 'n/a',
+        chatBot:   elRect   ? Math.round(elRect.bottom) : 'n/a',
+        compTop:   compRect ? Math.round(compRect.top)  : 'n/a',
+        compBot:   compRect ? Math.round(compRect.bottom) : 'n/a',
+        compPB:    comp     ? comp.style.paddingBottom || '(css)' : 'n/a',
+      });
+    };
+
+    const onFocus = () => { setInputFocused(true);  snap(); };
+    const onBlur  = () => { setInputFocused(false); snap(); };
+    document.addEventListener('focusin',  onFocus);
+    document.addEventListener('focusout', onBlur);
+
+    snap();
+    if (vv) { vv.addEventListener('resize', snap); vv.addEventListener('scroll', snap); }
+    else      window.addEventListener('resize', snap);
+
+    return () => {
+      document.removeEventListener('focusin',  onFocus);
+      document.removeEventListener('focusout', onBlur);
+      if (vv) { vv.removeEventListener('resize', snap); vv.removeEventListener('scroll', snap); }
+      else      window.removeEventListener('resize', snap);
+    };
+  }, [containerRef, composerRef]);
+
+  const row = (label, value) => (
+    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+      <span style={{ color: '#bbc9c7', fontSize: 10 }}>{label}</span>
+      <span style={{ color: '#6feee1', fontSize: 10, fontWeight: 700 }}>{String(value)}</span>
+    </div>
+  );
+
+  return (
+    <div style={{
+      position: 'absolute', bottom: 80, right: 8, zIndex: 9999,
+      background: 'rgba(0,0,0,0.85)', border: '1px solid #3c4947',
+      borderRadius: 10, padding: '8px 10px', width: 180,
+      fontFamily: 'monospace', pointerEvents: 'none',
+    }}>
+      {row('win.innerH',    vals.winH)}
+      {row('vv.height',     vals.vvH)}
+      {row('vv.offsetTop',  vals.vvOTop)}
+      {row('kb≈',           vals.kbEst)}
+      {row('scrollY',       vals.scrollY)}
+      {row('chat.top',      vals.chatTop)}
+      {row('chat.bot',      vals.chatBot)}
+      {row('comp.top',      vals.compTop)}
+      {row('comp.bot',      vals.compBot)}
+      {row('comp.pb',       vals.compPB)}
+      {row('input focused', inputFocused ? '✓ YES' : 'no')}
+    </div>
+  );
+}
+
 // ─── UserAvatar ───────────────────────────────────────────────────────────────
 function UserAvatar({ profile, size = 'md', className = '' }) {
   const sizes = { xs: 'w-8 h-8 text-xs', sm: 'w-9 h-9 text-xs', md: 'w-12 h-12 text-sm', lg: 'w-14 h-14 text-base' };
@@ -489,31 +564,51 @@ export function ChatView() {
   const [uploadingImage,   setUploadingImage]   = useState(false);
 
   const containerRef  = useRef(null);
+  const composerRef   = useRef(null);   // ← new: lets us zero safe-area when kb open
   const scrollRef     = useRef(null);
   const nearBottomRef = useRef(true);
   const prevMsgCount  = useRef(0);
   const fileInputRef  = useRef(null);
   const textareaRef   = useRef(null);
 
-  // ── iOS keyboard-safe height — body-lock + height-only strategy ─────────
+  // ── iOS keyboard-safe layout — vv.offsetTop + vv.height tracking ──────────
   //
-  // Root cause of the "lift" bug:
-  //   When the keyboard opens, iOS auto-scrolls the layout viewport to show
-  //   the focused input. This makes vv.offsetTop > 0 each animation frame as
-  //   the keyboard slides up. The previous handler set el.style.top = vv.offsetTop
-  //   on every frame — causing the entire container to jitter/jump.
+  // ROOT CAUSES (previous fix was wrong):
   //
-  // Fix:
-  //   1. Lock body scroll (position:fixed + overflow:hidden) so iOS cannot shift
-  //      vv.offsetTop in the first place. Body stays at y=0 the entire time.
-  //   2. Only track vv.height — the container shrinks from the bottom as the
-  //      keyboard rises. Composer naturally moves up; header stays pinned at top:0.
-  //   3. Never set el.style.top — position:fixed;top:0 already anchors the
-  //      container to the visual viewport top when body cannot scroll.
-  //   4. Remove the vv 'scroll' listener — no longer relevant with body locked.
+  //  A) vv.offsetTop was completely ignored.
+  //     On iOS PWA, when a textarea is focused, iOS shifts the visual viewport
+  //     independently of body scroll — even with position:fixed body lock.
+  //     vv.offsetTop > 0 means the visual viewport's top has moved down from
+  //     the layout viewport top.  If the container stays at top:0 but the
+  //     visual viewport starts at offsetTop:50, the top 50 px of the header
+  //     is cut off and a 50 px void appears above the keyboard. FIX: track
+  //     both vv.offsetTop (container top) AND vv.height (container height).
   //
-  // Debug logs (DEV only): vv.height, window.innerHeight, keyboard height estimate.
+  //  B) env(safe-area-inset-bottom) ≈ 34 px stays active when keyboard opens.
+  //     The composer had paddingBottom:max(env(safe-area-inset-bottom),10px).
+  //     On iOS PWA without the interactive-widget meta, the safe-area inset
+  //     does NOT zero out when the keyboard rises. Result: a 34 px void
+  //     between the composer bottom and the keyboard top — the "huge dark gap".
+  //     FIX: when keyboard is detected open (kbHeight > 100 px), override
+  //     composerRef.current.style.paddingBottom = '10px' directly via the DOM
+  //     (no React state → no re-render jank). Restore CSS value when kb closes.
+  //
+  //  C) Bottom nav was always rendered — its backdrop-filter blur bled upward
+  //     through the keyboard zone, making the nav appear "behind" the chat.
+  //     FIX: in App.jsx, nav is conditionally hidden when view === 'chat'.
+  //
+  // STRATEGY:
+  //   1. Keep body scroll-lock (position:fixed) to minimise vv.offsetTop drift.
+  //   2. Listen to BOTH vv 'resize' (height change) AND vv 'scroll' (offsetTop).
+  //   3. Set el.style.top    = vv.offsetTop   → container tracks visual viewport top.
+  //      Set el.style.height = vv.height      → container tracks visual viewport height.
+  //   4. Detect keyboard: kbHeight = window.innerHeight - vv.offsetTop - vv.height.
+  //      When kbHeight > 100, keyboard is open → zero out composer safe-area padding.
+  //   5. On unmount: restore body styles, restore composer padding.
   useEffect(() => {
+    const el   = containerRef.current;
+    const comp = composerRef.current;
+
     // Save existing body inline styles so we can restore on unmount
     const prev = {
       overflow: document.body.style.overflow,
@@ -521,10 +616,10 @@ export function ChatView() {
       width:    document.body.style.width,
       top:      document.body.style.top,
     };
-    // Capture current scroll so restore doesn't jump the page
     const scrollY = window.scrollY;
 
-    // Apply scroll lock
+    // Apply body scroll-lock — prevents iOS from scrolling body on input focus,
+    // which keeps vv.offsetTop at 0 most of the time.
     document.body.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.width    = '100%';
@@ -533,39 +628,74 @@ export function ChatView() {
     const vv = window.visualViewport;
 
     const update = () => {
-      const el = containerRef.current;
       if (!el) return;
-      // vv.height = visual viewport height excluding keyboard.
-      // Falls back to window.innerHeight on browsers without visualViewport.
-      const h = vv ? vv.height : window.innerHeight;
-      el.style.height = `${h}px`;
-      // NEVER touch el.style.top — container stays at top:0.
 
-      if (import.meta.env.DEV) {
-        const kb = Math.round(window.innerHeight - h);
-        console.log(
-          `[Chat/KB] vv.h=${Math.round(h)}  win.h=${window.innerHeight}` +
-          `  vv.offsetTop=${vv ? Math.round(vv.offsetTop) : 'n/a'}` +
-          `  keyboard≈${kb}px  chat=${activeChat ? 'open' : 'closed'}`
-        );
+      if (vv) {
+        const h    = vv.height;
+        const oTop = vv.offsetTop;  // how far down visual viewport top is from layout top
+
+        // Align container with the visual viewport exactly:
+        //   top:    oTop  → container starts where user can see
+        //   height: h     → container fills exactly the visible area
+        el.style.top    = `${oTop}px`;
+        el.style.height = `${h}px`;
+
+        // Keyboard height = space between visual viewport bottom and screen bottom.
+        // With body lock, oTop ≈ 0; the expression still handles any residual shift.
+        const kbHeight = Math.max(0, window.innerHeight - oTop - h);
+        const kbOpen   = kbHeight > 100;
+
+        // Remove safe-area-inset-bottom padding from composer when keyboard is open.
+        // env(safe-area-inset-bottom) ≈ 34 px on iPhone and does NOT reset to 0 on
+        // iOS PWA when keyboard opens (no interactive-widget meta). Leaving it active
+        // creates a 34 px void between composer and keyboard. We zero it out here via
+        // direct DOM manipulation to avoid triggering a React re-render on every frame.
+        if (comp) {
+          comp.style.paddingBottom = kbOpen ? '10px' : '';
+          // '' → CSS computed value (max(env(safe-area-inset-bottom),10px)) takes over
+        }
+
+        if (import.meta.env.DEV) {
+          console.log(
+            `[Chat/KB] vv.h=${Math.round(h)} oTop=${Math.round(oTop)}` +
+            ` win.h=${window.innerHeight} kb≈${Math.round(kbHeight)}px` +
+            ` kbOpen=${kbOpen} scrollY=${window.scrollY}`
+          );
+        }
+      } else {
+        // No visualViewport API — plain fallback
+        el.style.top    = '0';
+        el.style.height = `${window.innerHeight}px`;
+        if (comp) comp.style.paddingBottom = '';
       }
     };
 
     update();
-    // Only listen for resize (keyboard open/close). Scroll never fires now.
-    if (vv) vv.addEventListener('resize', update);
-    else    window.addEventListener('resize', update);
+
+    // vv 'resize' fires when keyboard opens/closes (vv.height changes).
+    // vv 'scroll' fires when iOS shifts offsetTop (e.g. on input focus).
+    // Both are needed to track the visual viewport completely.
+    if (vv) {
+      vv.addEventListener('resize', update);
+      vv.addEventListener('scroll', update);
+    } else {
+      window.addEventListener('resize', update);
+    }
 
     return () => {
-      // Detach listener
-      if (vv) vv.removeEventListener('resize', update);
-      else    window.removeEventListener('resize', update);
+      if (vv) {
+        vv.removeEventListener('resize', update);
+        vv.removeEventListener('scroll', update);
+      } else {
+        window.removeEventListener('resize', update);
+      }
 
-      // Restore body to its original state and scroll back to where we were
+      // Restore body styles and composer padding
       document.body.style.overflow = prev.overflow;
       document.body.style.position = prev.position;
       document.body.style.width    = prev.width;
       document.body.style.top      = prev.top;
+      if (comp) comp.style.paddingBottom = '';
       if (scrollY) window.scrollTo(0, scrollY);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -694,8 +824,11 @@ export function ChatView() {
       ref={containerRef}
       className="fixed left-0 right-0 z-[45] flex flex-col"
       style={{
-        top: 0,
-        height: '100dvh',   // JS overrides this with vv.height when keyboard opens
+        // top and height are NOT set here — JS (visualViewport update) owns them.
+        // Setting them in the React style prop would cause React to reset them to
+        // these values on every re-render, defeating the JS tracking.
+        // The Tailwind class 'fixed' provides position:fixed.
+        // Initial values are applied immediately in the useEffect update() call.
         background: C.surfaceDim,
         paddingLeft:  'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
@@ -1113,7 +1246,11 @@ export function ChatView() {
       )}
 
       {/* ── Composer ── glass surface, textarea + camera, rounded send ── */}
+      {/* composerRef: JS directly sets paddingBottom when keyboard is open.     */}
+      {/* CSS default: max(env(safe-area-inset-bottom),10px) for home-bar phones. */}
+      {/* When kb open: JS zeroes it to 10px to sit flush against the keyboard.  */}
       <div
+        ref={composerRef}
         className="flex-shrink-0 px-3 flex items-end gap-2"
         style={{
           paddingTop: '10px',
@@ -1195,6 +1332,13 @@ export function ChatView() {
           onChange={handleFileSelect}
         />
       </div>
+
+      {/* ── DEV keyboard debug panel ─────────────────────────────────────────── */}
+      {/* Visible overlay on real device: shows all vv values so we can verify  */}
+      {/* the fix on iPhone without guessing. Remove before production release.  */}
+      {import.meta.env.DEV && (
+        <DebugKbPanel containerRef={containerRef} composerRef={composerRef} />
+      )}
 
       {/* ── Modals ── */}
       {showOfferSheet && (

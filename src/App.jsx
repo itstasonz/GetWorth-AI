@@ -486,7 +486,10 @@ function AppShell() {
 
         {/* Bottom Nav */}
         {/* ═══ STITCH BOTTOM NAV — sliding pill edition ═══ */}
-        <nav
+        {/* Hidden completely when chat is active: the chat layer is fixed/inset:0   */}
+        {/* and the nav's backdrop-filter blur (and z-40 proximity) would bleed      */}
+        {/* visually into the keyboard zone. display:none is the only safe option.   */}
+        {view !== 'chat' && <nav
           className="fixed bottom-0 left-0 right-0 z-40 overflow-hidden"
           style={{
             background: 'rgba(28, 27, 27, 0.95)',
@@ -552,7 +555,7 @@ function AppShell() {
               );
             })}
           </div>
-        </nav>
+        </nav>}
       </div>
 
       {/* Global Styles */}
