@@ -822,18 +822,17 @@ export function ChatView() {
   return (
     <div
       ref={containerRef}
-      className="fixed left-0 right-0 z-[45] flex flex-col"
+      className="fixed inset-0 z-[45] flex flex-col overflow-hidden"
       style={{
-        // top and height are NOT set here — JS (visualViewport update) owns them.
-        // Setting them in the React style prop would cause React to reset them to
-        // these values on every re-render, defeating the JS tracking.
-        // The Tailwind class 'fixed' provides position:fixed.
-        // Initial values are applied immediately in the useEffect update() call.
+        // inset-0 (top:0 right:0 bottom:0 left:0) fills the full viewport
+        // from the first paint — no flash, no auto-height, flex works immediately.
+        // When JS sets el.style.top + el.style.height (via visualViewport update),
+        // CSS over-constraint rules drop bottom:0 so the container shrinks to
+        // exactly vv.height when the keyboard rises. top/height are absent from
+        // this prop intentionally so React never resets the JS-managed values.
         background: C.surfaceDim,
         paddingLeft:  'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
-        // Prevent the container itself from becoming a scroll origin on iOS.
-        // The message list has its own overflow-y-auto; nothing else should scroll.
         touchAction: 'pan-y',
         overscrollBehavior: 'none',
       }}

@@ -486,11 +486,10 @@ function AppShell() {
 
         {/* Bottom Nav */}
         {/* ═══ STITCH BOTTOM NAV — sliding pill edition ═══ */}
-        {/* Hidden completely when chat is active: the chat layer is fixed/inset:0   */}
-        {/* and the nav's backdrop-filter blur (and z-40 proximity) would bleed      */}
-        {/* visually into the keyboard zone. display:none is the only safe option.   */}
-        {view !== 'chat' && <nav
-          className="fixed bottom-0 left-0 right-0 z-40 overflow-hidden"
+        {/* Always in DOM (no remount flash on iOS). Hidden via display:none when   */}
+        {/* chat is active — no layout, no paint, no backdrop-filter bleed.         */}
+        <nav
+          className={`fixed bottom-0 left-0 right-0 z-40 overflow-hidden${view === 'chat' ? ' hidden' : ''}`}
           style={{
             background: 'rgba(28, 27, 27, 0.95)',
             backdropFilter: 'blur(24px)',
@@ -555,7 +554,7 @@ function AppShell() {
               );
             })}
           </div>
-        </nav>}
+        </nav>
       </div>
 
       {/* Global Styles */}
