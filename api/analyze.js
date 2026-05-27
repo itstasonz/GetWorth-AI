@@ -1979,8 +1979,12 @@ export default async function handler(req) {
     // ── STAGE 2: VERIFY + PRICE — REQUIRED but skippable ──
     // If < 8 s remaining: skip Stage 2, return rough estimate from Stage 1.
     // A rough result delivered in time is better than a 504.
+    let stage2FallbackUsed = false;
+    let stage2FallbackReason = null;
     let verification;
     if (rem() < 8_000) {
+      stage2FallbackUsed = true;
+      stage2FallbackReason = `budget_exhausted rem=${rem()}ms`;
       blog(`[Pipeline] Stage 2 SKIPPED — returning rough estimate (rem=${rem()}ms < 8000ms)`);
       verification = buildFallback(recognition, lang);
     } else {
@@ -1994,6 +1998,8 @@ export default async function handler(req) {
           'Stage 2 verification'
         );
       } catch (err) {
+        stage2FallbackUsed = true;
+        stage2FallbackReason = err.message;
         blog(`[Pipeline] Stage 2 FAILED — using rough estimate: ${err.message}`);
         verification = buildFallback(recognition, lang);
       }
@@ -2020,6 +2026,9 @@ export default async function handler(req) {
     result.db_match_found = dbMatchFound;
     result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
     result.recognition_source = (() => {
+      // When there is no DB match, always tag source as 'db_missing' so the
+      // submit_product_candidate RPC receives the correct CHECK constraint value.
+      if (!dbMatchFound) return 'db_missing';
       const m = verification.identification_method || 'generic_only';
       if (m === 'ocr_confirmed')                        return 'ocr_label';
       if (m === 'visual_match' || m === 'packaging_recognized') return 'visual';
@@ -2066,20 +2075,26 @@ export default async function handler(req) {
         failed: !recognition.brand_candidates?.length && !recognition.ocr_text?.has_readable_text,
       },
       retrieval: {
+        db_match_found: dbMatchFound,
         candidates_count: candidates.length,
         top3: candidates.slice(0, 3).map(c => `${c.brand} ${c.model}(${c._source} ${round((c.similarity||0)*100)}%)`).join(', '),
         strategy_log: retrievalStrategyLog,
       },
       pricing: {
-        fallback_used: verification.price_estimate_mid === 0 || verification.price_method === 'ai_estimate',
+        // stage2_fallback_used = true means buildFallback() was used: prices will be 0
+        // and price_method='ai_estimate' does NOT mean real pricing — it means failure.
+        // Use this flag, NOT price_method, to detect silent pricing failure.
+        stage2_fallback_used: stage2FallbackUsed,
+        stage2_fallback_reason: stage2FallbackReason,
         price_method: verification.price_method || 'ai_estimate',
-        price_low: verification.price_estimate_low,
-        price_mid: verification.price_estimate_mid,
-        price_high: verification.price_estimate_high,
-        candidate_used: candidates.length > 0 ? `${candidates[0]?.brand} ${candidates[0]?.model}` : 'none',
-        fallback_reason: (verification.price_estimate_mid === 0)
-          ? (candidates.length === 0 ? 'no_db_candidates' : 'stage2_failed_or_zero_price')
-          : null,
+        price_low:    verification.price_estimate_low,
+        price_mid:    verification.price_estimate_mid,
+        price_high:   verification.price_estimate_high,
+        price_zero:   verification.price_estimate_mid === 0,
+        db_candidate_used: dbMatchFound
+          ? `${candidates[0]?.brand} ${candidates[0]?.model} (${candidates[0]?._source})`
+          : 'none — db_missing',
+        silent_fail: stage2FallbackUsed || (!stage2FallbackUsed && verification.price_estimate_mid === 0),
       },
       stage2: {
         final_brand: verification.final_brand,

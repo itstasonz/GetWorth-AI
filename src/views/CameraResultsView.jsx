@@ -2150,12 +2150,13 @@ export function ResultsView() {
       {/* ═══ PIPELINE DEBUG PANEL — always shown when _debug present ═══ */}
       {result._debug && (() => {
         const d = result._debug;
-        const s1 = d.stage1 || {};
-        const s2 = d.stage2 || {};
+        const s1  = d.stage1    || {};
+        const s2  = d.stage2    || {};
         const ret = d.retrieval || {};
-        const pip = d.pipeline || {};
-        const s1Failed = s1.failed || (s1.brand === 'none' && !s1.ocr);
-        const noDb = ret.candidates_count === 0;
+        const pip = d.pipeline  || {};
+        const pri = d.pricing   || {};
+        const s1Failed  = s1.failed || (s1.brand === 'none' && !s1.ocr);
+        const dbMissing = ret.db_match_found === false;
         return (
           <FadeIn delay={400}>
             <div className="rounded-2xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.7)', border: '1px solid rgba(255,100,100,0.30)' }}>
@@ -2164,6 +2165,8 @@ export function ResultsView() {
                 <span className="text-[9px] text-slate-500">{pip.total_ms}ms · {pip.images_count} img(s){pip.vision_used ? ' · Vision' : ''}</span>
               </div>
               <div className="px-3 py-2 space-y-2 font-mono">
+
+                {/* Stage 1 */}
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 1 — Recognition</p>
                   <p className="text-[10px]" style={{ color: s1Failed ? '#f87171' : '#86efac' }}>cat: {s1.category} ({Math.round((s1.category_confidence||0)*100)}%)</p>
@@ -2173,11 +2176,17 @@ export function ResultsView() {
                   <p className="text-[10px]" style={{ color: s1.ocr ? '#a78bfa' : '#f87171' }}>ocr: {s1.ocr || '⚠ EMPTY'}{s1.logos ? ` | logos: ${s1.logos}` : ''}</p>
                   {s1.failed && <p className="text-[10px] font-semibold text-red-400">⛔ Stage 1 failed / timed out — used fallback</p>}
                 </div>
+
+                {/* DB Retrieval */}
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">DB Retrieval</p>
-                  <p className="text-[10px]" style={{ color: noDb ? '#f87171' : '#86efac' }}>
-                    {noDb ? '⚠ 0 candidates' : `${ret.candidates_count} found: ${ret.top3}`}
+                  {/* Primary status — DB match found vs DB missing */}
+                  <p className="text-[11px] font-bold" style={{ color: dbMissing ? '#f87171' : '#86efac' }}>
+                    {dbMissing ? '⚠ DB MISSING — 0 candidates' : `✓ DB MATCH — ${ret.candidates_count} found`}
                   </p>
+                  {!dbMissing && ret.top3 && (
+                    <p className="text-[10px] text-slate-400 break-all">{ret.top3}</p>
+                  )}
                   {ret.strategy_log && (() => {
                     const sl = ret.strategy_log;
                     const rows = [
@@ -2193,10 +2202,20 @@ export function ResultsView() {
                       <p key={i} className="text-[9px] text-slate-500 break-all">{r}</p>
                     ));
                   })()}
-                  {noDb && result.product_candidate_needed && (
-                    <p className="text-[9px] font-semibold" style={{ color: '#fbbf24' }}>→ candidate_needed=true (will save on confirm)</p>
+                  {/* Candidate save status */}
+                  {dbMissing && result.product_candidate_needed && (
+                    <p className="text-[10px] font-semibold mt-0.5" style={{ color: result.candidateSaved ? '#86efac' : '#fbbf24' }}>
+                      {result.candidateSaved
+                        ? '✓ candidate saved → product_candidates'
+                        : '→ candidate_needed — saves on confirm'}
+                    </p>
+                  )}
+                  {dbMissing && !result.product_candidate_needed && (
+                    <p className="text-[9px] text-slate-500">no candidate (insufficient recognition data)</p>
                   )}
                 </div>
+
+                {/* Stage 2 — Verification */}
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 2 — Verification</p>
                   <p className="text-[10px] text-slate-300">{s2.final_brand} {s2.final_model} / {s2.final_category}</p>
@@ -2204,6 +2223,24 @@ export function ResultsView() {
                   <p className="text-[10px]" style={{ color: '#6feee1' }}>conf: raw={Math.round((s2.raw_confidence||0)*100)}% → cal={Math.round((s2.calibrated_confidence||0)*100)}%</p>
                   {s2.reasoning && <p className="text-[10px] text-slate-500 italic break-words">{s2.reasoning}</p>}
                 </div>
+
+                {/* Pricing */}
+                <div>
+                  <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Pricing</p>
+                  {pri.stage2_fallback_used
+                    ? <p className="text-[10px] font-bold text-red-400">⛔ Stage 2 FALLBACK — prices are 0 (reason: {pri.stage2_fallback_reason || 'unknown'})</p>
+                    : <p className="text-[10px]" style={{ color: '#86efac' }}>✓ Stage 2 ran — {pri.price_method}</p>
+                  }
+                  <p className="text-[10px]" style={{ color: pri.price_zero ? '#f87171' : '#6feee1' }}>
+                    ₪{pri.price_low} / ₪{pri.price_mid} / ₪{pri.price_high}
+                    {pri.price_zero ? ' ⚠ ALL ZERO' : ''}
+                  </p>
+                  <p className="text-[9px] text-slate-500">source: {pri.db_candidate_used}</p>
+                  {pri.silent_fail && (
+                    <p className="text-[10px] font-semibold text-red-400">⛔ SILENT FAIL — pricing did not complete</p>
+                  )}
+                </div>
+
               </div>
             </div>
           </FadeIn>
