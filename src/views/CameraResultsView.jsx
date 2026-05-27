@@ -2199,18 +2199,21 @@ export function ResultsView() {
                   )}
                   {ret.strategy_log && (() => {
                     const sl = ret.strategy_log;
-                    const rows = [
-                      `table_ok=${sl.products_table_accessible}`,
-                      sl.vector_rpc?.attempted && `vec=${sl.vector_rpc.ok ? sl.vector_rpc.rows+'r' : 'ERR:'+sl.vector_rpc.error}`,
-                      sl.ocr_rpc?.attempted    && `ocr_rpc=${sl.ocr_rpc.ok ? sl.ocr_rpc.rows+'r' : 'ERR:'+sl.ocr_rpc.error}`,
-                      sl.ocr_direct_fallback?.attempted && `ocr_fallback=${sl.ocr_direct_fallback.rows}r tokens=[${(sl.ocr_direct_fallback.tokens_tried||[]).slice(0,3).join(',')}]`,
-                      sl.text_brand_model?.attempted && `brand_model=${sl.text_brand_model.rows}r q="${sl.text_brand_model.query}"`,
-                      sl.text_fts?.attempted && `fts=${sl.text_fts.ok ? sl.text_fts.rows+'r' : 'ERR:'+sl.text_fts.error}`,
-                      sl.category_fallback?.attempted && `cat_fallback=${sl.category_fallback.rows}r`,
-                    ].filter(Boolean);
-                    return rows.map((r, i) => (
-                      <p key={i} className="text-[9px] text-slate-500 break-all">{r}</p>
-                    ));
+                    const strats = sl.strategies || [];
+                    return (
+                      <>
+                        <p className="text-[9px] text-slate-500 break-all">
+                          table_ok={String(sl.products_table_accessible)} · final={sl.final_candidates ?? '?'}
+                        </p>
+                        {strats.map((s, i) => (
+                          <p key={i} className="text-[9px] break-all" style={{
+                            color: s.error ? '#f87171' : s.rows > 0 ? '#86efac' : '#64748b'
+                          }}>
+                            [{s.name}] {s.rows ?? 0}r {s.elapsed_ms != null ? `${s.elapsed_ms}ms` : ''}{s.error ? ` ERR:${s.error}` : ''}{s.query ? ` q="${String(s.query).slice(0,40)}"` : ''}
+                          </p>
+                        ))}
+                      </>
+                    );
                   })()}
                   {/* Candidate save status */}
                   {dbMissing && result.product_candidate_needed && (
