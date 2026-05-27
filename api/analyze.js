@@ -971,7 +971,33 @@ function getSupabase() {
 
 async function retrieveCandidates(recognition, queryEmbedding, visionData = null) {
   const supa = getSupabase();
-  if (!supa) return [];
+
+  // Initialise per-strategy log — always returned so callers can inspect it
+  const strategyLog = {
+    supabase_client: !!supa,
+    products_table_accessible: null, // probed below
+    vector_rpc:           { attempted: false, ok: false, rows: 0, error: null },
+    ocr_rpc:              { attempted: false, ok: false, rows: 0, error: null },
+    ocr_direct_fallback:  { attempted: false, ok: false, rows: 0, tokens_tried: [] },
+    ocr_brand_fallback:   { attempted: false, ok: false, rows: 0 },
+    text_brand_model:     { attempted: false, ok: false, rows: 0, query: null },
+    text_brand_name:      { attempted: false, ok: false, rows: 0, query: null },
+    text_fts:             { attempted: false, ok: false, rows: 0, terms: null, error: null },
+    text_candidate_sweep: { attempted: false, ok: false, rows: 0, models_tried: [] },
+    category_fallback:    { attempted: false, ok: false, rows: 0, query: null },
+    final_candidates:     0,
+  };
+
+  if (!supa) return { candidates: [], strategyLog };
+
+  // ── Probe: is the products table reachable? ──
+  try {
+    const { error: probeErr } = await supa.from('products').select('id').limit(1);
+    strategyLog.products_table_accessible = !probeErr;
+    if (probeErr) console.warn('[Retrieve] products table probe failed:', probeErr.message);
+  } catch (e) {
+    strategyLog.products_table_accessible = false;
+  }
 
   const topBrand = recognition.brand_candidates?.[0]?.brand;
   const topModel = recognition.model_candidates?.[0]?.model;
@@ -1004,6 +1030,7 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
   // ── Strategy 1: Vector similarity search ──
   if (queryEmbedding) {
+    strategyLog.vector_rpc.attempted = true;
     const { data: vecData, error: vecError } = await supa.rpc('match_products', {
       query_embedding: queryEmbedding,
       similarity_threshold: 0.60,
@@ -1012,14 +1039,24 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
     if (!vecError && vecData?.length) {
       vectorResults = vecData.map(r => ({ ...r, _source: 'vector', similarity: r.similarity }));
+      strategyLog.vector_rpc.ok = true;
+      strategyLog.vector_rpc.rows = vectorResults.length;
       console.log(`[Retrieve] Vector: ${vectorResults.length} results (top sim=${vectorResults[0]?.similarity?.toFixed(2)})`);
-    } else if (vecError) {
-      console.warn('[Retrieve] Vector RPC failed:', vecError.message || vecError);
+    } else {
+      strategyLog.vector_rpc.ok = false;
+      strategyLog.vector_rpc.rows = 0;
+      if (vecError) {
+        strategyLog.vector_rpc.error = vecError.message || String(vecError);
+        console.warn('[Retrieve] Vector RPC failed:', vecError.message || vecError);
+      } else {
+        strategyLog.vector_rpc.error = 'no_rows_returned';
+      }
     }
   }
 
   // ── Strategy 3: OCR keyword RPC (with direct ILIKE fallback when RPC absent) ──
   if (uniqueKeywords.length > 0) {
+    strategyLog.ocr_rpc.attempted = true;
     const { data: ocrData, error: ocrError } = await supa
       .rpc('match_products_by_ocr', { p_keywords: uniqueKeywords, p_limit: 6 })
       .catch(err => ({ data: null, error: err }));
@@ -1032,10 +1069,19 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
                   : r.match_type === 'ocr_keyword'  ? 0.80
                   : 0.75,
       }));
+      strategyLog.ocr_rpc.ok = true;
+      strategyLog.ocr_rpc.rows = ocrResults.length;
       console.log(`[Retrieve] OCR RPC: ${ocrResults.length} results`);
     } else {
       // RPC doesn't exist or failed — direct ILIKE fallback
-      if (ocrError) console.warn('[Retrieve] OCR RPC failed:', ocrError.message || String(ocrError), '— using direct ILIKE fallback');
+      strategyLog.ocr_rpc.ok = false;
+      strategyLog.ocr_rpc.rows = 0;
+      if (ocrError) {
+        strategyLog.ocr_rpc.error = ocrError.message || String(ocrError);
+        console.warn('[Retrieve] OCR RPC failed:', ocrError.message || String(ocrError), '— using direct ILIKE fallback');
+      } else {
+        strategyLog.ocr_rpc.error = 'no_rows_returned';
+      }
 
       try {
         // Pick the most significant keywords: model numbers (alphanumeric with digits), brand
@@ -1049,6 +1095,8 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
           ...modelTokens,
         ])].slice(0, 6);
 
+        strategyLog.ocr_direct_fallback.attempted = true;
+        strategyLog.ocr_direct_fallback.tokens_tried = searchModels;
         console.log(`[Retrieve] OCR direct fallback tokens: [${searchModels.join(', ')}]`);
 
         for (const token of searchModels) {
@@ -1065,12 +1113,17 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
         // Also try brand-only search if model search yielded nothing
         if (ocrResults.length === 0 && topBrand && topBrand.toLowerCase() !== 'unidentified') {
+          strategyLog.ocr_brand_fallback.attempted = true;
           const { data: brandOnly } = await supa.from('products').select('*')
             .ilike('brand', `%${topBrand}%`)
             .order('popularity_score', { ascending: false })
             .limit(4);
           if (brandOnly?.length) {
             ocrResults.push(...brandOnly.map(r => ({ ...r, _source: 'ocr_brand_fallback', similarity: 0.60 })));
+            strategyLog.ocr_brand_fallback.ok = true;
+            strategyLog.ocr_brand_fallback.rows = brandOnly.length;
+          } else {
+            strategyLog.ocr_brand_fallback.ok = false;
           }
         }
 
@@ -1078,8 +1131,11 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
           // Dedupe by id before logging
           const seen = new Set();
           ocrResults = ocrResults.filter(r => !seen.has(r.id) && seen.add(r.id));
+          strategyLog.ocr_direct_fallback.ok = true;
+          strategyLog.ocr_direct_fallback.rows = ocrResults.length;
           console.log(`[Retrieve] OCR direct fallback: ${ocrResults.length} results`);
         } else {
+          strategyLog.ocr_direct_fallback.ok = false;
           console.log('[Retrieve] OCR direct fallback: 0 results');
         }
       } catch (e2) {
@@ -1092,24 +1148,41 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   try {
     // 2a: brand + model ILIKE (primary — most precise)
     if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
+      const brandModelQuery = topModel && topModel.toLowerCase() !== 'unidentified'
+        ? `brand ILIKE %${topBrand}% AND model ILIKE %${topModel}%`
+        : `brand ILIKE %${topBrand}%`;
+      strategyLog.text_brand_model.attempted = true;
+      strategyLog.text_brand_model.query = brandModelQuery;
+
       let q = supa.from('products').select('*').ilike('brand', `%${topBrand}%`);
       if (topModel && topModel.toLowerCase() !== 'unidentified') {
         q = q.ilike('model', `%${topModel}%`);
       }
       const { data: exact, error: exactErr } = await q.limit(5);
       if (exactErr) {
+        strategyLog.text_brand_model.ok = false;
+        strategyLog.text_brand_model.error = exactErr.message;
         console.warn('[Retrieve] brand+model exact failed:', exactErr.message);
-      } else if (exact?.length) {
-        textResults.push(...exact.map(r => ({ ...r, _source: 'text_exact', similarity: 0.88 })));
-        console.log(`[Retrieve] text_exact: ${exact.length} (brand+model ILIKE)`);
+      } else {
+        strategyLog.text_brand_model.ok = true;
+        strategyLog.text_brand_model.rows = exact?.length || 0;
+        if (exact?.length) {
+          textResults.push(...exact.map(r => ({ ...r, _source: 'text_exact', similarity: 0.88 })));
+          console.log(`[Retrieve] text_exact: ${exact.length} (brand+model ILIKE)`);
+        }
       }
 
       // 2a-fallback: if model field returned nothing, search model string in name column
       if (textResults.length === 0 && topModel && topModel.toLowerCase() !== 'unidentified') {
+        const nameQuery = `brand ILIKE %${topBrand}% AND name ILIKE %${topModel}%`;
+        strategyLog.text_brand_name.attempted = true;
+        strategyLog.text_brand_name.query = nameQuery;
         const { data: nameSearch } = await supa.from('products').select('*')
           .ilike('brand', `%${topBrand}%`)
           .ilike('name', `%${topModel}%`)
           .limit(5);
+        strategyLog.text_brand_name.ok = true;
+        strategyLog.text_brand_name.rows = nameSearch?.length || 0;
         if (nameSearch?.length) {
           textResults.push(...nameSearch.map(r => ({ ...r, _source: 'text_name', similarity: 0.82 })));
           console.log(`[Retrieve] text_name: ${nameSearch.length} (brand + name ILIKE)`);
@@ -1121,15 +1194,26 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     if (textResults.length === 0) {
       const searchTerms = [topBrand, topModel].filter(t => t && t.toLowerCase() !== 'unidentified').join(' ');
       if (searchTerms.trim()) {
+        strategyLog.text_fts.attempted = true;
+        strategyLog.text_fts.terms = searchTerms;
         const { data: fts, error: ftsError } = await supa
           .from('products').select('*')
           .textSearch('name', searchTerms, { type: 'websearch' })
           .limit(5);
         if (!ftsError && fts?.length) {
           textResults.push(...fts.map(r => ({ ...r, _source: 'text_fts', similarity: 0.70 })));
+          strategyLog.text_fts.ok = true;
+          strategyLog.text_fts.rows = fts.length;
           console.log(`[Retrieve] text_fts: ${fts.length}`);
-        } else if (ftsError) {
-          console.warn('[Retrieve] textSearch failed (no FTS index?):', ftsError.message);
+        } else {
+          strategyLog.text_fts.ok = false;
+          strategyLog.text_fts.rows = 0;
+          if (ftsError) {
+            strategyLog.text_fts.error = ftsError.message;
+            console.warn('[Retrieve] textSearch failed (no FTS index?):', ftsError.message);
+          } else {
+            strategyLog.text_fts.error = 'no_rows_returned';
+          }
         }
       }
     }
@@ -1137,8 +1221,10 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     // 2c: model-candidate sweep (when no results yet — before popularity fallback)
     if (textResults.length === 0 && vectorResults.length === 0 && ocrResults.length === 0 && category) {
       if (topBrand && topBrand.toLowerCase() !== 'unidentified' && modelCandidates.length > 0) {
+        strategyLog.text_candidate_sweep.attempted = true;
         for (const candModel of modelCandidates.slice(0, 4)) {
           if (!candModel || candModel.toLowerCase() === 'unidentified') continue;
+          strategyLog.text_candidate_sweep.models_tried.push(candModel);
           const { data: candMatch } = await supa.from('products').select('*')
             .ilike('brand', `%${topBrand}%`)
             .ilike('model', `%${candModel}%`)
@@ -1147,18 +1233,27 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
             textResults.push(...candMatch.map(r => ({ ...r, _source: 'text_candidate', similarity: 0.65 })));
           }
         }
+        strategyLog.text_candidate_sweep.ok = textResults.length > 0;
+        strategyLog.text_candidate_sweep.rows = textResults.length;
         if (textResults.length > 0) console.log(`[Retrieve] text_candidate: ${textResults.length}`);
       }
 
       // 2d: category fallback (last resort — brand-filtered to avoid popularity poisoning)
       if (textResults.length === 0) {
+        strategyLog.category_fallback.attempted = true;
         let q = supa.from('products').select('*');
+        let catQuery;
         if (topBrand && topBrand.toLowerCase() !== 'unidentified') {
+          catQuery = `brand ILIKE %${topBrand}% AND category ILIKE %${category}%`;
           q = q.ilike('brand', `%${topBrand}%`).ilike('category', `%${category}%`);
         } else {
+          catQuery = `category ILIKE %${category}%`;
           q = q.ilike('category', `%${category}%`);
         }
+        strategyLog.category_fallback.query = catQuery;
         const { data: catFallback } = await q.order('popularity_score', { ascending: false }).limit(5);
+        strategyLog.category_fallback.ok = (catFallback?.length || 0) > 0;
+        strategyLog.category_fallback.rows = catFallback?.length || 0;
         if (catFallback?.length) {
           textResults.push(...catFallback.map(r => ({ ...r, _source: 'category_fallback', similarity: 0.28 })));
           console.log(`[Retrieve] category_fallback: ${catFallback.length}`);
@@ -1185,12 +1280,14 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
   merged.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
   const top = merged.slice(0, 10);
+  strategyLog.final_candidates = top.length;
+
   if (top.length > 0) {
     console.log(`[Retrieve] Final: ${top.length} candidates. Top: ${top[0].brand} ${top[0].model} (${top[0]._source} sim=${top[0].similarity?.toFixed(2)})`);
   } else {
     console.log('[Retrieve] Final: 0 candidates — no DB matches found');
   }
-  return top;
+  return { candidates: top, strategyLog };
 }
 
 async function fetchCorrections() {
@@ -1861,14 +1958,19 @@ export default async function handler(req) {
 
     // ── RETRIEVAL — OPTIONAL, requires >= 9 s remaining (same gate as embedding) ──
     let candidates = [];
+    let retrievalStrategyLog = null;
     if (rem() >= 9_000) {
       const retrievalCap = Math.min(4_500, rem() - 8_000);
       plog('Retrieval start', `cap=${retrievalCap}ms rem=${rem()}ms`);
-      candidates = await withTimeout(
+      const retrievalResult = await withTimeout(
         retrieveCandidates(recognition, queryEmbedding, visionData),
         retrievalCap,
         'DB retrieval'
-      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return []; });
+      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return null; });
+      if (retrievalResult) {
+        candidates = retrievalResult.candidates || [];
+        retrievalStrategyLog = retrievalResult.strategyLog || null;
+      }
       plog('Retrieval end', `${candidates.length} candidates rem=${rem()}ms`);
     } else {
       plog('Retrieval SKIPPED — budget', `rem=${rem()}ms < 9000ms`);
@@ -1926,6 +2028,18 @@ export default async function handler(req) {
       retrieval: {
         candidates_count: candidates.length,
         top3: candidates.slice(0, 3).map(c => `${c.brand} ${c.model}(${c._source} ${round((c.similarity||0)*100)}%)`).join(', '),
+        strategy_log: retrievalStrategyLog,
+      },
+      pricing: {
+        fallback_used: verification.price_estimate_mid === 0 || verification.price_method === 'ai_estimate',
+        price_method: verification.price_method || 'ai_estimate',
+        price_low: verification.price_estimate_low,
+        price_mid: verification.price_estimate_mid,
+        price_high: verification.price_estimate_high,
+        candidate_used: candidates.length > 0 ? `${candidates[0]?.brand} ${candidates[0]?.model}` : 'none',
+        fallback_reason: (verification.price_estimate_mid === 0)
+          ? (candidates.length === 0 ? 'no_db_candidates' : 'stage2_failed_or_zero_price')
+          : null,
       },
       stage2: {
         final_brand: verification.final_brand,
