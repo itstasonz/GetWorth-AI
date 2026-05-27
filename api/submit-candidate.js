@@ -2,9 +2,10 @@
 // §  submit-candidate  — save a user-confirmed product candidate
 // ══════════════════════════════════════════════════════════════
 // Called when the user confirms a scan result that returned 0 DB
-// candidates.  Inserts into product_candidates (staging table).
-// Deduplicates by brand + model + category (case-insensitive).
-// Never touches the products table.
+// candidates.  Calls the submit_product_candidate RPC which:
+//   • requires authentication (JWT verified server-side)
+//   • deduplicates by name OR brand+model
+//   • inserts into product_candidates (staging table, never products)
 // ══════════════════════════════════════════════════════════════
 
 import { createClient } from '@supabase/supabase-js';
@@ -32,122 +33,101 @@ function json(body, status, headers) {
   });
 }
 
-const VALID_SOURCES = ['ocr_label', 'visual', 'manual_correction'];
+const VALID_SOURCES = ['ocr_label', 'visual', 'manual_correction', 'db_missing'];
 
 export default async function handler(req) {
   const origin = req.headers.get('origin') || '';
   const corsHeaders = cors(origin);
 
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders });
-  if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405, corsHeaders);
+  if (req.method !== 'POST')   return json({ error: 'Method not allowed' }, 405, corsHeaders);
 
-  // ── Parse body ──
+  // ── 1. Require Authorization header ───────────────────────────
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return json({ error: 'Authentication required' }, 401, corsHeaders);
+  }
+  const token = authHeader.slice(7);
+
+  // ── 2. Parse body ──────────────────────────────────────────────
   let body;
   try { body = await req.json(); }
   catch { return json({ error: 'Invalid JSON body' }, 400, corsHeaders); }
 
-  const { candidate, valuation_id, correction_text, image_url } = body || {};
+  const { candidate, valuation_id, correction_text, image_path } = body || {};
   if (!candidate || typeof candidate !== 'object') {
     return json({ error: 'Missing candidate object' }, 400, corsHeaders);
   }
 
-  const { brand, model, name, category, subcategory, product_type, ocr_text, confidence, source } = candidate;
+  const {
+    brand, model, name, category, subcategory, product_type,
+    ocr_text, confidence, source,
+    image_path: candidateImagePath,
+    image_url,  // legacy field — fall through to image_path
+  } = candidate;
 
   // At least one identifying field is required
   if (!brand && !model && !name) {
     return json({ error: 'Candidate must include at least brand, model, or name' }, 400, corsHeaders);
   }
 
-  // ── Resolve user from JWT (optional — anonymous scans allowed) ──
-  let userId = null;
-  const authHeader = req.headers.get('authorization');
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    try {
-      const anonClient = createClient(
-        process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
-        process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY,
-      );
-      const { data: { user } } = await anonClient.auth.getUser(token);
-      userId = user?.id || null;
-    } catch { /* anonymous ok */ }
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const anonKey     = process.env.SUPABASE_KEY  || process.env.VITE_SUPABASE_ANON_KEY;
+  const serviceKey  = process.env.SUPABASE_SERVICE_KEY || anonKey;
+
+  if (!supabaseUrl || !anonKey) {
+    console.error('[SubmitCandidate] Missing SUPABASE_URL or anon key env vars');
+    return json({ error: 'Server configuration error' }, 500, corsHeaders);
   }
 
-  // ── Service client for duplicate check + insert ──
-  const supa = createClient(
-    process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_KEY || process.env.VITE_SUPABASE_ANON_KEY,
-  );
+  // ── 3. Verify JWT server-side — never trust client-supplied userId ──
+  const callerClient = createClient(supabaseUrl, anonKey, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth:   { persistSession: false },
+  });
 
-  // ── Duplicate check: existing pending/approved with same brand+model+category ──
-  const normBrand    = (brand    || '').toLowerCase().trim();
-  const normModel    = (model    || '').toLowerCase().trim();
-  const normCategory = (category || '').toLowerCase().trim();
+  const { data: { user }, error: authErr } = await callerClient.auth.getUser();
+  if (authErr || !user?.id) {
+    return json({ error: 'Invalid or expired token' }, 401, corsHeaders);
+  }
+  const userId = user.id;
 
-  let existingId = null;
-  try {
-    let q = supa
-      .from('product_candidates')
-      .select('id, occurrence_count')
-      .in('status', ['pending', 'approved']);
+  // ── 4. Build metadata — store valuation_id and correction_text here ──
+  const metadata = {};
+  if (valuation_id)    metadata.valuation_id    = valuation_id;
+  if (correction_text) metadata.correction_text = correction_text;
 
-    if (normBrand)    q = q.ilike('brand',    `%${normBrand}%`);
-    if (normModel)    q = q.ilike('model',    `%${normModel}%`);
-    if (normCategory) q = q.ilike('category', `%${normCategory}%`);
+  // Resolve image_path from multiple possible field names
+  const resolvedImagePath = image_path || candidateImagePath || image_url || null;
 
-    const { data: existing } = await q.limit(1);
-    if (existing?.length) existingId = existing[0].id;
-  } catch { /* non-fatal — proceed to insert */ }
+  // ── 5. Call RPC with service client ───────────────────────────
+  const supa = createClient(supabaseUrl, serviceKey, {
+    auth: { persistSession: false },
+  });
 
-  // ── Deduplicate: increment existing ──
-  if (existingId) {
-    const { data: cur } = await supa
-      .from('product_candidates')
-      .select('occurrence_count')
-      .eq('id', existingId)
-      .single();
+  const { data: rpcResult, error: rpcErr } = await supa.rpc('submit_product_candidate', {
+    p_caller_id:    userId,
+    p_name:         name          || null,
+    p_brand:        brand         || null,
+    p_model:        model         || null,
+    p_category:     category      || null,
+    p_subcategory:  subcategory   || null,
+    p_product_type: product_type  || null,
+    p_ocr_text:     ocr_text      || null,
+    p_confidence:   typeof confidence === 'number' ? confidence : null,
+    p_source:       VALID_SOURCES.includes(source) ? source : 'ocr_label',
+    p_image_path:   resolvedImagePath,
+    p_metadata:     Object.keys(metadata).length ? metadata : {},
+  });
 
-    await supa
-      .from('product_candidates')
-      .update({
-        occurrence_count: (cur?.occurrence_count || 1) + 1,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', existingId);
-
-    return json({ status: 'deduplicated', candidate_id: existingId }, 200, corsHeaders);
+  // ── 6. Propagate real errors — never fake success ──────────────
+  if (rpcErr) {
+    console.error('[SubmitCandidate] RPC failed:', rpcErr.message, rpcErr.code);
+    const status = rpcErr.code === '28000' ? 401 : 500;
+    return json({ error: rpcErr.message }, status, corsHeaders);
   }
 
-  // ── Insert new candidate ──
-  const row = {
-    created_by:      userId,
-    source_scan_id:  valuation_id  || null,
-    brand:           brand         || null,
-    model:           model         || null,
-    name:            name          || null,
-    category:        category      || null,
-    subcategory:     subcategory   || null,
-    product_type:    product_type  || null,
-    ocr_text:        ocr_text      || null,
-    confidence:      typeof confidence === 'number' ? confidence : null,
-    source:          VALID_SOURCES.includes(source) ? source : 'ocr_label',
-    image_url:       image_url     || null,
-    correction_text: correction_text || null,
-    status:          'pending',
-    occurrence_count: 1,
-    metadata:        {},
-  };
-
-  const { data, error } = await supa
-    .from('product_candidates')
-    .insert(row)
-    .select('id')
-    .single();
-
-  if (error) {
-    console.error('[SubmitCandidate] Insert failed:', error.message);
-    return json({ error: error.message }, 500, corsHeaders);
-  }
-
-  return json({ status: 'created', candidate_id: data.id }, 201, corsHeaders);
+  // rpcResult is the jsonb returned by the function
+  const httpStatus = rpcResult?.status === 'created' ? 201 : 200;
+  return json(rpcResult, httpStatus, corsHeaders);
 }
