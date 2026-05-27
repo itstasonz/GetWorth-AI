@@ -939,6 +939,7 @@ export function ResultsView() {
   const confidenceReasoning = result.confidence_reasoning || '';
   const priceMethod = result.marketValue?.price_method || '';
   const brandConf = classification.brand_confidence || recognition.brandConfidence || 'unidentified';
+  const matchedFromCandidate = !!result.matched_from_candidate;  // true → "Learned catalog"
 
   // Multi-photo
   const canAddPhoto = images.length < 3 && !isConfirmed;
@@ -1096,6 +1097,13 @@ export function ResultsView() {
               <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold backdrop-blur-md" style={{ background: 'rgba(111,238,225,0.12)', color: '#6FEEE1' }}>
                 <Eye className="w-2.5 h-2.5" />
                 {lang === 'he' ? 'חזותי' : 'Visual'}
+              </div>
+            )}
+            {/* Learned catalog badge — shown when match came from approved product_candidates */}
+            {matchedFromCandidate && (
+              <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-semibold backdrop-blur-md" style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24' }}>
+                <span>★</span>
+                {lang === 'he' ? 'קטלוג לומד' : 'Learned'}
               </div>
             )}
           </div>
@@ -2190,10 +2198,25 @@ export function ResultsView() {
                 {/* DB Retrieval */}
                 <div>
                   <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">DB Retrieval</p>
-                  {/* Primary status — DB match found vs DB missing */}
-                  <p className="text-[11px] font-bold" style={{ color: dbMissing ? '#f87171' : '#86efac' }}>
-                    {dbMissing ? '⚠ DB MISSING — 0 candidates' : `✓ DB MATCH — ${ret.candidates_count} found`}
+                  {/* Primary status */}
+                  <p className="text-[11px] font-bold" style={{
+                    color: dbMissing ? '#f87171'
+                         : ret.matched_from_candidate ? '#fbbf24'
+                         : '#86efac'
+                  }}>
+                    {dbMissing
+                      ? '⚠ DB MISSING — 0 candidates'
+                      : ret.matched_from_candidate
+                        ? `★ LEARNED MATCH — ${ret.candidates_count} candidate(s)`
+                        : `✓ DB MATCH — ${ret.candidates_count} found`}
                   </p>
+                  {/* Source table */}
+                  {!dbMissing && (
+                    <p className="text-[9px]" style={{ color: ret.matched_from_candidate ? '#fbbf24' : '#86efac', opacity: 0.8 }}>
+                      source_table={ret.source_table || 'products'}
+                      {ret.matched_from_candidate ? ' · status=approved' : ''}
+                    </p>
+                  )}
                   {!dbMissing && ret.top3 && (
                     <p className="text-[10px] text-slate-400 break-all">{ret.top3}</p>
                   )}

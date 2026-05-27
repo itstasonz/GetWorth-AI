@@ -1437,40 +1437,32 @@ async function writeBack(recognition, verification, embedding) {
     let productId;
 
     if (existing) {
+      // ── Update-only: raw AI scan output NEVER creates new product rows.
+      // New products enter via product_candidates → admin approval → promotion.
+      // Updating existing rows (popularity_score, embedding) is safe — the
+      // product identity was already human-curated when it was inserted.
       productId = existing.id;
       const updates = {
         popularity_score: (existing.popularity_score || 0) + 1,
-        avg_used_price_ils: verification.price_estimate_mid,
-        price_updated_at: new Date().toISOString(),
         scan_count: (existing.scan_count || 0) + 1,
         last_scanned_at: new Date().toISOString(),
       };
+      // Only update price if Stage 2 produced a real comp-based estimate
+      if (verification.price_method === 'comp_based' && verification.price_estimate_mid > 0) {
+        updates.avg_used_price_ils = verification.price_estimate_mid;
+        updates.price_updated_at   = new Date().toISOString();
+      }
       if (embedding) updates.text_embedding = embedding;
       await supa.from('products').update(updates).eq('id', existing.id);
     } else {
-      const row = {
-        name: verification.full_name || `${brand} ${model}`.trim(),
-        name_hebrew: verification.full_name_hebrew || null,
-        brand,
-        model: model !== 'unidentified' ? model : null,
-        category: verification.final_category,
-        retail_price_ils: verification.new_retail_price_ils || null,
-        avg_used_price_ils: verification.price_estimate_mid || null,
-        price_source: 'getworth_scan',
-        price_updated_at: new Date().toISOString(),
-        keywords: [
-          ...(recognition.ocr_text?.raw_texts || []),
-          recognition.category,
-          recognition.subcategory,
-        ].filter(Boolean),
-        popularity_score: 1,
-      };
-      if (embedding) row.text_embedding = embedding;
-      const { data: inserted } = await supa.from('products').insert(row).select('id').maybeSingle();
-      productId = inserted?.id;
+      // ── No existing product: do NOT auto-insert into products.
+      // The user-confirmation flow (product_candidate_needed → submit-candidate)
+      // will save this to product_candidates for admin review.
+      // This is the data-model boundary: trusted products ≠ raw AI guesses.
+      console.log(`[WriteBack] No existing product for "${brand} ${model}" — skipping auto-insert (goes via product_candidates flow)`);
     }
 
-    if (productId && verification.price_estimate_mid > 0) {
+    if (productId && verification.price_method === 'comp_based' && verification.price_estimate_mid > 0) {
       await supa.from('price_observations').insert({
         product_id: productId,
         price: verification.price_estimate_mid,
@@ -1965,7 +1957,19 @@ export default async function handler(req) {
       (_model && _model.toLowerCase() !== 'unidentified') ||
       recognition.ocr_text?.has_readable_text
     );
-    result.db_match_found = dbMatchFound;
+    // ── Source-table detection ──
+    // Track whether the top retrieval match came from `products` (trusted)
+    // or `product_candidates` (approved learned items).  This surfaces in
+    // the UI so users see "Matched from learned catalog" and in the debug
+    // panel so source_table is always visible.
+    const topCand = candidates[0] || null;
+    const matchedFromCandidate = !!(topCand?._from_approved_candidate);
+    const candidateSourceTable = matchedFromCandidate ? 'product_candidates'
+      : (candidates.length > 0 ? 'products' : 'none');
+
+    result.db_match_found          = dbMatchFound;
+    result.matched_from_candidate  = matchedFromCandidate;  // true → "Learned catalog" UI
+    result.candidate_source_table  = candidateSourceTable;  // 'products' | 'product_candidates' | 'none'
     result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
     result.stage2_timeout = stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded');
     result.recognition_source = (() => {
@@ -2018,10 +2022,14 @@ export default async function handler(req) {
         failed: !recognition.brand_candidates?.length && !recognition.ocr_text?.has_readable_text,
       },
       retrieval: {
-        db_match_found: dbMatchFound,
-        candidates_count: candidates.length,
-        top3: candidates.slice(0, 3).map(c => `${c.brand} ${c.model}(${c._source} ${round((c.similarity||0)*100)}%)`).join(', '),
-        strategy_log: retrievalStrategyLog,
+        db_match_found:       dbMatchFound,
+        source_table:         candidateSourceTable,
+        matched_from_candidate: matchedFromCandidate,
+        candidates_count:     candidates.length,
+        top3: candidates.slice(0, 3).map(c =>
+          `${c.brand} ${c.model}(src=${c._source}${c._from_approved_candidate ? ' LEARNED' : ''} sim=${round((c.similarity||0)*100)}%)`
+        ).join(', '),
+        strategy_log:         retrievalStrategyLog,
       },
       pricing: {
         stage2_fallback_used:   stage2FallbackUsed,
@@ -2035,8 +2043,8 @@ export default async function handler(req) {
         price_mid:              verification.price_estimate_mid,
         price_high:             verification.price_estimate_high,
         price_zero:             verification.price_estimate_mid === 0,
-        db_candidate_used:      dbMatchFound
-          ? `${candidates[0]?.brand} ${candidates[0]?.model} (${candidates[0]?._source})`
+        db_candidate_used: dbMatchFound
+          ? `${candidates[0]?.brand} ${candidates[0]?.model} (${candidates[0]?._source}${matchedFromCandidate ? ' · learned_candidate' : ''})`
           : 'none — db_missing',
         silent_fail: !stage2FallbackUsed && verification.price_estimate_mid === 0,
       },
