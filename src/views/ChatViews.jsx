@@ -718,7 +718,17 @@ export function ChatView() {
     prevMsgCount.current = count;
     if (isInitial) {
       requestAnimationFrame(() => {
-        if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+        const el = scrollRef.current;
+        if (!el) return;
+        el.scrollTop = el.scrollHeight;
+        if (import.meta.env.DEV) {
+          console.log('[Chat/Scroll] after initial scroll-to-bottom —',
+            `scrollTop=${Math.round(el.scrollTop)}`,
+            `scrollHeight=${el.scrollHeight}`,
+            `clientHeight=${el.clientHeight}`,
+            `gap=${el.scrollHeight - el.scrollTop - el.clientHeight}px`,
+          );
+        }
       });
       return;
     }
@@ -726,11 +736,48 @@ export function ChatView() {
     const fromMe = messages[count - 1]?.sender_id === user?.id;
     if (nearBottomRef.current || fromMe) {
       messagesEndRef?.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+      if (import.meta.env.DEV) {
+        requestAnimationFrame(() => {
+          const el = scrollRef.current;
+          if (!el) return;
+          console.log('[Chat/Scroll] after new-msg scrollIntoView —',
+            `scrollTop=${Math.round(el.scrollTop)}`,
+            `scrollHeight=${el.scrollHeight}`,
+            `clientHeight=${el.clientHeight}`,
+            `gap=${el.scrollHeight - el.scrollTop - el.clientHeight}px`,
+          );
+        });
+      }
     } else {
       setShowNewMsgBanner(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
+
+  // ── Scroll instrumentation — DEV only ────────────────────────────────────
+  // Logs scrollTop / scrollHeight / clientHeight at three moments:
+  //   1. chat-open  (activeChat mounts)
+  //   2. messages-loaded (first render with data — handled in auto-scroll above)
+  //   3. two-pass RAF (after browser has painted the full message list)
+  useEffect(() => {
+    if (!activeChat || !import.meta.env.DEV) return;
+    const snap = (label) => {
+      const el = scrollRef.current;
+      if (!el) { console.log(`[Chat/Scroll] ${label} — scrollRef not yet attached`); return; }
+      console.log(`[Chat/Scroll] ${label} —`,
+        `scrollTop=${Math.round(el.scrollTop)}`,
+        `scrollHeight=${el.scrollHeight}`,
+        `clientHeight=${el.clientHeight}`,
+        `gap=${el.scrollHeight - el.scrollTop - el.clientHeight}px`,
+      );
+    };
+    snap('chat-open (sync)');
+    requestAnimationFrame(() => {
+      snap('chat-open (rAF-1)');
+      requestAnimationFrame(() => snap('chat-open (rAF-2)'));
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChat?.id]);
 
   if (!activeChat) return null;
 
@@ -1008,7 +1055,7 @@ export function ChatView() {
           ) : null}
 
           {/* Message bubbles with date separators */}
-          <div className="space-y-[3px] px-3 pt-3 pb-4">
+          <div className="space-y-[3px] px-3 pt-3 pb-1">
             {groupedWithDates.map((item, idx) => {
               // Date separator row
               if (item._type === 'date') {

@@ -258,6 +258,9 @@ export function AppProvider({ children }) {
 
       // Phase 2: network refresh in background — doesn't block UI
       try {
+        // DEV: log full URL so we can verify OAuth redirect landed here with tokens
+        if (import.meta.env.DEV) console.log('[Auth] returned URL=', window.location.href);
+
         const [sessionResult, listingsResult] = await Promise.all([
           supabase.auth.getSession(),
           supabase
@@ -267,6 +270,10 @@ export function AppProvider({ children }) {
             .order('created_at', { ascending: false })
             .limit(PAGE_SIZE),
         ]);
+
+        if (import.meta.env.DEV) {
+          console.log('[Auth] session user=', sessionResult.data?.session?.user?.email ?? null);
+        }
 
         if (mounted && sessionResult.data?.session?.user) {
           setUser(sessionResult.data.session.user);
@@ -286,6 +293,9 @@ export function AppProvider({ children }) {
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (import.meta.env.DEV) {
+        console.log('[Auth] auth state change=', event, 'user=', session?.user?.email ?? null);
+      }
       if (!mounted) return;
       if (event === 'PASSWORD_RECOVERY') {
         setUser(session.user);
@@ -975,7 +985,9 @@ export function AppProvider({ children }) {
   // ─── AUTH ACTIONS ───────────────────────────────────
 
   const signInGoogle = async () => {
-    await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+    const redirectTo = window.location.origin;
+    if (import.meta.env.DEV) console.log('[Auth] signInWithOAuth redirectTo=', redirectTo);
+    await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
   };
 
   const signInEmail = async (e) => {
