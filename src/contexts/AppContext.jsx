@@ -179,6 +179,8 @@ export function AppProvider({ children }) {
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const ordersLastLoadRef = useRef(0);
+  const msgChannelRef = useRef(null);
+  const notifChannelRef = useRef(null);
 
   // Notifications state (order events)
   const [orderNotifications, setOrderNotifications] = useState([]);
@@ -352,100 +354,132 @@ export function AppProvider({ children }) {
   // REALTIME MESSAGING + IN-APP NOTIFICATION ENGINE
   // ═══════════════════════════════════════════════════════
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
 
-    const msgChannelName = `rt-msgs-${user.id}-${Date.now()}`;
-    const channel = supabase
-      .channel(msgChannelName)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'messages' },
-        async (payload) => {
-          const newMsg = payload.new;
-          if (newMsg.sender_id === user.id) return;
+    let cancelled = false;
+    let errorTimer = null;
+    let subscribed = false;
 
-          let isInThisChat = false;
-          setActiveChat((current) => {
-            if (current && newMsg.conversation_id === current.id) {
-              isInThisChat = true;
-              setMessages((prev) => {
-                if (prev.some((m) => m.id === newMsg.id)) return prev;
-                return [...prev, newMsg];
-              });
-              setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-              supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id)
-                .then(({ error }) => { if (error && DEV) console.error('[Chat] Mark read failed:', error); });
+    const setup = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled || !session?.access_token) return;
+
+      if (msgChannelRef.current) {
+        supabase.removeChannel(msgChannelRef.current);
+        msgChannelRef.current = null;
+      }
+
+      const channelName = `rt-msgs-${user.id}`;
+      const channel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'messages' },
+          async (payload) => {
+            const newMsg = payload.new;
+            if (newMsg.sender_id === user.id) return;
+
+            let isInThisChat = false;
+            setActiveChat((current) => {
+              if (current && newMsg.conversation_id === current.id) {
+                isInThisChat = true;
+                setMessages((prev) => {
+                  if (prev.some((m) => m.id === newMsg.id)) return prev;
+                  return [...prev, newMsg];
+                });
+                setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+                supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id)
+                  .then(({ error }) => { if (error && DEV) console.error('[Chat] Mark read failed:', error); });
+              }
+              return current;
+            });
+
+            if (!isInThisChat) {
+              try {
+                const [senderProfile, convData] = await Promise.all([
+                  getCachedProfile(newMsg.sender_id),
+                  supabase
+                    .from('conversations')
+                    .select('listing:listings(id, title, title_hebrew, images)')
+                    .eq('id', newMsg.conversation_id)
+                    .single()
+                    .then(r => r.data),
+                ]);
+                const senderName = senderProfile?.full_name || (lang === 'he' ? 'משתמש' : 'Someone');
+                const listing = convData?.listing;
+                const listingTitle = (lang === 'he' && listing?.title_hebrew)
+                  ? listing.title_hebrew : (listing?.title || '');
+                setMsgNotification({
+                  senderName, listingTitle, content: newMsg.content,
+                  conversationId: newMsg.conversation_id,
+                  listingImage: listing?.images?.[0] || null,
+                  isOffer: newMsg.is_offer, offerAmount: newMsg.offer_amount,
+                });
+                playSound('tap');
+              } catch (err) {
+                console.warn('Notification enrichment failed:', err);
+                setMsgNotification({
+                  senderName: lang === 'he' ? 'הודעה חדשה' : 'New message',
+                  listingTitle: '', content: newMsg.content,
+                  conversationId: newMsg.conversation_id,
+                });
+              }
             }
-            return current;
-          });
-
-          if (!isInThisChat) {
-            try {
-              const [senderProfile, convData] = await Promise.all([
-                getCachedProfile(newMsg.sender_id),
-                supabase
-                  .from('conversations')
-                  .select('listing:listings(id, title, title_hebrew, images)')
-                  .eq('id', newMsg.conversation_id)
-                  .single()
-                  .then(r => r.data),
-              ]);
-              const senderName = senderProfile?.full_name || (lang === 'he' ? 'משתמש' : 'Someone');
-              const listing = convData?.listing;
-              const listingTitle = (lang === 'he' && listing?.title_hebrew)
-                ? listing.title_hebrew : (listing?.title || '');
-              setMsgNotification({
-                senderName, listingTitle, content: newMsg.content,
-                conversationId: newMsg.conversation_id,
-                listingImage: listing?.images?.[0] || null,
-                isOffer: newMsg.is_offer, offerAmount: newMsg.offer_amount,
-              });
-              playSound('tap');
-            } catch (err) {
-              console.warn('Notification enrichment failed:', err);
-              setMsgNotification({
-                senderName: lang === 'he' ? 'הודעה חדשה' : 'New message',
-                listingTitle: '', content: newMsg.content,
-                conversationId: newMsg.conversation_id,
-              });
-            }
+            // Update the conversation preview in-place — avoids a full network reload
+            // on every incoming message. Only fall back to a reload if the conversation
+            // isn't in state yet (e.g. a brand-new thread the user hasn't seen).
+            setConversations(prev => {
+              const idx = prev.findIndex(c => c.id === newMsg.conversation_id);
+              if (idx === -1) {
+                loadConversations(true);
+                return prev;
+              }
+              const updated = { ...prev[idx], updated_at: newMsg.created_at, messages: [newMsg] };
+              const next = [...prev];
+              next.splice(idx, 1);
+              return [updated, ...next];
+            });
+            setUnreadCount(prev => isInThisChat ? prev : prev + 1);
           }
-          // Update the conversation preview in-place — avoids a full network reload
-          // on every incoming message. Only fall back to a reload if the conversation
-          // isn't in state yet (e.g. a brand-new thread the user hasn't seen).
-          setConversations(prev => {
-            const idx = prev.findIndex(c => c.id === newMsg.conversation_id);
-            if (idx === -1) {
-              // New conversation not in list yet — trigger a full reload
-              loadConversations(true);
-              return prev;
-            }
-            const updated = { ...prev[idx], updated_at: newMsg.created_at, messages: [newMsg] };
-            const next = [...prev];
-            next.splice(idx, 1);
-            return [updated, ...next];
-          });
-          setUnreadCount(prev => isInThisChat ? prev : prev + 1);
-        }
-      )
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'messages' },
-        (payload) => {
-          const updated = payload.new;
-          setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
-        }
-      )
-      .subscribe((status, err) => {
-        console.log('[Realtime] rt-msgs status:', status, 'user:', user.id, err || '');
-        if (status === 'SUBSCRIBED') console.log('✅ Realtime connected for', user.id);
-        else if (status === 'CHANNEL_ERROR') console.error('❌ Realtime channel error', { channel: msgChannelName, status, err });
-        else if (status === 'TIMED_OUT') console.error('❌ Realtime channel timed out', { channel: msgChannelName });
-      });
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'messages' },
+          (payload) => {
+            const updated = payload.new;
+            setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
+          }
+        )
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            subscribed = true;
+            if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+            if (DEV) console.log('✅ rt-msgs SUBSCRIBED for', user.id);
+          } else if (status === 'CHANNEL_ERROR') {
+            errorTimer = setTimeout(() => {
+              if (!subscribed) console.error('❌ rt-msgs CHANNEL_ERROR (unrecovered)', { err });
+            }, 2000);
+          } else if (status === 'TIMED_OUT') {
+            console.error('❌ rt-msgs TIMED_OUT');
+          }
+        });
+
+      if (cancelled) {
+        supabase.removeChannel(channel);
+      } else {
+        msgChannelRef.current = channel;
+      }
+    };
+
+    setup();
 
     return () => {
-      console.log('[Realtime] removing channel:', msgChannelName);
-      supabase.removeChannel(channel);
+      cancelled = true;
+      if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+      if (msgChannelRef.current) {
+        supabase.removeChannel(msgChannelRef.current);
+        msgChannelRef.current = null;
+      }
     };
   }, [user?.id]);
 
@@ -485,65 +519,91 @@ export function AppProvider({ children }) {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
 
-    // Initial load
     loadNotifications();
 
-    const notifChannelName = `rt-notifs-${user.id}-${Date.now()}`;
-    const notifChannel = supabase
-      .channel(notifChannelName)
-      // New notification inserted → show toast + update badge
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
-        (payload) => {
-          const notif = payload.new;
-          setOrderNotifications(prev => [notif, ...prev]);
-          setNotifUnreadCount(prev => prev + 1);
-          showToastMsg(notif.title || (lang === 'he' ? 'התראה חדשה' : 'New notification'));
-          playSound('tap');
+    let cancelled = false;
+    let errorTimer = null;
+    let subscribed = false;
 
-          // Auto-refresh orders when order-related notification arrives
-          if (notif.type?.startsWith('ORDER_')) {
-            loadOrders(true);
+    const setup = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (cancelled || !session?.access_token) return;
+
+      if (notifChannelRef.current) {
+        supabase.removeChannel(notifChannelRef.current);
+        notifChannelRef.current = null;
+      }
+
+      const channelName = `rt-notifs-${user.id}`;
+      const notifChannel = supabase
+        .channel(channelName)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
+          (payload) => {
+            const notif = payload.new;
+            setOrderNotifications(prev => [notif, ...prev]);
+            setNotifUnreadCount(prev => prev + 1);
+            showToastMsg(notif.title || (lang === 'he' ? 'התראה חדשה' : 'New notification'));
+            playSound('tap');
+            if (notif.type?.startsWith('ORDER_')) {
+              loadOrders(true);
+            }
           }
-        }
-      )
-      // Order status changed → refresh orders + update activeOrder
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'orders' },
-        (payload) => {
-          const updated = payload.new;
-          // Only process if user is involved
-          if (updated.buyer_id !== user.id && updated.seller_id !== user.id) return;
-          setOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
-          setActiveOrder(prev => prev?.id === updated.id ? { ...prev, ...updated } : prev);
-        }
-      )
-      // New order created → refresh orders (seller sees new requests immediately)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'orders' },
-        (payload) => {
-          const newOrder = payload.new;
-          if (newOrder.seller_id === user.id || newOrder.buyer_id === user.id) {
-            if (DEV) console.log('[Realtime] New order detected, refreshing orders');
-            loadOrders(true);
+        )
+        .on(
+          'postgres_changes',
+          { event: 'UPDATE', schema: 'public', table: 'orders' },
+          (payload) => {
+            const updated = payload.new;
+            if (updated.buyer_id !== user.id && updated.seller_id !== user.id) return;
+            setOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
+            setActiveOrder(prev => prev?.id === updated.id ? { ...prev, ...updated } : prev);
           }
-        }
-      )
-      .subscribe((status, err) => {
-        console.log('[Realtime] rt-notifs status:', status, 'user:', user.id, err || '');
-        if (status === 'SUBSCRIBED') console.log('✅ Notifs realtime connected for', user.id);
-        else if (status === 'CHANNEL_ERROR') console.error('❌ Realtime notifs channel error', { channel: notifChannelName, status, err });
-        else if (status === 'TIMED_OUT') console.error('❌ Realtime notifs channel timed out', { channel: notifChannelName });
-      });
+        )
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'orders' },
+          (payload) => {
+            const newOrder = payload.new;
+            if (newOrder.seller_id === user.id || newOrder.buyer_id === user.id) {
+              if (DEV) console.log('[Realtime] New order detected, refreshing orders');
+              loadOrders(true);
+            }
+          }
+        )
+        .subscribe((status, err) => {
+          if (status === 'SUBSCRIBED') {
+            subscribed = true;
+            if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+            if (DEV) console.log('✅ rt-notifs SUBSCRIBED for', user.id);
+          } else if (status === 'CHANNEL_ERROR') {
+            errorTimer = setTimeout(() => {
+              if (!subscribed) console.error('❌ rt-notifs CHANNEL_ERROR (unrecovered)', { err });
+            }, 2000);
+          } else if (status === 'TIMED_OUT') {
+            console.error('❌ rt-notifs TIMED_OUT');
+          }
+        });
+
+      if (cancelled) {
+        supabase.removeChannel(notifChannel);
+      } else {
+        notifChannelRef.current = notifChannel;
+      }
+    };
+
+    setup();
 
     return () => {
-      console.log('[Realtime] removing channel:', notifChannelName);
-      supabase.removeChannel(notifChannel);
+      cancelled = true;
+      if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
+      if (notifChannelRef.current) {
+        supabase.removeChannel(notifChannelRef.current);
+        notifChannelRef.current = null;
+      }
     };
   }, [user?.id]);
 
@@ -2314,10 +2374,12 @@ export function AppProvider({ children }) {
     }
 
     // Phase 2: background network refresh
-    // Uses get_user_orders() SECURITY DEFINER RPC — single JOIN query,
-    // bypasses per-row RLS evaluation, eliminates the 57014 timeout.
+    // Uses get_user_orders() SECURITY DEFINER RPC — UNION-based query,
+    // bypasses per-row RLS evaluation, guarantees index usage.
+    const t0 = performance.now();
     try {
       const { data, error: err } = await supabase.rpc('get_user_orders');
+      if (DEV) console.log(`[Orders] RPC took ${Math.round(performance.now() - t0)}ms`);
       if (err) throw err;
 
       const newOrders = data || [];
@@ -2332,7 +2394,8 @@ export function AppProvider({ children }) {
         return fresh || prev;
       });
     } catch (e) {
-      console.error('[Orders] Load error:', e);
+      const ms = Math.round(performance.now() - t0);
+      console.error(`[Orders] Load error after ${ms}ms — code:${e?.code} msg:${e?.message}`);
     }
     setOrdersLoading(false);
   }, [user]);
@@ -2342,13 +2405,15 @@ export function AppProvider({ children }) {
   // get_user_orders(); enforces caller-is-party check inside the function.
   const fetchOrderById = useCallback(async (orderId) => {
     if (!user || !orderId) return null;
+    const t0 = performance.now();
     try {
       const { data, error } = await supabase.rpc('get_order_by_id', { p_order_id: orderId });
+      if (DEV) console.log(`[Orders] fetchById took ${Math.round(performance.now() - t0)}ms`);
       if (error) throw error;
       // SETOF jsonb → array of 0–1 rows; return the first element or null
       return data?.[0] ?? null;
     } catch (e) {
-      if (DEV) console.warn('[Orders] fetchById error:', e.message);
+      console.warn(`[Orders] fetchById error — code:${e?.code} msg:${e?.message}`);
       return null;
     }
   }, [user]);
