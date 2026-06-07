@@ -161,8 +161,8 @@ export const Card = ({ children, className = '', onClick, glow, gradient }) => (
   <div 
     onClick={onClick} 
     className={`relative rounded-3xl backdrop-blur-xl transition-all duration-500 ${onClick ? 'cursor-pointer hover:scale-[1.02] hover:-translate-y-1 active:scale-[0.98]' : ''} ${className}`}
-    style={{ 
-      background: gradient || 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.02) 100%)',
+    style={{
+      background: gradient || 'linear-gradient(135deg, var(--color-surface-muted) 0%, rgba(255,255,255,0.02) 100%)',
       border: '1px solid rgba(255,255,255,0.08)',
       boxShadow: glow ? '0 8px 32px rgba(59,130,246,0.15), inset 0 1px 0 rgba(255,255,255,0.1)' : '0 4px 24px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.05)'
     }}
@@ -177,10 +177,10 @@ export const Btn = ({ children, primary, secondary, disabled, className = '', ..
     disabled={disabled} 
     className={`relative px-6 py-3.5 rounded-2xl font-semibold flex items-center justify-center gap-2 transition-all duration-300 active:scale-95 disabled:opacity-50 overflow-hidden group btn-spring ${primary ? 'btn-spring-primary' : ''} ${className}`}
     style={{
-      background: primary ? 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)' : secondary ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'rgba(255,255,255,0.05)',
+      background: primary ? 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%)' : secondary ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'var(--color-surface-muted)',
       border: primary || secondary ? 'none' : '1px solid rgba(255,255,255,0.1)',
       boxShadow: primary ? '0 8px 24px rgba(111,238,225,0.35), inset 0 1px 0 rgba(255,255,255,0.25)' : secondary ? '0 8px 24px rgba(16,185,129,0.4)' : 'none',
-      color: primary ? '#003733' : undefined,
+      color: primary ? 'var(--color-primary-on)' : undefined,
     }}
     {...p}
   >
