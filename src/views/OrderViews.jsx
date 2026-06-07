@@ -292,6 +292,7 @@ export function OrderDetailView() {
   const [updating, setUpdating] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
@@ -580,7 +581,7 @@ export function OrderDetailView() {
 
             {/* BUYER ONLY: Complete after received — seller cannot trigger this */}
             {order.status === 'delivered' && isBuyer && (
-              <Btn primary className="w-full py-4" onClick={() => handleAction('completed')} disabled={updating}>
+              <Btn primary className="w-full py-4" onClick={() => setShowCompleteConfirm(true)} disabled={updating}>
                 {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                 {lang === 'he' ? 'אשר והשלם עסקה' : 'Complete Transaction'}
               </Btn>
@@ -672,6 +673,28 @@ export function OrderDetailView() {
         <FadeIn><Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
           <div className="flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5 text-yellow-400" /><span className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'תודה! הביקורת נשלחה' : 'Thank you! Review submitted'}</span></div>
         </Card></FadeIn>
+      )}
+
+      {/* Complete Confirmation Modal */}
+      {showCompleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <SlideUp className="w-full max-w-md">
+            <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-4">
+              <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+              <div className="text-center space-y-2">
+                <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
+                <h3 className="text-lg font-bold">{lang === 'he' ? 'לאשר סיום עסקה?' : 'Complete this transaction?'}</h3>
+                <p className="text-sm text-slate-400">{lang === 'he' ? 'פעולה זו סופית ואינה ניתנת לביטול. אשר רק לאחר שקיבלת את הפריט ובדקת אותו.' : 'This is final and cannot be undone. Only confirm after you have received and inspected the item.'}</p>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowCompleteConfirm(false)} className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium">{lang === 'he' ? 'חזור' : 'Go Back'}</button>
+                <Btn primary className="flex-1 py-3" onClick={() => { setShowCompleteConfirm(false); handleAction('completed'); }} disabled={updating}>
+                  {lang === 'he' ? 'אשר וסיים' : 'Confirm & Complete'}
+                </Btn>
+              </div>
+            </div>
+          </SlideUp>
+        </div>
       )}
 
       {/* Cancel Modal */}

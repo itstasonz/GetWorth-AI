@@ -3,7 +3,7 @@ import {
   MessageCircle, ChevronRight, ChevronLeft,
   DollarSign, Loader2, Send, Check, CheckCheck,
   X, ArrowDown, Shield, Search, PlusCircle,
-  Video, Phone, MoreVertical, Camera,
+  MoreVertical, Camera,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Btn, FadeIn, SlideUp } from '../components/ui';
@@ -38,81 +38,6 @@ const C = {
 
 // liquid-gradient: Stitch's signature outgoing bubble — bright teal
 const LIQUID_GRADIENT = `linear-gradient(135deg, ${C.primary} 0%, ${C.primaryCont} 100%)`;
-
-// ─── DebugKbPanel ─────────────────────────────────────────────────────────────
-// DEV-only floating panel that surfaces visualViewport values on a real device.
-// Renders in the bottom-right corner so it doesn't block UI during testing.
-// Remove (or keep — it only mounts when import.meta.env.DEV is true) before ship.
-function DebugKbPanel({ containerRef, composerRef }) {
-  const [vals, setVals] = useState({});
-  const [inputFocused, setInputFocused] = useState(false);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    const snap = () => {
-      const el   = containerRef.current;
-      const comp = composerRef.current;
-      const elRect   = el   ? el.getBoundingClientRect()   : null;
-      const compRect = comp ? comp.getBoundingClientRect() : null;
-      setVals({
-        winH:      window.innerHeight,
-        vvH:       vv ? Math.round(vv.height)    : 'n/a',
-        vvOTop:    vv ? Math.round(vv.offsetTop) : 'n/a',
-        kbEst:     vv ? Math.max(0, Math.round(window.innerHeight - vv.offsetTop - vv.height)) : 'n/a',
-        scrollY:   Math.round(window.scrollY),
-        chatTop:   elRect   ? Math.round(elRect.top)    : 'n/a',
-        chatBot:   elRect   ? Math.round(elRect.bottom) : 'n/a',
-        compTop:   compRect ? Math.round(compRect.top)  : 'n/a',
-        compBot:   compRect ? Math.round(compRect.bottom) : 'n/a',
-        compPB:    comp     ? comp.style.paddingBottom || '(css)' : 'n/a',
-      });
-    };
-
-    const onFocus = () => { setInputFocused(true);  snap(); };
-    const onBlur  = () => { setInputFocused(false); snap(); };
-    document.addEventListener('focusin',  onFocus);
-    document.addEventListener('focusout', onBlur);
-
-    snap();
-    if (vv) { vv.addEventListener('resize', snap); vv.addEventListener('scroll', snap); }
-    else      window.addEventListener('resize', snap);
-
-    return () => {
-      document.removeEventListener('focusin',  onFocus);
-      document.removeEventListener('focusout', onBlur);
-      if (vv) { vv.removeEventListener('resize', snap); vv.removeEventListener('scroll', snap); }
-      else      window.removeEventListener('resize', snap);
-    };
-  }, [containerRef, composerRef]);
-
-  const row = (label, value) => (
-    <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-      <span style={{ color: '#bbc9c7', fontSize: 10 }}>{label}</span>
-      <span style={{ color: '#6feee1', fontSize: 10, fontWeight: 700 }}>{String(value)}</span>
-    </div>
-  );
-
-  return (
-    <div style={{
-      position: 'absolute', bottom: 80, right: 8, zIndex: 9999,
-      background: 'rgba(0,0,0,0.85)', border: '1px solid #3c4947',
-      borderRadius: 10, padding: '8px 10px', width: 180,
-      fontFamily: 'monospace', pointerEvents: 'none',
-    }}>
-      {row('win.innerH',    vals.winH)}
-      {row('vv.height',     vals.vvH)}
-      {row('vv.offsetTop',  vals.vvOTop)}
-      {row('kb≈',           vals.kbEst)}
-      {row('scrollY',       vals.scrollY)}
-      {row('chat.top',      vals.chatTop)}
-      {row('chat.bot',      vals.chatBot)}
-      {row('comp.top',      vals.compTop)}
-      {row('comp.bot',      vals.compBot)}
-      {row('comp.pb',       vals.compPB)}
-      {row('input focused', inputFocused ? '✓ YES' : 'no')}
-    </div>
-  );
-}
 
 // ─── UserAvatar ───────────────────────────────────────────────────────────────
 function UserAvatar({ profile, size = 'md', className = '' }) {
@@ -265,54 +190,6 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
 // Messages sent with an attached photo are stored as `__chat_img__<url>`.
 // ChatView detects this prefix and renders an image bubble instead of text.
 const IMG_PREFIX = '__chat_img__';
-
-// ─── CallStubModal ────────────────────────────────────────────────────────────
-// Architecture stub for future WebRTC integration.
-// handleStartVideoCall / handleStartVoiceCall are prepared in ChatView;
-// this modal confirms the feature is recognised but not yet wired.
-function CallStubModal({ type, lang, onClose }) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="mx-6 p-7 rounded-3xl text-center w-full max-w-[320px]"
-        style={{ background: C.surfaceLow, boxShadow: '0 20px 60px rgba(0,0,0,0.55)' }}
-        onClick={e => e.stopPropagation()}
-      >
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-          style={{ background: 'rgba(111,238,225,0.08)' }}
-        >
-          {type === 'video'
-            ? <Video className="w-8 h-8" style={{ color: C.primary }} />
-            : <Phone className="w-8 h-8" style={{ color: C.primary }} />
-          }
-        </div>
-        <h3
-          className="font-bold text-lg mb-2"
-          style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}
-        >
-          {type === 'video'
-            ? (lang === 'he' ? 'שיחת וידאו' : 'Video Call')
-            : (lang === 'he' ? 'שיחת קול' : 'Voice Call')
-          }
-        </h3>
-        <p className="text-sm mb-5" style={{ color: C.onSurfaceVar }}>
-          {lang === 'he' ? 'תכונה זו תגיע בקרוב' : 'This feature is coming soon.'}
-        </p>
-        <button
-          onClick={onClose}
-          className="w-full py-3 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98]"
-          style={{ background: C.surfaceHigh, color: C.onSurfaceVar }}
-        >
-          {lang === 'he' ? 'סגור' : 'Close'}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 // ─── DateSeparator ────────────────────────────────────────────────────────────
 function DateSeparator({ date, lang }) {
@@ -559,7 +436,6 @@ export function ChatView() {
 
   const [showOfferSheet,   setShowOfferSheet]   = useState(false);
   const [showNewMsgBanner, setShowNewMsgBanner] = useState(false);
-  const [callModal,        setCallModal]        = useState(null);   // 'video' | 'voice' | null
   const [imgPreview,       setImgPreview]       = useState(null);   // { file, dataUrl }
   const [uploadingImage,   setUploadingImage]   = useState(false);
 
@@ -835,10 +711,6 @@ export function ChatView() {
     requestAnimationFrame(() => { if (scrollRef.current) scrollRef.current.scrollTop = top; });
   };
 
-  // ── Call stubs (future WebRTC integration) ────────────────────────────────
-  const handleStartVideoCall = () => setCallModal('video');
-  const handleStartVoiceCall = () => setCallModal('voice');
-
   // ── Textarea auto-grow ───────────────────────────────────────────────────
   const handleTextareaInput = (e) => {
     setNewMessage(e.target.value);
@@ -935,24 +807,8 @@ export function ChatView() {
           </p>
         </div>
 
-        {/* Call stub buttons + overflow */}
-        <div className="flex items-center gap-0 flex-shrink-0">
-          <button
-            onClick={handleStartVideoCall}
-            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
-            style={{ color: C.primary }}
-            aria-label={lang === 'he' ? 'שיחת וידאו' : 'Video call'}
-          >
-            <Video className="w-5 h-5" />
-          </button>
-          <button
-            onClick={handleStartVoiceCall}
-            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
-            style={{ color: C.primary }}
-            aria-label={lang === 'he' ? 'שיחת קול' : 'Voice call'}
-          >
-            <Phone className="w-5 h-5" />
-          </button>
+        {/* Header overflow */}
+        <div className="flex items-center flex-shrink-0">
           <button
             className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
             style={{ color: C.onSurfaceVar }}
@@ -1379,26 +1235,12 @@ export function ChatView() {
         />
       </div>
 
-      {/* ── DEV keyboard debug panel ─────────────────────────────────────────── */}
-      {/* Visible overlay on real device: shows all vv values so we can verify  */}
-      {/* the fix on iPhone without guessing. Remove before production release.  */}
-      {import.meta.env.DEV && (
-        <DebugKbPanel containerRef={containerRef} composerRef={composerRef} />
-      )}
-
       {/* ── Modals ── */}
       {showOfferSheet && (
         <OfferSheet
           listing={listing} lang={lang} rtl={rtl}
           onClose={() => setShowOfferSheet(false)}
           onSend={handleOfferSend}
-        />
-      )}
-      {callModal && (
-        <CallStubModal
-          type={callModal}
-          lang={lang}
-          onClose={() => setCallModal(null)}
         />
       )}
     </div>
