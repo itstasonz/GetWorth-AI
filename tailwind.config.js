@@ -20,6 +20,10 @@ export default {
         'primary-dark':   'var(--color-primary-dark)',
         'primary-on':     'var(--color-primary-on)',
         'outline':        'var(--color-outline)',
+        // Stage 2: text and elevation tokens
+        'app-secondary':  'var(--color-text-secondary)',
+        'app-muted':      'var(--color-text-muted)',
+        'surface-muted':  'var(--color-surface-muted)',
       },
     },
   },

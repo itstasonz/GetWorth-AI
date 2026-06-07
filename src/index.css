@@ -16,6 +16,10 @@
   --color-primary-dark:   #4FD1C5;
   --color-primary-on:     #003733;
   --color-outline:        #3C4947;
+  --color-text-primary:   #F8FAFC;
+  --color-text-secondary: #BBC9C7;
+  --color-text-muted:     #64748B;
+  --color-surface-muted:  rgba(255,255,255,0.05);
 }
 
 /*

@@ -235,12 +235,12 @@ export const haptic = (pattern = 10) => {
 export const EmptyState = ({ icon: Icon, title, subtitle, cta, className = '' }) => (
   <FadeIn className={`flex flex-col items-center justify-center text-center py-16 ${className}`}>
     {Icon && (
-      <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-        <Icon className="w-10 h-10 text-slate-600" />
+      <div className="w-20 h-20 rounded-3xl bg-surface-muted flex items-center justify-center mx-auto mb-4">
+        <Icon className="w-10 h-10 text-app-muted" />
       </div>
     )}
-    {title && <p className="text-slate-300 font-semibold mb-1">{title}</p>}
-    {subtitle && <p className="text-slate-500 text-sm mb-5 max-w-[240px] leading-relaxed">{subtitle}</p>}
+    {title && <p className="text-app-secondary font-semibold mb-1">{title}</p>}
+    {subtitle && <p className="text-app-muted text-sm mb-5 max-w-[240px] leading-relaxed">{subtitle}</p>}
     {cta}
   </FadeIn>
 );

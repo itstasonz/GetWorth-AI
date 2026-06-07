@@ -8,7 +8,7 @@ export default function LoadingScreen({ fullscreen = true }) {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#131313',
+    background: 'var(--color-app)',
   };
 
   const style = fullscreen
@@ -25,10 +25,10 @@ export default function LoadingScreen({ fullscreen = true }) {
         aria-hidden="true"
         style={{ animation: 'spin 0.9s linear infinite' }}
       >
-        <circle cx="16" cy="16" r="13" stroke="#3c4947" strokeWidth="3" />
+        <circle cx="16" cy="16" r="13" style={{ stroke: 'var(--color-outline)' }} strokeWidth="3" />
         <path
           d="M16 3 A13 13 0 0 1 29 16"
-          stroke="#6FEEE1"
+          style={{ stroke: 'var(--color-primary)' }}
           strokeWidth="3"
           strokeLinecap="round"
         />
