@@ -239,11 +239,12 @@ function AppShell() {
   // handles popping to the correct parent view with proper state restoration.
   // reset() is intentionally NOT used here — it clears activeChat/pipeline state
   // which is wrong for a simple "go back one level" action.
-  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orderDetail', 'admin', 'notifications', 'analytics']);
+  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orders', 'orderDetail', 'admin', 'notifications', 'analytics']);
   const isBackView = BACK_VIEWS.has(view);
   const BACK_LABELS = {
     detail:        lang === 'he' ? 'עיון'    : 'Browse',
     sellerProfile: lang === 'he' ? 'מוצר'   : 'Listing',
+    orders:        lang === 'he' ? 'פרופיל' : 'Profile',
     orderDetail:   lang === 'he' ? 'הזמנות' : 'Orders',
     admin:         lang === 'he' ? 'ניהול'  : 'Admin',
     notifications: lang === 'he' ? 'הזמנות' : 'Orders',
