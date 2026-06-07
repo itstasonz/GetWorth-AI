@@ -40,9 +40,26 @@ const json = (body: unknown, status = 200) =>
 // ── Constants ─────────────────────────────────────────────────────────────────
 const MAX_BYTES    = 10 * 1024 * 1024; // 10 MB
 const BUCKET       = 'verification-photos';
-// Accept any image type the client sends; we'll store as-is.
-// Client compresses to JPEG before sending, so this is normally image/jpeg.
 const IMAGE_PREFIX = 'image/';
+
+// Magic-byte signatures for accepted image formats.
+// MIME type from the client is not trusted — we validate the actual file bytes.
+function validateImageBytes(buf: ArrayBuffer): string | null {
+  if (buf.byteLength < 12) return 'File too small to be a valid image';
+  const b = new Uint8Array(buf, 0, 12);
+
+  // JPEG: FF D8 FF
+  if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return null;
+  // PNG: 89 50 4E 47
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47) return null;
+  // WebP: RIFF????WEBP
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 &&
+      b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return null;
+  // HEIC/HEIF: 'ftyp' box starts at byte 4
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return null;
+
+  return 'File is not a supported image format (jpeg, png, webp, or heic)';
+}
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 serve(async (req) => {
@@ -108,17 +125,23 @@ serve(async (req) => {
     }
 
     imageArrayBuf = await blob.arrayBuffer();
+
+    // ── 6. Validate magic bytes — MIME type is client-controlled and not trusted ──
+    const magicErr = validateImageBytes(imageArrayBuf);
+    if (magicErr) {
+      return json({ error: magicErr }, 415);
+    }
   } catch (e) {
     console.error('[submit-verification-selfie] form parse error:', e);
     return json({ error: 'Failed to parse request body', detail: String(e) }, 400);
   }
 
-  // ── 6. Service-role client — bypasses Storage RLS entirely ────────────────
+  // ── 7. Service-role client — bypasses Storage RLS entirely ────────────────
   const adminClient = createClient(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
 
-  // ── 7. Upload selfie to private bucket ────────────────────────────────────
+  // ── 8. Upload selfie to private bucket ────────────────────────────────────
   // Path: <verified-user-id>/selfie.jpg
   // upsert:true handles both first upload and re-upload.
   // cacheControl:'0' prevents any CDN from serving stale identity photos.
@@ -135,7 +158,7 @@ serve(async (req) => {
     return json({ error: 'Storage upload failed', detail: uploadErr.message }, 500);
   }
 
-  // ── 8. Update profile — service role bypasses column-level RLS ───────────
+  // ── 9. Update profile — service role bypasses column-level RLS ───────────
   const { error: updateErr } = await adminClient
     .from('profiles')
     .update({
@@ -152,7 +175,7 @@ serve(async (req) => {
     return json({ error: 'Profile update failed', detail: updateErr.message }, 500);
   }
 
-  // ── 9. Success ────────────────────────────────────────────────────────────
+  // ── 10. Success ───────────────────────────────────────────────────────────
   return json({
     ok:                      true,
     verification_status:     'pending',

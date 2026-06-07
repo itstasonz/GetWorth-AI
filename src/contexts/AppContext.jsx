@@ -457,7 +457,13 @@ export function AppProvider({ children }) {
           { event: 'UPDATE', schema: 'public', table: 'messages' },
           (payload) => {
             const updated = payload.new;
-            setMessages((prev) => prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m));
+            setMessages((prev) => {
+              // Guard: skip if the updated message is not in the current view.
+              // Without this, every is_read mark on any conversation creates a
+              // new array reference and triggers a React re-render unnecessarily.
+              if (!prev.some((m) => m.id === updated.id)) return prev;
+              return prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m);
+            });
           }
         )
         .subscribe((status, err) => {

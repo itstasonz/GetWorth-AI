@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react
 import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import LoadingScreen from './components/LoadingScreen';
 import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn, ScreenTransition } from './components/ui';
 import { formatPrice, getSellerBadgeStyle } from './lib/utils';
 
@@ -234,6 +235,24 @@ function AppShell() {
     { id: 'profile', icon: User, label: lang === 'he' ? 'פרופיל' : 'Profile' },
   ];
 
+  // Depth-2 views: the header arrow should invoke history.back() so urlSync.js
+  // handles popping to the correct parent view with proper state restoration.
+  // reset() is intentionally NOT used here — it clears activeChat/pipeline state
+  // which is wrong for a simple "go back one level" action.
+  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orderDetail', 'admin', 'notifications', 'analytics']);
+  const isBackView = BACK_VIEWS.has(view);
+  const BACK_LABELS = {
+    detail:        lang === 'he' ? 'עיון'    : 'Browse',
+    sellerProfile: lang === 'he' ? 'מוצר'   : 'Listing',
+    orderDetail:   lang === 'he' ? 'הזמנות' : 'Orders',
+    admin:         lang === 'he' ? 'ניהול'  : 'Admin',
+    notifications: lang === 'he' ? 'הזמנות' : 'Orders',
+    analytics:     lang === 'he' ? 'פרופיל' : 'Profile',
+  };
+  const headerLabel = isBackView
+    ? (BACK_LABELS[view] ?? (lang === 'he' ? 'חזרה' : 'Back'))
+    : (lang === 'he' ? 'שוק' : 'Marketplace');
+
 
   return (
     <div
@@ -381,8 +400,11 @@ function AppShell() {
           }}
         >
           <div className="flex items-center justify-between px-6 h-16 w-full max-w-7xl mx-auto">
-            {/* Left: back arrow + Marketplace title */}
-            <div className="flex items-center gap-4 cursor-pointer" onClick={() => { reset(); goTab('home'); }}>
+            {/* Left: back arrow + context label */}
+            <div
+              className="flex items-center gap-4 cursor-pointer"
+              onClick={isBackView ? () => history.back() : () => { reset(); goTab('home'); }}
+            >
               {rtl
                 ? <ChevronRight className="w-6 h-6 cursor-pointer hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} />
                 : <ArrowLeft className="w-6 h-6 cursor-pointer hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} />
@@ -391,7 +413,7 @@ function AppShell() {
                 className="text-lg font-semibold tracking-tight"
                 style={{ fontFamily: '"Manrope", system-ui, sans-serif', color: '#6FEEE1' }}
               >
-                {lang === 'he' ? 'שוק' : 'Marketplace'}
+                {headerLabel}
               </h1>
             </div>
 
@@ -449,7 +471,7 @@ function AppShell() {
         {/* ChatView is here too: ScreenTransition has will-change:transform which creates a new stacking  */}
         {/* context, trapping ChatView's z-[45] inside it and letting the bottom nav (z-40, root context)  */}
         {/* paint over the composer. Moving ChatView here puts it at root stacking level.                  */}
-        <Suspense fallback={null}>
+        <Suspense fallback={<LoadingScreen fullscreen />}>
           {view === 'camera' && <LazyCameraView />}
           {view === 'analyzing' && <LazyAnalyzingView />}
           {view === 'results' && <LazyResultsView />}
@@ -467,7 +489,7 @@ function AppShell() {
             {view === 'sellerProfile' && <SellerProfileView />}
             {view === 'auth' && <AuthView />}
             {view === 'profile' && user && <ProfileView />}
-            <Suspense fallback={null}>
+            <Suspense fallback={<LoadingScreen fullscreen={false} />}>
               {view === 'saved' && <LazySavedView />}
               {view === 'inbox' && <LazyInboxView />}
               {view === 'myListings' && <LazyMyListingsView />}

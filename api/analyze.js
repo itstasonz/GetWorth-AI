@@ -24,12 +24,10 @@ import { createClient } from '@supabase/supabase-js';
 // Set ALLOWED_ORIGIN=https://yourapp.com (comma-separated) in Vercel env vars.
 function getCorsHeaders(requestOrigin) {
   const configured = (process.env.ALLOWED_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
-  const allowed = new Set([
-    ...configured,
-    'http://localhost:5173',
-    'http://localhost:3000',
-    'http://localhost:4173',
-  ]);
+  const devOrigins = process.env.NODE_ENV !== 'production'
+    ? ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:4173']
+    : [];
+  const allowed = new Set([...configured, ...devOrigins]);
   const headers = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
