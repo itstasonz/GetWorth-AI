@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── GetWorth design tokens ──────────────────────────────────────────────────
+ * Stage 1: CSS variable foundation. Tailwind extends these via tailwind.config.js
+ * so screens can use bg-app, bg-surface-low, text-primary, border-outline, etc.
+ * Existing hardcoded colors are left unchanged until Stage 2 migration.
+ * ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  --color-app:            #131313;
+  --color-surface-lowest: #0E0E0E;
+  --color-surface-low:    #1C1B1B;
+  --color-surface-high:   #2A2A2A;
+  --color-primary:        #6FEEE1;
+  --color-primary-dark:   #4FD1C5;
+  --color-primary-on:     #003733;
+  --color-outline:        #3C4947;
+}
+
 /*
  * Shell background reset.
  *
