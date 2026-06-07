@@ -30,7 +30,7 @@
 
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- PART 1 — Add tables to supabase_realtime publication
+-- PART 1 — Add tables to supabase_realtime publicatione
 --
 -- pg_publication_tables is checked first; ALTER PUBLICATION ADD TABLE errors
 -- if the table is already a member, so the conditional guard is required.

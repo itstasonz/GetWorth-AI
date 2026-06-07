@@ -4,13 +4,13 @@ An intelligent app that uses AI to recognize items from photos and provide insta
 
 ## Features
 
-- 📸 **Camera Scan** - Take photos directly in the app
-- 🖼️ **Image Upload** - Upload existing photos
-- 🤖 **AI Recognition** - Automatically identifies items using Claude AI
-- 💰 **Instant Valuation** - Get market value estimates with price ranges
-- 👤 **User Accounts** - Sign up with email, Google, or Apple
-- 📋 **Personal Listings** - Save items you want to sell
-- 📜 **Search History** - Track all your scanned items
+-  **Camera Scan** - Take photos directly in the app
+-  **Image Upload** - Upload existing photos
+-  **AI Recognition** - Automatically identifies items using Claude AI
+-  **Instant Valuation** - Get market value estimates with price ranges
+-  **User Accounts** - Sign up with email, Google, or Apple
+-  **Personal Listings** - Save items you want to sell
+-  **Search History** - Track all your scanned items
 
 ## Quick Deploy to Vercel (Recommended)
 

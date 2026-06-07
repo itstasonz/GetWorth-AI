@@ -15,6 +15,23 @@ export function BrowseView() {
     hasMore, loadingMore, loadMoreListings,
   } = useApp();
 
+  // Track whether the initial listings fetch has completed.
+  //
+  // We capture the listings array reference at mount. When loadListings resolves —
+  // even with zero results — AppContext calls setListings([]) which produces a NEW
+  // array reference. Comparing against the mount-time ref is the only reliable
+  // signal that a fetch completed without touching AppContext or adding a timer.
+  //
+  // Why not [listings.length]: length stays 0 on both "still loading" and "fetched
+  // empty", so the effect never fires when the backend returns zero items.
+  const listingsMountRef = useRef(listings);
+  const [listingsInitialized, setListingsInitialized] = useState(listings.length > 0);
+  useEffect(() => {
+    if (listings !== listingsMountRef.current) {
+      setListingsInitialized(true);
+    }
+  }, [listings]);
+
   // ─── Pull-to-refresh ────────────────────────────────────────────────
   const [refreshingUI, setRefreshingUI] = useState(false);
   const touchStartY = useRef(0);
@@ -183,13 +200,49 @@ export function BrowseView() {
         </button>
       </div>
 
-      {sortedListings.length === 0 ? (
-        <FadeIn className="text-center py-16">
-          <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
-            <Search className="w-10 h-10 text-slate-600" />
-          </div>
-          <p className="text-slate-400 font-medium">{t.noResults}</p>
-        </FadeIn>
+      {!listingsInitialized ? (
+        /* Skeleton grid — shown while first listings fetch is in flight */
+        <div className="grid grid-cols-2 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-3xl overflow-hidden bg-white/5 relative" style={{ animationDelay: `${i * 40}ms` }}>
+              <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/10 to-transparent z-10 pointer-events-none" />
+              {/* Image placeholder */}
+              <div className="aspect-square bg-white/[0.04]" />
+              {/* Text placeholders */}
+              <div className="p-4 space-y-2.5">
+                <div className="h-3.5 bg-white/[0.06] rounded-xl w-4/5" />
+                <div className="h-5 bg-white/[0.06] rounded-xl w-2/5" />
+                <div className="h-3 bg-white/[0.04] rounded-xl w-3/5" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : sortedListings.length === 0 ? (
+        /* Context-aware empty state */
+        search || category !== 'all' || filterCondition !== 'all' || priceRange.min || priceRange.max ? (
+          <FadeIn className="text-center py-16">
+            <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+              <Search className="w-10 h-10 text-slate-600" />
+            </div>
+            <p className="text-slate-300 font-semibold mb-2">{t.noResults}</p>
+            <p className="text-slate-500 text-sm mb-5 max-w-[220px] mx-auto leading-relaxed">
+              {lang === 'he' ? 'נסה לשנות את הפילטרים או לחפש משהו אחר' : 'Try adjusting your filters or search for something else'}
+            </p>
+            <Btn onClick={() => { setSearch(''); setCategory('all'); setFilterCondition('all'); setPriceRange({ min: '', max: '' }); }} className="mx-auto text-sm">
+              {lang === 'he' ? 'נקה פילטרים' : 'Clear Filters'}
+            </Btn>
+          </FadeIn>
+        ) : (
+          <FadeIn className="text-center py-16">
+            <div className="w-20 h-20 rounded-3xl bg-white/5 flex items-center justify-center mx-auto mb-4">
+              <ShoppingBag className="w-10 h-10 text-slate-600" />
+            </div>
+            <p className="text-slate-300 font-semibold mb-2">{lang === 'he' ? 'אין מוצרים עדיין' : 'No listings yet'}</p>
+            <p className="text-slate-500 text-sm mb-5 max-w-[220px] mx-auto leading-relaxed">
+              {lang === 'he' ? 'היה הראשון להוסיף מוצר למכירה' : 'Be the first to post something for sale'}
+            </p>
+          </FadeIn>
+        )
       ) : (
         <>
           <div className="grid grid-cols-2 gap-4">

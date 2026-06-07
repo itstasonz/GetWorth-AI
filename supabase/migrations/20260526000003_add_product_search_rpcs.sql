@@ -9,32 +9,12 @@
 -- return empty results on every scan.
 -- ══════════════════════════════════════════════════════════════════
 
--- ── Drop all known existing signatures first ──────────────────────
--- Required because CREATE OR REPLACE cannot change the return type or
--- parameter defaults of an already-existing function in Postgres.
--- Using exact signatures confirmed from pg_proc inspection.
-
-DROP FUNCTION IF EXISTS public.match_products_by_ocr(text[], integer);
-DROP FUNCTION IF EXISTS public.match_products(vector, double precision, integer);
-DROP FUNCTION IF EXISTS public.match_products(vector, integer);
-
--- ── Diagnostic: list remaining signatures (run output visible in psql / SQL editor) ──
-SELECT
-  p.proname                                            AS function_name,
-  pg_get_function_identity_arguments(p.oid)            AS args
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'public'
-  AND p.proname IN ('match_products', 'match_products_by_ocr')
-ORDER BY p.proname, p.oid;
-
-
 -- ── match_products_by_ocr ─────────────────────────────────────────
 -- Called by retrieveCandidates() with OCR-extracted keyword tokens.
 -- Matches products by: model number, name, brand, or keyword array.
 -- Returns ranked results: model_number > ocr_keyword > keyword > brand.
 
-CREATE OR REPLACE FUNCTION public.match_products_by_ocr(
+CREATE OR REPLACE FUNCTION match_products_by_ocr(
   p_keywords TEXT[],
   p_limit    INT DEFAULT 6
 )
@@ -79,27 +59,27 @@ AS $$
     p.keywords,
     p.aliases,
     CASE
-      -- Model field match — highest priority (model number confirmed by OCR)
+      -- Model field matches (highest priority — model number confirmed by OCR)
       WHEN EXISTS (
         SELECT 1 FROM unnest(p_keywords) kw
         WHERE p.model ILIKE '%' || kw || '%' AND length(kw) >= 3
       ) THEN 'model_number'
-      -- Name field match
+      -- Name field matches
       WHEN EXISTS (
         SELECT 1 FROM unnest(p_keywords) kw
         WHERE p.name ILIKE '%' || kw || '%' AND length(kw) >= 3
       ) THEN 'ocr_keyword'
-      -- Keywords array match
+      -- Keywords array matches
       WHEN EXISTS (
         SELECT 1 FROM unnest(p.keywords) pk, unnest(p_keywords) kw
         WHERE pk ILIKE '%' || kw || '%' AND length(kw) >= 3
       ) THEN 'keyword'
-      -- Aliases array match
+      -- Aliases array matches
       WHEN EXISTS (
         SELECT 1 FROM unnest(p.aliases) pa, unnest(p_keywords) kw
         WHERE pa ILIKE '%' || kw || '%' AND length(kw) >= 3
       ) THEN 'alias'
-      -- Brand match — lowest priority (too broad on its own)
+      -- Brand matches (lowest priority — too broad on its own)
       WHEN EXISTS (
         SELECT 1 FROM unnest(p_keywords) kw
         WHERE p.brand ILIKE '%' || kw || '%' AND length(kw) >= 3
@@ -108,6 +88,7 @@ AS $$
     END AS match_type
   FROM products p
   WHERE
+    -- At least one keyword must match something
     (
       EXISTS (SELECT 1 FROM unnest(p_keywords) kw WHERE p.model ILIKE '%' || kw || '%' AND length(kw) >= 3)
       OR EXISTS (SELECT 1 FROM unnest(p_keywords) kw WHERE p.name  ILIKE '%' || kw || '%' AND length(kw) >= 3)
@@ -128,19 +109,20 @@ $$;
 
 
 -- ── match_products (vector similarity) ────────────────────────────
--- Called by retrieveCandidates() Strategy 1 when a query embedding is available.
--- Requires the pgvector extension and a vector text_embedding column on products.
--- The DO block skips creation if pgvector is absent — api/analyze.js handles
--- the resulting RPC error gracefully via its OCR/text fallback strategies.
+-- Called by retrieveCandidates() Strategy 1 when an embedding is available.
+-- Requires the pgvector extension and a text_embedding column on products.
+-- SKIP THIS if pgvector is not enabled in your Supabase project — the
+-- api/analyze.js code already handles the RPC error gracefully.
 
 DO $$
 BEGIN
+  -- Only create if pgvector extension is loaded (avoids migration failure when absent)
   IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
     EXECUTE $func$
-      CREATE OR REPLACE FUNCTION public.match_products(
-        query_embedding      vector,
-        similarity_threshold double precision DEFAULT 0.60,
-        match_limit          integer          DEFAULT 10
+      CREATE OR REPLACE FUNCTION match_products(
+        query_embedding   vector,
+        similarity_threshold FLOAT DEFAULT 0.60,
+        match_limit       INT    DEFAULT 10
       )
       RETURNS TABLE (
         id                  UUID,
@@ -159,7 +141,7 @@ BEGIN
         confidence_weight   NUMERIC,
         keywords            TEXT[],
         aliases             TEXT[],
-        similarity          double precision
+        similarity          FLOAT
       )
       LANGUAGE sql
       STABLE
@@ -172,50 +154,20 @@ BEGIN
           p.price_low_ils, p.price_high_ils,
           p.popularity_score, p.scan_count, p.confidence_weight,
           p.keywords, p.aliases,
-          (1 - (p.text_embedding <=> query_embedding))::double precision AS similarity
+          1 - (p.text_embedding <=> query_embedding) AS similarity
         FROM products p
         WHERE p.text_embedding IS NOT NULL
-          AND (1 - (p.text_embedding <=> query_embedding)) > similarity_threshold
+          AND 1 - (p.text_embedding <=> query_embedding) > similarity_threshold
         ORDER BY p.text_embedding <=> query_embedding
         LIMIT match_limit;
       $inner$;
     $func$;
-    RAISE NOTICE 'match_products (vector) created successfully';
+    RAISE NOTICE 'match_products (vector) created';
   ELSE
-    RAISE NOTICE 'pgvector extension not found — match_products skipped. Vector search falls back gracefully in api/analyze.js.';
+    RAISE NOTICE 'pgvector not available — match_products (vector) skipped. Vector search will fall back gracefully.';
   END IF;
 END;
 $$;
 
-
--- ── Grants ────────────────────────────────────────────────────────
-GRANT EXECUTE ON FUNCTION public.match_products_by_ocr(TEXT[], INT)
-  TO anon, authenticated, service_role;
-
--- Conditionally grant match_products only if it was created
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.proname = 'match_products'
-  ) THEN
-    EXECUTE 'GRANT EXECUTE ON FUNCTION public.match_products(vector, double precision, integer) TO anon, authenticated, service_role';
-    RAISE NOTICE 'Granted execute on match_products';
-  END IF;
-END;
-$$;
-
-
--- ── Final diagnostic: confirm what exists after migration ─────────
-SELECT
-  p.proname                                            AS function_name,
-  pg_get_function_identity_arguments(p.oid)            AS args,
-  l.lanname                                            AS language,
-  p.prosecdef                                          AS security_definer
-FROM pg_proc p
-JOIN pg_namespace n ON n.oid = p.pronamespace
-JOIN pg_language  l ON l.oid = p.prolang
-WHERE n.nspname = 'public'
-  AND p.proname IN ('match_products', 'match_products_by_ocr')
-ORDER BY p.proname, p.oid;
+-- Grant execute to the anon and authenticated roles used by Supabase clients
+GRANT EXECUTE ON FUNCTION match_products_by_ocr(TEXT[], INT) TO anon, authenticated, service_role;

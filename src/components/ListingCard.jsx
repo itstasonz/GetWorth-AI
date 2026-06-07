@@ -64,7 +64,7 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
     <div className="animate-fadeIn" style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}>
       <Card className="overflow-hidden group" onClick={() => viewItem(item)}>
         <div className="relative aspect-square overflow-hidden">
-          <LazyImage src={item.images?.[0]} alt="" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
+          <LazyImage src={item.images?.[0]} alt={item.title || ''} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
           
           {/* Save button */}

@@ -4,8 +4,8 @@
   "description": "AI-Powered Item Valuation App",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0f1a",
-  "theme_color": "#3b82f6",
+  "background_color": "#131313",
+  "theme_color": "#131313",
   "orientation": "portrait",
   "icons": [
     {

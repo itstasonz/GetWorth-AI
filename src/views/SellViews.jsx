@@ -295,7 +295,7 @@ export function MyListingsView() {
 }
 
 export function SavedView() {
-  const { t, lang, rtl, savedItems, viewItem, toggleSave, user } = useApp();
+  const { t, lang, rtl, savedItems, viewItem, toggleSave, user, goTab } = useApp();
   return (
     <div className="space-y-5">
       <FadeIn><h2 className="text-2xl font-bold">{t.saved}</h2></FadeIn>
@@ -308,14 +308,12 @@ export function SavedView() {
           ))}
         </div>
       ) : (
-        <FadeIn delay={100}>
-          <Card className="p-10 text-center" gradient="linear-gradient(135deg, rgba(239,68,68,0.08), rgba(239,68,68,0.02))">
-            <div className="w-20 h-20 rounded-3xl bg-pink-500/10 flex items-center justify-center mx-auto mb-4">
-              <Heart className="w-10 h-10 text-pink-400" />
-            </div>
-            <p className="text-slate-400">{t.noSaved}</p>
-          </Card>
-        </FadeIn>
+        <EmptyState
+          icon={Heart}
+          title={t.noSaved}
+          subtitle={lang === 'he' ? 'לחץ על הלב בכל פריט כדי לשמור אותו כאן' : 'Tap the heart on any listing to save it here'}
+          cta={<Btn primary onClick={() => goTab('browse')}>{lang === 'he' ? 'עיון בפריטים' : 'Browse Items'}</Btn>}
+        />
       )}
     </div>
   );

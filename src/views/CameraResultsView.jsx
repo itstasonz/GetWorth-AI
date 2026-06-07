@@ -1008,7 +1008,7 @@ export function ResultsView() {
             }
           }}>
           <div className="aspect-[4/5]">
-            <img src={images[activePhotoIndex] || images[0]} className="w-full h-full object-cover" />
+            <img src={images[activePhotoIndex] || images[0]} className="w-full h-full object-cover" alt={result?.name || (lang === 'he' ? 'פריט לניתוח' : 'Item for valuation')} />
           </div>
           {/* Authenticity-aware badge */}
           {(() => {
