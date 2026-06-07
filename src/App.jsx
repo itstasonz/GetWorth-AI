@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
-import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw } from 'lucide-react';
+import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw, Upload } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
@@ -203,6 +203,7 @@ function AppShell() {
     showContact, setShowContact, selected, startConversation,
     // Misc
     myListings, unreadCount, notifUnreadCount, fileRef, orders,
+    cameraBlocked, setCameraBlocked,
   } = useApp();
 
   const { hasUpdate, applyUpdate } = usePWAUpdate();
@@ -325,6 +326,44 @@ function AppShell() {
               </div>
             </Card>
           </ScaleIn>
+        </div>
+      )}
+
+      {/* Camera Blocked Modal */}
+      {cameraBlocked && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <SlideUp className="w-full max-w-md">
+            <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-5">
+              <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+              <div className="text-center space-y-3">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto" style={{ background: 'rgba(239,68,68,0.12)' }}>
+                  <AlertCircle className="w-8 h-8 text-red-400" />
+                </div>
+                <h3 className="text-lg font-bold">{lang === 'he' ? 'הגישה למצלמה חסומה' : 'Camera access blocked'}</h3>
+                <p className="text-sm text-slate-400 leading-relaxed">
+                  {lang === 'he'
+                    ? 'כדי לאפשר: פתח הגדרות > הדפדפן שלך > מצלמה > אפשר'
+                    : 'To enable: open Settings → your browser → Camera → Allow'}
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setCameraBlocked(false)}
+                  className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 transition-all"
+                >
+                  {lang === 'he' ? 'סגור' : 'Dismiss'}
+                </button>
+                <button
+                  onClick={() => { setCameraBlocked(false); fileRef.current?.click(); }}
+                  className="flex-1 py-3 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all active:scale-95"
+                  style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
+                >
+                  <Upload className="w-4 h-4" />
+                  {lang === 'he' ? 'העלה תמונה' : 'Upload photo'}
+                </button>
+              </div>
+            </div>
+          </SlideUp>
         </div>
       )}
 

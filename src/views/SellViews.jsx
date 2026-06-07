@@ -1449,7 +1449,7 @@ export function ListingFlowView() {
     listingStep, setListingStep, listingData, setListingData,
     images, setImages,
     publishing, publishListing, selectCondition, setView,
-    reset, goTab, playSound,
+    reset, goTab, playSound, showToastMsg,
   } = useApp();
 
   const fileInputRef = useRef(null);
@@ -1458,9 +1458,17 @@ export function ListingFlowView() {
   const categoryQuestions = getQuestionsForCategory(itemCategory, answers);
 
   const addMoreImages = (e) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach((file) => {
-      if (!file.type.startsWith('image/')) return;
+    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
+    const available = 6 - images.length;
+    if (files.length > available) {
+      showToastMsg(
+        available > 0
+          ? (lang === 'he' ? `ניתן להוסיף עוד ${available} תמונות בלבד (מקסימום 6)` : `Only ${available} photo${available !== 1 ? 's' : ''} left (max 6)`)
+          : (lang === 'he' ? 'הגעת למגבלת 6 תמונות' : 'Photo limit reached (max 6)'),
+        'error',
+      );
+    }
+    files.slice(0, available).forEach((file) => {
       const reader = new FileReader();
       reader.onload = (ev) => {
         setImages((prev) => {

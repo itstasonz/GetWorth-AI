@@ -193,6 +193,7 @@ export function AppProvider({ children }) {
   // Camera permission
   const cameraStreamRef = useRef(null);
   const cameraPermissionGranted = useRef(false);
+  const [cameraBlocked, setCameraBlocked] = useState(false);
 
   // Refs
   const fileRef = useRef(null);
@@ -2063,7 +2064,7 @@ export function AppProvider({ children }) {
           const permResult = await navigator.permissions.query({ name: 'camera' });
           camLog(`permission state: ${permResult.state}`);
           if (permResult.state === 'denied') {
-            setError(lang === 'he' ? 'הגישה למצלמה נחסמה. אנא אפשר אותה בהגדרות הדפדפן' : 'Camera access is blocked. Please enable it in browser settings.');
+            setCameraBlocked(true);
             cameraStartingRef.current = false;
             return;
           }
@@ -2120,7 +2121,7 @@ export function AppProvider({ children }) {
       releaseCamera();
       if (err.name === 'NotAllowedError' || err.name === 'NotFoundError') {
         cameraPermissionGranted.current = false;
-        setError(lang === 'he' ? 'הגישה למצלמה נדחתה' : 'Camera access denied.');
+        setCameraBlocked(true);
       } else {
         setError(lang === 'he' ? 'שגיאה בפתיחת המצלמה' : 'Failed to open camera');
       }
@@ -2652,7 +2653,7 @@ export function AppProvider({ children }) {
     setPipelineError(null);
     setAddPhotoMode(false);
     setHelpModalOpen(false);
-    setImages([]); setResult(null); setView('home'); setError(null);
+    setImages([]); setResult(null); setView('home'); setError(null); setCameraBlocked(false);
     setCondition(null); setListingStep(0); setSelected(null);
     setActiveChat(null); capturedImageRef.current = null;
     setSellerProfile(null); setSellerListings([]);
@@ -2846,6 +2847,7 @@ export function AppProvider({ children }) {
     error, setError, toasts, dismissToast, showToastMsg,
     soundEnabled, setSoundEnabled, playSound,
     fileRef, videoRef, canvasRef,
+    cameraBlocked, setCameraBlocked,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

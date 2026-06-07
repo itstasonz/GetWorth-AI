@@ -293,6 +293,7 @@ export function OrderDetailView() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  const [showDeclineConfirm, setShowDeclineConfirm] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
@@ -556,7 +557,7 @@ export function OrderDetailView() {
                   {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
                   {lang === 'he' ? 'אשר הזמנה' : 'Accept Order'}
                 </Btn>
-                <button onClick={() => handleAction('declined')} disabled={updating}
+                <button onClick={() => setShowDeclineConfirm(true)} disabled={updating}
                   className="w-full py-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm font-semibold text-red-300 flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all disabled:opacity-40">
                   <ThumbsDown className="w-4 h-4" />{lang === 'he' ? 'דחה הזמנה' : 'Decline Order'}
                 </button>
@@ -673,6 +674,29 @@ export function OrderDetailView() {
         <FadeIn><Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
           <div className="flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5 text-yellow-400" /><span className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'תודה! הביקורת נשלחה' : 'Thank you! Review submitted'}</span></div>
         </Card></FadeIn>
+      )}
+
+      {/* Decline Confirmation Modal */}
+      {showDeclineConfirm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <SlideUp className="w-full max-w-md">
+            <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-4">
+              <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+              <div className="text-center space-y-2">
+                <ThumbsDown className="w-10 h-10 text-red-400 mx-auto" />
+                <h3 className="text-lg font-bold text-red-300">{lang === 'he' ? 'לדחות את הבקשה?' : 'Decline this request?'}</h3>
+                <p className="text-sm text-slate-400">{lang === 'he' ? 'הקונה יקבל הודעה שהבקשה נדחתה.' : 'The buyer will be notified that their request was declined.'}</p>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setShowDeclineConfirm(false)} className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium">{lang === 'he' ? 'חזור' : 'Go Back'}</button>
+                <button onClick={() => { setShowDeclineConfirm(false); handleAction('declined'); }} disabled={updating}
+                  className="flex-1 py-3 rounded-xl bg-red-600/20 border border-red-500/30 text-sm font-semibold text-red-300 flex items-center justify-center gap-2 hover:bg-red-600/30 transition-all disabled:opacity-40">
+                  {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <ThumbsDown className="w-4 h-4" />}{lang === 'he' ? 'כן, דחה' : 'Yes, Decline'}
+                </button>
+              </div>
+            </div>
+          </SlideUp>
+        </div>
       )}
 
       {/* Complete Confirmation Modal */}
