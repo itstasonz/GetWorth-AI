@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon, X, Keyboard } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { camLog } from '../contexts/AppContext';
@@ -282,8 +282,18 @@ export function AnalyzingView() {
   const {
     lang, t, images, capturedImageRef, rtl,
     pipelineState, pipelineError,
-    retryPipeline, cancelPipeline,
+    retryPipeline, cancelPipeline, scanCooldownUntil,
   } = useApp();
+
+  // Tick once a second while a rate-limit cooldown is active, to update the countdown.
+  const [nowTick, setNowTick] = useState(Date.now());
+  useEffect(() => {
+    if (!scanCooldownUntil || scanCooldownUntil <= Date.now()) return;
+    const id = setInterval(() => setNowTick(Date.now()), 500);
+    return () => clearInterval(id);
+  }, [scanCooldownUntil]);
+  const cooldownSecs = Math.max(0, Math.ceil((scanCooldownUntil - nowTick) / 1000));
+  const coolingDown = cooldownSecs > 0;
 
   const isError = pipelineState === 'compress_error' || pipelineState === 'analysis_error';
   const isCompressing = pipelineState === 'compressing';
@@ -343,15 +353,20 @@ export function AnalyzingView() {
             </button>
             <button
               onClick={retryPipeline}
+              disabled={coolingDown}
               className="flex-1 py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2 active:scale-[0.97]"
               style={{
                 background: STITCH.GRADIENT_PRIMARY,
                 color: STITCH.onPrimary,
                 boxShadow: '0 10px 25px rgba(111, 238, 225, 0.25)',
+                opacity: coolingDown ? 0.5 : 1,
+                pointerEvents: coolingDown ? 'none' : 'auto',
               }}
             >
               <RefreshCw className="w-4 h-4" />
-              {lang === 'he' ? 'נסה שוב' : 'Retry'}
+              {coolingDown
+                ? (lang === 'he' ? `המתן ${cooldownSecs}ש׳` : `Wait ${cooldownSecs}s`)
+                : (lang === 'he' ? 'נסה שוב' : 'Retry')}
             </button>
           </div>
         </div>

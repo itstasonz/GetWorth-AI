@@ -120,6 +120,11 @@ export function AppProvider({ children }) {
   const [pipelineState, setPipelineState] = useState('idle');
   const [pipelineError, setPipelineError] = useState(null);
   const pipelineAbortRef = useRef(null);
+  // In-flight guard — prevents duplicate /api/analyze calls from rapid taps.
+  const pipelineActiveRef = useRef(false);
+  // Rate-limit cooldown (epoch ms). Scan/retry disabled until now passes this.
+  const [scanCooldownUntil, setScanCooldownUntil] = useState(0);
+  const scanCooldownUntilRef = useRef(0); // latest value for use inside callbacks
   // Perf: cache recognition hints in memory — refresh every 5 min, not every scan
   const hintsCacheRef = useRef({ data: [], ts: 0 });
 
@@ -1425,6 +1430,23 @@ export function AppProvider({ children }) {
         if (DEV) console.log(`[Analyze] Attempt ${attempt + 1}: HTTP ${res.status} in ${(performance.now() - t0).toFixed(0)}ms`);
 
         if (!res.ok) {
+          // Rate limited — parse structured body, surface a friendly message,
+          // and carry retryAfter so the pipeline can start a cooldown.
+          if (res.status === 429) {
+            let errBody = {};
+            try { errBody = await res.json(); } catch {}
+            const secs = errBody.retryAfterSeconds
+              || parseInt(res.headers.get('Retry-After') || '0', 10)
+              || 30;
+            const msg = errBody.message || (errBody.limitType === 'user_daily'
+              ? (lang === 'he' ? 'הגעת למכסת הסריקות היומית. נסה שוב מחר.' : 'Daily scan limit reached. Try again tomorrow.')
+              : (lang === 'he' ? 'יותר מדי סריקות. המתן רגע ונסה שוב.' : 'Too many scans. Please wait a moment and try again.'));
+            const rlErr = new Error(msg);
+            rlErr.rateLimited = true;
+            rlErr.retryAfter = secs;
+            rlErr.limitType = errBody.limitType || 'rate';
+            throw rlErr; // not retried here (maxRetries=0) — handled in runPipeline
+          }
           if (res.status === 401) {
             let errBody = {};
             try { errBody = await res.json(); } catch {}
@@ -1580,7 +1602,21 @@ export function AppProvider({ children }) {
   // ── Main pipeline: compress → analyze ──
   // appendMode: if true, appends new image to existing images[] and re-analyzes all
   const runPipeline = useCallback(async (rawDataUrl, appendMode = false) => {
-    // Cancel any in-flight pipeline
+    // ── In-flight guard — a scan is already running; ignore duplicate taps ──
+    if (pipelineActiveRef.current) {
+      if (DEV) console.log('[Pipeline] Ignored — a scan is already running');
+      return;
+    }
+    // ── Cooldown guard — respect server rate-limit backoff ──
+    if (Date.now() < scanCooldownUntilRef.current) {
+      const secs = Math.ceil((scanCooldownUntilRef.current - Date.now()) / 1000);
+      setPipelineState('analysis_error');
+      setPipelineError(lang === 'he' ? `המתן ${secs} שניות לפני סריקה נוספת` : `Please wait ${secs}s before scanning again`);
+      return;
+    }
+    pipelineActiveRef.current = true;
+
+    // Cancel any in-flight pipeline (defensive — guard above should prevent this)
     if (pipelineAbortRef.current) {
       pipelineAbortRef.current.abort();
     }
@@ -1660,17 +1696,30 @@ export function AppProvider({ children }) {
         return;
       }
 
+      // Rate limited — start a cooldown so scan/retry buttons disable until it passes.
+      if (e.rateLimited) {
+        const until = Date.now() + (e.retryAfter || 30) * 1000;
+        scanCooldownUntilRef.current = until;
+        setScanCooldownUntil(until);
+        if (DEV) console.log(`[Pipeline] Rate limited — cooldown ${e.retryAfter}s (${e.limitType})`);
+      }
+
       console.error('[Pipeline] Failed:', e);
       const failedAtCompress = !imagesRef.current.length || pipelineState === 'compressing';
       setPipelineState(failedAtCompress ? 'compress_error' : 'analysis_error');
       setPipelineError(e.message || (lang === 'he' ? 'שגיאה' : 'An error occurred'));
       playSound('error');
+    } finally {
+      // Always release the in-flight guard so legitimate retries can proceed.
+      pipelineActiveRef.current = false;
     }
   }, [analyzeWithRetry, fetchRecognitionHints, storeValuation, playSound, lang]);
 
   // ── Retry from the failed step ──
   const retryPipeline = useCallback(() => {
     if (!capturedImageRef.current) return;
+    // Block duplicate runs and respect cooldown (runPipeline re-checks too).
+    if (pipelineActiveRef.current || Date.now() < scanCooldownUntilRef.current) return;
     setView('analyzing');
     runPipeline(capturedImageRef.current);
   }, [runPipeline]);
@@ -1930,6 +1979,8 @@ export function AppProvider({ children }) {
   // ── handleFile: user picks image from gallery ──
   const handleFile = useCallback((file) => {
     if (!file?.type.startsWith('image/')) return;
+    // In-flight / cooldown guard — avoid duplicate scans (runPipeline re-checks too).
+    if (pipelineActiveRef.current || Date.now() < scanCooldownUntilRef.current) return;
     playSound('tap');
     setView('analyzing');
 
@@ -2144,6 +2195,8 @@ export function AppProvider({ children }) {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas) return;
+    // In-flight / cooldown guard — block double-capture & rate-limited re-scans.
+    if (pipelineActiveRef.current || Date.now() < scanCooldownUntilRef.current) return;
 
     // Check video is actually producing frames
     if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
@@ -2826,7 +2879,7 @@ export function AppProvider({ children }) {
     sellerReviews, reviewsLoading, submitReview, loadSellerReviews,
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
-    pipelineState, pipelineError, retryPipeline, cancelPipeline,
+    pipelineState, pipelineError, retryPipeline, cancelPipeline, scanCooldownUntil,
     // Multi-photo + Help modal
     addPhoto, addPhotoMode, setAddPhotoMode,
     captureAdditionalPhoto, handleAdditionalFile, submitBrandHint,

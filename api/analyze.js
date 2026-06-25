@@ -762,14 +762,29 @@ async function incrementVisionDailyCounter(supa) {
   }
 }
 
+// Seconds remaining until the next UTC midnight (when the daily quota resets).
+function secondsUntilUtcMidnight() {
+  const now = new Date();
+  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+  return Math.max(1, Math.ceil((midnight - now.getTime()) / 1000));
+}
+
+// Returns { allowed, limitType, retryAfter, charged }.
+//   limitType : 'ip_rate' | 'user_rate' | 'user_daily' | 'quota_error' | null
+//   retryAfter: seconds the client should wait before retrying
+//   charged   : true only when the daily quota was incremented for a request that
+//               WILL proceed to the AI pipeline. The caller MUST refund (via
+//               decrement_user_daily_scan) if that scan then fails, so a failed
+//               scan never permanently consumes the user's daily allowance.
+// Safe logs only — no tokens, secrets, or image data.
 async function checkRateLimit(supa, ip, userId) {
   // No DB client = fail closed: we cannot verify the rate, so deny
-  if (!supa || !ip) return { allowed: false, reason: 'ip_rate' };
+  if (!supa || !ip) return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
 
   const oneMinAgo = new Date(Date.now() - 60_000).toISOString();
 
   try {
-    // ── IP per-minute check (unchanged behaviour) ──
+    // ── IP per-minute check (burst guard — counts all attempts) ──
     const { count: ipCount } = await supa
       .from('scan_rate_log')
       .select('*', { count: 'exact', head: true })
@@ -777,11 +792,11 @@ async function checkRateLimit(supa, ip, userId) {
       .gte('created_at', oneMinAgo);
 
     if ((ipCount || 0) >= VISION_RATE_PER_MIN) {
-      console.warn(`[RateLimit] IP ${ip} exceeded ${VISION_RATE_PER_MIN}/min`);
-      return { allowed: false, reason: 'ip_rate' };
+      console.warn(`[RateLimit] denied source=ip limitType=ip_rate count=${ipCount}/${VISION_RATE_PER_MIN} retryAfter=60s charged=false`);
+      return { allowed: false, limitType: 'ip_rate', retryAfter: 60, charged: false };
     }
 
-    // ── User per-minute check ──
+    // ── User per-minute check (burst guard) ──
     if (userId) {
       const { count: userMinCount } = await supa
         .from('scan_rate_log')
@@ -790,38 +805,55 @@ async function checkRateLimit(supa, ip, userId) {
         .gte('created_at', oneMinAgo);
 
       if ((userMinCount || 0) >= USER_RATE_PER_MIN) {
-        console.warn(`[RateLimit] User ${userId} exceeded ${USER_RATE_PER_MIN}/min`);
-        return { allowed: false, reason: 'user_rate' };
+        console.warn(`[RateLimit] denied source=user limitType=user_rate count=${userMinCount}/${USER_RATE_PER_MIN} retryAfter=60s charged=false`);
+        return { allowed: false, limitType: 'user_rate', retryAfter: 60, charged: false };
       }
 
-      // ── Atomic daily increment — blocking, fail closed ──
-      // Increment BEFORE the pipeline runs. The RPC returns the new count post-increment.
-      // If the RPC errors for any reason, deny (fail closed — billing leakage not acceptable).
-      // Over-limit requests also increment; abusers cannot probe the boundary by spamming.
+      // ── Atomic daily increment — anti-probe (over-limit requests still count) ──
+      // Charged up-front; the caller REFUNDS this on Stage 1 failure so failed
+      // scans do not consume the daily quota. RPC is SECURITY DEFINER (works with
+      // anon key). Fail closed on RPC error — billing leakage is not acceptable.
       const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
       const { data: newDailyCount, error: rpcErr } = await supa
         .rpc('increment_user_daily_scan', { p_user_id: userId, p_date: today });
       if (rpcErr) {
-        console.error('[RateLimit] Daily increment RPC failed — denying:', rpcErr.message);
-        return { allowed: false, reason: 'quota_error' };
+        console.error('[RateLimit] denied source=quota limitType=quota_error reason=rpc_failed charged=false:', rpcErr.message);
+        return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
       }
       if ((newDailyCount || 0) > USER_DAILY_LIMIT) {
-        console.warn(`[RateLimit] User ${userId} daily limit hit (count=${newDailyCount}/${USER_DAILY_LIMIT})`);
-        return { allowed: false, reason: 'user_daily' };
+        const retryAfter = secondsUntilUtcMidnight();
+        // No AI runs for a denied request, so this increment stays as the anti-probe
+        // penalty (charged=false → caller does not refund denied requests).
+        console.warn(`[RateLimit] denied source=user limitType=user_daily count=${newDailyCount}/${USER_DAILY_LIMIT} retryAfter=${retryAfter}s charged=false`);
+        return { allowed: false, limitType: 'user_daily', retryAfter, charged: false };
       }
     }
 
     // Non-blocking insert — records this scan for per-minute window checks
     supa.from('scan_rate_log')
       .insert({ ip, user_id: userId || null, created_at: new Date().toISOString() })
-      .then(({ error }) => { if (error) console.error('[RateLimit] Insert failed:', error.message); })
-      .catch(err => console.error('[RateLimit] Insert exception:', err.message));
+      .then(({ error }) => { if (error) console.error('[RateLimit] log insert failed:', error.message); })
+      .catch(err => console.error('[RateLimit] log insert exception:', err.message));
 
-    return { allowed: true, reason: null };
+    console.log(`[RateLimit] allowed uid=${userId ? 'present' : 'anon'} charged=${!!userId}`);
+    return { allowed: true, limitType: null, retryAfter: 0, charged: !!userId };
   } catch (err) {
     // DB check failed — deny rather than allow (fail closed)
-    console.error('[RateLimit] DB check failed — denying request:', err.message);
-    return { allowed: false, reason: 'ip_rate' };
+    console.error('[RateLimit] denied source=db reason=check_failed charged=false:', err.message);
+    return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
+  }
+}
+
+// Refund a previously-charged daily scan after a failed scan. Best-effort.
+async function refundDailyQuota(supa, userId) {
+  if (!supa || !userId) return;
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data, error } = await supa.rpc('decrement_user_daily_scan', { p_user_id: userId, p_date: today });
+    if (error) { console.error('[RateLimit] refund failed:', error.message); return; }
+    console.log(`[RateLimit] refunded daily quota after failed scan newCount=${data}`);
+  } catch (err) {
+    console.error('[RateLimit] refund exception:', err.message);
   }
 }
 
@@ -1812,6 +1844,9 @@ export default async function handler(req) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return json({ error: 'API key not configured' }, 500, cors);
 
+  // Hoisted so both the Stage 1 catch and the outer fatal catch can refund.
+  let quotaCharged = false;
+
   try {
     // Reject oversized bodies before JSON parsing (5 images × 5 MB + envelope).
     // Content-Length may be absent on chunked transfers; skip the check if so.
@@ -1834,17 +1869,24 @@ export default async function handler(req) {
             || req.headers.get('x-real-ip')
             || 'unknown';
 
-    const { allowed: rateOk, reason: rateReason } = await checkRateLimit(supa, ip, authUser.id);
-    if (!rateOk) {
-      const errorMsg = rateReason === 'user_daily'
+    const rl = await checkRateLimit(supa, ip, authUser.id);
+    // Tracks whether THIS request charged the daily quota, so we can refund it if
+    // the scan later fails (Stage 1 / fatal). Set false again once refunded.
+    quotaCharged = rl.charged;
+    if (!rl.allowed) {
+      const message = rl.limitType === 'user_daily'
         ? 'Daily scan limit reached. Try again tomorrow.'
         : 'Too many scans. Please wait a moment and try again.';
+      blog(`[RateLimit] 429 limitType=${rl.limitType} retryAfter=${rl.retryAfter}s (no AI call — cost-free)`);
       return json({
-        error: errorMsg,
-        retryable: rateReason !== 'user_daily',
+        error: message,                       // legacy field — kept for back-compat
+        code: 'RATE_LIMITED',
+        message,
+        retryAfterSeconds: rl.retryAfter,
+        limitType: rl.limitType,
+        retryable: rl.limitType !== 'user_daily',
         rateLimited: true,
-        reason: rateReason,
-      }, 429, cors);
+      }, 429, { ...cors, 'Retry-After': String(rl.retryAfter) });
     }
 
     // ── SERIAL OCR EARLY EXIT — skip full pipeline (rate-limited above) ──
@@ -1911,7 +1953,9 @@ export default async function handler(req) {
       // Stage 1 failure is NOT a product classification — it is a retryable error.
       // Return 503 so the client shows "please retry" instead of a fake "Other" result.
       const isTimeout = stage1Err.message?.includes('Timeout') || stage1Err.name === 'AbortError';
-      blog(`[Pipeline] Stage 1 FAILED (${isTimeout ? 'timeout' : stage1Err.name}) — returning 503: ${stage1Err.message}`);
+      // Refund the daily quota — a failed scan must not consume the user's allowance.
+      if (quotaCharged) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
+      blog(`[Pipeline] Stage 1 FAILED (${isTimeout ? 'timeout' : stage1Err.name}) — returning 503 (quota refunded): ${stage1Err.message}`);
       return json({
         error: lang === 'he'
           ? 'הזיהוי נכשל — אנא נסה שוב'
@@ -2187,6 +2231,9 @@ export default async function handler(req) {
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
 
   } catch (error) {
+    // Refund daily quota on any fatal failure so a broken scan isn't charged.
+    // No-op if already refunded or never charged.
+    if (quotaCharged) { await refundDailyQuota(getSupabase(), authUser?.id); quotaCharged = false; }
     console.error('[Pipeline] Fatal:', error);
     return json({ error: 'Internal server error' }, 500, cors);
   }
