@@ -17,6 +17,17 @@ export const config = { runtime: 'edge' };
 import { createClient } from '@supabase/supabase-js';
 
 // ═══════════════════════════════════════════════════════
+// MODEL CONFIG — single source of truth for Anthropic model IDs
+// ═══════════════════════════════════════════════════════
+// MODEL_VISION drives Stage 1 (recognition) and Stage 2 (verify + pricing).
+// Was 'claude-sonnet-4-20250514' (Sonnet 4), which is deprecated and now returns
+// 404 for this account. 'claude-sonnet-4-6' is the current, active Sonnet — the
+// canonical migration target, vision-capable, and a strict capability upgrade
+// that preserves/improves scan quality. Use the bare alias (no date suffix).
+const MODEL_VISION = 'claude-sonnet-4-6';
+const MODEL_OCR    = 'claude-haiku-4-5-20251001'; // serial-label OCR (unchanged)
+
+// ═══════════════════════════════════════════════════════
 // SECURITY HELPERS
 // ═══════════════════════════════════════════════════════
 
@@ -689,7 +700,7 @@ async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: MODEL_VISION,
       max_tokens: 1500,
       messages: [{ role: 'user', content }],
     }),
@@ -1357,7 +1368,7 @@ async function verifyAndPrice(recognition, candidates, corrections, language, ap
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
+      model: MODEL_VISION,
       max_tokens: 1500,
       messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
     }),
@@ -1788,7 +1799,7 @@ async function ocrSerialLabel(imageBase64, apiKey) {
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: MODEL_OCR,
       max_tokens: 200,
       messages: [{
         role: 'user',
