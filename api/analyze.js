@@ -792,62 +792,37 @@ async function checkRateLimit(supa, ip, userId) {
   // No DB client = fail closed: we cannot verify the rate, so deny
   if (!supa || !ip) return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
 
-  const oneMinAgo = new Date(Date.now() - 60_000).toISOString();
-
   try {
-    // ── IP per-minute check (burst guard — counts all attempts) ──
-    const { count: ipCount } = await supa
-      .from('scan_rate_log')
-      .select('*', { count: 'exact', head: true })
-      .eq('ip', ip)
-      .gte('created_at', oneMinAgo);
-
-    if ((ipCount || 0) >= VISION_RATE_PER_MIN) {
-      console.warn(`[RateLimit] denied source=ip limitType=ip_rate count=${ipCount}/${VISION_RATE_PER_MIN} retryAfter=60s charged=false`);
-      return { allowed: false, limitType: 'ip_rate', retryAfter: 60, charged: false };
+    // ── Single round trip: IP + user burst guards, atomic daily increment, and
+    // the per-minute attempt log all run inside check_and_increment_scan_rate()
+    // (SECURITY DEFINER). Replaces 3 sequential Edge→Supabase round trips (~6.3s)
+    // with one (~1 RTT) so Stage 1 keeps its time budget. Semantics unchanged.
+    const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
+    const { data, error } = await supa.rpc('check_and_increment_scan_rate', {
+      p_ip:          ip,
+      p_user_id:     userId || null,
+      p_date:        today,
+      p_ip_limit:    VISION_RATE_PER_MIN,
+      p_user_limit:  USER_RATE_PER_MIN,
+      p_daily_limit: USER_DAILY_LIMIT,
+    });
+    if (error) {
+      console.error('[RateLimit] denied source=db reason=rpc_failed charged=false:', error.message);
+      return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
     }
-
-    // ── User per-minute check (burst guard) ──
-    if (userId) {
-      const { count: userMinCount } = await supa
-        .from('scan_rate_log')
-        .select('*', { count: 'exact', head: true })
-        .eq('user_id', userId)
-        .gte('created_at', oneMinAgo);
-
-      if ((userMinCount || 0) >= USER_RATE_PER_MIN) {
-        console.warn(`[RateLimit] denied source=user limitType=user_rate count=${userMinCount}/${USER_RATE_PER_MIN} retryAfter=60s charged=false`);
-        return { allowed: false, limitType: 'user_rate', retryAfter: 60, charged: false };
-      }
-
-      // ── Atomic daily increment — anti-probe (over-limit requests still count) ──
-      // Charged up-front; the caller REFUNDS this on Stage 1 failure so failed
-      // scans do not consume the daily quota. RPC is SECURITY DEFINER (works with
-      // anon key). Fail closed on RPC error — billing leakage is not acceptable.
-      const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD UTC
-      const { data: newDailyCount, error: rpcErr } = await supa
-        .rpc('increment_user_daily_scan', { p_user_id: userId, p_date: today });
-      if (rpcErr) {
-        console.error('[RateLimit] denied source=quota limitType=quota_error reason=rpc_failed charged=false:', rpcErr.message);
-        return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
-      }
-      if ((newDailyCount || 0) > USER_DAILY_LIMIT) {
-        const retryAfter = secondsUntilUtcMidnight();
-        // No AI runs for a denied request, so this increment stays as the anti-probe
-        // penalty (charged=false → caller does not refund denied requests).
-        console.warn(`[RateLimit] denied source=user limitType=user_daily count=${newDailyCount}/${USER_DAILY_LIMIT} retryAfter=${retryAfter}s charged=false`);
-        return { allowed: false, limitType: 'user_daily', retryAfter, charged: false };
-      }
+    // RETURNS TABLE → supabase-js yields an array of rows.
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row) {
+      console.error('[RateLimit] denied source=db reason=empty_result charged=false');
+      return { allowed: false, limitType: 'quota_error', retryAfter: 30, charged: false };
     }
-
-    // Non-blocking insert — records this scan for per-minute window checks
-    supa.from('scan_rate_log')
-      .insert({ ip, user_id: userId || null, created_at: new Date().toISOString() })
-      .then(({ error }) => { if (error) console.error('[RateLimit] log insert failed:', error.message); })
-      .catch(err => console.error('[RateLimit] log insert exception:', err.message));
-
-    console.log(`[RateLimit] allowed uid=${userId ? 'present' : 'anon'} charged=${!!userId}`);
-    return { allowed: true, limitType: null, retryAfter: 0, charged: !!userId };
+    if (!row.allowed) {
+      const retryAfter = row.limit_type === 'user_daily' ? secondsUntilUtcMidnight() : 60;
+      console.warn(`[RateLimit] denied source=db limitType=${row.limit_type} dailyCount=${row.daily_count} retryAfter=${retryAfter}s charged=false`);
+      return { allowed: false, limitType: row.limit_type, retryAfter, charged: false };
+    }
+    console.log(`[RateLimit] allowed uid=${userId ? 'present' : 'anon'} dailyCount=${row.daily_count} charged=${row.charged}`);
+    return { allowed: true, limitType: null, retryAfter: 0, charged: !!row.charged };
   } catch (err) {
     // DB check failed — deny rather than allow (fail closed)
     console.error('[RateLimit] denied source=db reason=check_failed charged=false:', err.message);
