@@ -1397,9 +1397,11 @@ export function AppProvider({ children }) {
         if (pipelineSignal.aborted) throw new DOMException('Cancelled', 'AbortError');
       }
 
-      // Create a per-attempt controller that aborts on timeout OR user cancel
+      // Create a per-attempt controller that aborts on timeout OR user cancel.
+      // 50s > server BUDGET_MS (45s on the Node runtime) so the server always
+      // responds first — the client only aborts if the function truly hangs.
       const attemptCtrl = new AbortController();
-      const timeoutId = setTimeout(() => attemptCtrl.abort(), 25000);
+      const timeoutId = setTimeout(() => attemptCtrl.abort(), 50000);
       const onPipelineAbort = () => { clearTimeout(timeoutId); attemptCtrl.abort(); };
       pipelineSignal.addEventListener('abort', onPipelineAbort);
 

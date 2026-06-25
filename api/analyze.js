@@ -12,7 +12,13 @@
 //
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const config = { runtime: 'edge' };
+// Node.js serverless runtime (not Edge): Edge is wall-capped at 25s and ignores
+// maxDuration; Sonnet 4.6 Vision (Stage 1) can exceed the 12s that the Edge wall
+// allowed. Node honors maxDuration (up to 60s here), giving Stage 1 real headroom
+// without changing the model/prompt/images. The handler already uses Web-standard
+// Request/Response + global crypto.subtle/fetch/atob/AbortController, all available
+// on Node 20 — no handler I/O rewrite required.
+export const config = { maxDuration: 60 };
 
 import { createClient } from '@supabase/supabase-js';
 
@@ -1807,10 +1813,11 @@ export default async function handler(req) {
   // rem() = how many ms we have left before we must respond.
   // All stage decisions and timeouts are derived from this single source of truth.
   const TREQ      = Date.now();
-  const BUDGET_MS = 22_000;   // hard ceiling — must respond before this
-  // Raised from 18 s → 22 s: auth slow-path (network JWT, no SUPABASE_JWT_SECRET)
-  // consumes up to 5 s, leaving only 13 s for Stage 1 + retrieval + Stage 2.
-  // Stage 1 (Claude Vision) needs at least 8 s minimum to avoid constant fallback.
+  const BUDGET_MS = 45_000;   // hard ceiling — must respond before this
+  // Raised 22 s → 45 s after moving off Edge to the Node runtime (maxDuration 60 s,
+  // ~15 s safety margin). Edge's 25 s wall forced an 8–12 s Stage 1 cap, which
+  // Sonnet 4.6 Vision routinely exceeded; the larger budget lets Stage 1 use up to
+  // 20 s while still leaving ample room for retrieval + Stage 2.
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
 
@@ -1904,7 +1911,7 @@ export default async function handler(req) {
     // Formula: up to 12 s, but reserves 8 s for retrieval + Stage 2.
     // With 22 s budget and ~1 s auth (fast path) → ~13 s remaining → cap = 12 s.
     // With 22 s budget and ~5 s auth (network path) → ~17 s remaining → cap = 12 s.
-    const stage1Cap = Math.max(Math.min(12_000, rem() - 8_000), 8_000);
+    const stage1Cap = Math.max(Math.min(20_000, rem() - 8_000), 8_000);
     const imgByteEst = imageList.reduce((sum, b64) => sum + Math.round(b64.length * 0.75), 0);
     plog('Stage 1 start', `images=${imageList.length} ~bytes=${imgByteEst} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
 
