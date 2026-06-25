@@ -59,20 +59,45 @@ function b64urlDecode(str) {
   return Uint8Array.from(atob(padded), c => c.charCodeAt(0));
 }
 
-async function verifyJWTLocally(token, secret) {
+// Module-scoped JWKS cache — shared across warm Edge invocations. Supabase
+// projects that use asymmetric JWT signing keys (alg ES256/RS256) publish their
+// public keys here; the first request fetches (~50-200ms), the rest are local.
+let _jwksCache = { keys: null, exp: 0 };
+
+async function fetchJwks(supabaseUrl) {
+  const now = Date.now();
+  if (_jwksCache.keys && _jwksCache.exp > now) return _jwksCache.keys;
+  const ctrl = new AbortController();
+  const tid = setTimeout(() => ctrl.abort(), 3000);
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`, {
+      headers: { Accept: 'application/json' },
+      signal: ctrl.signal,
+    });
+    if (!res.ok) throw new Error(`JWKS fetch ${res.status}`);
+    const data = await res.json();
+    _jwksCache = { keys: data.keys || [], exp: now + 10 * 60 * 1000 }; // 10 min TTL
+    return _jwksCache.keys;
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+// Verifies a Supabase access token without a network round-trip to auth.getUser().
+//   • HS256 tokens → symmetric verify with SUPABASE_JWT_SECRET.
+//   • ES256 tokens → asymmetric verify against the project's public JWKS key
+//     (JWS uses raw R||S signatures, which is exactly the IEEE-P1363 format
+//      Web Crypto's ECDSA verify expects — no DER conversion needed).
+async function verifyJWTLocally(token, { secret, supabaseUrl }) {
   const parts = token.split('.');
   if (parts.length !== 3) throw new Error('Malformed JWT');
 
   const [hB64, pB64, sB64] = parts;
 
-  // Validate algorithm
-  const header = JSON.parse(new TextDecoder().decode(b64urlDecode(hB64)));
-  if (header.alg !== 'HS256') throw new Error(`Unsupported alg: ${header.alg}`);
-
-  // Decode payload
+  const header  = JSON.parse(new TextDecoder().decode(b64urlDecode(hB64)));
   const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(pB64)));
 
-  // Check expiry before touching crypto (cheap early exit)
+  // Check expiry before touching crypto (cheap, scheme-independent early exit)
   const nowSec = Math.floor(Date.now() / 1000);
   if (payload.exp && payload.exp < nowSec) {
     const e = new Error('Token expired');
@@ -80,71 +105,85 @@ async function verifyJWTLocally(token, secret) {
     throw e;
   }
 
-  // Verify HMAC-SHA256 signature
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(secret),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify'],
-  );
-  const ok = await crypto.subtle.verify(
-    'HMAC', key,
-    b64urlDecode(sB64),
-    new TextEncoder().encode(`${hB64}.${pB64}`),
-  );
-  if (!ok) throw new Error('Invalid signature');
+  const signed = new TextEncoder().encode(`${hB64}.${pB64}`);
+  const sig    = b64urlDecode(sB64);
 
+  let ok = false;
+  if (header.alg === 'HS256') {
+    if (!secret) throw new Error('No HS256 secret configured');
+    const key = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(secret),
+      { name: 'HMAC', hash: 'SHA-256' }, false, ['verify'],
+    );
+    ok = await crypto.subtle.verify('HMAC', key, sig, signed);
+  } else if (header.alg === 'ES256') {
+    if (!supabaseUrl) throw new Error('No Supabase URL for JWKS');
+    const jwks = await fetchJwks(supabaseUrl);
+    const jwk = jwks.find(k => k.kid === header.kid) || jwks.find(k => k.alg === 'ES256');
+    if (!jwk) throw new Error(`No JWKS key for kid=${header.kid}`);
+    const key = await crypto.subtle.importKey(
+      'jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify'],
+    );
+    ok = await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, sig, signed);
+  } else {
+    throw new Error(`Unsupported alg: ${header.alg}`);
+  }
+
+  if (!ok) throw new Error('Invalid signature');
   if (!payload.sub) throw new Error('Missing sub claim');
   return payload;
 }
 
 async function verifyJWT(authHeader) {
-  if (!authHeader?.startsWith('Bearer ')) return null;
-  const token = authHeader.slice(7).trim();
+  const hasBearer = !!authHeader?.startsWith('Bearer ');
+  const token = hasBearer ? authHeader.slice(7).trim() : '';
+  // Safe diagnostics — never logs the token or secret value.
+  console.log(`[Auth] hasAuthHeader=${hasBearer} tokenPresent=${!!token}`);
   if (!token) return null;
 
   const jwtSecret = process.env.SUPABASE_JWT_SECRET;
+  const url       = process.env.SUPABASE_URL     || process.env.VITE_SUPABASE_URL;
+  const anonKey   = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
 
-  // ── Fast path: local HMAC-SHA256 ──
-  if (jwtSecret) {
+  // ── Fast path: local verify (HS256 via secret, OR ES256 via cached JWKS) ──
+  // Always attempt — ES256 verification needs only the public JWKS, not a secret.
+  {
     const t0 = Date.now();
-    console.log('[Auth] local-verify start');
     try {
-      const payload = await verifyJWTLocally(token, jwtSecret);
+      const payload = await verifyJWTLocally(token, { secret: jwtSecret, supabaseUrl: url });
       console.log(`[Auth] local-verify OK ${Date.now() - t0}ms method=local sub=${payload.sub}`);
       return { id: payload.sub, email: payload.email, role: payload.role, _authMethod: 'local' };
     } catch (err) {
+      // Expired is definitive — Supabase would reject it too. Short-circuit.
       if (err.code === 'TOKEN_EXPIRED') {
         console.warn(`[Auth] local-verify EXPIRED ${Date.now() - t0}ms`);
         return { _expired: true };
       }
-      // Bad signature or malformed — fail closed, never fallback to network
-      console.error(`[Auth] local-verify FAILED ${Date.now() - t0}ms: ${err.message}`);
-      return null;
+      // Local verify could NOT confirm the token (e.g. JWKS fetch hiccup or a
+      // signing scheme we don't handle). Do NOT fail closed — fall through to
+      // the authoritative network check below. A forged token still fails there.
+      console.warn(`[Auth] local-verify could not confirm (${err.message}) — falling back to network`);
     }
   }
 
-  // ── Fallback: Supabase auth.getUser() (no secret configured) ──
-  const url     = process.env.SUPABASE_URL     || process.env.VITE_SUPABASE_URL;
-  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  // ── Network verify: Supabase auth.getUser() (authoritative, any signing scheme) ──
   if (!url || !anonKey) {
-    console.error('[Auth] SUPABASE_JWT_SECRET and SUPABASE_URL/ANON_KEY both missing');
+    console.error('[Auth] network verify unavailable — SUPABASE_URL/ANON_KEY missing');
     return null;
   }
   const t0 = Date.now();
-  console.log('[Auth] network-fallback auth.getUser start');
+  console.log('[Auth] network verify auth.getUser start');
   try {
     const client = createClient(url, anonKey);
     const { data: { user }, error } = await client.auth.getUser(token);
     if (error || !user) {
-      console.warn(`[Auth] network-fallback FAILED ${Date.now() - t0}ms: ${error?.message}`);
+      console.warn(`[Auth] network verify FAILED ${Date.now() - t0}ms: ${error?.message}`);
       return null;
     }
-    console.log(`[Auth] network-fallback OK ${Date.now() - t0}ms method=network sub=${user.id}`);
+    console.log(`[Auth] network verify OK ${Date.now() - t0}ms method=network sub=${user.id}`);
     return { ...user, _authMethod: 'network' };
   } catch (err) {
-    console.warn(`[Auth] network-fallback exception ${Date.now() - t0}ms: ${err.message}`);
+    console.warn(`[Auth] network verify exception ${Date.now() - t0}ms: ${err.message}`);
     return null;
   }
 }
