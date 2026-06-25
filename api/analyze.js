@@ -79,7 +79,7 @@ async function fetchJwks(supabaseUrl) {
   const now = Date.now();
   if (_jwksCache.keys && _jwksCache.exp > now) return _jwksCache.keys;
   const ctrl = new AbortController();
-  const tid = setTimeout(() => ctrl.abort(), 3000);
+  const tid = setTimeout(() => ctrl.abort(), 5000);
   try {
     const res = await fetch(`${supabaseUrl}/auth/v1/.well-known/jwks.json`, {
       headers: { Accept: 'application/json' },
