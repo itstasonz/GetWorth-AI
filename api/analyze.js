@@ -1867,12 +1867,16 @@ export default async function handler(req) {
     }
 
     const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null } = await req.json();
+    // TIMING: req.json() blocks until the full request body has uploaded. On Edge
+    // this upload time is inside the budget clock — this log isolates it.
+    blog(`[Timing] body read+parsed (req.json) bodyLen=${bodyLen}B`);
     const clientHints = clientCorrections.length > 0 ? clientCorrections : hints;
     const imageList = imagesArr?.length > 0 ? imagesArr : imageData ? [imageData] : [];
 
     // ── IMAGE VALIDATION — magic bytes + 5 MB cap ──
     const imgErr = validateImages(imageList);
     if (imgErr) return json({ error: imgErr }, 400, cors);
+    blog(`[Timing] images validated count=${imageList.length}`);
 
     // ── PHASE 3: RATE LIMITING — fail closed on DB error ──
     const supa = getSupabase();
@@ -1880,7 +1884,9 @@ export default async function handler(req) {
             || req.headers.get('x-real-ip')
             || 'unknown';
 
+    blog('[Timing] rate-limit check start');
     const rl = await checkRateLimit(supa, ip, authUser.id);
+    blog(`[Timing] rate-limit check done allowed=${rl.allowed}`);
     // Tracks whether THIS request charged the daily quota, so we can refund it if
     // the scan later fails (Stage 1 / fatal). Set false again once refunded.
     quotaCharged = rl.charged;
