@@ -621,7 +621,7 @@ Respond ONLY with valid JSON:
 // §3  STAGE 1 — RECOGNITION (Claude Vision)
 // ═══════════════════════════════════════════════════════
 
-async function recognize(images, language, apiKey) {
+async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
   const prompt = buildRecognitionPrompt(language);
 
   const content = [
@@ -637,6 +637,11 @@ async function recognize(images, language, apiKey) {
     },
   ];
 
+  // Stage 1 is already guarded by the caller's withTimeout(stage1Cap). Align the
+  // inner fetch abort just under that cap (single source of truth = budget clock)
+  // and disable the inner retry: a second attempt can never fit Stage 1's budget
+  // and only risks a dangling upstream fetch. The client retries on STAGE1_TIMEOUT.
+  const innerAttemptMs = Math.max(attemptTimeoutMs - 500, 3000);
   const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -649,7 +654,7 @@ async function recognize(images, language, apiKey) {
       max_tokens: 1500,
       messages: [{ role: 'user', content }],
     }),
-  });
+  }, 0, innerAttemptMs);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -1833,7 +1838,7 @@ export default async function handler(req) {
     let recognition;
     try {
       recognition = await withTimeout(
-        recognize(imageList, lang, apiKey),
+        recognize(imageList, lang, apiKey, stage1Cap),
         stage1Cap,
         'Stage 1 recognition'
       );
