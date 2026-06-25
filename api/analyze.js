@@ -46,6 +46,9 @@ function getCorsHeaders(requestOrigin) {
     : [];
   const allowed = new Set([...configured, ...devOrigins]);
   const headers = {
+    // TEMPORARY build marker — confirms the browser hit the Node-runtime preview
+    // build (maxDuration 60 / 45s budget / 20s Stage 1 cap). Remove after validation.
+    'X-GetWorth-Build': '774e6e9-node-budget',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Cache-Control': 'no-store, no-cache, must-revalidate',
@@ -1801,7 +1804,7 @@ async function ocrSerialLabel(imageBase64, apiKey) {
 // §10  MAIN HANDLER
 // ═══════════════════════════════════════════════════════
 
-export default async function handler(req) {
+async function handleRequest(req) {
   // CORS: reflect origin only when it is in the allow-list
   const cors = getCorsHeaders(req.headers.get('origin') || '');
 
@@ -2235,6 +2238,71 @@ export default async function handler(req) {
     if (quotaCharged) { await refundDailyQuota(getSupabase(), authUser?.id); quotaCharged = false; }
     console.error('[Pipeline] Fatal:', error);
     return json({ error: 'Internal server error' }, 500, cors);
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════
+// NODE SERVERLESS ADAPTER
+// ═══════════════════════════════════════════════════════
+// Vercel's Node runtime invokes (req, res) with a Node IncomingMessage — not a
+// Web Request — so req.headers.get()/req.json() don't exist and we must write to
+// res instead of returning a Response. This thin adapter wraps the Node request
+// into a Web-Request-like object and pipes handleRequest()'s Web Response back to
+// res, so the entire handleRequest() body above stays unchanged. It also still
+// works if invoked with a real Web Request (Edge), for safety.
+
+function toWebRequest(nodeReq) {
+  let _bodyPromise;
+  return {
+    method: nodeReq.method,
+    headers: {
+      get: (name) => {
+        const v = nodeReq.headers[String(name).toLowerCase()];
+        return Array.isArray(v) ? v.join(', ') : (v ?? null);
+      },
+    },
+    json: () => {
+      if (_bodyPromise) return _bodyPromise;       // memoize — body is read once
+      _bodyPromise = (async () => {
+        // Vercel may have already parsed a JSON body into nodeReq.body.
+        if (nodeReq.body !== undefined && nodeReq.body !== null && nodeReq.body !== '') {
+          return typeof nodeReq.body === 'string' ? JSON.parse(nodeReq.body) : nodeReq.body;
+        }
+        // Otherwise read the raw request stream.
+        const chunks = [];
+        for await (const chunk of nodeReq) {
+          chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+        }
+        const raw = Buffer.concat(chunks).toString('utf8');
+        return raw ? JSON.parse(raw) : {};
+      })();
+      return _bodyPromise;
+    },
+  };
+}
+
+async function writeWebResponse(nodeRes, webRes) {
+  nodeRes.statusCode = webRes.status;
+  webRes.headers.forEach((value, key) => nodeRes.setHeader(key, value));
+  const text = await webRes.text();
+  nodeRes.end(text);
+}
+
+export default async function handler(req, res) {
+  // Edge path (single Web Request arg, no res): return the Response directly.
+  if (!res || typeof req?.headers?.get === 'function') {
+    return handleRequest(req);
+  }
+  // Node serverless path: adapt (req, res).
+  try {
+    const webRes = await handleRequest(toWebRequest(req));
+    await writeWebResponse(res, webRes);
+  } catch (err) {
+    console.error('[Handler] adapter fatal:', err?.message);
+    res.statusCode = 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: 'Internal server error' }));
   }
 }
 
