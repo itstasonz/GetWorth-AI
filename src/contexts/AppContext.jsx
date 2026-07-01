@@ -27,6 +27,115 @@ export const useApp = () => {
   return ctx;
 };
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ALPHA-002 — Realtime channel lifecycle manager
+// ═══════════════════════════════════════════════════════════════════════════
+// Mobile browsers kill the realtime WebSocket constantly: backgrounding, screen
+// lock, Wi-Fi ⇄ cellular hand-off, and connection loss all silently drop it.
+// The previous subscribe() handlers only LOGGED on CHANNEL_ERROR / TIMED_OUT,
+// so once the socket died it stayed dead until the effect re-ran (never, within
+// a session) — chat and notifications went quiet with no visible failure.
+//
+// This hook owns the full connection lifecycle for ONE channel and recovers
+// automatically. It contains no business logic: the caller supplies
+// `buildChannel(name)` — a channel with its `.on(...)` handlers attached but NOT
+// yet subscribed — and an optional `onRecover` that re-syncs state after a
+// reconnect (so a recovered socket never leaves the UI showing stale data).
+//
+//   • Reconnects on CHANNEL_ERROR, TIMED_OUT, and CLOSED
+//   • Reconnects on the `online` event and on visibilitychange → visible
+//   • Exponential backoff (1s → 30s), reset to 0 on a successful SUBSCRIBED
+//   • Single-flight: never runs two connects or holds two channels at once
+//   • Leak-free: clears its timer, channel, and window/document listeners on unmount
+function useRealtimeChannel(userId, channelKey, buildChannel, onRecover) {
+  // Keep the latest closures without re-running the effect — otherwise every
+  // unrelated re-render would tear the socket down and rebuild it.
+  const buildRef   = useRef(buildChannel);
+  const recoverRef = useRef(onRecover);
+  buildRef.current   = buildChannel;
+  recoverRef.current = onRecover;
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const BACKOFFS = [1000, 2000, 5000, 10000, 20000, 30000];
+    let cancelled    = false;
+    let channel      = null;
+    let retryTimer   = null;
+    let attempt      = 0;
+    let connecting   = false;
+    let hasConnected = false;
+
+    const clearRetry  = () => { if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; } };
+    const dropChannel = () => { if (channel) { supabase.removeChannel(channel); channel = null; } };
+
+    const scheduleReconnect = () => {
+      if (cancelled || retryTimer) return;              // one pending retry at a time
+      const delay = BACKOFFS[Math.min(attempt, BACKOFFS.length - 1)];
+      attempt += 1;
+      retryTimer = setTimeout(() => { retryTimer = null; connect(); }, delay);
+    };
+
+    const connect = async () => {
+      if (cancelled || connecting) return;              // single-flight guard
+      connecting = true;
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (cancelled || !session?.access_token) return;
+
+        dropChannel();                                  // never hold two subscriptions
+        const name = `${channelKey}-${userId}`;
+        channel = buildRef.current(name).subscribe((status) => {
+          if (cancelled) return;
+          if (status === 'SUBSCRIBED') {
+            attempt = 0;
+            clearRetry();
+            if (DEV) console.log(`✅ ${name} SUBSCRIBED`);
+            if (hasConnected) { try { recoverRef.current?.(); } catch { /* resync best-effort */ } }
+            hasConnected = true;
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            if (DEV) console.warn(`⚠️ ${name} ${status} — scheduling reconnect`);
+            dropChannel();
+            scheduleReconnect();
+          }
+        });
+      } finally {
+        connecting = false;
+      }
+    };
+
+    // Explicit environment signal (network back / app foregrounded): recover
+    // immediately, but don't thrash a socket that is already healthy.
+    const kick = () => {
+      if (cancelled || connecting) return;
+      // Skip when a socket is already up OR a join is already in flight. `connecting`
+      // covers connect()'s await window; `'joining'` covers the window after connect()
+      // returns but before SUBSCRIBED fires — so a burst of online + visibilitychange
+      // events can never interrupt or duplicate an in-progress connection.
+      if (channel && (channel.state === 'joined' || channel.state === 'joining')) return;
+      attempt = 0;
+      clearRetry();
+      connect();
+    };
+
+    const onOnline     = () => kick();
+    const onVisibility = () => { if (document.visibilityState === 'visible') kick(); };
+
+    window.addEventListener('online', onOnline);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    connect();
+
+    return () => {
+      cancelled = true;
+      clearRetry();
+      dropChannel();
+      window.removeEventListener('online', onOnline);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [userId, channelKey]);
+}
+
 // ═══════════════════════════════════════════════════════
 // Image compression — run BEFORE sending to API
 // Resizes to max dimension, JPEG quality configurable (default 800px, 0.65)
@@ -190,8 +299,6 @@ export function AppProvider({ children }) {
   const [activeOrderId, setActiveOrderId] = useState(null);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const ordersLastLoadRef = useRef(0);
-  const msgChannelRef = useRef(null);
-  const notifChannelRef = useRef(null);
 
   // Notifications state (order events)
   const [orderNotifications, setOrderNotifications] = useState([]);
@@ -375,26 +482,12 @@ export function AppProvider({ children }) {
   // ═══════════════════════════════════════════════════════
   // REALTIME MESSAGING + IN-APP NOTIFICATION ENGINE
   // ═══════════════════════════════════════════════════════
-  useEffect(() => {
-    if (!user?.id) return;
-
-    let cancelled = false;
-    let errorTimer = null;
-    let subscribed = false;
-
-    const setup = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (cancelled || !session?.access_token) return;
-
-      if (msgChannelRef.current) {
-        supabase.removeChannel(msgChannelRef.current);
-        msgChannelRef.current = null;
-      }
-
-      const channelName = `rt-msgs-${user.id}`;
-      const channel = supabase
-        .channel(channelName)
-        .on(
+  useRealtimeChannel(
+    user?.id,
+    'rt-msgs',
+    (channelName) => supabase
+      .channel(channelName)
+      .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'messages' },
           async (payload) => {
@@ -477,39 +570,11 @@ export function AppProvider({ children }) {
               return prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m);
             });
           }
-        )
-        .subscribe((status, err) => {
-          if (status === 'SUBSCRIBED') {
-            subscribed = true;
-            if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
-            if (DEV) console.log('✅ rt-msgs SUBSCRIBED for', user.id);
-          } else if (status === 'CHANNEL_ERROR') {
-            errorTimer = setTimeout(() => {
-              if (!subscribed) console.error('❌ rt-msgs CHANNEL_ERROR (unrecovered)', { err });
-            }, 2000);
-          } else if (status === 'TIMED_OUT') {
-            console.error('❌ rt-msgs TIMED_OUT');
-          }
-        });
-
-      if (cancelled) {
-        supabase.removeChannel(channel);
-      } else {
-        msgChannelRef.current = channel;
-      }
-    };
-
-    setup();
-
-    return () => {
-      cancelled = true;
-      if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
-      if (msgChannelRef.current) {
-        supabase.removeChannel(msgChannelRef.current);
-        msgChannelRef.current = null;
-      }
-    };
-  }, [user?.id]);
+        ),
+    // Re-sync the conversation list after a reconnect (realtime does not replay
+    // events missed while the socket was down).
+    () => loadConversations(true),
+  );
 
   // ═══════════════════════════════════════════════════════
   // REALTIME: ORDER NOTIFICATIONS + ORDER STATUS CHANGES
@@ -546,28 +611,14 @@ export function AppProvider({ children }) {
     setNotifUnreadCount(0);
   }, [user]);
 
-  useEffect(() => {
-    if (!user?.id) return;
+  useEffect(() => { if (user?.id) loadNotifications(); }, [user?.id, loadNotifications]);
 
-    loadNotifications();
-
-    let cancelled = false;
-    let errorTimer = null;
-    let subscribed = false;
-
-    const setup = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (cancelled || !session?.access_token) return;
-
-      if (notifChannelRef.current) {
-        supabase.removeChannel(notifChannelRef.current);
-        notifChannelRef.current = null;
-      }
-
-      const channelName = `rt-notifs-${user.id}`;
-      const notifChannel = supabase
-        .channel(channelName)
-        .on(
+  useRealtimeChannel(
+    user?.id,
+    'rt-notifs',
+    (channelName) => supabase
+      .channel(channelName)
+      .on(
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
           (payload) => {
@@ -601,39 +652,10 @@ export function AppProvider({ children }) {
               loadOrders(true);
             }
           }
-        )
-        .subscribe((status, err) => {
-          if (status === 'SUBSCRIBED') {
-            subscribed = true;
-            if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
-            if (DEV) console.log('✅ rt-notifs SUBSCRIBED for', user.id);
-          } else if (status === 'CHANNEL_ERROR') {
-            errorTimer = setTimeout(() => {
-              if (!subscribed) console.error('❌ rt-notifs CHANNEL_ERROR (unrecovered)', { err });
-            }, 2000);
-          } else if (status === 'TIMED_OUT') {
-            console.error('❌ rt-notifs TIMED_OUT');
-          }
-        });
-
-      if (cancelled) {
-        supabase.removeChannel(notifChannel);
-      } else {
-        notifChannelRef.current = notifChannel;
-      }
-    };
-
-    setup();
-
-    return () => {
-      cancelled = true;
-      if (errorTimer) { clearTimeout(errorTimer); errorTimer = null; }
-      if (notifChannelRef.current) {
-        supabase.removeChannel(notifChannelRef.current);
-        notifChannelRef.current = null;
-      }
-    };
-  }, [user?.id]);
+        ),
+    // Re-sync notifications + orders after a reconnect (missed while offline).
+    () => { loadNotifications(); loadOrders(true); },
+  );
 
   // Tap notification banner → open that conversation
   const openNotification = async (notification) => {
