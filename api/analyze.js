@@ -1366,9 +1366,14 @@ async function fetchCorrections() {
 // §6  STAGE 2 — VERIFICATION + PRICING
 // ═══════════════════════════════════════════════════════
 
-async function verifyAndPrice(recognition, candidates, corrections, language, apiKey, visionData = null) {
+async function verifyAndPrice(recognition, candidates, corrections, language, apiKey, visionData = null, attemptTimeoutMs = 12000) {
   const prompt = buildVerificationPrompt(recognition, candidates, corrections, language, visionData);
 
+  // GW-002: single attempt (maxRetries=0) with the caller's Stage-2 budget as the
+  // per-attempt timeout. Previously used the fetchWithRetry defaults
+  // (attemptTimeoutMs=12000, maxRetries=1), which aborted every Stage-2 request at
+  // 12s then retried — so Stage 2 could never complete regardless of the outer
+  // withTimeout cap. A retry inside a tight budget only doubles latency.
   const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -1381,7 +1386,7 @@ async function verifyAndPrice(recognition, candidates, corrections, language, ap
       max_tokens: 1500,
       messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
     }),
-  });
+  }, 0, attemptTimeoutMs);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -2121,23 +2126,28 @@ async function handleRequest(req) {
     }
 
     // ── STAGE 2: VERIFY + PRICE — REQUIRED but skippable ──
-    // If < 8 s remaining: skip Stage 2, return rough estimate from Stage 1.
-    // A rough result delivered in time is better than a 504.
+    // GW-002: budget-aware cap. The old hardcoded 9s ceiling was an Edge-era
+    // leftover that killed Stage 2 with ~9s of budget still unused (Node
+    // maxDuration 60 / BUDGET_MS 45 leave ample headroom). Reserve time AFTER
+    // Stage 2 for calibration + normalise + GW-000 awaited persistence
+    // (record_scan + derived write-back) + JSON encode + response write.
+    // Stage 2 needs >= 8s of usable time; if rem() - reserve < 8s we fall back
+    // rather than force an unsafe sub-8s cap. A rough result in time beats a 504.
+    const STAGE2_RESERVE_MS = 4_000;   // post-Stage-2 work incl. GW-000 persistence
     let stage2FallbackUsed = false;
     let stage2FallbackReason = null;
     let verification;
-    if (rem() < 8_000) {
+    if (rem() - STAGE2_RESERVE_MS < 8_000) {
       stage2FallbackUsed = true;
-      stage2FallbackReason = `budget_exhausted rem=${rem()}ms`;
-      blog(`[Pipeline] Stage 2 SKIPPED — returning rough estimate (rem=${rem()}ms < 8000ms)`);
+      stage2FallbackReason = `budget_too_low rem=${rem()}ms`;
+      blog(`[Pipeline] Stage 2 SKIPPED — returning rough estimate (rem=${rem()}ms, need >= ${8_000 + STAGE2_RESERVE_MS}ms)`);
       verification = buildFallback(recognition, lang, stage2FallbackReason);
     } else {
-      // Leave at least 1 s for calibration + normalise + JSON encode + response write
-      const stage2Cap = Math.min(9_000, rem() - 1_000);
+      const stage2Cap = Math.max(8_000, Math.min(20_000, rem() - STAGE2_RESERVE_MS));
       plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
       try {
         verification = await withTimeout(
-          verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData),
+          verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData, stage2Cap),
           stage2Cap,
           'Stage 2 verification'
         );
