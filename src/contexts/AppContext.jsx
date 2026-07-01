@@ -6,6 +6,7 @@ import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSeria
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
+import { recordObservation, OBS } from '../lib/observations';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -1722,6 +1723,17 @@ export function AppProvider({ children }) {
         backupValuation(analysisResult).catch(err => { if (DEV) console.error('[Pipeline] backup failed:', err); });
       }
 
+      // GW-005A: real user signal — a scan produced a valuation (ids + facts only).
+      recordObservation(OBS.VALUATION_COMPLETED, {
+        category:     analysisResult.category,
+        confidence:   analysisResult.confidence,
+        price_mid:    analysisResult.marketValue?.mid,
+        price_method: analysisResult.marketValue?.price_method,
+        comp_count:   analysisResult._pipeline?.db_matches,
+        append:       appendMode,
+        duration_ms:  Math.round(performance.now() - pipelineT0),
+      }, { scanUuid: analysisResult.scan_uuid, valuationId: analysisResult.valuation_id });
+
       if (DEV) console.log(`[Pipeline] ✅ Done in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
 
     } catch (e) {
@@ -1911,6 +1923,14 @@ export function AppProvider({ children }) {
         backupValuation(refined).catch(() => {});
       }
 
+      // GW-005A: real feedback signal — user corrected the identification.
+      recordObservation(OBS.VALUATION_REFINED, {
+        category:       refined.category,
+        confidence:     refined.confidence,
+        had_correction: Boolean(oldName && oldName !== refined.name),
+        prior_confidence: result?.confidence,
+      }, { scanUuid: refined.scan_uuid, valuationId: refined.valuation_id });
+
       if (DEV) console.log('[Refine] Complete:', refined.name);
     } catch (e) {
       if (e.name === 'AbortError') return;
@@ -1957,6 +1977,14 @@ export function AppProvider({ children }) {
       result.category,
       result.details?.brand
     );
+
+    // GW-005A: real feedback signal — user confirmed the identification was right.
+    recordObservation(OBS.VALUATION_CONFIRMED, {
+      category:   result.category,
+      confidence: result.confidence,
+      price_mid:  result.marketValue?.mid,
+    }, { scanUuid: result.scan_uuid, valuationId: result.valuation_id });
+
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
 
     // ── PRODUCT CANDIDATE: save to staging table if item was not in DB ──
@@ -2433,6 +2461,18 @@ export function AppProvider({ children }) {
           });
       }
 
+      // GW-005A: real pricing signal — seller published at a chosen price.
+      recordObservation(OBS.LISTING_CREATED, {
+        listing_id:     newListingId,
+        category:       normalizedCategory,
+        condition,
+        price:          listingRow.price,       // seller's real chosen price
+        ai_price_mid:   result?.marketValue?.mid, // AI estimate → delta = pricing accuracy
+        quality_score:  qualityScore,
+        has_valuation:  Boolean(result?.valuation_id),
+        ai_confidence:  result?.confidence,
+      }, { valuationId: result?.valuation_id });
+
       await loadUserData();
       await loadListings(true);
       setListingStep(3);
@@ -2549,6 +2589,14 @@ export function AppProvider({ children }) {
       playSound('coin');
       setShowCheckout(false);
 
+      // GW-005A: real buyer-intent signal — purchase initiated at an actual price.
+      recordObservation(OBS.ORDER_CREATED, {
+        order_id:        data?.id,
+        listing_id:      listingId,
+        price,
+        delivery_method: deliveryMethod,
+      });
+
       // Fetch the full order with joins BEFORE navigating
       const fullOrder = await fetchOrderById(data.id);
       setActiveOrder(fullOrder || data);
@@ -2612,6 +2660,12 @@ export function AppProvider({ children }) {
 
       showToastMsg(statusLabels[newStatus] || (lang === 'he' ? 'עודכן' : 'Updated'));
       playSound(newStatus === 'completed' ? 'coin' : 'tap');
+
+      // GW-005A: real marketplace outcome — an order changed state.
+      recordObservation(OBS.ORDER_TRANSITIONED, {
+        order_id:  orderId,
+        to_status: newStatus,
+      });
 
       // Background refresh (non-blocking) — realtime will also sync
       loadOrders(true).catch(() => {});
@@ -2691,6 +2745,14 @@ export function AppProvider({ children }) {
       });
 
       if (err) throw err;
+
+      // GW-005A: real trust signal — rating on a completed order (never the comment text).
+      recordObservation(OBS.REVIEW_SUBMITTED, {
+        order_id:      orderId,
+        listing_id:    listingId,
+        rating,
+        reviewer_role: reviewerRole,
+      });
 
       showToastMsg(lang === 'he' ? 'הביקורת נשלחה! תודה' : 'Review submitted! Thank you');
       playSound('coin');
