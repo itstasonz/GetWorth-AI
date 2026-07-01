@@ -1131,9 +1131,16 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   // Per-strategy log: { name, query, rows, error, elapsed_ms }
   const logS = (name, query, rows, error, t0) => {
     const elapsed = Date.now() - t0;
-    strategyLog.strategies.push({ name, query: String(query).slice(0, 120), rows, error: error ?? null, elapsed_ms: elapsed });
-    const tag = error ? `ERR:${String(error).slice(0, 80)}` : `${rows}r`;
-    console.log(`[Retrieve] ${name}: ${tag} ${elapsed}ms`);
+    // GW-001: structured per-strategy log — strategy_name, elapsed_ms, candidate_count, success/failure
+    strategyLog.strategies.push({
+      strategy_name:   name,
+      elapsed_ms:      elapsed,
+      candidate_count: rows,
+      success:         error == null,
+      query:           String(query).slice(0, 120),
+      error:           error ?? null,
+    });
+    console.log(`[Retrieve] ${name}: ${error ? `FAILURE err=${String(error).slice(0, 80)}` : `success ${rows}r`} ${elapsed}ms`);
   };
 
   // ── 1. Exact brand + exact model ─────────────────────────────────────────
@@ -1159,40 +1166,44 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
   if (uniqueKw.length > 0) {
     const t = Date.now();
-    // Try OCR RPC first (may not exist)
-    const { data: rpcD, error: rpcE } = await supa
-      .rpc('match_products_by_ocr', { p_keywords: uniqueKw, p_limit: 6 })
-      .catch(err => ({ data: null, error: err }));
+    // GW-001: wrap the whole OCR strategy so one failure never aborts retrieval.
+    // Supabase builders are thenables WITHOUT .catch — await + destructure { data, error }.
+    try {
+      // Try OCR RPC first (Supabase returns DB errors in `error`, does not reject).
+      const { data: rpcD, error: rpcE } = await supa
+        .rpc('match_products_by_ocr', { p_keywords: uniqueKw, p_limit: 6 });
 
-    if (!rpcE && rpcD?.length) {
-      const mapped = rpcD.map(r => ({
-        ...r,
-        similarity: r.match_type === 'model_number' ? 0.92 : r.match_type === 'ocr_keyword' ? 0.80 : 0.75,
-      }));
-      logS('2_ocr_rpc', `kw=[${uniqueKw.slice(0,5).join(',')}]`, addRows(mapped, 'ocr_rpc', null), null, t);
-    } else {
-      // Direct ILIKE on model-like tokens
-      const modelTokens = ocrTexts
-        .flatMap(tx => tx.split(/\s+/))
-        .filter(w => /[A-Za-z][0-9]|[0-9]{3,}/.test(w) && w.length >= 3)
-        .slice(0, 6);
-      let n = 0;
-      for (const tok of modelTokens) {
-        let q = supa.from('products').select('*');
-        if (brand_ok) q = q.ilike('brand', `%${topBrand}%`);
-        q = q.or(`model.ilike.%${tok}%,name.ilike.%${tok}%`).limit(3);
-        const { data: fd } = await q.catch(() => ({ data: [] }));
-        n += addRows(fd, 'ocr_ilike', 0.80);
+      if (!rpcE && rpcD?.length) {
+        const mapped = rpcD.map(r => ({
+          ...r,
+          similarity: r.match_type === 'model_number' ? 0.92 : r.match_type === 'ocr_keyword' ? 0.80 : 0.75,
+        }));
+        logS('2_ocr_rpc', `kw=[${uniqueKw.slice(0,5).join(',')}]`, addRows(mapped, 'ocr_rpc', null), null, t);
+      } else {
+        // Direct ILIKE on model-like tokens
+        const modelTokens = ocrTexts
+          .flatMap(tx => tx.split(/\s+/))
+          .filter(w => /[A-Za-z][0-9]|[0-9]{3,}/.test(w) && w.length >= 3)
+          .slice(0, 6);
+        let n = 0;
+        for (const tok of modelTokens) {
+          let q = supa.from('products').select('*');
+          if (brand_ok) q = q.ilike('brand', `%${topBrand}%`);
+          q = q.or(`model.ilike.%${tok}%,name.ilike.%${tok}%`).limit(3);
+          const { data: fd } = await q;
+          n += addRows(fd, 'ocr_ilike', 0.80);
+        }
+        // Brand-only if still nothing
+        if (n === 0 && brand_ok) {
+          const { data: bd } = await supa.from('products').select('*')
+            .ilike('brand', `%${topBrand}%`)
+            .order('popularity_score', { ascending: false }).limit(4);
+          n += addRows(bd, 'ocr_brand_only', 0.60);
+        }
+        logS('2_ocr_ilike', `tokens=[${modelTokens.join(',')}]`, n, rpcE?.message, t);
       }
-      // Brand-only if still nothing
-      if (n === 0 && brand_ok) {
-        const { data: bd } = await supa.from('products').select('*')
-          .ilike('brand', `%${topBrand}%`)
-          .order('popularity_score', { ascending: false }).limit(4)
-          .catch(() => ({ data: [] }));
-        n += addRows(bd, 'ocr_brand_only', 0.60);
-      }
-      logS('2_ocr_ilike', `tokens=[${modelTokens.join(',')}]`, n, rpcE?.message, t);
+    } catch (e) {
+      logS('2_ocr', `kw=[${uniqueKw.slice(0,5).join(',')}]`, 0, e.message, t);
     }
   }
 
@@ -1223,14 +1234,15 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     const t = Date.now();
     let n = 0;
     const tried = [];
-    for (const cand of allModels.slice(1, 5)) {
-      tried.push(cand);
-      const { data } = await supa.from('products').select('*')
-        .ilike('brand', `%${topBrand}%`).ilike('model', `%${cand}%`).limit(2)
-        .catch(() => ({ data: [] }));
-      n += addRows(data, 'model_candidates', 0.72);
-    }
-    logS('4_model_candidates', `brand="${topBrand}" tried=[${tried.join(',')}]`, n, null, t);
+    try {
+      for (const cand of allModels.slice(1, 5)) {
+        tried.push(cand);
+        const { data } = await supa.from('products').select('*')
+          .ilike('brand', `%${topBrand}%`).ilike('model', `%${cand}%`).limit(2);
+        n += addRows(data, 'model_candidates', 0.72);
+      }
+      logS('4_model_candidates', `brand="${topBrand}" tried=[${tried.join(',')}]`, n, null, t);
+    } catch (e) { logS('4_model_candidates', `brand="${topBrand}" tried=[${tried.join(',')}]`, n, e.message, t); }
   }
 
   // ── 5. Brand + category lookup ───────────────────────────────────────────
@@ -1311,7 +1323,7 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   const top = results.slice(0, 10);
   strategyLog.final_candidates = top.length;
 
-  const summary = strategyLog.strategies.map(s => `${s.name}:${s.rows}r(${s.elapsed_ms}ms)`).join(' ');
+  const summary = strategyLog.strategies.map(s => `${s.strategy_name}:${s.candidate_count}r/${s.elapsed_ms}ms/${s.success ? 'ok' : 'fail'}`).join(' ');
   console.log(`[Retrieve] Summary: ${summary}`);
   if (top.length > 0) {
     console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} sim=${top[0].similarity?.toFixed(2)}`);
