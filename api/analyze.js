@@ -442,7 +442,7 @@ export const VERIFICATION_SCHEMA = {
     selling_tips:          { type: 'string' },
     israeli_market_notes:  { type: 'string' },
     price_factors:         { type: 'array', items: { type: 'object' } },
-    comparable_items:      { type: 'array', items: { type: 'object' } },
+    // GW-004: comparable_items removed — AI-fabricated comps are never generated or surfaced.
   },
 };
 
@@ -670,7 +670,6 @@ Respond ONLY with valid JSON:
   "selling_tips": "${isHe ? 'טיפ' : 'tip'}",
   "israeli_market_notes": "notes",
   "price_factors": [{"factor":"condition","impact":"-₪100"}],
-  "comparable_items": [{"name":"Similar Item","price":400,"source":"Yad2"}],
   "authenticity_assessment": {
     "status": "not_required|unknown|likely_original|possible_replica|suspected_fake",
     "confidence": 0.0,
@@ -1848,7 +1847,10 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
     raw_confidence: verification.raw_match_confidence ?? verification.match_confidence,
     needsConfirmation: tierInfo.needsConfirmation,
     authenticity: auth,
-    comparable_items: verification.comparable_items || [],
+    // GW-004: never surface AI-fabricated comparables. Real DB comps are still
+    // used internally for pricing (retrieval -> Stage 2) but are NOT displayed as
+    // external evidence. Only real DB-backed records may populate this later.
+    comparable_items: [],
     _pipeline: {
       version: 'v2',
       stage1_confidence: recognition.category_confidence,
