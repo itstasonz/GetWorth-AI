@@ -119,7 +119,13 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION record_scan(jsonb) FROM public;
+-- Lock down execution. Supabase auto-grants EXECUTE on public functions to
+-- anon + authenticated via default privileges, and a REVOKE FROM PUBLIC does
+-- NOT remove those explicit role grants — so revoke them explicitly. record_scan
+-- is SECURITY DEFINER and trusts a caller-supplied user_id, so ONLY the service
+-- role (server, after JWT verification) may execute it. The client backup path
+-- never calls this function; it uses the RLS-scoped valuations insert.
+REVOKE ALL ON FUNCTION record_scan(jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION record_scan(jsonb) TO service_role;
 
 
