@@ -5,6 +5,7 @@ import SoundEffects from '../lib/sounds';
 import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
+import { reportError } from '../lib/telemetry';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -125,6 +126,10 @@ export function AppProvider({ children }) {
   // Rate-limit cooldown (epoch ms). Scan/retry disabled until now passes this.
   const [scanCooldownUntil, setScanCooldownUntil] = useState(0);
   const scanCooldownUntilRef = useRef(0); // latest value for use inside callbacks
+  // GW-000: one scan_uuid per scan LIFECYCLE (reused across append/refine of the
+  // same item; a fresh scan gets a new one). Sent to /api/analyze so the server
+  // stamps the valuation + scan_events; future events reference this id.
+  const currentScanUuidRef = useRef(null);
   // Perf: cache recognition hints in memory — refresh every 5 min, not every scan
   const hintsCacheRef = useRef({ data: [], ts: 0 });
 
@@ -1411,6 +1416,8 @@ export function AppProvider({ children }) {
         const body = base64Array.length > 1
           ? { images: base64Array, lang, corrections }
           : { imageData: base64Array[0], lang, corrections };
+        // GW-000: correlate the whole scan lifecycle server-side.
+        if (currentScanUuidRef.current) body.scan_uuid = currentScanUuidRef.current;
         if (refineModel) {
           body.refineModel = refineModel;
           console.log(`[Analyze correction] Sending refineModel="${refineModel}" to backend`);
@@ -1518,39 +1525,55 @@ export function AppProvider({ children }) {
     throw lastError;
   }, [lang]);
 
-  // ── Store valuation in DB (non-blocking, best-effort) ──
-  const storeValuation = useCallback(async (aiResult) => {
-    if (!user) return null;
-    try {
-      const row = {
-        user_id: user.id,
-        ai_name: aiResult.name || 'Unknown',
-        ai_name_hebrew: aiResult.nameHebrew || '',
-        ai_category: aiResult.category || 'Other',
-        ai_confidence: aiResult.confidence || 0,
-        ai_raw_response: aiResult,
-        ocr_text: aiResult.recognition?.ocrText || null,
-        model_number: aiResult.recognition?.modelNumber || null,
-        identified_by: aiResult.recognition?.identifiedBy || 'visual',
-        alternatives: aiResult.recognition?.alternatives || [],
-        price_low: aiResult.marketValue?.low || null,
-        price_mid: aiResult.marketValue?.mid || null,
-        price_high: aiResult.marketValue?.high || null,
-        new_retail: aiResult.marketValue?.newRetailPrice || null,
-        price_method: aiResult.marketValue?.price_method || 'ai_estimate',
-        lang,
-      };
-      const { data, error } = await supabase.from('valuations').insert(row).select('id').single();
-      if (error) {
-        if (DEV) console.warn('[Valuation] Store failed:', error.message);
-        return null;
+  // ── GW-000: BACKUP valuation writer (recovery path, NOT primary) ──
+  // The server (record_scan) is authoritative and persists every scan. This runs
+  // ONLY when the server reports persistence failed (aiResult.persisted === false).
+  // It upserts on the server-decided valuation_id, so it can never duplicate the
+  // row even if the server later succeeds. Retried; failures are reported.
+  const backupValuation = useCallback(async (aiResult, maxAttempts = 2) => {
+    if (!user || !aiResult?.valuation_id) return null;
+    const row = {
+      id: aiResult.valuation_id,                 // server-decided → idempotent
+      user_id: user.id,
+      scan_uuid: aiResult.scan_uuid || null,
+      valuation_version: aiResult.valuation_version ?? 1,
+      ai_name: aiResult.name || 'Unknown',
+      ai_name_hebrew: aiResult.nameHebrew || '',
+      ai_category: aiResult.category || 'Other',
+      ai_confidence: aiResult.confidence || 0,
+      ai_raw_response: aiResult,
+      ocr_text: aiResult.recognition?.ocrText || null,
+      model_number: aiResult.recognition?.modelNumber || null,
+      identified_by: aiResult.recognition?.identifiedBy || 'visual',
+      alternatives: aiResult.recognition?.alternatives || [],
+      price_low: aiResult.marketValue?.low ?? null,
+      price_mid: aiResult.marketValue?.mid ?? null,
+      price_high: aiResult.marketValue?.high ?? null,
+      new_retail: aiResult.marketValue?.newRetailPrice ?? null,
+      price_method: aiResult.marketValue?.price_method || 'ai_estimate',
+      comp_count: aiResult._pipeline?.db_matches ?? null,
+      lang,
+    };
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // ignoreDuplicates: if the server row already exists, do nothing (no UPDATE
+        // policy needed) — the RLS insert check (user_id = auth.uid()) still applies.
+        const { error } = await supabase
+          .from('valuations')
+          .upsert(row, { onConflict: 'id', ignoreDuplicates: true });
+        if (error) throw error;
+        if (DEV) console.log('[Valuation] Backup upsert ok:', row.id);
+        return row.id;
+      } catch (e) {
+        if (attempt === maxAttempts) {
+          console.warn('[Valuation] Backup failed:', e.message);
+          reportError(e, { scan_uuid: row.scan_uuid, stage: 'client_backup', valuation_id: row.id });
+          return null;
+        }
+        await new Promise(r => setTimeout(r, 200 * attempt));
       }
-      if (DEV) console.log('[Valuation] Stored:', data.id);
-      return data.id;
-    } catch (e) {
-      if (DEV) console.warn('[Valuation] Store error:', e.message);
-      return null;
     }
+    return null;
   }, [user, lang]);
 
   // ── Load user's valuation history ──
@@ -1617,6 +1640,13 @@ export function AppProvider({ children }) {
       return;
     }
     pipelineActiveRef.current = true;
+
+    // GW-000: fresh scan → new lifecycle id; append → reuse the current one so
+    // the whole multi-photo/refine lifecycle stays correlated under one scan_uuid.
+    if (!appendMode || !currentScanUuidRef.current) {
+      currentScanUuidRef.current =
+        (globalThis.crypto?.randomUUID?.() || `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    }
 
     // Cancel any in-flight pipeline (defensive — guard above should prevent this)
     if (pipelineAbortRef.current) {
@@ -1685,10 +1715,12 @@ export function AppProvider({ children }) {
         setHelpModalOpen(true);
       }
 
-      // Store valuation in DB (async, non-blocking)
-      storeValuation(analysisResult).then(vid => {
-        if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
-      }).catch(err => { if (DEV) console.error('[Pipeline] storeValuation failed:', err); });
+      // GW-000: server (record_scan) is authoritative and already persisted this
+      // scan; analysisResult carries valuation_id / scan_uuid / persisted. Fire the
+      // client backup ONLY if the server reported failure.
+      if (analysisResult.persisted === false) {
+        backupValuation(analysisResult).catch(err => { if (DEV) console.error('[Pipeline] backup failed:', err); });
+      }
 
       if (DEV) console.log(`[Pipeline] ✅ Done in ${(performance.now() - pipelineT0).toFixed(0)}ms`);
 
@@ -1715,7 +1747,7 @@ export function AppProvider({ children }) {
       // Always release the in-flight guard so legitimate retries can proceed.
       pipelineActiveRef.current = false;
     }
-  }, [analyzeWithRetry, fetchRecognitionHints, storeValuation, playSound, lang]);
+  }, [analyzeWithRetry, fetchRecognitionHints, backupValuation, playSound, lang]);
 
   // ── Retry from the failed step ──
   const retryPipeline = useCallback(() => {
@@ -1873,9 +1905,11 @@ export function AppProvider({ children }) {
           oldValuationId                              // link to valuation
         );
       }
-      storeValuation(refined).then(vid => {
-        if (vid) setResult(prev => prev ? { ...prev, valuation_id: vid } : prev);
-      });
+      // GW-000: refine is the SAME lifecycle (scan_uuid reused); the server
+      // persisted this refined valuation. Backup only on reported failure.
+      if (refined.persisted === false) {
+        backupValuation(refined).catch(() => {});
+      }
 
       if (DEV) console.log('[Refine] Complete:', refined.name);
     } catch (e) {
@@ -1885,7 +1919,7 @@ export function AppProvider({ children }) {
       setView('results');
       showToastMsg(lang === 'he' ? 'שגיאה בעדכון, מחירים מקוריים נשמרו' : 'Update failed, original prices kept');
     }
-  }, [images, result, analyzeWithRetry, storeValuation, storeCorrection, playSound, lang, showToastMsg]);
+  }, [images, result, analyzeWithRetry, backupValuation, storeCorrection, playSound, lang, showToastMsg]);
 
   // ── Confirm: user says the identification is correct ──
   const confirmResult = useCallback(() => {

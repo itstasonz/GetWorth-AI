@@ -1,4 +1,5 @@
 import React from 'react';
+import { reportError } from '../lib/telemetry';
 
 // [IMPORTANT FIX #5] ErrorBoundary prevents a crash in any sub-view
 // from white-screening the entire app.
@@ -14,6 +15,8 @@ export default class ErrorBoundary extends React.Component {
 
   componentDidCatch(error, info) {
     console.error('ErrorBoundary caught:', error, info);
+    // GW-000: route through the pluggable sink (no-op until Sentry — GW-000.5).
+    reportError(error, { boundary: 'ErrorBoundary', componentStack: info?.componentStack });
   }
 
   render() {

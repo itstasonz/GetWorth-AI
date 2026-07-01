@@ -33,6 +33,19 @@ import { createClient } from '@supabase/supabase-js';
 const MODEL_VISION = 'claude-sonnet-4-6';
 const MODEL_OCR    = 'claude-haiku-4-5-20251001'; // serial-label OCR (unchanged)
 
+// GW-000: version stamped on every valuation so future pricing engines stay
+// historically comparable. Bump when the pricing pipeline changes materially.
+const VALUATION_VERSION = 1;
+
+// GW-000: pluggable server-side error sink. Structured log today; full Sentry
+// emission is wired in GW-000.5 (guarded by SENTRY_DSN). Never throws.
+function reportError(err, context = {}) {
+  try {
+    console.error('[reportError]', JSON.stringify({ message: err?.message || String(err), ...context }));
+    // GW-000.5: if (process.env.SENTRY_DSN) { /* emit to Sentry */ }
+  } catch { /* telemetry must never throw */ }
+}
+
 // ═══════════════════════════════════════════════════════
 // SECURITY HELPERS
 // ═══════════════════════════════════════════════════════
@@ -1557,6 +1570,68 @@ async function writeBack(recognition, verification, embedding) {
 
 
 // ═══════════════════════════════════════════════════════
+// §8.5  GW-000 — SCAN PERSISTENCE (server-authoritative)
+// ═══════════════════════════════════════════════════════
+// record_scan() is the ONLY critical transaction: it writes the valuation and
+// commits. Derived data (product stats / popularity / price_observations) is
+// updated AFTERWARD and best-effort — it can never block or roll back the
+// valuation. Every outcome is logged to scan_events for lifecycle reconstruction
+// and surfaced via reportError on final failure.
+
+// Append a lifecycle event. Best-effort — never throws, never blocks the scan.
+async function logScanEvent(supa, scanUuid, eventType, stage, payload = {}) {
+  if (!supa || !scanUuid) return;
+  try {
+    await supa.from('scan_events').insert({ scan_uuid: scanUuid, event_type: eventType, stage, payload });
+  } catch (e) {
+    console.warn(`[scan_events] log failed (${eventType}): ${e.message}`);
+  }
+}
+
+// CRITICAL: persist the valuation via the record_scan RPC, with bounded retries.
+// Returns true if the valuation is durably stored, false otherwise (→ client backup).
+async function recordScanWithRetry(supa, valuationRow, scanUuid, maxAttempts = 3) {
+  if (!supa) return false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { error } = await supa.rpc('record_scan', { p_valuation: valuationRow });
+      if (error) throw new Error(error.message);
+      await logScanEvent(supa, scanUuid, 'valuation_recorded', 'persist', { valuation_id: valuationRow.id, attempt });
+      return true;
+    } catch (err) {
+      console.warn(`[record_scan] attempt ${attempt}/${maxAttempts} failed: ${err.message}`);
+      if (attempt === maxAttempts) {
+        await logScanEvent(supa, scanUuid, 'persistence_failed', 'valuation', { valuation_id: valuationRow.id, error: err.message, attempts: attempt });
+        reportError(err, { scan_uuid: scanUuid, stage: 'record_scan', valuation_id: valuationRow.id });
+        return false;
+      }
+      await new Promise(r => setTimeout(r, 200 * attempt));
+    }
+  }
+  return false;
+}
+
+// SECONDARY: derived data. Runs only AFTER the valuation is committed. Failures
+// are logged + reported but are non-fatal by construction (caller ignores them).
+async function updateDerivedWithRetry(supa, recognition, verification, embedding, scanUuid, maxAttempts = 2) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      await withTimeout(writeBack(recognition, verification, embedding), 8_000, 'writeBack');
+      await logScanEvent(supa, scanUuid, 'derived_updated', 'writeback', { attempt });
+      return;
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        await logScanEvent(supa, scanUuid, 'derived_failed', 'writeback', { error: err.message, attempts: attempt });
+        reportError(err, { scan_uuid: scanUuid, stage: 'derived_writeback' });
+        return;
+      }
+      await new Promise(r => setTimeout(r, 200 * attempt));
+    }
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════
 // §9  NORMALIZE
 // ═══════════════════════════════════════════════════════
 
@@ -1851,7 +1926,7 @@ async function handleRequest(req) {
       return json({ error: 'Request body too large' }, 413, cors);
     }
 
-    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null } = await req.json();
+    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = await req.json();
     // TIMING: req.json() blocks until the full request body has uploaded. On Edge
     // this upload time is inside the budget clock — this log isolates it.
     blog(`[Timing] body read+parsed (req.json) bodyLen=${bodyLen}B`);
@@ -2215,20 +2290,63 @@ async function handleRequest(req) {
       },
     };
 
-    // ── WRITE-BACK — always fire-and-forget, never blocks the response ──
-    // Reuse queryEmbedding from the pipeline rather than making a duplicate paid API call.
-    // generateEmbedding (document type) would produce a marginally different vector, but
-    // the difference is negligible for write-back storage purposes.
-    const writeBackAsync = async () => {
-      const wbT = Date.now();
-      try {
-        await withTimeout(writeBack(recognition, verification, queryEmbedding), 8_000, 'writeBack');
-        console.log(`[WriteBack] Done in ${Date.now() - wbT}ms`);
-      } catch (e) {
-        console.warn(`[WriteBack] Failed in ${Date.now() - wbT}ms:`, e.message);
-      }
-    };
-    writeBackAsync().catch(() => {});
+    // ── GW-000: SERVER-AUTHORITATIVE PERSISTENCE ──
+    // scan_uuid = whole-scan lifecycle id (client-generated; server backfills if
+    // absent). valuation_id is decided HERE and returned even on failure, so the
+    // client backup can upsert the SAME row idempotently (no duplicates).
+    const scanUuid     = clientScanUuid || crypto.randomUUID();
+    const valuationId  = crypto.randomUUID();
+    result.scan_uuid          = scanUuid;
+    result.valuation_id       = valuationId;
+    result.valuation_version  = VALUATION_VERSION;
+
+    // Lifecycle breadcrumb — lets any scan_uuid be reconstructed for debugging.
+    await logScanEvent(supa, scanUuid, 'scan_analyzed', 'pipeline', {
+      category: result.category,
+      brand: verification.final_brand,
+      model: verification.final_model,
+      price_mid: result.marketValue?.mid,
+      confidence: result.confidence,
+      stage2_fallback: stage2FallbackUsed,
+      vision_used: !!visionData,
+      total_ms: totalMs,
+    });
+
+    // 1) CRITICAL transaction — persist the valuation and commit.
+    let persisted = false;
+    if (authUser?.id) {
+      const valuationRow = {
+        id:                valuationId,
+        user_id:           authUser.id,
+        scan_uuid:         scanUuid,
+        valuation_version: VALUATION_VERSION,
+        product_id:        candidates[0]?.id || null,
+        ai_name:           result.name || 'Unknown',
+        ai_name_hebrew:    result.nameHebrew || '',
+        ai_category:       result.category || 'Other',
+        ai_confidence:     result.confidence || 0,
+        ai_raw_response:   result,
+        ocr_text:          result.recognition?.ocrText || null,
+        model_number:      result.recognition?.modelNumber || null,
+        identified_by:     result.recognition?.identifiedBy || 'visual',
+        alternatives:      result.recognition?.alternatives || [],
+        price_low:         result.marketValue?.low ?? null,
+        price_mid:         result.marketValue?.mid ?? null,
+        price_high:        result.marketValue?.high ?? null,
+        new_retail:        result.marketValue?.newRetailPrice ?? null,
+        price_method:      result.marketValue?.price_method || 'ai_estimate',
+        comp_count:        candidates.length,
+        lang,
+      };
+      persisted = await recordScanWithRetry(supa, valuationRow, scanUuid);
+    }
+    result.persisted = persisted;
+
+    // 2) DERIVED data — only AFTER the valuation committed; best-effort, never
+    //    blocks the response or affects valuation durability.
+    if (persisted) {
+      await updateDerivedWithRetry(supa, recognition, verification, queryEmbedding, scanUuid).catch(() => {});
+    }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
 
