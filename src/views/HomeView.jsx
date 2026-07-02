@@ -69,7 +69,10 @@ function useAutoScroll(speed = 0.4) {
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════
 export default function HomeView() {
-  const { lang, rtl, listings, goTab, startCamera, handleFile, fileRef, viewItem } = useApp();
+  const { lang, rtl, listings, goTab, startCamera, handleFile, viewItem } = useApp();
+  // Local ref — sharing the context fileRef across components orphans the
+  // input when another binder unmounts (FRONTEND-003)
+  const uploadFileRef = useRef(null);
 
   // Build carousel items from real listings + samples, triple for seamless loop
   const carouselItems = [
@@ -87,7 +90,7 @@ export default function HomeView() {
       style={{ background: STITCH.background, fontFamily: STITCH.FONT_BODY }}
     >
       <input
-        ref={fileRef}
+        ref={uploadFileRef}
         type="file"
         accept="image/*"
         className="hidden"
@@ -203,7 +206,7 @@ export default function HomeView() {
 
           {/* SECONDARY ACTION: UPLOAD PILL */}
           <button
-            onClick={() => fileRef.current?.click()}
+            onClick={() => uploadFileRef.current?.click()}
             className="rounded-full flex items-center gap-2.5 active:scale-[0.97] transition-all"
             style={{
               paddingLeft: 'clamp(18px, 5vw, 28px)',

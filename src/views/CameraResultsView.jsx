@@ -726,11 +726,13 @@ function HelpIdentifyModal() {
     lang, result, images,
     helpModalOpen, setHelpModalOpen,
     addPhoto, submitBrandHint, handleAdditionalFile,
-    fileRef,
   } = useApp();
 
   const [brandInput, setBrandInput] = React.useState('');
   const [showAllBrands, setShowAllBrands] = React.useState(false);
+  // Local ref — sharing the context fileRef across components orphans the
+  // input when another binder unmounts (FRONTEND-003)
+  const uploadFileRef = React.useRef(null);
 
   if (!helpModalOpen || !result) return null;
 
@@ -795,12 +797,12 @@ function HelpIdentifyModal() {
                   <Camera className="w-4 h-4" />
                   {lang === 'he' ? 'צלם תווית' : 'Take photo'}
                 </button>
-                <button onClick={() => fileRef.current?.click()}
+                <button onClick={() => uploadFileRef.current?.click()}
                   className="py-3 px-4 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 flex items-center justify-center gap-2 hover:bg-white/10 transition-all">
                   <Upload className="w-4 h-4" />
                   {lang === 'he' ? 'העלה' : 'Upload'}
                 </button>
-                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
+                <input ref={uploadFileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
               </div>
               <p className="text-[10px] text-slate-600 mt-1.5">
                 {lang === 'he'
@@ -910,7 +912,7 @@ export function ResultsView() {
   const {
     lang, t, images, result, startListing, reset,
     refineResult, confirmResult, correctResult, saveProductCandidate,
-    addPhoto, setHelpModalOpen, helpModalOpen, fileRef,
+    addPhoto, setHelpModalOpen, helpModalOpen,
     handleAdditionalFile,
     serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
     profile,
