@@ -913,6 +913,7 @@ export function ResultsView() {
     addPhoto, setHelpModalOpen, helpModalOpen, fileRef,
     handleAdditionalFile,
     serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
+    profile,
   } = useApp();
 
   const [showCorrection, setShowCorrection] = React.useState(false);
@@ -2177,8 +2178,8 @@ export function ResultsView() {
         </FadeIn>
       )}
 
-      {/* ═══ PIPELINE DEBUG PANEL — always shown when _debug present ═══ */}
-      {result._debug && (() => {
+      {/* ═══ PIPELINE DEBUG PANEL — admins and local dev only ═══ */}
+      {result._debug && (profile?.is_admin === true || import.meta.env.DEV) && (() => {
         const d = result._debug;
         const s1  = d.stage1    || {};
         const s2  = d.stage2    || {};
