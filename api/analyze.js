@@ -2444,6 +2444,7 @@ export default async function handler(req, res) {
     console.error('[Handler] adapter fatal:', err?.message);
     res.statusCode = 500;
     res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
     res.end(JSON.stringify({ error: 'Internal server error' }));
   }
 }
