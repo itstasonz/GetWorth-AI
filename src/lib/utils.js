@@ -34,6 +34,14 @@ export const calcPrice = (base, cond, ans, category) => {
   return Math.round(base * (1 - disc - extra));
 };
 
+// CHAT-002: image messages are stored as `__chat_img__<url>` (see ChatViews).
+// Previews (inbox rows, notification banners) must never show the raw marker.
+export const CHAT_IMG_PREFIX = '__chat_img__';
+export const formatMessagePreview = (content, lang) =>
+  typeof content === 'string' && content.startsWith(CHAT_IMG_PREFIX)
+    ? (lang === 'he' ? '📷 תמונה' : '📷 Photo')
+    : content;
+
 export const formatMessageTime = (date, lang) => {
   const d = new Date(date);
   const now = new Date();

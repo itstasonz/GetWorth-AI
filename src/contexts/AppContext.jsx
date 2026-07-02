@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
@@ -284,6 +284,13 @@ export function AppProvider({ children }) {
   const [sendingMessage, setSendingMessage] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef(null);
+  // CHAT-002: refs mirror chat state for the realtime handler. Reading state via
+  // a setState updater's side effect is unreliable (React only evaluates updaters
+  // eagerly when the queue is empty) — refs are always current.
+  const activeChatRef = useRef(null);
+  const conversationsRef = useRef([]);
+  useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
+  useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
 
   // In-app message notification banner
   const [msgNotification, setMsgNotification] = useState(null);
@@ -494,20 +501,19 @@ export function AppProvider({ children }) {
             const newMsg = payload.new;
             if (newMsg.sender_id === user.id) return;
 
-            let isInThisChat = false;
-            setActiveChat((current) => {
-              if (current && newMsg.conversation_id === current.id) {
-                isInThisChat = true;
-                setMessages((prev) => {
-                  if (prev.some((m) => m.id === newMsg.id)) return prev;
-                  return [...prev, newMsg];
-                });
-                setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
-                supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id)
-                  .then(({ error }) => { if (error && DEV) console.error('[Chat] Mark read failed:', error); });
-              }
-              return current;
-            });
+            // CHAT-002: read the open chat from a ref, never from a setState
+            // updater side effect (the old pattern intermittently reported false
+            // while the user WAS in the chat → phantom banner + wrong badge).
+            const isInThisChat = activeChatRef.current?.id === newMsg.conversation_id;
+            if (isInThisChat) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
+              });
+              setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+              supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id)
+                .then(({ error }) => { if (error && DEV) console.error('[Chat] Mark read failed:', error); });
+            }
 
             if (!isInThisChat) {
               try {
@@ -525,7 +531,7 @@ export function AppProvider({ children }) {
                 const listingTitle = (lang === 'he' && listing?.title_hebrew)
                   ? listing.title_hebrew : (listing?.title || '');
                 setMsgNotification({
-                  senderName, listingTitle, content: newMsg.content,
+                  senderName, listingTitle, content: formatMessagePreview(newMsg.content, lang),
                   conversationId: newMsg.conversation_id,
                   listingImage: listing?.images?.[0] || null,
                   isOffer: newMsg.is_offer, offerAmount: newMsg.offer_amount,
@@ -535,7 +541,7 @@ export function AppProvider({ children }) {
                 console.warn('Notification enrichment failed:', err);
                 setMsgNotification({
                   senderName: lang === 'he' ? 'הודעה חדשה' : 'New message',
-                  listingTitle: '', content: newMsg.content,
+                  listingTitle: '', content: formatMessagePreview(newMsg.content, lang),
                   conversationId: newMsg.conversation_id,
                 });
               }
@@ -543,18 +549,22 @@ export function AppProvider({ children }) {
             // Update the conversation preview in-place — avoids a full network reload
             // on every incoming message. Only fall back to a reload if the conversation
             // isn't in state yet (e.g. a brand-new thread the user hasn't seen).
-            setConversations(prev => {
-              const idx = prev.findIndex(c => c.id === newMsg.conversation_id);
-              if (idx === -1) {
-                loadConversations(true);
-                return prev;
-              }
-              const updated = { ...prev[idx], updated_at: newMsg.created_at, messages: [newMsg] };
-              const next = [...prev];
-              next.splice(idx, 1);
-              return [updated, ...next];
-            });
-            setUnreadCount(prev => isInThisChat ? prev : prev + 1);
+            // Membership is checked via ref (not inside the updater) so the updater
+            // stays pure. If we're reading this chat right now the preview is stored
+            // as already-read — the derived unread count must not include it.
+            if (!conversationsRef.current.some(c => c.id === newMsg.conversation_id)) {
+              loadConversations(true);
+            } else {
+              const previewMsg = isInThisChat ? { ...newMsg, is_read: true } : newMsg;
+              setConversations(prev => {
+                const idx = prev.findIndex(c => c.id === newMsg.conversation_id);
+                if (idx === -1) return prev;
+                const updated = { ...prev[idx], updated_at: newMsg.created_at, messages: [previewMsg] };
+                const next = [...prev];
+                next.splice(idx, 1);
+                return [updated, ...next];
+              });
+            }
           }
         )
         .on(
@@ -571,9 +581,15 @@ export function AppProvider({ children }) {
             });
           }
         ),
-    // Re-sync the conversation list after a reconnect (realtime does not replay
-    // events missed while the socket was down).
-    () => loadConversations(true),
+    // Re-sync after a reconnect (realtime does not replay events missed while
+    // the socket was down). CHAT-002: also reload the OPEN conversation —
+    // without this, messages missed during the outage update the inbox preview
+    // but never appear in the thread the user is looking at.
+    () => {
+      loadConversations(true);
+      const open = activeChatRef.current;
+      if (open?.id && !open.isDemo) loadMessages(open.id);
+    },
   );
 
   // ═══════════════════════════════════════════════════════
@@ -811,8 +827,20 @@ export function AppProvider({ children }) {
 
   // ─── CHAT ───────────────────────────────────────────
 
+  // CHAT-002: badge semantics = number of CONVERSATIONS with unread messages.
+  // The preview query only carries the last message per conversation, so a
+  // per-message total was never obtainable here — the old code mixed both
+  // meanings (initial load counted ≤1/conv, realtime incremented per message)
+  // and the badge visibly shrank on every reload. unreadCount is now derived
+  // from `conversations` in one place (effect below) for every path: initial
+  // load, cache, realtime, reconnect.
   const countUnread = (convList, userId) =>
-    (convList || []).reduce((n, c) => n + (c.messages?.filter(m => !m.is_read && m.sender_id !== userId)?.length || 0), 0);
+    (convList || []).reduce((n, c) =>
+      n + ((c.messages || []).some(m => !m.is_read && m.sender_id !== userId) ? 1 : 0), 0);
+
+  useEffect(() => {
+    setUnreadCount(user ? countUnread(conversations, user.id) : 0);
+  }, [conversations, user]);
 
   const loadConversations = useCallback(async (force = false) => {
     if (!user) return;
@@ -828,8 +856,7 @@ export function AppProvider({ children }) {
     const cacheKey = `conv-${user.id}`;
     const cached = await cacheGet(cacheKey);
     if (cached?.length) {
-      setConversations(cached);
-      setUnreadCount(countUnread(cached, user.id));
+      setConversations(cached); // unreadCount derives from this via effect
       setConversationsLoading(false); // real content from cache — hide skeleton now
       if (DEV) console.log(`[Chat] IDB cache: ${cached.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
     }
@@ -849,9 +876,8 @@ export function AppProvider({ children }) {
       .order('created_at', { ascending: false, referencedTable: 'messages' })
       .limit(1, { referencedTable: 'messages' });
     if (data) {
-      setConversations(data);
+      setConversations(data); // unreadCount derives from this via effect
       conversationsLastLoadRef.current = Date.now();
-      setUnreadCount(countUnread(data, user.id));
       cacheSet(cacheKey, data);
       if (DEV) console.log(`[Chat] Network done: ${data.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
     }

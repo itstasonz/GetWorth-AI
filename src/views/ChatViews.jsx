@@ -7,7 +7,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Btn, FadeIn, SlideUp } from '../components/ui';
-import { formatPrice, formatMessageTime } from '../lib/utils';
+import { formatPrice, formatMessageTime, formatMessagePreview } from '../lib/utils';
 
 // ─── Stitch design tokens ─────────────────────────────────────────────────────
 // surface-dim:             #131313  — page / inbox background
@@ -348,10 +348,14 @@ export function InboxView() {
           {filtered.map(conv => {
             const otherUser  = conv.buyer_id === user.id ? conv.seller : conv.buyer;
             const lastMsg    = conv.messages?.[0] ?? null;
-            const convUnread = conv.messages?.filter(m => !m.is_read && m.sender_id !== user.id).length || 0;
+            // CHAT-002: preview carries only the LAST message, so a per-message
+            // count is meaningless here — treat unread as a boolean per thread.
+            const convUnread = (conv.messages || []).some(m => !m.is_read && m.sender_id !== user.id) ? 1 : 0;
             const lastText   = lastMsg?.is_offer
               ? `💰 ₪${lastMsg.offer_amount}`
-              : lastMsg?.content || (lang === 'he' ? 'שיחה חדשה' : 'New conversation');
+              : (lastMsg?.content
+                  ? formatMessagePreview(lastMsg.content, lang)
+                  : (lang === 'he' ? 'שיחה חדשה' : 'New conversation'));
             const listingTitle = lang === 'he' && conv.listing?.title_hebrew
               ? conv.listing.title_hebrew : conv.listing?.title;
 
@@ -412,7 +416,7 @@ export function InboxView() {
                         className="text-[10px] px-2 py-0.5 rounded-full font-medium"
                         style={{ background: `${C.primary}1a`, color: C.primary }}
                       >
-                        {convUnread} {lang === 'he' ? 'חדשות' : 'new'}
+                        {lang === 'he' ? 'חדש' : 'New'}
                       </span>
                     </div>
                   )}
@@ -780,16 +784,12 @@ export function ChatView() {
           {rtl ? <ChevronRight className="w-6 h-6" /> : <ChevronLeft className="w-6 h-6" />}
         </button>
 
-        {/* Avatar + online indicator */}
-        <div className="relative flex-shrink-0">
+        {/* Avatar — no presence indicator: there is no presence system (CHAT-002) */}
+        <div className="flex-shrink-0">
           <UserAvatar profile={otherUser} size="sm" />
-          <div
-            className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2"
-            style={{ background: C.primary, borderColor: C.surfaceDim }}
-          />
         </div>
 
-        {/* Name + active status */}
+        {/* Name */}
         <div className="flex-1 min-w-0 px-1">
           <div className="flex items-center gap-1.5">
             <p
@@ -802,9 +802,6 @@ export function ChatView() {
               <Shield className="w-3.5 h-3.5 flex-shrink-0" style={{ color: C.primary }} />
             )}
           </div>
-          <p className="text-[11px] font-medium" style={{ color: C.primary }}>
-            {lang === 'he' ? 'פעיל עכשיו' : 'Active now'}
-          </p>
         </div>
 
         {/* Header overflow */}
