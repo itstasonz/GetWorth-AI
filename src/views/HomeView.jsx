@@ -3,7 +3,6 @@ import {
   Camera, Upload, ArrowRight, ArrowLeft, Flame
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { SAMPLE_ITEMS } from '../lib/constants';
 import { formatPrice } from '../lib/utils';
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -74,11 +73,9 @@ export default function HomeView() {
   // input when another binder unmounts (FRONTEND-003)
   const uploadFileRef = useRef(null);
 
-  // Build carousel items from real listings + samples, triple for seamless loop
-  const carouselItems = [
-    ...listings.slice(0, 8),
-    ...SAMPLE_ITEMS.slice(0, 6),
-  ];
+  // Build carousel from real listings only (FRONTEND-005: demo items removed),
+  // tripled for seamless loop
+  const carouselItems = listings.slice(0, 8);
   const allItems = [...carouselItems, ...carouselItems, ...carouselItems];
 
   const carousel = useAutoScroll(0.4);
@@ -231,7 +228,8 @@ export default function HomeView() {
 
         </div>
 
-        {/* ═══ HOT ITEMS / LIVE LISTINGS SECTION ═══ */}
+        {/* ═══ HOT ITEMS / LIVE LISTINGS SECTION — hidden until real listings exist ═══ */}
+        {carouselItems.length > 0 && (
         <section
           className="w-full max-w-7xl mx-auto"
           style={{ marginTop: 'clamp(16px, 2.5vh, 36px)' }}
@@ -300,6 +298,7 @@ export default function HomeView() {
             </div>
           </div>
         </section>
+        )}
 
       </main>
     </div>
