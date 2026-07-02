@@ -1315,6 +1315,33 @@ export function AppProvider({ children }) {
     loadUserData(); showToastMsg('Deleted');
   };
 
+  // ── FRONTEND-006: minimal listing edit — title/description/price/condition ONLY.
+  // Field whitelist is fixed here so callers can never touch images, category,
+  // valuation, or serial data. Owner-scoped like deleteListing; RLS enforces
+  // seller_id server-side as well.
+  const updateListing = async (id, { title, description, price, condition: newCondition, titleHebrew }) => {
+    const { data, error } = await supabase.from('listings')
+      .update({
+        title, description, price, condition: newCondition,
+        // Only sent when the seller actually changed the title — keeps the
+        // seller's words consistent in both languages instead of showing a
+        // stale AI-generated Hebrew name over an edited title.
+        ...(titleHebrew !== undefined && { title_hebrew: titleHebrew }),
+      })
+      .eq('id', id).eq('seller_id', user.id).select();
+    if (error || !data?.length) {
+      if (DEV) console.warn('[EditListing] update failed:', error?.message);
+      showToastMsg(lang === 'he' ? 'שגיאה בעדכון המודעה' : 'Failed to update listing');
+      return false;
+    }
+    const updated = data[0];
+    setMyListings(prev => prev.map(l => (l.id === id ? { ...l, ...updated } : l)));
+    setListings(prev => prev.map(l => (l.id === id ? { ...l, ...updated } : l)));
+    setSelected(prev => (prev?.id === id ? { ...prev, ...updated } : prev));
+    showToastMsg(lang === 'he' ? 'המודעה עודכנה' : 'Listing updated');
+    return true;
+  };
+
   // ═══════════════════════════════════════════════════════
   // IMAGE ANALYSIS PIPELINE
   //
@@ -2974,7 +3001,7 @@ export function AppProvider({ children }) {
     tab, setTab, view, setView, goTab, reset,
     listings, myListings, savedIds, savedItems,
     hasMore, loadingMore, loadMoreListings, loadListings,
-    toggleSave, deleteListing, viewItem, contactSeller,
+    toggleSave, deleteListing, updateListing, viewItem, contactSeller,
     selected, setSelected, showContact, setShowContact, heartAnim,
     sellerProfile, sellerListings, loadingSeller, viewSellerProfile,
     search, setSearch, category, setCategory,

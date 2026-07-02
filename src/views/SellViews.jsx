@@ -18,15 +18,16 @@ const SELL_STITCH = {
   FONT_BODY:               '"Inter", system-ui, -apple-system, sans-serif',
 };
 import { useApp } from '../contexts/AppContext';
-import { Card, Btn, Badge, FadeIn, ScaleIn, InputField, BackButton, ConfirmSheet, EmptyState, haptic } from '../components/ui';
+import { Card, Btn, Badge, FadeIn, ScaleIn, SlideUp, InputField, BackButton, ConfirmSheet, EmptyState, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
 
 export function MyListingsView() {
-  const { t, lang, rtl, user, myListings, deleteListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
+  const { t, lang, rtl, user, myListings, deleteListing, updateListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
   const [activeTab, setActiveTab] = useState('active');
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
 
   // ─── Derived data ───
   const pendingRequests = (orders || []).filter(o => o.seller_id === user?.id && o.status === 'pending');
@@ -242,12 +243,15 @@ export function MyListingsView() {
                         {formatPrice(item.price)}
                       </span>
                       <div className="flex gap-0.5">
+                        {/* Sold listings are historical records — not editable */}
+                        {item.status !== 'sold' && (
                         <button
-                          onClick={e => { e.stopPropagation(); viewItem(item); }}
+                          onClick={e => { e.stopPropagation(); setEditTarget(item); }}
                           className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
                           style={{ color: SELL_STITCH.onSurfaceVariant }}>
                           <Pencil className="w-4 h-4" />
                         </button>
+                        )}
                         <button
                           onClick={e => { e.stopPropagation(); setDeleteTarget(item.id); }}
                           className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-red-500/15 active:scale-90"
@@ -280,6 +284,17 @@ export function MyListingsView() {
         />
       )}
 
+      {editTarget && (
+        <EditListingSheet
+          item={editTarget}
+          lang={lang}
+          rtl={rtl}
+          t={t}
+          onClose={() => setEditTarget(null)}
+          onSave={(fields) => updateListing(editTarget.id, fields)}
+        />
+      )}
+
       <ConfirmSheet
         open={deleteTarget !== null}
         icon={<Trash2 className="w-8 h-8 text-red-400" />}
@@ -290,6 +305,126 @@ export function MyListingsView() {
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => { deleteListing(deleteTarget); setDeleteTarget(null); }}
       />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// FRONTEND-006: EDIT LISTING SHEET — title/description/price/condition only.
+// Images, category, and AI data are intentionally not editable.
+// ═══════════════════════════════════════════════════════
+const EDIT_CONDITIONS = ['newSealed', 'likeNew', 'used', 'poor'];
+
+function EditListingSheet({ item, lang, rtl, t, onClose, onSave }) {
+  const [title, setTitle] = useState(item.title || '');
+  const [desc, setDesc] = useState(item.description || '');
+  const [price, setPrice] = useState(item.price ?? '');
+  const [cond, setCond] = useState(item.condition || 'used');
+  const [saving, setSaving] = useState(false);
+
+  const priceNum = Number(price);
+  const valid = title.trim().length > 0 && Number.isFinite(priceNum) && priceNum > 0;
+
+  const handleSave = async () => {
+    if (!valid || saving) return;
+    setSaving(true);
+    const titleChanged = title.trim() !== (item.title || '');
+    const ok = await onSave({
+      title: title.trim(),
+      description: desc.trim(),
+      price: priceNum,
+      condition: cond,
+      // Sync title_hebrew only when the title was actually edited (see updateListing)
+      ...(titleChanged && item.title_hebrew ? { titleHebrew: title.trim() } : {}),
+    });
+    setSaving(false);
+    if (ok) onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 backdrop-blur-sm animate-fadeIn" onClick={onClose}>
+      <SlideUp className="w-full max-w-md">
+        <div
+          className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-4 max-h-[85vh] overflow-y-auto"
+          dir={rtl ? 'rtl' : 'ltr'}
+          onClick={e => e.stopPropagation()}
+        >
+          <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
+          <h3 className="text-lg font-bold text-center">{lang === 'he' ? 'עריכת מודעה' : 'Edit Listing'}</h3>
+
+          {/* Title */}
+          <div>
+            <p className="text-xs text-slate-500 mb-1.5">{lang === 'he' ? 'כותרת' : 'Title'}</p>
+            <input
+              value={title}
+              onChange={e => setTitle(e.target.value)}
+              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
+            />
+          </div>
+
+          {/* Description */}
+          <div>
+            <p className="text-xs text-slate-500 mb-1.5">{lang === 'he' ? 'תיאור' : 'Description'}</p>
+            <textarea
+              value={desc}
+              onChange={e => setDesc(e.target.value)}
+              rows={3}
+              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 resize-none focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
+            />
+          </div>
+
+          {/* Price */}
+          <div>
+            <p className="text-xs text-slate-500 mb-1.5">{lang === 'he' ? 'מחיר (₪)' : 'Price (₪)'}</p>
+            <input
+              value={price}
+              onChange={e => setPrice(e.target.value)}
+              type="number"
+              inputMode="numeric"
+              min="1"
+              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
+            />
+          </div>
+
+          {/* Condition */}
+          <div>
+            <p className="text-xs text-slate-500 mb-1.5">{t.condition || 'Condition'}</p>
+            <div className="grid grid-cols-2 gap-2">
+              {EDIT_CONDITIONS.map(c => (
+                <button
+                  key={c}
+                  onClick={() => setCond(c)}
+                  className="py-3 px-3 rounded-xl text-sm font-medium border transition-all active:scale-[0.97]"
+                  style={cond === c
+                    ? { borderColor: 'rgba(111,238,225,0.6)', background: 'rgba(111,238,225,0.08)', color: '#6FEEE1' }
+                    : { borderColor: 'rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.02)', color: '#BBC9C7' }}
+                >
+                  {t[c] || c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3 pt-1 pb-2">
+            <button
+              onClick={onClose}
+              className="flex-1 py-3.5 rounded-xl bg-white/5 border border-white/10 text-sm font-medium text-slate-300 hover:bg-white/10 transition-all active:scale-95"
+            >
+              {lang === 'he' ? 'ביטול' : 'Cancel'}
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!valid || saving}
+              className="flex-1 py-3.5 rounded-xl text-sm font-bold transition-all active:scale-[0.97] disabled:opacity-40 flex items-center justify-center gap-2"
+              style={{ background: SELL_STITCH.GRADIENT_PRIMARY, color: SELL_STITCH.onPrimary }}
+            >
+              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+              {lang === 'he' ? 'שמור שינויים' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      </SlideUp>
     </div>
   );
 }
