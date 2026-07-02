@@ -2016,7 +2016,7 @@ export function ResultsView() {
           /* MODERATE — teal outline primary, ghost secondary */
           <div className="space-y-2">
             <button
-              onClick={startListing}
+              onClick={() => { confirmResult(); startListing(); }}
               className="w-full h-14 rounded-full flex items-center justify-center gap-3 font-bold text-base active:scale-[0.97] transition-all"
               style={{
                 background: 'transparent',

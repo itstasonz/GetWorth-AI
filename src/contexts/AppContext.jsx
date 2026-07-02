@@ -1965,7 +1965,7 @@ export function AppProvider({ children }) {
 
   // ── Confirm: user says the identification is correct ──
   const confirmResult = useCallback(() => {
-    if (!result) return;
+    if (!result || result.userConfirmed) return; // idempotent — never double-record
     setResult(prev => ({ ...prev, userConfirmed: true, needsConfirmation: false }));
     playSound('tap');
     // Persist confirmation to valuations table
