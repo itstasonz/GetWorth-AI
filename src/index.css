@@ -2,6 +2,72 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Self-hosted fonts ────────────────────────────────────────────────────────
+ * Manrope (headlines) and Inter (body) carry no Hebrew glyphs, and ~30 inline
+ * style props across the views hardcode those family names. Instead of editing
+ * every stack, Heebo is aliased UNDER the "Manrope" and "Inter" family names
+ * with a Hebrew-only unicode-range, so Hebrew text resolves to Heebo
+ * automatically wherever either family is requested.
+ *
+ * Order matters: Latin faces are declared LAST so they win the overlapping
+ * punctuation ranges (U+2000-206F); Hebrew codepoints (U+0590-05FF, U+FB1D-
+ * FB4F) and the shekel sign (U+20AA) only exist in the Heebo faces.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* Hebrew glyphs for "Manrope" and "Inter" → served by Heebo */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/heebo-hebrew.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/heebo-hebrew.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+
+/* Standalone Heebo family (kept for any direct 'Heebo' references) */
+@font-face {
+  font-family: 'Heebo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/heebo-hebrew.woff2') format('woff2');
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: 'Heebo';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/heebo-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Latin faces — declared last so they take precedence on overlapping ranges */
+@font-face {
+  font-family: 'Manrope';
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url('/fonts/manrope-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* ── GetWorth design tokens ──────────────────────────────────────────────────
  * Stage 1: CSS variable foundation. Tailwind extends these via tailwind.config.js
  * so screens can use bg-app, bg-surface-low, text-primary, border-outline, etc.

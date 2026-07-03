@@ -261,7 +261,8 @@ function AppShell() {
       className="text-white flex flex-col"
       style={{
         minHeight: '100dvh',        /* at least full viewport — never less */
-        fontFamily: rtl ? 'Heebo, sans-serif' : 'Inter, sans-serif',
+        /* Hebrew glyphs resolve to Heebo via unicode-range aliases in index.css */
+        fontFamily: '"Inter", system-ui, sans-serif',
         background: '#131313',
       }}
       dir={rtl ? 'rtl' : 'ltr'}

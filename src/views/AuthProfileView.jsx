@@ -237,16 +237,6 @@ export function ProfileView() {
     if (user && typeof loadMyReviews === 'function') loadMyReviews();
   }, [user, loadMyReviews]);
 
-  // Inject Manrope + Inter fonts once
-  useEffect(() => {
-    if (document.getElementById('stitch-fonts')) return;
-    const link = document.createElement('link');
-    link.id = 'stitch-fonts';
-    link.rel = 'stylesheet';
-    link.href = 'https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap';
-    document.head.appendChild(link);
-  }, []);
-
   if (!user) return null;
 
   const vStatus = profile?.verification_status || 'unverified';
