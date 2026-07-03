@@ -60,7 +60,7 @@ function getCorsHeaders(requestOrigin) {
   const allowed = new Set([...configured, ...devOrigins]);
   const headers = {
     // TEMPORARY build marker — confirms the browser hit the Node-runtime preview
-    // build (maxDuration 60 / 45s budget / 20s Stage 1 cap). Remove after validation.
+    // build (maxDuration 60 / 45s budget / 28s Stage 1 cap). Remove after validation.
     'X-GetWorth-Build': '774e6e9-node-budget',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
@@ -308,7 +308,7 @@ const AUTHENTICITY_HIGH_RISK_CATEGORIES = new Set(['watches', 'jewelry', 'bags',
 // stalled upstream never blocks the full pipeline budget.
 async function fetchWithRetry(url, options, maxRetries = 1, attemptTimeoutMs = 12000) {
   const delays = [1000, 2500, 5000];
-  let lastResponse, lastError;
+  let lastResponse, lastError, lastWasAbort = false;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
@@ -325,6 +325,7 @@ async function fetchWithRetry(url, options, maxRetries = 1, attemptTimeoutMs = 1
       clearTimeout(timeoutId);
       if (lastResponse.ok) return lastResponse;
       if ([529, 500, 502, 503].includes(lastResponse.status)) {
+        lastWasAbort = false;
         lastError = await lastResponse.json().catch(() => ({}));
         console.warn(`[Pipeline] Attempt ${attempt + 1} got ${lastResponse.status}:`, lastError.error?.message || '');
         if (attempt < maxRetries) continue;
@@ -334,16 +335,26 @@ async function fetchWithRetry(url, options, maxRetries = 1, attemptTimeoutMs = 1
     } catch (err) {
       clearTimeout(timeoutId);
       lastError = { error: { message: err.message } };
-      const tag = err.name === 'AbortError' ? 'timed out' : 'network error';
+      lastWasAbort = err.name === 'AbortError';
+      const tag = lastWasAbort ? 'timed out' : 'network error';
       console.warn(`[Pipeline] Attempt ${attempt + 1} ${tag}:`, err.message);
       if (attempt < maxRetries) continue;
     }
   }
   console.error('[Pipeline] All retries exhausted:', lastError);
+  // X-Upstream-Failure lets callers log WHY the synthetic 503 was produced
+  // (per-attempt AbortController timeout vs real upstream 5xx). Diagnostic only —
+  // body and status are unchanged and no caller branches on this header.
   return new Response(JSON.stringify({
     error: 'Service temporarily overloaded. Please try again.',
     retryable: true,
-  }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  }), {
+    status: 503,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Upstream-Failure': lastWasAbort ? 'attempt-timeout' : 'upstream-error',
+    },
+  });
 }
 
 // ═══════════════════════════════════════════════════════
@@ -711,7 +722,8 @@ async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
   // Stage 1 is already guarded by the caller's withTimeout(stage1Cap). Align the
   // inner fetch abort just under that cap (single source of truth = budget clock)
   // and disable the inner retry: a second attempt can never fit Stage 1's budget
-  // and only risks a dangling upstream fetch. The client retries on STAGE1_TIMEOUT.
+  // and only risks a dangling upstream fetch. On STAGE1_TIMEOUT the client shows
+  // a manual Retry button — there is NO automatic client retry (maxRetries=0).
   const innerAttemptMs = Math.max(attemptTimeoutMs - 500, 3000);
   const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -729,6 +741,12 @@ async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    // Synthetic 503 from fetchWithRetry after the per-attempt AbortController
+    // fired: surface it as a timeout so Stage 1 logs don't mislabel an inner
+    // abort as a real Anthropic 503 ("Recognition API 503: Unknown").
+    if (res.headers.get('x-upstream-failure') === 'attempt-timeout') {
+      throw new Error(`[Timeout] Recognition inner fetch aborted at ${innerAttemptMs}ms`);
+    }
     throw new Error(`Recognition API ${res.status}: ${err.error?.message || 'Unknown'}`);
   }
 
@@ -1755,6 +1773,96 @@ function normalizeModelKey(model) {
     .trim();
 }
 
+// ── SCAN-IDENTITY-001: canonical product title ──────────────────────────────
+// Hebrew labels for common item descriptors (Stage 1 subcategory). Brand and
+// model names are NEVER translated — Latin product names are the norm in
+// Israeli commerce; only the generic descriptor gets a Hebrew label.
+const HEBREW_DESCRIPTORS = {
+  'gaming mouse': 'עכבר גיימינג',
+  'wireless mouse': 'עכבר אלחוטי',
+  'mouse': 'עכבר',
+  'mechanical keyboard': 'מקלדת מכנית',
+  'gaming keyboard': 'מקלדת גיימינג',
+  'keyboard': 'מקלדת',
+  'wireless headphones': 'אוזניות אלחוטיות',
+  'gaming headset': 'אוזניות גיימינג',
+  'headphones': 'אוזניות',
+  'earbuds': 'אוזניות אלחוטיות',
+  'smartphone': 'סמארטפון',
+  'laptop': 'מחשב נייד',
+  'tablet': 'טאבלט',
+  'smartwatch': 'שעון חכם',
+  'monitor': 'מסך מחשב',
+  'bluetooth speaker': "רמקול בלוטות'",
+  'speaker': 'רמקול',
+  'camera': 'מצלמה',
+  'game console': 'קונסולת משחק',
+  'game controller': 'בקר משחק',
+  'controller': 'בקר משחק',
+  'drone': 'רחפן',
+  'router': 'ראוטר',
+  'webcam': 'מצלמת רשת',
+  'microphone': 'מיקרופון',
+  'power bank': 'סוללת גיבוי',
+  'watch': 'שעון',
+  'sneakers': 'נעלי ספורט',
+  'backpack': 'תיק גב',
+  'bicycle': 'אופניים',
+};
+
+function hebrewDescriptor(descriptor) {
+  return HEBREW_DESCRIPTORS[(descriptor || '').toLowerCase().trim()] || null;
+}
+
+function titleCaseDescriptor(s) {
+  return (s || '').replace(/\b[a-z]/g, (c) => c.toUpperCase());
+}
+
+// A category ("Electronics") is never used as the product title. Fallback
+// ladder: brand+model → brand+descriptor → descriptor. recognition.category
+// survives only as an emergency guard against an empty title (no brand, no
+// subcategory, no usable full_name).
+function composeTitles(recognition, verification) {
+  const brand = (verification.final_brand || '').trim();
+  const model = (verification.final_model || '').trim();
+  const brandOk = !!brand && brand.toLowerCase() !== 'unidentified';
+  const modelOk = !!model && model.toLowerCase() !== 'unidentified';
+  const descriptor = (recognition.subcategory || '').trim();
+  const fullName = (verification.full_name || '').trim();
+  const category = recognition.category || '';
+
+  let name;
+  if (brandOk && modelOk) {
+    // Canonical identity — always "<Brand> <Model>", regardless of language.
+    // Guard: some models arrive with the brand already prefixed.
+    name = model.toLowerCase().startsWith(brand.toLowerCase()) ? model : `${brand} ${model}`;
+  } else if (brandOk) {
+    // Accept Stage 2's full_name only when it actually carries the brand —
+    // an unguarded generic full_name ("Gaming Mouse") must not win here.
+    name = fullName.toLowerCase().includes(brand.toLowerCase())
+      ? fullName
+      : `${brand} ${titleCaseDescriptor(descriptor)}`.trim();
+  } else {
+    name = titleCaseDescriptor(descriptor)
+      || (fullName && fullName !== category ? fullName : '')
+      || category; // emergency only
+  }
+
+  // Hebrew title: identical Latin brand+model when identified; Hebrew is used
+  // only for generic descriptors. Never falls back to category_hebrew.
+  let nameHebrew;
+  if (brandOk && modelOk) {
+    nameHebrew = name;
+  } else if (brandOk) {
+    const heb = hebrewDescriptor(descriptor);
+    nameHebrew = heb ? `${brand} ${heb}` : name;
+  } else {
+    nameHebrew = hebrewDescriptor(descriptor) || name;
+  }
+
+  return { name, nameHebrew };
+}
+
 function normalizeForUI(recognition, verification, tierInfo, visionUsed = false) {
   const ocr = recognition.ocr_text || {};
   const auth = assessAuthenticity(recognition, verification);
@@ -1766,11 +1874,13 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
     : auth.replicaTier === 'high_end_replica' ? 0.28
     : 1.0;
 
+  // SCAN-IDENTITY-001: title composed from structured identity fields;
+  // category is kept fully separate from the product title.
+  const titles = composeTitles(recognition, verification);
+
   return {
-    name: verification.full_name || (verification.final_brand !== 'unidentified'
-      ? `${verification.final_brand} ${verification.final_model}`.trim()
-      : recognition.category),
-    nameHebrew: verification.full_name_hebrew || recognition.category_hebrew || '',
+    name: titles.name,
+    nameHebrew: titles.nameHebrew,
     category: verification.final_category || recognition.category,
     confidence: verification.match_confidence,
     isSellable: verification.is_sellable ?? true,
@@ -1824,8 +1934,12 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
       })(),
     },
     identification: {
-      generic_name: recognition.category,
-      generic_name_hebrew: recognition.category_hebrew || '',
+      // SCAN-IDENTITY-001: descriptor-first — the very_low UI title path and
+      // "looks like a …" strings consume these; a subcategory ("gaming mouse")
+      // beats a broad category ("Electronics"). Category remains the last resort.
+      generic_name: titleCaseDescriptor(recognition.subcategory) || recognition.category,
+      generic_name_hebrew: hebrewDescriptor(recognition.subcategory)
+        || recognition.category_hebrew || '',
       brand: verification.final_brand,
       model: verification.final_model,
       full_name: verification.full_name || '',
@@ -1914,7 +2028,8 @@ async function handleRequest(req) {
   // Raised 22 s → 45 s after moving off Edge to the Node runtime (maxDuration 60 s,
   // ~15 s safety margin). Edge's 25 s wall forced an 8–12 s Stage 1 cap, which
   // Sonnet 4.6 Vision routinely exceeded; the larger budget lets Stage 1 use up to
-  // 20 s while still leaving ample room for retrieval + Stage 2.
+  // 28 s (ALPHA-005) while reserving 12 s for embedding + retrieval + Stage 2 +
+  // persistence + response write.
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
 
@@ -2003,12 +2118,14 @@ async function handleRequest(req) {
       blog(`[Pipeline] ${stage}${extra ? ' — ' + extra : ''}`);
 
     // ── STAGE 1: RECOGNIZE (Claude Vision) — REQUIRED ──
-    // Cap shrinks with budget so Stage 1 never eats into Stage 2's 8 s minimum.
+    // Cap shrinks with budget so Stage 1 never starves the rest of the pipeline.
     // Floor: 8 s — Claude Vision typically needs 5-10 s; 3 s was always timing out.
-    // Formula: up to 12 s, but reserves 8 s for retrieval + Stage 2.
-    // With 22 s budget and ~1 s auth (fast path) → ~13 s remaining → cap = 12 s.
-    // With 22 s budget and ~5 s auth (network path) → ~17 s remaining → cap = 12 s.
-    const stage1Cap = Math.max(Math.min(20_000, rem() - 8_000), 8_000);
+    // Formula: up to 28 s, reserving 12 s for embedding + retrieval + Stage 2
+    // (8 s minimum) + persistence + response write. ALPHA-005: raised from 20 s —
+    // Sonnet Vision generating the full recognition JSON routinely needs 15-25 s,
+    // and the 45 s budget leaves this headroom unused.
+    // With 45 s budget and ~2 s auth+parse → ~42 s remaining → cap = 28 s.
+    const stage1Cap = Math.max(Math.min(28_000, rem() - 12_000), 8_000);
     const imgByteEst = imageList.reduce((sum, b64) => sum + Math.round(b64.length * 0.75), 0);
     plog('Stage 1 start', `images=${imageList.length} ~bytes=${imgByteEst} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
 
@@ -2048,10 +2165,24 @@ async function handleRequest(req) {
     } catch (stage1Err) {
       // Stage 1 failure is NOT a product classification — it is a retryable error.
       // Return 503 so the client shows "please retry" instead of a fake "Other" result.
-      const isTimeout = stage1Err.message?.includes('Timeout') || stage1Err.name === 'AbortError';
+      // Classify for LOGS ONLY — the client response below is identical for every kind.
+      //   stage1_timeout          → outer withTimeout or inner fetch AbortController
+      //   anthropic_auth_error    → 401/403 from the Anthropic API (key problem)
+      //   anthropic_rate_limited  → 429 from the Anthropic API
+      //   anthropic_upstream_error→ 5xx/529 from the Anthropic API (or exhausted retries)
+      //   anthropic_api_error     → any other non-2xx Anthropic status
+      //   other_failure           → parse errors, network errors, unexpected throws
+      const msg = stage1Err.message || '';
+      const failureKind =
+        (stage1Err.name === 'AbortError' || msg.includes('[Timeout]')) ? 'stage1_timeout'
+        : /Recognition API (401|403)/.test(msg)           ? 'anthropic_auth_error'
+        : /Recognition API 429/.test(msg)                 ? 'anthropic_rate_limited'
+        : /Recognition API (500|502|503|529)/.test(msg)   ? 'anthropic_upstream_error'
+        : /Recognition API \d+/.test(msg)                 ? 'anthropic_api_error'
+        : 'other_failure';
       // Refund the daily quota — a failed scan must not consume the user's allowance.
       if (quotaCharged) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
-      blog(`[Pipeline] Stage 1 FAILED (${isTimeout ? 'timeout' : stage1Err.name}) — returning 503 (quota refunded): ${stage1Err.message}`);
+      blog(`[Pipeline] Stage 1 FAILED (${failureKind}) — returning 503 (quota refunded): ${msg}`);
       return json({
         error: lang === 'he'
           ? 'הזיהוי נכשל — אנא נסה שוב'
