@@ -32,6 +32,7 @@ import { createClient } from '@supabase/supabase-js';
 // that preserves/improves scan quality. Use the bare alias (no date suffix).
 const MODEL_VISION = 'claude-sonnet-4-6';
 const MODEL_OCR    = 'claude-haiku-4-5-20251001'; // serial-label OCR (unchanged)
+const MODEL_PRICING = 'claude-haiku-4-5-20251001'; // SCAN-009: PRE v1 rescue pricing — small structured call, latency-optimized
 
 // GW-000: version stamped on every valuation so future pricing engines stay
 // historically comparable. Bump when the pricing pipeline changes materially.
@@ -2035,6 +2036,15 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
       // Populated when Stage 2 fallback is used; null means Stage 2 ran normally
       pricing_status:  verification._pricing_meta?.pricing_status  || (verification.price_method === 'comp_based' ? 'db_based' : 'ai_estimate'),
       pricing_warning: verification._pricing_meta?.pricing_warning || null,
+      // SCAN-008: internal pricing grade — decoupled from identity confidence.
+      // HIGH = Stage 2 comp-based · MEDIUM = Stage 2 AI estimate or curated
+      // db_fallback · LOW = category bucket · MANUAL_REQUIRED = no evidence.
+      // Not rendered anywhere; persisted inside ai_raw_response for learning.
+      pricing_confidence: verification._pricing_meta?.pricing_confidence
+        || (verification.price_method === 'comp_based' ? 'HIGH' : 'MEDIUM'),
+      // SCAN-009: PRE provenance — which rescue source priced this (internal).
+      pricing_reason: verification._pricing_meta?.pricing_reason || null,
+      pre_source:     verification._pricing_meta?.pre_source || null,
     },
     details: {
       description: verification.israeli_market_notes || '',
@@ -2163,7 +2173,9 @@ async function handleRequest(req) {
   // rem() = how many ms we have left before we must respond.
   // All stage decisions and timeouts are derived from this single source of truth.
   const TREQ      = Date.now();
-  const BUDGET_MS = 45_000;   // hard ceiling — must respond before this
+  const BUDGET_MS = 50_000;   // hard ceiling — must respond before this
+  // SCAN-009: raised 45s → 50s (maxDuration 60 keeps a 10s margin) to fund the
+  // Pricing Rescue Engine after a Stage-2 timeout without shrinking Stage 2's cap.
   // Raised 22 s → 45 s after moving off Edge to the Node runtime (maxDuration 60 s,
   // ~15 s safety margin). Edge's 25 s wall forced an 8–12 s Stage 1 cap, which
   // Sonnet 4.6 Vision routinely exceeded; the larger budget lets Stage 1 use up to
@@ -2171,6 +2183,22 @@ async function handleRequest(req) {
   // persistence + response write.
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
+
+  // ── SCAN-008 (B-3): reclaim serial overhead for Stage 2's budget ──────────
+  // Production scans showed Stage 2 consistently needs 18–20s (output-token
+  // bound), while cold-start overhead ate its cap: auth (JWKS ~1.8–3.1s) ran
+  // serially BEFORE the body parse, and the rate-limit RPC paid ~2–3s of cold
+  // Supabase TLS/pool setup. Both are independent of auth, so they now start
+  // concurrently with it. Semantics unchanged: the body is only USED after
+  // auth succeeds, and a parse failure surfaces exactly where it used to.
+  const bodyPromise = (async () => {
+    try { return await req.json(); }
+    catch (e) { return { __parse_error: e?.message || 'invalid JSON' }; }
+  })();
+  try {
+    // Fire-and-forget pool warmup — result ignored, errors swallowed.
+    getSupabase()?.from('products').select('id').limit(1).then(() => {}, () => {});
+  } catch { /* warmup must never block or throw */ }
 
   // ── AUTH — local HMAC-SHA256 (fast path) or network fallback ──
   // Local verify: ~1 ms, zero network. Fallback: up to 5 s (only when
@@ -2199,7 +2227,11 @@ async function handleRequest(req) {
       return json({ error: 'Request body too large' }, 413, cors);
     }
 
-    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = await req.json();
+    // SCAN-008 (B-3): body was parsed concurrently with auth (above). A parse
+    // failure throws here — same catch path and 500 status as before.
+    const parsedBody = await bodyPromise;
+    if (parsedBody?.__parse_error) throw new Error(`Body parse failed: ${parsedBody.__parse_error}`);
+    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = parsedBody;
     // TIMING: req.json() blocks until the full request body has uploaded. On Edge
     // this upload time is inside the budget clock — this log isolates it.
     blog(`[Timing] body read+parsed (req.json) bodyLen=${bodyLen}B`);
@@ -2423,17 +2455,38 @@ async function handleRequest(req) {
     // (record_scan + derived write-back) + JSON encode + response write.
     // Stage 2 needs >= 8s of usable time; if rem() - reserve < 8s we fall back
     // rather than force an unsafe sub-8s cap. A rough result in time beats a 504.
-    const STAGE2_RESERVE_MS = 4_000;   // post-Stage-2 work incl. GW-000 persistence
+    // SCAN-009: reserve = 4s persistence/response + 3.5s Pricing Rescue Engine.
+    // If Stage 2 succeeds the PRE slice simply returns to the margin.
+    const STAGE2_RESERVE_MS = 7_500;
     let stage2FallbackUsed = false;
     let stage2FallbackReason = null;
     let verification;
+
+    // SCAN-009: Stage 2 failure → Pricing Rescue Engine (catalog → Haiku →
+    // category anchor → manual). AI slice funded by STAGE2_RESERVE_MS; 4s is
+    // always preserved for persistence + response write.
+    const runPricingRescue = async (reason) => {
+      const capMs = Math.max(0, Math.min(3_500, rem() - 4_000));
+      plog('PRE start', `cap=${capMs}ms rem=${rem()}ms`);
+      const quote = await pricingRescueEngine({
+        recognition, candidates, identity: assessFallbackIdentity(recognition),
+        failReason: reason, apiKey, capMs, lang,
+      }).catch(err => { blog(`[PRE] engine error — manual pricing: ${err.message}`); return null; });
+      plog('PRE end', quote ? `source=${quote.pre_source} ₪${quote.price_estimate_mid} grade=${quote.pricing_confidence} rem=${rem()}ms` : `no quote rem=${rem()}ms`);
+      return buildFallback(recognition, lang, reason, candidates, quote);
+    };
+
     if (rem() - STAGE2_RESERVE_MS < 8_000) {
       stage2FallbackUsed = true;
       stage2FallbackReason = `budget_too_low rem=${rem()}ms`;
-      blog(`[Pipeline] Stage 2 SKIPPED — returning rough estimate (rem=${rem()}ms, need >= ${8_000 + STAGE2_RESERVE_MS}ms)`);
-      verification = buildFallback(recognition, lang, stage2FallbackReason);
+      blog(`[Pipeline] Stage 2 SKIPPED — rescue pricing (rem=${rem()}ms, need >= ${8_000 + STAGE2_RESERVE_MS}ms)`);
+      verification = await runPricingRescue(stage2FallbackReason);
     } else {
-      const stage2Cap = Math.max(8_000, Math.min(20_000, rem() - STAGE2_RESERVE_MS));
+      // SCAN-008 (B-3): ceiling raised 20s → 24s. Stage 2 empirically needs
+      // 18–20s (4/4 production scans); a 20s ceiling left zero headroom even
+      // when the budget clock had 24s+ genuinely available. Still bounded by
+      // rem() − reserve and floored at 8s — slow-Stage-1 scans are unchanged.
+      const stage2Cap = Math.max(8_000, Math.min(24_000, rem() - STAGE2_RESERVE_MS));
       plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
       try {
         verification = await withTimeout(
@@ -2444,8 +2497,8 @@ async function handleRequest(req) {
       } catch (err) {
         stage2FallbackUsed = true;
         stage2FallbackReason = err.message;
-        blog(`[Pipeline] Stage 2 FAILED — using rough estimate: ${err.message}`);
-        verification = buildFallback(recognition, lang, stage2FallbackReason);
+        blog(`[Pipeline] Stage 2 FAILED — rescue pricing: ${err.message}`);
+        verification = await runPricingRescue(stage2FallbackReason);
       }
     }
 
@@ -2573,6 +2626,9 @@ async function handleRequest(req) {
         stage2_timeout:         stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded'),
         pricing_status:         result.marketValue.pricing_status,
         pricing_warning:        result.marketValue.pricing_warning,
+        pricing_confidence:     result.marketValue.pricing_confidence,
+        pricing_reason:         result.marketValue.pricing_reason,
+        pre_source:             result.marketValue.pre_source,
         fallback_key:           verification._pricing_meta?.fallback_key || null,
         price_method:           verification.price_method || 'ai_estimate',
         price_low:              verification.price_estimate_low,
@@ -2886,6 +2942,7 @@ function getCategoryFallbackPricing(recognition, failReason) {
       pricing_status:   'manual_required',
       pricing_warning:  `${reason}Cannot estimate price from category alone. Please enter a price manually.`,
       fallback_key:     matchedKey || cat || 'unknown',
+      pricing_confidence: 'MANUAL_REQUIRED', // SCAN-008: internal pricing grade
     };
   }
 
@@ -2896,42 +2953,218 @@ function getCategoryFallbackPricing(recognition, failReason) {
     pricing_status:   'category_fallback',
     pricing_warning:  `${reason}Rough estimate based on category "${matchedKey}". Confirm item for accurate pricing.`,
     fallback_key:     matchedKey,
+    pricing_confidence: 'LOW', // SCAN-008: internal pricing grade
   };
 }
 
-function buildFallback(recognition, lang, failReason = null) {
-  const isHe = lang === 'he';
+// ── Shared identity assessment for the fallback path ────────────────────────
+// F4 (SCAN-003): Stage 2 failing is a PRICING failure — it must not demote a
+// confident Stage 1 identification into the "Possibly" tier. Identity
+// confidence is derived from Stage 1 candidate evidence; the brand_confidence
+// label lets calibrateVerification apply its normal caps. confirmed_by_text is
+// only emitted when the model side is ALSO strong (Stage 1's hard rule means
+// modelC ≥ 0.75 requires text/OCR confirmation). Used by both buildFallback
+// and the Pricing Rescue Engine — identity is assessed once, priced separately.
+function assessFallbackIdentity(recognition) {
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
   const brand = topBrand?.brand || 'unidentified';
   const model = topModel?.model || 'unidentified';
   const brandOk = brand.toLowerCase() !== 'unidentified';
   const modelOk = model.toLowerCase() !== 'unidentified';
-  const fp = getCategoryFallbackPricing(recognition, failReason);
-
-  // F4 (SCAN-003): Stage 2 failing is a PRICING failure — it must not demote a
-  // confident Stage 1 identification into the "Possibly" tier. Identity
-  // confidence is derived from Stage 1 candidate evidence; the brand_confidence
-  // label below lets calibrateVerification apply its normal caps (e.g.
-  // inferred_from_visuals ≤ 0.75). Weak/no-brand results keep the old
-  // conservative 0.45 cap. Pricing remains flagged rough via _pricing_meta —
-  // this changes nothing about price values or their status.
   const brandC = topBrand?.confidence || 0;
   const modelC = topModel?.confidence || 0;
   let identityConf;
   if (brandOk && modelOk && modelC > 0) identityConf = Math.min((brandC + modelC) / 2, 0.88);
   else if (brandOk)                     identityConf = Math.min(brandC, 0.70);
   else                                  identityConf = Math.min(recognition.category_confidence, 0.45);
-
-  // confirmed_by_text triggers calibrateVerification's 0.80 floor when a model
-  // is present, so it is only emitted when the model side is ALSO strong —
-  // Stage 1's hard rule means modelC ≥ 0.75 requires text/OCR confirmation.
   const brandEvidence = (topBrand?.evidence || '').toLowerCase();
   const brandTextRead = brandC >= 0.75 && /text|ocr|label|sticker|readable/.test(brandEvidence);
   const brandConfLabel = !brandOk ? 'unidentified'
     : /packaging/.test(brandEvidence) ? 'packaging_recognized'
     : (brandTextRead && (!modelOk || modelC >= 0.75)) ? 'confirmed_by_text'
     : 'inferred_from_visuals';
+  const identityHigh = identityConf >= 0.80 || brandConfLabel === 'confirmed_by_text';
+  const brandHead = brandOk ? brand.toLowerCase().split(' ')[0] : '';
+  return { brand, model, brandOk, modelOk, brandC, modelC, identityConf, brandConfLabel, identityHigh, brandHead };
+}
+
+// ═══════════════════════════════════════════════════════
+// §6.5  PRICING RESCUE ENGINE — PRE v1 (SCAN-009)
+// ═══════════════════════════════════════════════════════
+// Activates ONLY when Stage 2 cannot produce a reliable price (timeout,
+// provider failure, budget skip). Responsibility: PRICING ONLY — it never
+// re-runs recognition/OCR/Vision/retrieval and never touches identity,
+// confidence calibration, or authenticity.
+//
+// Architecture: ordered source chain, first quote wins. Every source receives
+// the same ctx built from data already collected during the scan. Future
+// sources (price_observations, listings history, eBay/marketplace feeds,
+// retailer pricing) plug in by adding one function to PRE_SOURCES — no
+// architectural change required.
+//
+// Quote shape: { price_estimate_low/mid/high, pricing_status,
+//   pricing_confidence ('MEDIUM'|'LOW'|'MANUAL_REQUIRED'), pricing_reason,
+//   pricing_warning, fallback_key, pre_source, _db_retail? }
+
+// Source 1 — catalog anchor (deterministic, 0ms, rows already in memory).
+// Evidence-corroborated brand-aligned rows → MEDIUM. Guess-derived rows are
+// acceptable for PRICING at high similarity (sibling products price close to
+// each other, unlike identity) but always graded LOW.
+function preQuoteFromCatalog(ctx) {
+  const { candidates, identity, failReason } = ctx;
+  if (!identity.brandOk || !identity.brandHead) return null;
+  const rows = (candidates || []).filter(c =>
+    (c.avg_used_price_ils > 0) &&
+    (c.brand || '').toLowerCase().includes(identity.brandHead));
+  if (!rows.length) return null;
+  rows.sort((a, b) =>
+    ((b._evidence_grade === true) - (a._evidence_grade === true)) ||
+    ((b.similarity || 0) - (a.similarity || 0)));
+  const row = rows[0];
+  if (!row._evidence_grade && (row.similarity || 0) < 0.80) return null;
+  return {
+    price_estimate_low:  row.price_low_ils  || Math.round(row.avg_used_price_ils * 0.75),
+    price_estimate_mid:  row.avg_used_price_ils,
+    price_estimate_high: row.price_high_ils || Math.round(row.avg_used_price_ils * 1.25),
+    pricing_status:      'db_fallback',
+    pricing_confidence:  row._evidence_grade ? 'MEDIUM' : 'LOW',
+    pricing_reason:      `Catalog pricing for ${row.brand} ${row.model || row.name}${row._evidence_grade ? '' : ' (closest match, unverified)'}.`,
+    pricing_warning:     `Pricing stage failed (${failReason || 'unknown'}). Using catalog pricing.`,
+    fallback_key:        'db_row',
+    pre_source:          'catalog',
+    _db_retail:          row.retail_price_ils || 0,
+  };
+}
+
+// Source 2 — AI estimator (Claude Haiku, budget-gated, ≤3.5s).
+// Dedicated ~300-token pricing prompt. Sends ONLY minimal structured context —
+// never the scan. Output clamped: AI rescue quotes never exceed MEDIUM.
+function buildRescuePricingPrompt(ctx) {
+  const { recognition, candidates, identity } = ctx;
+  const condition = recognition.visual_features?.condition || 'unknown';
+  const certainty = identity.identityHigh ? 'high' : identity.brandOk ? 'moderate' : 'low';
+  const anchors = (candidates || [])
+    .filter(c => c.avg_used_price_ils > 0)
+    .slice(0, 3)
+    .map(c => `- ${c.brand} ${c.model || c.name}: used avg ₪${c.avg_used_price_ils}, range ₪${c.price_low_ils ?? '?'}-${c.price_high_ils ?? '?'}, new ₪${c.retail_price_ils ?? '?'}`)
+    .join('\n');
+  return `You are a pricing engine for second-hand goods in ISRAEL. Estimate the current Israeli used-market price in ILS for ONE item. Respond with ONLY JSON.
+
+ITEM:
+- Product: ${identity.brandOk ? identity.brand : 'unknown brand'} ${identity.modelOk ? identity.model : ''}
+- Category: ${recognition.category || 'unknown'}${recognition.subcategory ? ' / ' + recognition.subcategory : ''}
+- Condition: ${condition}
+- Identity certainty: ${certainty}
+
+MARKET ANCHORS (possibly unrelated items — use only if relevant):
+${anchors || '- none'}
+
+RULES:
+- Israeli second-hand market (Yad2, Facebook Marketplace IL). Electronics retail is typically 20-40% above US prices.
+- Used items typically sell at 40-70% of Israeli new retail depending on condition.
+- Widen the range when identity certainty is not high.
+- If you do not know this exact product, price the closest equivalent and say so in "reason".
+
+JSON: {"low":0,"mid":0,"high":0,"confidence":"MEDIUM|LOW","reason":"one short sentence"}`;
+}
+
+async function preQuoteFromAI(ctx) {
+  const { apiKey, capMs, failReason } = ctx;
+  if (!apiKey || !capMs || capMs < 1_800) return null; // not enough budget for a safe call
+  const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: MODEL_PRICING,
+      max_tokens: 200,
+      messages: [{ role: 'user', content: [{ type: 'text', text: buildRescuePricingPrompt(ctx) }] }],
+    }),
+  }, 0, Math.min(capMs, 3_500));
+  if (!res.ok) return null;
+  const data = await res.json();
+  const raw = data.content?.find(c => c.type === 'text')?.text || '';
+  let q;
+  try { q = parseJSON(raw, 'rescue-pricing'); } catch { return null; }
+  const low = Number(q.low), mid = Number(q.mid), high = Number(q.high);
+  // Sanity gates — a malformed or absurd quote is worse than manual pricing.
+  if (!Number.isFinite(mid) || mid <= 0 || mid > 500_000) return null;
+  if (!Number.isFinite(low) || !Number.isFinite(high) || low < 0 || low > mid || high < mid) return null;
+  return {
+    price_estimate_low:  Math.round(low),
+    price_estimate_mid:  Math.round(mid),
+    price_estimate_high: Math.round(high),
+    pricing_status:      'rescue_estimate',
+    pricing_confidence:  q.confidence === 'MEDIUM' ? 'MEDIUM' : 'LOW',
+    pricing_reason:      String(q.reason || 'AI market estimate.').slice(0, 160),
+    pricing_warning:     `Pricing stage failed (${failReason || 'unknown'}). Quick AI market estimate — verify before selling.`,
+    fallback_key:        'rescue_ai',
+    pre_source:          'ai_haiku',
+  };
+}
+
+// Source 3 — category anchor (deterministic, 0ms). WEAK IDENTITY ONLY:
+// B-15 policy stands — a confidently identified product is never priced from
+// a category bucket (that is how a ₪1,100 fragrance became ₪50).
+function preQuoteFromCategory(ctx) {
+  if (ctx.identity.identityHigh) return null;
+  const fp = getCategoryFallbackPricing(ctx.recognition, ctx.failReason);
+  if (fp.pricing_status === 'manual_required') return null; // null bucket → no quote
+  return { ...fp, pricing_reason: `Category-level estimate (${fp.fallback_key}).`, pre_source: 'category_anchor' };
+}
+
+function preManualQuote(ctx) {
+  return {
+    price_estimate_low:  0,
+    price_estimate_mid:  0,
+    price_estimate_high: 0,
+    pricing_status:      'manual_required',
+    pricing_confidence:  'MANUAL_REQUIRED',
+    pricing_reason:      'No pricing evidence available.',
+    pricing_warning:     `Pricing stage failed (${ctx.failReason || 'unknown'}). ${ctx.identity.identityHigh
+      ? 'The product was identified confidently, but insufficient pricing evidence was available — please set the price manually.'
+      : 'Please set the price manually.'}`,
+    fallback_key:        ctx.identity.identityHigh ? 'identity_high_no_price_evidence' : 'no_price_evidence',
+    pre_source:          'none',
+  };
+}
+
+const PRE_SOURCES = [preQuoteFromCatalog, preQuoteFromAI, preQuoteFromCategory];
+
+async function pricingRescueEngine(ctx) {
+  const t0 = Date.now();
+  for (const source of PRE_SOURCES) {
+    try {
+      const quote = await source(ctx);
+      if (quote) {
+        console.log(`[PRE] quote from ${quote.pre_source}: ₪${quote.price_estimate_mid} conf=${quote.pricing_confidence} ${Date.now() - t0}ms`);
+        return quote;
+      }
+    } catch (err) {
+      console.warn(`[PRE] source ${source.name} failed (continuing): ${err.message}`);
+    }
+  }
+  console.log(`[PRE] no source produced a quote — manual pricing (${Date.now() - t0}ms)`);
+  return preManualQuote(ctx);
+}
+
+function buildFallback(recognition, lang, failReason = null, candidates = [], rescueQuote = null) {
+  const isHe = lang === 'he';
+  const identity = assessFallbackIdentity(recognition);
+  const { brand, model, brandOk, modelOk, identityConf, brandConfLabel } = identity;
+
+  // SCAN-009: pricing comes from the Pricing Rescue Engine (caller awaits it —
+  // async sources incl. the Haiku estimator). Defensive synchronous path when
+  // called without a quote: deterministic sources only, same B-15 policy.
+  const preCtx = { recognition, candidates, identity, failReason };
+  const fp = rescueQuote
+    || preQuoteFromCatalog(preCtx)
+    || preQuoteFromCategory(preCtx)
+    || preManualQuote(preCtx);
 
   return {
     final_category: recognition.category,
@@ -2950,7 +3183,7 @@ function buildFallback(recognition, lang, failReason = null) {
     price_estimate_low:  fp.price_estimate_low,
     price_estimate_mid:  fp.price_estimate_mid,
     price_estimate_high: fp.price_estimate_high,
-    new_retail_price_ils: 0,
+    new_retail_price_ils: fp._db_retail || 0,
     price_method: 'ai_estimate',
     _pricing_meta: fp,   // consumed by normalizeForUI
     currency: 'ILS',
