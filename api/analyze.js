@@ -1136,18 +1136,18 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   const strategyLog = {
     supabase_client: !!supa,
     products_table_accessible: null,
-    strategies: [],          // [{ name, query, rows, error, elapsed_ms }]
+    // [{ strategy_name, elapsed_ms, candidate_count, success, query, error,
+    //    parallel_group, started_ms, finished_ms, skipped?, reason? }]  (SCAN-010)
+    strategies: [],
     final_candidates: 0,
+    group_a_wall_ms: null,       // SCAN-010: wall time of the parallel group
+    group_a_sequential_ms: null, // sum of individual durations (= old serial cost)
   };
 
   if (!supa) return { candidates: [], strategyLog };
 
-  // ── Probe products table ─────────────────────────────────────────────────
-  try {
-    const { error: pe } = await supa.from('products').select('id').limit(1);
-    strategyLog.products_table_accessible = !pe;
-    if (pe) console.warn('[Retrieve] products probe failed:', pe.message);
-  } catch { strategyLog.products_table_accessible = false; }
+  // SCAN-010: the probe is launched inside parallel Group A below — it is a
+  // pure diagnostic and was serially costing ~0.3–1s before any strategy ran.
 
   // ── Inputs ───────────────────────────────────────────────────────────────
   const topBrand     = recognition.brand_candidates?.[0]?.brand;
@@ -1245,9 +1245,11 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     return n;
   };
 
-  // Per-strategy log: { name, query, rows, error, elapsed_ms }
-  const logS = (name, query, rows, error, t0) => {
-    const elapsed = Date.now() - t0;
+  // Per-strategy log. SCAN-010: optional meta adds parallel_group + start/finish
+  // offsets (ms from retrieval start) so future audits can see the timeline.
+  const tRetr0 = Date.now();
+  const logS = (name, query, rows, error, t0, meta = {}) => {
+    const elapsed = meta.elapsed_ms ?? (Date.now() - t0);
     // GW-001: structured per-strategy log — strategy_name, elapsed_ms, candidate_count, success/failure
     strategyLog.strategies.push({
       strategy_name:   name,
@@ -1256,26 +1258,56 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
       success:         error == null,
       query:           String(query).slice(0, 120),
       error:           error ?? null,
+      parallel_group:  meta.parallel_group || 'B_sequential',
+      started_ms:      meta.started_ms ?? (t0 - tRetr0),
+      finished_ms:     meta.finished_ms ?? (Date.now() - tRetr0),
     });
-    console.log(`[Retrieve] ${name}: ${error ? `FAILURE err=${String(error).slice(0, 80)}` : `success ${rows}r`} ${elapsed}ms`);
+    console.log(`[Retrieve] ${name}: ${error ? `FAILURE err=${String(error).slice(0, 80)}` : `success ${rows}r`} ${elapsed}ms${meta.parallel_group === 'A_parallel' ? ` [∥ ${meta.started_ms}→${meta.finished_ms}ms]` : ''}`);
   };
 
-  // ── 1. Exact brand + exact model ─────────────────────────────────────────
-  if (brand_ok && model_ok) {
-    const t = Date.now(), q = `brand~"${topBrand}" model~"${topModel}"`;
+  // ═══════════════════════════════════════════════════════════════════════
+  // SCAN-010: GROUP A — independent strategies fetched in PARALLEL
+  // ═══════════════════════════════════════════════════════════════════════
+  // Dependency audit: probe, S1, S2, S3a, S3b read only Stage-1/OCR inputs —
+  // never the accumulated `results` — so their FETCHES run concurrently.
+  // S4–S9 gate on results.length built up by earlier strategies, so they stay
+  // sequential (Group B) — their entry conditions are order-dependent by design.
+  //
+  // Identity guarantee: rows are APPLIED via addRows in the ORIGINAL order
+  // (1 → 2 → 3a → 3b), so dedup ownership, per-row _source/similarity, the
+  // per-strategy dedup counts in logs, and the final sorted candidate list are
+  // byte-identical to sequential execution whenever all fetches complete.
+  // Only wall-clock timing changes. The single order-dependent branch inside
+  // S2 — brand-only runs only when the ilike batches added 0 rows AFTER dedup
+  // against S1 — is preserved by deferring that query to apply time.
+
+  // Runners FETCH only (no addRows). Shape:
+  //   { name, q, t0, started, finished, error, batches:[{rows,source,baseSim}] }
+  const mkRec = (name, q) => ({ name, q, t0: Date.now(), started: Date.now() - tRetr0, finished: null, error: null, batches: [] });
+  const finish = (rec) => { rec.finished = Date.now() - tRetr0; return rec; };
+
+  const fetchProbe = async () => {
+    try {
+      const { error: pe } = await supa.from('products').select('id').limit(1);
+      strategyLog.products_table_accessible = !pe;
+      if (pe) console.warn('[Retrieve] products probe failed:', pe.message);
+    } catch { strategyLog.products_table_accessible = false; }
+  };
+
+  const fetchS1 = async () => {
+    const rec = mkRec('1_exact_brand_model', `brand~"${topBrand}" model~"${topModel}"`);
     try {
       const { data, error } = await supa.from('products').select('*')
         .ilike('brand', `%${topBrand}%`).ilike('model', `%${topModel}%`).limit(5);
-      logS('1_exact_brand_model', q, addRows(data, 'exact_brand_model', 0.92), error?.message, t);
-    } catch (e) { logS('1_exact_brand_model', q, 0, e.message, t); }
-  }
+      rec.error = error?.message ?? null;
+      rec.batches.push({ rows: data, source: 'exact_brand_model', baseSim: 0.92 });
+    } catch (e) { rec.error = e.message; }
+    return finish(rec);
+  };
 
-  // ── 2. OCR exact text lookup ─────────────────────────────────────────────
-  // Keyword list (uniqueKw) is built in the provenance block above — same
-  // tokens, same order, same F3 (SCAN-003) generic-token filtering, but each
-  // token now carries its origin (SCAN-007).
-  if (uniqueKw.length > 0) {
-    const t = Date.now();
+  const fetchS2 = async () => {
+    const rec = mkRec('2_ocr_rpc', `kw=[${uniqueKw.slice(0,5).join(',')}]`);
+    rec.deferredBrandOnly = false;
     // GW-001: wrap the whole OCR strategy so one failure never aborts retrieval.
     // Supabase builders are thenables WITHOUT .catch — await + destructure { data, error }.
     try {
@@ -1284,11 +1316,8 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
         .rpc('match_products_by_ocr', { p_keywords: uniqueKw, p_limit: 6 });
 
       if (!rpcE && rpcD?.length) {
-        // F7 (SCAN-005): similarity now follows match specificity. The old
-        // mapping collapsed alias/keyword/brand to a flat 0.75, so a row that
-        // matched ONLY on brand ("logitech" seen in OCR) outranked full-text
-        // name matches (0.68) and brand+category (0.60). Brand presence is not
-        // product identity — it now ranks below both.
+        // F7 (SCAN-005): similarity follows match specificity — brand-only rows
+        // (0.55) rank below FTS (0.68) and brand+category (0.60).
         const OCR_MATCH_SIM = {
           model_number: 0.92,  // model column or model_numbers array hit
           ocr_keyword:  0.80,  // product name contains an OCR token
@@ -1300,60 +1329,106 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
           ...r,
           // F1 (SCAN-003): expose the RPC's model-column match as a flag that
           // survives addRows() — calibrateVerification keys its OCR-confirmed
-          // boost off this (the old check `_source === 'ocr_model_number'` matched
-          // a value retrieval never produced, so the boost was dead code).
+          // boost off this.
           _ocr_model_confirmed: r.match_type === 'model_number',
           similarity: OCR_MATCH_SIM[r.match_type] ?? 0.55,
         }));
-        logS('2_ocr_rpc', `kw=[${uniqueKw.slice(0,5).join(',')}]`, addRows(mapped, 'ocr_rpc', null), null, t);
+        rec.batches.push({ rows: mapped, source: 'ocr_rpc', baseSim: null });
       } else {
         // Direct ILIKE on model-like tokens
+        rec.name = '2_ocr_ilike';
+        rec.error = rpcE?.message ?? null;
         const modelTokens = ocrTexts
           .flatMap(tx => tx.split(/\s+/))
           .filter(w => /[A-Za-z][0-9]|[0-9]{3,}/.test(w) && w.length >= 3)
           .slice(0, 6);
-        let n = 0;
+        rec.q = `tokens=[${modelTokens.join(',')}]`;
         for (const tok of modelTokens) {
           let q = supa.from('products').select('*');
           if (brand_ok) q = q.ilike('brand', `%${topBrand}%`);
           q = q.or(`model.ilike.%${tok}%,name.ilike.%${tok}%`).limit(3);
           const { data: fd } = await q;
-          n += addRows(fd, 'ocr_ilike', 0.80);
+          rec.batches.push({ rows: fd, source: 'ocr_ilike', baseSim: 0.80 });
         }
-        // Brand-only if still nothing
-        if (n === 0 && brand_ok) {
-          const { data: bd } = await supa.from('products').select('*')
-            .ilike('brand', `%${topBrand}%`)
-            .order('popularity_score', { ascending: false }).limit(4);
-          n += addRows(bd, 'ocr_brand_only', 0.60);
-        }
-        logS('2_ocr_ilike', `tokens=[${modelTokens.join(',')}]`, n, rpcE?.message, t);
+        // Original semantics: brand-only runs only if the ilike loop COMPLETED
+        // and added 0 post-dedup rows — decidable only at apply time.
+        rec.deferredBrandOnly = brand_ok;
       }
     } catch (e) {
-      logS('2_ocr', `kw=[${uniqueKw.slice(0,5).join(',')}]`, 0, e.message, t);
+      // Batches fetched before the exception are kept — matches the original,
+      // where addRows had already run for them.
+      rec.name = rec.name === '2_ocr_ilike' ? '2_ocr_ilike' : '2_ocr';
+      rec.error = e.message;
     }
-  }
+    return finish(rec);
+  };
 
-  // ── 3a. Brand + normalized model (strip suffix variants) ─────────────────
-  if (brand_ok && model_ok) {
-    const norm = normalizeModelKey(topModel); // hoisted — strips Hero/X/v2/Pro/RGB/etc.
-    if (norm && norm.toLowerCase() !== topModel.toLowerCase()) {
-      const t = Date.now(), q = `brand~"${topBrand}" model~"${norm}"`;
-      try {
-        const { data, error } = await supa.from('products').select('*')
-          .ilike('brand', `%${topBrand}%`).ilike('model', `%${norm}%`).limit(5);
-        logS('3a_normalized_model', q, addRows(data, 'normalized_model', 0.85), error?.message, t);
-      } catch (e) { logS('3a_normalized_model', q, 0, e.message, t); }
-    }
+  const normModel = (brand_ok && model_ok) ? normalizeModelKey(topModel) : null; // strips Hero/X/v2/Pro/RGB/etc.
+  const runS3a = !!(normModel && normModel.toLowerCase() !== topModel.toLowerCase());
+  const fetchS3a = async () => {
+    const rec = mkRec('3a_normalized_model', `brand~"${topBrand}" model~"${normModel}"`);
+    try {
+      const { data, error } = await supa.from('products').select('*')
+        .ilike('brand', `%${topBrand}%`).ilike('model', `%${normModel}%`).limit(5);
+      rec.error = error?.message ?? null;
+      rec.batches.push({ rows: data, source: 'normalized_model', baseSim: 0.85 });
+    } catch (e) { rec.error = e.message; }
+    return finish(rec);
+  };
 
-    // ── 3b. Model in name column (model stored as part of product name) ────
-    const t2 = Date.now(), q2 = `brand~"${topBrand}" name~"${topModel}"`;
+  const fetchS3b = async () => {
+    const rec = mkRec('3b_name_col', `brand~"${topBrand}" name~"${topModel}"`);
     try {
       const { data, error } = await supa.from('products').select('*')
         .ilike('brand', `%${topBrand}%`).ilike('name', `%${topModel}%`).limit(5);
-      logS('3b_name_col', q2, addRows(data, 'name_col', 0.82), error?.message, t2);
-    } catch (e) { logS('3b_name_col', q2, 0, e.message, t2); }
+      rec.error = error?.message ?? null;
+      rec.batches.push({ rows: data, source: 'name_col', baseSim: 0.82 });
+    } catch (e) { rec.error = e.message; }
+    return finish(rec);
+  };
+
+  // ── Launch Group A concurrently (runners never reject) ──────────────────
+  const [ , recS1, recS2, recS3a, recS3b] = await Promise.all([
+    fetchProbe(),
+    (brand_ok && model_ok) ? fetchS1() : null,
+    (uniqueKw.length > 0)  ? fetchS2() : null,
+    runS3a                 ? fetchS3a() : null,
+    (brand_ok && model_ok) ? fetchS3b() : null,
+  ]);
+
+  // ── Apply in CANONICAL order — this is what makes results identical ─────
+  const applyRec = (rec) => {
+    if (!rec) return;
+    let n = 0;
+    for (const b of rec.batches) n += addRows(b.rows, b.source, b.baseSim);
+    logS(rec.name, rec.q, n, rec.error, rec.t0,
+      { parallel_group: 'A_parallel', started_ms: rec.started, finished_ms: rec.finished, elapsed_ms: rec.finished - rec.started });
+    return n;
+  };
+  applyRec(recS1);
+  if (recS2) {
+    let n2 = 0;
+    for (const b of recS2.batches) n2 += addRows(b.rows, b.source, b.baseSim);
+    if (recS2.deferredBrandOnly && n2 === 0) {
+      // Brand-only if still nothing (post-dedup, exactly as the serial code)
+      try {
+        const { data: bd } = await supa.from('products').select('*')
+          .ilike('brand', `%${topBrand}%`)
+          .order('popularity_score', { ascending: false }).limit(4);
+        n2 += addRows(bd, 'ocr_brand_only', 0.60);
+      } catch (e) { recS2.error = recS2.error || e.message; }
+    }
+    logS(recS2.name, recS2.q, n2, recS2.error, recS2.t0,
+      { parallel_group: 'A_parallel', started_ms: recS2.started, finished_ms: recS2.finished, elapsed_ms: recS2.finished - recS2.started });
   }
+  applyRec(recS3a);
+  applyRec(recS3b);
+
+  // SCAN-010 budget accounting: wall vs sequential-equivalent time
+  const groupARecs = [recS1, recS2, recS3a, recS3b].filter(Boolean);
+  strategyLog.group_a_wall_ms = Date.now() - tRetr0;
+  strategyLog.group_a_sequential_ms = groupARecs.reduce((s, r) => s + (r.finished - r.started), 0);
+  console.log(`[Retrieve] groupA: wall=${strategyLog.group_a_wall_ms}ms sequential-equivalent=${strategyLog.group_a_sequential_ms}ms recovered≈${Math.max(0, strategyLog.group_a_sequential_ms - strategyLog.group_a_wall_ms)}ms`);
 
   // ── 4. Brand + ALL model candidates sweep ────────────────────────────────
   // Skip top model (already tried in 1); try remaining candidates.
@@ -1443,6 +1518,29 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
       }));
       logS('9_approved_candidates', `status=approved brand/model`, addRows(mapped, 'approved_candidate', 0.65), error?.message, t);
     } catch (e) { logS('9_approved_candidates', 'approved_candidates', 0, e.message, t); }
+  }
+
+  // ── SCAN-010 observability: record strategies that never ran ────────────
+  // (early-exit via the results.length gates, or inputs missing). Future
+  // audits see skipped-vs-ran at a glance instead of inferring from absence.
+  {
+    const ran = new Set(strategyLog.strategies.map(s => s.strategy_name.split('_')[0]));
+    const KNOWN = [
+      ['1_exact_brand_model', 'A_parallel'], ['2_ocr_rpc', 'A_parallel'],
+      ['3a_normalized_model', 'A_parallel'], ['3b_name_col', 'A_parallel'],
+      ['4_model_candidates', 'B_sequential'], ['5_brand_category', 'B_sequential'],
+      ['6_fts', 'B_sequential'], ['7_vector', 'B_sequential'],
+      ['8_category_fallback', 'B_sequential'], ['9_approved_candidates', 'B_sequential'],
+    ];
+    for (const [name, group] of KNOWN) {
+      if (!ran.has(name.split('_')[0])) {
+        strategyLog.strategies.push({
+          strategy_name: name, skipped: true, parallel_group: group,
+          reason: group === 'A_parallel' ? 'inputs_missing' : 'enough_candidates_or_inputs_missing',
+          elapsed_ms: 0, candidate_count: 0, success: true, query: '', error: null,
+        });
+      }
+    }
   }
 
   // ── Finalise: sort → take top 10 ────────────────────────────────────────
