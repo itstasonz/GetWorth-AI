@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 //
 // COST PROTECTION (Phase 3):
-//   1. Vision only called when Stage 1 confidence < 60%
+//   1. Vision only called when Stage 1 identity (brand/model) or category confidence < 60%
 //   2. Image hash cache (24h TTL) — same image never costs twice
 //   3. Daily hard limit (1500 calls/day) — synced with Google Quota
 //   4. Rate limit per IP (5 scans/minute)
@@ -287,7 +287,7 @@ function withTimeout(promise, ms, label) {
 const VISION_DAILY_LIMIT = 1500;             // Hard cap per day across all users
 const VISION_RATE_PER_MIN = 5;               // Per-IP scan rate limit
 const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same image
-const VISION_TRIGGER_THRESHOLD = 0.60;       // Only call Vision when Stage 1 confidence is below this
+const VISION_TRIGGER_THRESHOLD = 0.60;       // Vision fires when Stage 1 identity (brand/model) or category confidence is below this
 
 const USER_RATE_PER_MIN = 5;                 // Per-user per-minute scan limit
 const USER_DAILY_LIMIT   = 50;               // Per-user daily scan quota (beta)
@@ -1079,6 +1079,39 @@ function getSupabase() {
   return _supabaseClient;
 }
 
+// ── F3 (SCAN-003): OCR token hygiene ──────────────────────────────────────
+// Generic OCR words ("wireless", "gaming", "mouse", "black", "usb", "pro"…)
+// used to reach match_products_by_ocr and return WRONG products at 0.80
+// similarity via name-column ILIKE, polluting Stage 2's candidate block.
+// Rule: model-shaped identifiers (letter+digit mix or a 3+ digit run — G502,
+// WH-1000XM5, A2251, M185) always pass; anything else must be a 3+ char word
+// that is not in the generic-token list. Brand names, Stage 1 model-candidate
+// strings, and Vision logos bypass this filter entirely (added unsplit below).
+const OCR_GENERIC_TOKENS = new Set([
+  // connectivity / interfaces
+  'wireless', 'wired', 'bluetooth', 'wifi', 'usb', 'usbc', 'hdmi', 'nfc',
+  // product-type words
+  'gaming', 'game', 'mouse', 'mice', 'keyboard', 'headset', 'headphone',
+  'headphones', 'earbuds', 'speaker', 'charger', 'cable', 'adapter',
+  'laptop', 'phone', 'tablet', 'watch', 'camera', 'controller', 'console',
+  // colors
+  'black', 'white', 'blue', 'red', 'green', 'gray', 'grey', 'silver',
+  'gold', 'rose', 'pink', 'purple', 'yellow', 'orange',
+  // marketing / variant suffixes (full model strings are added unsplit, so
+  // dropping these as lone tokens loses nothing)
+  'pro', 'max', 'mini', 'plus', 'lite', 'slim', 'ultra', 'air', 'edition',
+  'series', 'new', 'original', 'genuine', 'official', 'premium', 'classic',
+  // label boilerplate
+  'model', 'serial', 'number', 'made', 'china', 'vietnam', 'taiwan',
+  'warranty', 'battery', 'power', 'input', 'output', 'volt', 'volts',
+  'charging', 'rechargeable', 'certified', 'designed', 'assembled',
+  // filler
+  'the', 'and', 'for', 'with', 'from', 'this', 'item', 'product',
+  'size', 'color', 'colour', 'type', 'version', 'quality',
+]);
+const isModelShapedToken = (w) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/i.test(w);
+const isUsefulOcrToken   = (w) => isModelShapedToken(w) || (w.length >= 3 && !OCR_GENERIC_TOKENS.has(w));
+
 // ── Strategy execution order ──────────────────────────────────────────────
 // 1  Exact brand + exact model         (most specific, highest confidence)
 // 2  OCR exact tokens                  (brand/model/name from OCR + Vision)
@@ -1172,11 +1205,14 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
   // ── 2. OCR exact text lookup ─────────────────────────────────────────────
   // Build keyword list from OCR + Vision
+  // F3 (SCAN-003): split OCR/Vision text streams pass through the generic-token
+  // filter; brand, model candidates, and logos are trusted identity evidence and
+  // are added unsplit/unfiltered.
   const ocrKw = [
-    ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
+    ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(isUsefulOcrToken)),
     ...allModels.map(m => m.toLowerCase()),
     ...(brand_ok ? [topBrand.toLowerCase()] : []),
-    ...visionText.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(w => w.length >= 2)),
+    ...visionText.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(isUsefulOcrToken)),
     ...visionLogos.map(l => l.toLowerCase()),
   ];
   const uniqueKw = [...new Set(ocrKw)].slice(0, 25);
@@ -1193,6 +1229,11 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
       if (!rpcE && rpcD?.length) {
         const mapped = rpcD.map(r => ({
           ...r,
+          // F1 (SCAN-003): expose the RPC's model-column match as a flag that
+          // survives addRows() — calibrateVerification keys its OCR-confirmed
+          // boost off this (the old check `_source === 'ocr_model_number'` matched
+          // a value retrieval never produced, so the boost was dead code).
+          _ocr_model_confirmed: r.match_type === 'model_number',
           similarity: r.match_type === 'model_number' ? 0.92 : r.match_type === 'ocr_keyword' ? 0.80 : 0.75,
         }));
         logS('2_ocr_rpc', `kw=[${uniqueKw.slice(0,5).join(',')}]`, addRows(mapped, 'ocr_rpc', null), null, t);
@@ -1462,10 +1503,21 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
   if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
 
   // RULE 6 (Phase 2): OCR keyword match boost
-  const ocrMatch = dbMatches.find(m => m._source?.startsWith('ocr_'));
+  // F1 (SCAN-003): the 0.82 floor fires only for rows whose MODEL column matched
+  // an OCR token (_ocr_model_confirmed, set from the RPC's match_type) AND whose
+  // brand aligns with the final brand — a wrong-product keyword match must never
+  // inherit the floor. Generic OCR matches keep the mild +0.08 boost only.
+  const ocrRows  = dbMatches.filter(m => m._source?.startsWith('ocr_'));
+  const ocrMatch = ocrRows.find(m => m._ocr_model_confirmed) || ocrRows[0];
   if (ocrMatch && brand.toLowerCase() !== 'unidentified' && brandConf !== 'unidentified') {
-    if (ocrMatch._source === 'ocr_model_number') {
-      conf = Math.max(conf, 0.82);
+    const brandHead  = brand.toLowerCase().split(' ')[0];
+    const matchBrand = (ocrMatch.brand || '').toLowerCase();
+    const brandAligned = !!brandHead && !!matchBrand
+      && (matchBrand.includes(brandHead) || brandHead.includes(matchBrand));
+    if (ocrMatch._ocr_model_confirmed && brandAligned) {
+      // At least the generic +0.08 boost, and never below the 0.82 floor —
+      // model-number evidence must never calibrate lower than a keyword match.
+      conf = Math.max(Math.min(conf + 0.08, 0.88), 0.82);
       console.log(`[Calibrate] OCR model_number match boost → ${round(conf * 100)}%`);
     } else {
       conf = Math.min(conf + 0.08, 0.88);
@@ -2204,7 +2256,19 @@ async function handleRequest(req) {
     // Skip when: confidence is sufficient, OR budget too tight.
     // Timeout cap = rem - 10 s (preserve 10 s for embed+retrieve+Stage2).
     let visionData = null;
-    const needsVision = recognition.category_confidence < VISION_TRIGGER_THRESHOLD;
+    // F2 (SCAN-003): gate Vision on IDENTITY confidence, not just category
+    // confidence. "Electronics 90%" with an unreadable label used to skip Vision
+    // — exactly the scan Vision exists for. Identity is weak when the top brand
+    // OR top model candidate is below the trigger threshold (shape-only photos,
+    // generic-only recognition, and no-OCR scans all land here because the Stage 1
+    // prompt caps their candidate confidence). Text-confirmed scans (brand AND
+    // model ≥ threshold, incl. user corrections at 0.96) still skip. All cost
+    // protections (24h image cache, daily hard cap, per-IP rate limit) are
+    // unchanged inside fallbackVision.
+    const topBrandConf = recognition.brand_candidates?.[0]?.confidence || 0;
+    const topModelConf = recognition.model_candidates?.[0]?.confidence || 0;
+    const identityWeak = topBrandConf < VISION_TRIGGER_THRESHOLD || topModelConf < VISION_TRIGGER_THRESHOLD;
+    const needsVision  = recognition.category_confidence < VISION_TRIGGER_THRESHOLD || identityWeak;
     if (needsVision && rem() >= 12_000) {
       const visionCap = Math.min(5_000, rem() - 10_000);
       plog('Vision start', `conf=${round(recognition.category_confidence * 100)}% cap=${visionCap}ms rem=${rem()}ms`);
@@ -2212,7 +2276,7 @@ async function handleRequest(req) {
         .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; });
       plog('Vision end', visionData ? `labels=${visionData.labels?.length} text=${visionData.text?.length} rem=${rem()}ms` : `no data rem=${rem()}ms`);
     } else if (!needsVision) {
-      plog('Vision skip', `conf sufficient (${round(recognition.category_confidence * 100)}%) rem=${rem()}ms`);
+      plog('Vision skip', `identity sufficient (cat=${round(recognition.category_confidence * 100)}% brand=${round(topBrandConf * 100)}% model=${round(topModelConf * 100)}%) rem=${rem()}ms`);
     } else {
       plog('Vision SKIPPED — budget', `rem=${rem()}ms < 12000ms required`);
     }
@@ -2744,21 +2808,52 @@ function getCategoryFallbackPricing(recognition, failReason) {
 
 function buildFallback(recognition, lang, failReason = null) {
   const isHe = lang === 'he';
-  const brand = recognition.brand_candidates?.[0]?.brand || 'unidentified';
-  const model = recognition.model_candidates?.[0]?.model || 'unidentified';
+  const topBrand = recognition.brand_candidates?.[0];
+  const topModel = recognition.model_candidates?.[0];
+  const brand = topBrand?.brand || 'unidentified';
+  const model = topModel?.model || 'unidentified';
+  const brandOk = brand.toLowerCase() !== 'unidentified';
+  const modelOk = model.toLowerCase() !== 'unidentified';
   const fp = getCategoryFallbackPricing(recognition, failReason);
+
+  // F4 (SCAN-003): Stage 2 failing is a PRICING failure — it must not demote a
+  // confident Stage 1 identification into the "Possibly" tier. Identity
+  // confidence is derived from Stage 1 candidate evidence; the brand_confidence
+  // label below lets calibrateVerification apply its normal caps (e.g.
+  // inferred_from_visuals ≤ 0.75). Weak/no-brand results keep the old
+  // conservative 0.45 cap. Pricing remains flagged rough via _pricing_meta —
+  // this changes nothing about price values or their status.
+  const brandC = topBrand?.confidence || 0;
+  const modelC = topModel?.confidence || 0;
+  let identityConf;
+  if (brandOk && modelOk && modelC > 0) identityConf = Math.min((brandC + modelC) / 2, 0.88);
+  else if (brandOk)                     identityConf = Math.min(brandC, 0.70);
+  else                                  identityConf = Math.min(recognition.category_confidence, 0.45);
+
+  // confirmed_by_text triggers calibrateVerification's 0.80 floor when a model
+  // is present, so it is only emitted when the model side is ALSO strong —
+  // Stage 1's hard rule means modelC ≥ 0.75 requires text/OCR confirmation.
+  const brandEvidence = (topBrand?.evidence || '').toLowerCase();
+  const brandTextRead = brandC >= 0.75 && /text|ocr|label|sticker|readable/.test(brandEvidence);
+  const brandConfLabel = !brandOk ? 'unidentified'
+    : /packaging/.test(brandEvidence) ? 'packaging_recognized'
+    : (brandTextRead && (!modelOk || modelC >= 0.75)) ? 'confirmed_by_text'
+    : 'inferred_from_visuals';
+
   return {
     final_category: recognition.category,
     final_category_hebrew: recognition.category_hebrew || '',
     final_brand: brand,
     final_model: model,
-    full_name: brand !== 'unidentified' ? `${brand} ${model}`.trim() : recognition.category,
+    // Never emit "Brand unidentified" as a display name — brand-only fallbacks
+    // carry just the brand; composeTitles appends the subcategory descriptor.
+    full_name: brandOk ? [brand, modelOk ? model : ''].filter(Boolean).join(' ') : recognition.category,
     full_name_hebrew: recognition.category_hebrew || '',
-    match_confidence: Math.min(recognition.category_confidence, 0.45),
+    match_confidence: identityConf,
     confidence_reasoning: isHe ? 'שלב התמחור נכשל — הערכה ראשונית בלבד' : 'Pricing stage failed — rough estimate only',
     matched_product_ids: [],
-    identification_method: brand !== 'unidentified' ? 'visual_match' : 'generic_only',
-    brand_confidence: 'unidentified',
+    identification_method: brandOk ? 'visual_match' : 'generic_only',
+    brand_confidence: brandConfLabel,
     price_estimate_low:  fp.price_estimate_low,
     price_estimate_mid:  fp.price_estimate_mid,
     price_estimate_high: fp.price_estimate_high,
