@@ -761,7 +761,12 @@ async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
 // ═══════════════════════════════════════════════════════
 
 async function imageHash(base64) {
-  const data = new TextEncoder().encode(base64.slice(0, 4096));
+  // F13 (SCAN-005): hash the FULL image. The old 4 KB prefix covered little
+  // more than the JPEG header + first scanlines, which two different photos
+  // from the same camera can share — a collision served a WRONG cached Vision
+  // result for 24h. SHA-256 over a few MB is milliseconds; existing cache
+  // entries keyed by prefix hashes simply miss once and repopulate.
+  const data = new TextEncoder().encode(base64);
   const buf = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 32);
 }
@@ -1227,6 +1232,18 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
         .rpc('match_products_by_ocr', { p_keywords: uniqueKw, p_limit: 6 });
 
       if (!rpcE && rpcD?.length) {
+        // F7 (SCAN-005): similarity now follows match specificity. The old
+        // mapping collapsed alias/keyword/brand to a flat 0.75, so a row that
+        // matched ONLY on brand ("logitech" seen in OCR) outranked full-text
+        // name matches (0.68) and brand+category (0.60). Brand presence is not
+        // product identity — it now ranks below both.
+        const OCR_MATCH_SIM = {
+          model_number: 0.92,  // model column or model_numbers array hit
+          ocr_keyword:  0.80,  // product name contains an OCR token
+          alias:        0.78,  // curated alias (full product names, Hebrew names)
+          keyword:      0.72,  // keywords / ocr_keywords array token
+          brand:        0.55,  // brand-only — weakest evidence class
+        };
         const mapped = rpcD.map(r => ({
           ...r,
           // F1 (SCAN-003): expose the RPC's model-column match as a flag that
@@ -1234,7 +1251,7 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
           // boost off this (the old check `_source === 'ocr_model_number'` matched
           // a value retrieval never produced, so the boost was dead code).
           _ocr_model_confirmed: r.match_type === 'model_number',
-          similarity: r.match_type === 'model_number' ? 0.92 : r.match_type === 'ocr_keyword' ? 0.80 : 0.75,
+          similarity: OCR_MATCH_SIM[r.match_type] ?? 0.55,
         }));
         logS('2_ocr_rpc', `kw=[${uniqueKw.slice(0,5).join(',')}]`, addRows(mapped, 'ocr_rpc', null), null, t);
       } else {
@@ -1595,7 +1612,7 @@ function getConfidenceTier(confidence) {
 // §8  WRITE-BACK
 // ═══════════════════════════════════════════════════════
 
-async function writeBack(recognition, verification, embedding) {
+async function writeBack(recognition, verification) {
   const supa = getSupabase();
   if (!supa) return;
 
@@ -1626,12 +1643,18 @@ async function writeBack(recognition, verification, embedding) {
         scan_count: (existing.scan_count || 0) + 1,
         last_scanned_at: new Date().toISOString(),
       };
-      // Only update price if Stage 2 produced a real comp-based estimate
-      if (verification.price_method === 'comp_based' && verification.price_estimate_mid > 0) {
-        updates.avg_used_price_ils = verification.price_estimate_mid;
-        updates.price_updated_at   = new Date().toISOString();
-      }
-      if (embedding) updates.text_embedding = embedding;
+      // F17 (SCAN-005): scan estimates NEVER overwrite catalog pricing.
+      // "comp_based" usually means "Stage 2 saw a DB candidate", so writing
+      // price_estimate_mid back into avg_used_price_ils re-anchored the catalog
+      // on an estimate derived from the catalog — a self-reinforcing loop.
+      // Scan prices still land in price_observations (append-only history,
+      // source-tagged) below; curated catalog prices stay curated.
+      //
+      // F4 (SCAN-005): text_embedding is no longer written here. The previous
+      // code stored the scan's QUERY-type Voyage embedding over the product's
+      // curated DOCUMENT-type embedding (the two are intentionally asymmetric),
+      // silently degrading vector search with every matched scan. Re-embedding,
+      // if ever needed, must use input_type 'document' via a seeding script.
       await supa.from('products').update(updates).eq('id', existing.id);
     } else {
       // ── No existing product: do NOT auto-insert into products.
@@ -1699,10 +1722,10 @@ async function recordScanWithRetry(supa, valuationRow, scanUuid, maxAttempts = 3
 
 // SECONDARY: derived data. Runs only AFTER the valuation is committed. Failures
 // are logged + reported but are non-fatal by construction (caller ignores them).
-async function updateDerivedWithRetry(supa, recognition, verification, embedding, scanUuid, maxAttempts = 2) {
+async function updateDerivedWithRetry(supa, recognition, verification, scanUuid, maxAttempts = 2) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await withTimeout(writeBack(recognition, verification, embedding), 8_000, 'writeBack');
+      await withTimeout(writeBack(recognition, verification), 8_000, 'writeBack');
       await logScanEvent(supa, scanUuid, 'derived_updated', 'writeback', { attempt });
       return;
     } catch (err) {
@@ -2271,8 +2294,14 @@ async function handleRequest(req) {
     const needsVision  = recognition.category_confidence < VISION_TRIGGER_THRESHOLD || identityWeak;
     if (needsVision && rem() >= 12_000) {
       const visionCap = Math.min(5_000, rem() - 10_000);
-      plog('Vision start', `conf=${round(recognition.category_confidence * 100)}% cap=${visionCap}ms rem=${rem()}ms`);
-      visionData = await withTimeout(fallbackVision(imageList[0], supa), visionCap, 'Vision fallback')
+      // F14 (SCAN-005): inspect the NEWEST image, not imageList[0]. In a
+      // multi-photo scan the client appends photos (label/model-plate close-ups
+      // requested by the help flow) at the END of the array — exactly the
+      // OCR-richest evidence, which Vision previously never saw. Single-photo
+      // scans are unchanged. The 24h cache keys off this same image.
+      const visionImage = imageList[imageList.length - 1];
+      plog('Vision start', `conf=${round(recognition.category_confidence * 100)}% img=${imageList.length}/${imageList.length} cap=${visionCap}ms rem=${rem()}ms`);
+      visionData = await withTimeout(fallbackVision(visionImage, supa), visionCap, 'Vision fallback')
         .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; });
       plog('Vision end', visionData ? `labels=${visionData.labels?.length} text=${visionData.text?.length} rem=${rem()}ms` : `no data rem=${rem()}ms`);
     } else if (!needsVision) {
@@ -2564,7 +2593,7 @@ async function handleRequest(req) {
     // 2) DERIVED data — only AFTER the valuation committed; best-effort, never
     //    blocks the response or affects valuation durability.
     if (persisted) {
-      await updateDerivedWithRetry(supa, recognition, verification, queryEmbedding, scanUuid).catch(() => {});
+      await updateDerivedWithRetry(supa, recognition, verification, scanUuid).catch(() => {});
     }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
