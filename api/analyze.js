@@ -1164,6 +1164,66 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
   console.log(`[Retrieve] brand="${topBrand}" model="${topModel}" cat="${category}" ocr=[${ocrTexts.join('|')}] models=[${allModels.join(',')}]`);
 
+  // ── SCAN-007 (B-13): retrieval-token provenance ──────────────────────────
+  // Scan #1 proved the pipeline can confirm itself: Stage 1's guessed model
+  // string retrieved its own catalog row, and calibration treated that hit as
+  // independent OCR corroboration (+boosts → 88% for a wrong sibling).
+  // Every token now carries its origin. Retrieval still uses ALL tokens
+  // (recall unchanged — same tokens, same order, same 25-token cap); only
+  // calibration's corroboration boosts are gated on evidence-grade matches.
+  // BARCODE is reserved: no barcode source exists in the pipeline yet.
+  const EVIDENCE_ORIGINS = new Set(['OCR', 'VISION', 'MODEL_NUMBER', 'BARCODE', 'USER_CORRECTION']);
+  const tokenOrigins = new Map(); // token -> Set<origin>; insertion order preserved
+  const addTok = (tok, origin) => {
+    if (!tok) return;
+    if (!tokenOrigins.has(tok)) tokenOrigins.set(tok, new Set());
+    tokenOrigins.get(tok).add(origin);
+  };
+  // Same construction order as before (OCR → model candidates → brand → Vision)
+  // so uniqueKw is byte-identical to the pre-SCAN-007 list.
+  ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(isUsefulOcrToken))
+    .forEach(t => addTok(t, 'OCR'));
+  (recognition.model_candidates || []).forEach(m => {
+    if (m.model && m.model.toLowerCase() !== 'unidentified') {
+      addTok(m.model.toLowerCase(), m.evidence === 'user_correction' ? 'USER_CORRECTION' : 'STAGE1_GUESS');
+    }
+  });
+  if (brand_ok) {
+    addTok(topBrand.toLowerCase(),
+      recognition.brand_candidates?.[0]?.evidence === 'user_correction' ? 'USER_CORRECTION' : 'STAGE1_GUESS');
+  }
+  visionText.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(isUsefulOcrToken))
+    .forEach(t => addTok(t, 'VISION'));
+  visionLogos.forEach(l => addTok(l.toLowerCase(), 'VISION'));
+
+  const uniqueKw = [...tokenOrigins.keys()].slice(0, 25);
+  const evidenceTokens = uniqueKw.filter(t => [...tokenOrigins.get(t)].some(o => EVIDENCE_ORIGINS.has(o)));
+
+  // A row is independently corroborated only when an evidence-origin token
+  // matches its visible identity fields (model/name/keywords/aliases — brand
+  // deliberately excluded: a brand hit is not model-level corroboration).
+  // Source-agnostic on purpose: a row found by a guess-driven strategy still
+  // counts as corroborated if OCR/Vision text independently matches it.
+  const rowEvidenceGrade = (r) => {
+    if (evidenceTokens.length === 0) return false;
+    const fields = [r.model, r.name, ...(r.keywords || []), ...(r.aliases || [])]
+      .filter(Boolean).map(f => String(f).toLowerCase());
+    if (evidenceTokens.some(tok => fields.some(f => f.includes(tok)))) return true;
+    if (r.match_type === 'model_number') {
+      // Tier-1 hit not explained by visible fields ⇒ it came from the
+      // model_numbers equality (column not returned by the RPC). Attribute it
+      // to evidence only when a model-shaped evidence token exists AND no
+      // unexplained model-shaped guess token could have been the source —
+      // ambiguity resolves to "no boost" (fail-safe).
+      const shaped = (t) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/i.test(t);
+      const evShaped = evidenceTokens.some(shaped);
+      const guessShapedUnexplained = uniqueKw.some(t =>
+        !evidenceTokens.includes(t) && shaped(t) && !fields.some(f => f.includes(t)));
+      return evShaped && !guessShapedUnexplained;
+    }
+    return false;
+  };
+
   // ── Dedup accumulator ────────────────────────────────────────────────────
   const seen    = new Set();
   const results = [];
@@ -1176,7 +1236,8 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
         seen.add(r.id);
         const weight  = r.confidence_weight ?? 1.0;
         const rawSim  = baseSim ?? r.similarity ?? 0.5;
-        results.push({ ...r, _source: source, similarity: Math.min(rawSim * weight, 1.0) });
+        // SCAN-007 (B-13): stamp evidence provenance on every candidate row.
+        results.push({ ...r, _source: source, similarity: Math.min(rawSim * weight, 1.0), _evidence_grade: rowEvidenceGrade(r) });
         n++;
       }
     }
@@ -1209,19 +1270,9 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   }
 
   // ── 2. OCR exact text lookup ─────────────────────────────────────────────
-  // Build keyword list from OCR + Vision
-  // F3 (SCAN-003): split OCR/Vision text streams pass through the generic-token
-  // filter; brand, model candidates, and logos are trusted identity evidence and
-  // are added unsplit/unfiltered.
-  const ocrKw = [
-    ...ocrTexts.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(isUsefulOcrToken)),
-    ...allModels.map(m => m.toLowerCase()),
-    ...(brand_ok ? [topBrand.toLowerCase()] : []),
-    ...visionText.flatMap(t => t.toLowerCase().split(/[\s,;|]+/).filter(isUsefulOcrToken)),
-    ...visionLogos.map(l => l.toLowerCase()),
-  ];
-  const uniqueKw = [...new Set(ocrKw)].slice(0, 25);
-
+  // Keyword list (uniqueKw) is built in the provenance block above — same
+  // tokens, same order, same F3 (SCAN-003) generic-token filtering, but each
+  // token now carries its origin (SCAN-007).
   if (uniqueKw.length > 0) {
     const t = Date.now();
     // GW-001: wrap the whole OCR strategy so one failure never aborts retrieval.
@@ -1401,7 +1452,7 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   const summary = strategyLog.strategies.map(s => `${s.strategy_name}:${s.candidate_count}r/${s.elapsed_ms}ms/${s.success ? 'ok' : 'fail'}`).join(' ');
   console.log(`[Retrieve] Summary: ${summary}`);
   if (top.length > 0) {
-    console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} sim=${top[0].similarity?.toFixed(2)}`);
+    console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} sim=${top[0].similarity?.toFixed(2)} ev=${top[0]._evidence_grade ? 'evidence' : 'guess'}`);
   } else {
     console.log('[Retrieve] 0 candidates');
   }
@@ -1515,8 +1566,19 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
     conf = Math.min(conf, 0.79);
   }
   if (method === 'generic_only') conf = Math.min(conf, 0.50);
-  if (dbMatches.length > 0 && (method === 'db_match' || brandConf === 'db_matched')) conf = Math.min(conf + 0.10, 0.90);
-  if (isPackaging && dbMatches.length > 0) conf = Math.min(conf + 0.10, 0.85);
+
+  // SCAN-007 (B-13): retrieval counts as INDEPENDENT corroboration only when a
+  // match is evidence-grade (its identity fields were hit by an OCR / Vision /
+  // model-number / barcode / user-correction token). Rows found solely via
+  // Stage 1's own guessed strings still flow to Stage 2 for reasoning and
+  // ranking, but they must never raise confidence or suppress confirmation
+  // prompts — that is the self-confirmation loop that produced Scan #1's 88%.
+  const hasEvidenceMatch = dbMatches.some(m => m._evidence_grade);
+  if (dbMatches.length > 0 && !hasEvidenceMatch) {
+    console.log('[Calibrate] retrieval matches are guess-derived only — corroboration boosts suppressed');
+  }
+  if (hasEvidenceMatch && dbMatches.length > 0 && (method === 'db_match' || brandConf === 'db_matched')) conf = Math.min(conf + 0.10, 0.90);
+  if (hasEvidenceMatch && isPackaging && dbMatches.length > 0) conf = Math.min(conf + 0.10, 0.85);
   if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
 
   // RULE 6 (Phase 2): OCR keyword match boost
@@ -1524,7 +1586,9 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
   // an OCR token (_ocr_model_confirmed, set from the RPC's match_type) AND whose
   // brand aligns with the final brand — a wrong-product keyword match must never
   // inherit the floor. Generic OCR matches keep the mild +0.08 boost only.
-  const ocrRows  = dbMatches.filter(m => m._source?.startsWith('ocr_'));
+  // SCAN-007 (B-13): only evidence-grade rows are eligible for RULE 6 —
+  // guess-derived ocr_* matches get no boost of any kind.
+  const ocrRows  = dbMatches.filter(m => m._source?.startsWith('ocr_') && m._evidence_grade);
   const ocrMatch = ocrRows.find(m => m._ocr_model_confirmed) || ocrRows[0];
   if (ocrMatch && brand.toLowerCase() !== 'unidentified' && brandConf !== 'unidentified') {
     const brandHead  = brand.toLowerCase().split(' ')[0];
@@ -2499,7 +2563,7 @@ async function handleRequest(req) {
         matched_from_candidate: matchedFromCandidate,
         candidates_count:     candidates.length,
         top3: candidates.slice(0, 3).map(c =>
-          `${c.brand} ${c.model}(src=${c._source}${c._from_approved_candidate ? ' LEARNED' : ''} sim=${round((c.similarity||0)*100)}%)`
+          `${c.brand} ${c.model}(src=${c._source}${c._from_approved_candidate ? ' LEARNED' : ''} sim=${round((c.similarity||0)*100)}% ev=${c._evidence_grade ? 'evidence' : 'guess'})`
         ).join(', '),
         strategy_log:         retrievalStrategyLog,
       },
