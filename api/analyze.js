@@ -954,6 +954,60 @@ async function setCachedVisionResult(supa, hash, result) {
   }
 }
 
+// ── SPRINT-1 M1.1 (OCE capture phase): Vision response → visionData ─────────
+// Pure parse of a single Google Vision API response (exported for the test
+// harness). The flat labels/text/logos/webEntities fields are byte-identical
+// to the pre-M1.1 parse — every existing consumer reads only those. The new
+// ocr_context field is CAPTURE-ONLY spatial metadata (nothing in the pipeline
+// consumes it yet); it is surfaced verbatim in _debug.ocr_context so OCE
+// scoring (M1.2+) can be designed against real production geometry.
+export function parseVisionResponse(response) {
+  // TEXT/LOGO boundingPoly carries pixel `vertices`; OBJECT_LOCALIZATION
+  // carries 0–1 `normalizedVertices`. Google omits x/y when 0.
+  const verts = (poly, key) => (poly?.[key] || []).map(v => ({ x: v.x ?? 0, y: v.y ?? 0 }));
+
+  return {
+    labels: (response.labelAnnotations || []).map(l => ({
+      description: l.description,
+      score: l.score,
+    })),
+    text: (response.textAnnotations || [])
+      .slice(1)
+      .map(t => t.description)
+      .filter(t => t && t.length > 1 && t.length < 80),
+    logos: (response.logoAnnotations || []).map(l => ({
+      description: l.description,
+      score: l.score,
+    })),
+    webEntities: (response.webDetection?.webEntities || [])
+      .filter(e => e.description && e.score > 0.5)
+      .map(e => e.description),
+    ocr_context: {
+      version: 1,
+      // annotation[0] is Vision's full-text block — kept (capped) because it
+      // preserves reading order/line structure the flat array loses.
+      full_text: (response.textAnnotations?.[0]?.description || '').slice(0, 500) || null,
+      // Deliberately UNFILTERED (only capped): the flat `text` array drops
+      // fragments of length ≤1 — but bare "G" / CJK junk are exactly the
+      // tokens OCE must learn to score (B-18 family).
+      text_boxes: (response.textAnnotations || []).slice(1, 31).map(t => ({
+        text: t.description,
+        bbox: verts(t.boundingPoly, 'vertices'),
+      })),
+      logo_boxes: (response.logoAnnotations || []).map(l => ({
+        description: l.description,
+        score: l.score,
+        bbox: verts(l.boundingPoly, 'vertices'),
+      })),
+      objects: (response.localizedObjectAnnotations || []).map(o => ({
+        name: o.name,
+        score: o.score,
+        bbox: verts(o.boundingPoly, 'normalizedVertices'),
+      })),
+    },
+  };
+}
+
 async function fallbackVision(imageBase64, supa) {
   const apiKey = process.env.GOOGLE_VISION_API_KEY;
   if (!apiKey) {
@@ -989,6 +1043,9 @@ async function fallbackVision(imageBase64, supa) {
               { type: 'TEXT_DETECTION', maxResults: 10 },
               { type: 'LOGO_DETECTION', maxResults: 5 },
               { type: 'WEB_DETECTION', maxResults: 5 },
+              // SPRINT-1 M1.1 (OCE): primary-object boxes ride the same
+              // request (no extra call; billed as one extra feature unit).
+              { type: 'OBJECT_LOCALIZATION', maxResults: 5 },
             ],
           }],
         }),
@@ -1010,28 +1067,12 @@ async function fallbackVision(imageBase64, supa) {
       return null;
     }
 
-    const result = {
-      labels: (response.labelAnnotations || []).map(l => ({
-        description: l.description,
-        score: l.score,
-      })),
-      text: (response.textAnnotations || [])
-        .slice(1)
-        .map(t => t.description)
-        .filter(t => t && t.length > 1 && t.length < 80),
-      logos: (response.logoAnnotations || []).map(l => ({
-        description: l.description,
-        score: l.score,
-      })),
-      webEntities: (response.webDetection?.webEntities || [])
-        .filter(e => e.description && e.score > 0.5)
-        .map(e => e.description),
-    };
+    const result = parseVisionResponse(response);
 
     incrementVisionDailyCounter(supa).catch(() => {});
     setCachedVisionResult(supa, hash, result).catch(() => {});
 
-    console.log(`[Vision] Got ${result.labels.length} labels, ${result.text.length} text fragments, ${result.logos.length} logos`);
+    console.log(`[Vision] Got ${result.labels.length} labels, ${result.text.length} text fragments, ${result.logos.length} logos, ${result.ocr_context.objects.length} objects`);
     return result;
 
   } catch (err) {
@@ -2876,6 +2917,11 @@ async function handleRequest(req) {
         total_ms: totalMs,
         budget_ms: BUDGET_MS,
       },
+      // SPRINT-1 M1.1 (OCE capture): spatial OCR metadata — debug-only, no
+      // pipeline consumer. null when Vision was skipped OR the result came
+      // from a pre-M1.1 vision_cache entry (24h TTL; boxes appear as the
+      // cache turns over).
+      ocr_context: visionData?.ocr_context || null,
     };
 
     // ── GW-000: SERVER-AUTHORITATIVE PERSISTENCE ──
