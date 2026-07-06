@@ -1146,6 +1146,40 @@ const OCR_GENERIC_TOKENS = new Set([
 const isModelShapedToken = (w) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/i.test(w);
 const isUsefulOcrToken   = (w) => isModelShapedToken(w) || (w.length >= 3 && !OCR_GENERIC_TOKENS.has(w));
 
+// A row is independently corroborated only when an evidence-origin token
+// matches its visible identity fields (model/name/keywords/aliases — brand
+// deliberately excluded: a brand hit is not model-level corroboration).
+// Source-agnostic on purpose: a row found by a guess-driven strategy still
+// counts as corroborated if OCR/Vision text independently matches it.
+// SCAN-013 (B-22): catalog names and aliases embed the brand ("Logitech MX
+// Keys S"), so a brand-only token ("logi", "logitech" from OCR or a Vision
+// logo) used to grade EVERY same-brand row as evidence through row.name.
+// A token that is the row's own brand — or a fragment of it — is brand-level
+// signal and is skipped here; only tokens carrying model information can
+// grade a row. Pure function (exported for the test harness).
+export function gradeRowEvidence(r, evidenceTokens, uniqueKw) {
+  if (evidenceTokens.length === 0) return false;
+  const rowBrand = String(r.brand || '').toLowerCase();
+  const modelTokens = rowBrand
+    ? evidenceTokens.filter(tok => !rowBrand.includes(tok))
+    : evidenceTokens;
+  const fields = [r.model, r.name, ...(r.keywords || []), ...(r.aliases || [])]
+    .filter(Boolean).map(f => String(f).toLowerCase());
+  if (modelTokens.some(tok => fields.some(f => f.includes(tok)))) return true;
+  if (r.match_type === 'model_number') {
+    // Tier-1 hit not explained by visible fields ⇒ it came from the
+    // model_numbers equality (column not returned by the RPC). Attribute it
+    // to evidence only when a model-shaped evidence token exists AND no
+    // unexplained model-shaped guess token could have been the source —
+    // ambiguity resolves to "no boost" (fail-safe).
+    const evShaped = evidenceTokens.some(isModelShapedToken);
+    const guessShapedUnexplained = uniqueKw.some(t =>
+      !evidenceTokens.includes(t) && isModelShapedToken(t) && !fields.some(f => f.includes(t)));
+    return evShaped && !guessShapedUnexplained;
+  }
+  return false;
+}
+
 // ── Strategy execution order ──────────────────────────────────────────────
 // 1  Exact brand + exact model         (most specific, highest confidence)
 // 2  OCR exact tokens                  (brand/model/name from OCR + Vision)
@@ -1191,6 +1225,17 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   const brand_ok = !!(topBrand && topBrand.toLowerCase() !== 'unidentified');
   const model_ok = !!(topModel && topModel.toLowerCase() !== 'unidentified');
 
+  // SCAN-013 (B-2): Stage 1 models often arrive brand-prefixed ("Logitech
+  // G Pro Wireless") while the catalog model column stores the bare model
+  // ("G Pro Wireless") — ILIKE '%Logitech G Pro Wireless%' matched 0 rows, so
+  // strategies 1/3a/3b always came back empty. They now query with the bare
+  // model. Token construction / uniqueKw are untouched (ranking unchanged),
+  // and when the model carries no brand prefix this is a no-op.
+  const queryModel = (brand_ok && model_ok) ? stripBrandPrefix(topBrand, topModel) : topModel;
+  if (model_ok && queryModel !== topModel) {
+    console.log(`[Retrieve] SCAN-013: brand prefix stripped for S1/S3a/S3b — "${topModel}" → "${queryModel}"`);
+  }
+
   console.log(`[Retrieve] brand="${topBrand}" model="${topModel}" cat="${category}" ocr=[${ocrTexts.join('|')}] models=[${allModels.join(',')}]`);
 
   // ── SCAN-007 (B-13): retrieval-token provenance ──────────────────────────
@@ -1228,30 +1273,12 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   const uniqueKw = [...tokenOrigins.keys()].slice(0, 25);
   const evidenceTokens = uniqueKw.filter(t => [...tokenOrigins.get(t)].some(o => EVIDENCE_ORIGINS.has(o)));
 
-  // A row is independently corroborated only when an evidence-origin token
-  // matches its visible identity fields (model/name/keywords/aliases — brand
-  // deliberately excluded: a brand hit is not model-level corroboration).
-  // Source-agnostic on purpose: a row found by a guess-driven strategy still
-  // counts as corroborated if OCR/Vision text independently matches it.
-  const rowEvidenceGrade = (r) => {
-    if (evidenceTokens.length === 0) return false;
-    const fields = [r.model, r.name, ...(r.keywords || []), ...(r.aliases || [])]
-      .filter(Boolean).map(f => String(f).toLowerCase());
-    if (evidenceTokens.some(tok => fields.some(f => f.includes(tok)))) return true;
-    if (r.match_type === 'model_number') {
-      // Tier-1 hit not explained by visible fields ⇒ it came from the
-      // model_numbers equality (column not returned by the RPC). Attribute it
-      // to evidence only when a model-shaped evidence token exists AND no
-      // unexplained model-shaped guess token could have been the source —
-      // ambiguity resolves to "no boost" (fail-safe).
-      const shaped = (t) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/i.test(t);
-      const evShaped = evidenceTokens.some(shaped);
-      const guessShapedUnexplained = uniqueKw.some(t =>
-        !evidenceTokens.includes(t) && shaped(t) && !fields.some(f => f.includes(t)));
-      return evShaped && !guessShapedUnexplained;
-    }
-    return false;
-  };
+  // SCAN-013 (B-22): grading logic lives in gradeRowEvidence (module level,
+  // exported for the test harness) — semantics + the brand-token fix are
+  // documented there. Parity vs the old inline closure was verified on replay
+  // fixtures before the swap (only diff: brand-only tokens no longer grade
+  // same-brand rows as evidence through name/keywords).
+  const rowEvidenceGrade = (r) => gradeRowEvidence(r, evidenceTokens, uniqueKw);
 
   // ── Dedup accumulator ────────────────────────────────────────────────────
   const seen    = new Set();
@@ -1323,10 +1350,10 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   };
 
   const fetchS1 = async () => {
-    const rec = mkRec('1_exact_brand_model', `brand~"${topBrand}" model~"${topModel}"`);
+    const rec = mkRec('1_exact_brand_model', `brand~"${topBrand}" model~"${queryModel}"`);
     try {
       const { data, error } = await supa.from('products').select('*')
-        .ilike('brand', `%${topBrand}%`).ilike('model', `%${topModel}%`).limit(5);
+        .ilike('brand', `%${topBrand}%`).ilike('model', `%${queryModel}%`).limit(5);
       rec.error = error?.message ?? null;
       rec.batches.push({ rows: data, source: 'exact_brand_model', baseSim: 0.92 });
     } catch (e) { rec.error = e.message; }
@@ -1391,8 +1418,8 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     return finish(rec);
   };
 
-  const normModel = (brand_ok && model_ok) ? normalizeModelKey(topModel) : null; // strips Hero/X/v2/Pro/RGB/etc.
-  const runS3a = !!(normModel && normModel.toLowerCase() !== topModel.toLowerCase());
+  const normModel = (brand_ok && model_ok) ? normalizeModelKey(queryModel) : null; // strips Hero/X/v2/Pro/RGB/etc.
+  const runS3a = !!(normModel && normModel.toLowerCase() !== queryModel.toLowerCase());
   const fetchS3a = async () => {
     const rec = mkRec('3a_normalized_model', `brand~"${topBrand}" model~"${normModel}"`);
     try {
@@ -1405,10 +1432,10 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
   };
 
   const fetchS3b = async () => {
-    const rec = mkRec('3b_name_col', `brand~"${topBrand}" name~"${topModel}"`);
+    const rec = mkRec('3b_name_col', `brand~"${topBrand}" name~"${queryModel}"`);
     try {
       const { data, error } = await supa.from('products').select('*')
-        .ilike('brand', `%${topBrand}%`).ilike('name', `%${topModel}%`).limit(5);
+        .ilike('brand', `%${topBrand}%`).ilike('name', `%${queryModel}%`).limit(5);
       rec.error = error?.message ?? null;
       rec.batches.push({ rows: data, source: 'name_col', baseSim: 0.82 });
     } catch (e) { rec.error = e.message; }
@@ -2042,6 +2069,50 @@ function assessAuthenticity(recognition, verification) {
 }
 
 
+// ── SCAN-013 (B-20/B-2): brand/model normalization helpers ──────────────────
+// Stage 1 may emit brand-prefixed models ("Logitech G Pro Wireless") and the
+// alternatives builder used to re-prefix them, producing doubled display names
+// ("Logitech Logitech G Pro Wireless") that then flowed back through the
+// correction path into retrieval and product_candidates. These two helpers are
+// the single place that dedups a leading brand. Exported for the test harness.
+
+// Strip a leading brand prefix — repeated any number of times — from a model
+// or name string. Word-boundary safe ("Logi" never strips "Logitech …").
+// Returns the input unchanged when brand/value is missing or nothing remains.
+export function stripBrandPrefix(brand, value) {
+  const v = (value || '').trim();
+  const b = (brand || '').trim().toLowerCase();
+  if (!v || !b) return v;
+  let out = v;
+  while (out.toLowerCase().startsWith(b + ' ')) out = out.slice(b.length + 1).trim();
+  return out || v;
+}
+
+// Canonical "<Brand> <Model>" join that can never double the brand.
+// Degenerate inputs collapse to the brand alone (model === brand or empty).
+export function composeBrandModelName(brand, model) {
+  const b = (brand || '').trim();
+  const m = stripBrandPrefix(b, model);
+  if (!b) return m;
+  if (!m || m.toLowerCase() === b.toLowerCase()) return b;
+  return `${b} ${m}`;
+}
+
+// Parse + sanitize a user correction (refineModel). The client may send an
+// alternative's display string, which historically could arrive double-branded;
+// the model must never carry the brand prefix, and the stored correction text
+// is rebuilt from the sanitized parts ONLY when stripping changed something —
+// otherwise the user's text is preserved verbatim.
+export function sanitizeUserCorrection(refineModel, stage1Brand) {
+  const raw = refineModel.trim();
+  const spaceIdx = raw.indexOf(' ');
+  const corrBrand = spaceIdx > 0 ? raw.slice(0, spaceIdx) : (stage1Brand || null);
+  const rawModel  = spaceIdx > 0 ? raw.slice(spaceIdx + 1) : raw;
+  const corrModel = corrBrand ? stripBrandPrefix(corrBrand, rawModel) : rawModel;
+  const corrText  = corrModel !== rawModel ? composeBrandModelName(corrBrand, corrModel) : raw;
+  return { corrBrand, corrModel, corrText };
+}
+
 // Strip trailing variant suffixes so G502/G502 Hero/G502X all collapse to "g502"
 function normalizeModelKey(model) {
   return (model || '')
@@ -2112,8 +2183,9 @@ function composeTitles(recognition, verification) {
   let name;
   if (brandOk && modelOk) {
     // Canonical identity — always "<Brand> <Model>", regardless of language.
-    // Guard: some models arrive with the brand already prefixed.
-    name = model.toLowerCase().startsWith(brand.toLowerCase()) ? model : `${brand} ${model}`;
+    // SCAN-013 (B-20): composeBrandModelName dedups a brand prefix even when
+    // repeated — the old startsWith guard passed doubled models through verbatim.
+    name = composeBrandModelName(brand, model);
   } else if (brandOk) {
     // Accept Stage 2's full_name only when it actually carries the brand —
     // an unguarded generic full_name ("Gaming Mouse") must not win here.
@@ -2215,7 +2287,11 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false)
           })
           .slice(0, 3)
           .map(c => ({
-            name: brandOk ? `${topBrand} ${c.model}`.trim() : c.model,
+            // SCAN-013 (B-20): this blind prefix was the origin of doubled
+            // display names ("Logitech Logitech G Pro Wireless") whenever a
+            // Stage 1 candidate already carried the brand — and the client
+            // sends this exact string back as refineModel on tap-correct.
+            name: brandOk ? composeBrandModelName(topBrand, c.model) : c.model,
             confidence: c.confidence,
           }));
       })(),
@@ -2452,12 +2528,13 @@ async function handleRequest(req) {
       // refineModel carries their intent (e.g. "Logitech G900").
       // Override Stage 1 so Stage 2 treats this as a mandatory identity.
       if (refineModel) {
-        const corrText = refineModel.trim();
-        const spaceIdx = corrText.indexOf(' ');
-        const corrBrand = spaceIdx > 0
-          ? corrText.slice(0, spaceIdx)
-          : (recognition.brand_candidates?.[0]?.brand || null);
-        const corrModel = spaceIdx > 0 ? corrText.slice(spaceIdx + 1) : corrText;
+        // SCAN-013 (B-20): sanitizeUserCorrection strips a (possibly doubled)
+        // brand prefix from the model and rebuilds the stored correction text,
+        // so every downstream consumer (_user_correction passthrough, Stage 2
+        // prompt, candidate_payload, buildFallback) sees "<Brand> <Model>" —
+        // never "Logitech Logitech G Pro Wireless".
+        const { corrBrand, corrModel, corrText } =
+          sanitizeUserCorrection(refineModel, recognition.brand_candidates?.[0]?.brand);
 
         recognition.brand_candidates = [
           { brand: corrBrand || 'Unknown', confidence: 0.96, evidence: 'user_correction' },
@@ -2469,7 +2546,7 @@ async function handleRequest(req) {
         ];
         recognition._user_correction = corrText;
         recognition._correction_source = 'user_selected';
-        console.log(`[Analyze correction received] refineModel="${corrText}" → brand="${corrBrand}" model="${corrModel}"`);
+        console.log(`[Analyze correction received] refineModel="${refineModel.trim()}" → brand="${corrBrand}" model="${corrModel}"${corrText !== refineModel.trim() ? ` (sanitized → "${corrText}")` : ''}`);
       }
     } catch (stage1Err) {
       // Stage 1 failure is NOT a product classification — it is a retryable error.
@@ -2699,6 +2776,7 @@ async function handleRequest(req) {
         ? verification.final_model : null;
 
       // User correction takes priority over Stage 2 output — parse the corrected text directly
+      // (SCAN-013: _user_correction is already sanitized at injection time).
       if (recognition._user_correction) {
         const corrText = recognition._user_correction.trim();
         const spaceIdx = corrText.indexOf(' ');
@@ -2709,13 +2787,17 @@ async function handleRequest(req) {
           cpModel = corrText;
         }
       }
+      // SCAN-013 (B-20): the model column must store the bare model — Stage 2's
+      // final_model can arrive brand-prefixed. This row seeds the learned
+      // catalog (product_candidates), so a doubled name here is contamination.
+      if (cpBrand && cpModel) cpModel = stripBrandPrefix(cpBrand, cpModel);
 
       result.candidate_payload = {
         brand:        cpBrand,
         model:        cpModel,
         name:         recognition._user_correction
                         || verification.full_name
-                        || [cpBrand, cpModel].filter(Boolean).join(' ')
+                        || composeBrandModelName(cpBrand, cpModel)
                         || null,
         category:     verification.final_category || recognition.category || null,
         subcategory:  recognition.subcategory || null,
@@ -3395,7 +3477,9 @@ function buildFallback(recognition, lang, failReason = null, candidates = [], re
     final_model: model,
     // Never emit "Brand unidentified" as a display name — brand-only fallbacks
     // carry just the brand; composeTitles appends the subcategory descriptor.
-    full_name: brandOk ? [brand, modelOk ? model : ''].filter(Boolean).join(' ') : recognition.category,
+    // SCAN-013 (B-20): brand-prefixed models used to double here ("Logitech" +
+    // "Logitech G Pro Wireless") whenever Stage 2 was down.
+    full_name: brandOk ? (modelOk ? composeBrandModelName(brand, model) : brand) : recognition.category,
     full_name_hebrew: recognition.category_hebrew || '',
     match_confidence: identityConf,
     confidence_reasoning: isHe ? 'שלב התמחור נכשל — הערכה ראשונית בלבד' : 'Pricing stage failed — rough estimate only',
