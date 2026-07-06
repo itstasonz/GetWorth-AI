@@ -299,6 +299,28 @@ const USER_DAILY_LIMIT   = 50;               // Per-user daily scan quota (beta)
 const AUTHENTICITY_HIGH_RISK_BRANDS = /\b(rolex|omega|cartier|audemars piguet|ap royal oak|patek philippe|richard mille|jaeger|iwc|breitling|tag heuer|hublot|chanel|louis vuitton|lv|gucci|prada|hermes|herm[eè]s|dior|versace|burberry|balenciaga|off-white|supreme|yeezy|bape|comme des gar[cç]ons|cdg|givenchy|bottega veneta|celine|saint laurent|ysl|goyard|rimowa|tiffany|van cleef|bulgari|chopard|a. lange|lange|montblanc|tudor|zenith|girard-perregaux|jordan|travis scott|fragment|nike sb|nike dunk|adidas yeezy|air jordan|limited edition collab)\b/i;
 const AUTHENTICITY_HIGH_RISK_CATEGORIES = new Set(['watches', 'jewelry', 'bags', 'handbags', 'perfumes', 'collectibles', 'sneakers', 'clothing', 'accessories']);
 
+// SCAN-011: Stage 2 output slimming. The always-on authenticity_assessment
+// block is the largest chunk of Stage 2's output tokens; the non-streaming
+// verification call was output-bound past its cap (6/6 production scans
+// aborted at cap+2-6ms). Forensics are now REQUESTED only for counterfeit-
+// prone scans; every other scan gets a 'not_required' stub in verifyAndPrice
+// so the parsed shape reaching assessAuthenticity / RULE 9 is unchanged.
+// Perfumes/clothing/accessories stay in AUTHENTICITY_HIGH_RISK_CATEGORIES for
+// server-side risk scoring but do NOT trigger the prompt block unless the
+// brand itself is counterfeit-prone (owner decision, SCAN-011).
+const AUTHENTICITY_PROMPT_CATEGORIES = /watch|jewel|bag|handbag|sneak|collectib/i;
+
+export function needsAuthenticityForensics(recognition, visionData = null) {
+  if (AUTHENTICITY_PROMPT_CATEGORIES.test(`${recognition.category || ''} ${recognition.subcategory || ''}`)) return true;
+  const brandText = [
+    ...(recognition.brand_candidates || []).map(b => b.brand),
+    ...(recognition.ocr_text?.raw_texts || []),
+    ...(recognition.ocr_text?.logos_detected || []),
+    ...((visionData?.logos || []).map(l => l.description)),
+  ].filter(Boolean).join(' ');
+  return AUTHENTICITY_HIGH_RISK_BRANDS.test(brandText);
+}
+
 // ═══════════════════════════════════════════════════════
 // RETRY HELPER
 // ═══════════════════════════════════════════════════════
@@ -547,7 +569,7 @@ Respond ONLY with valid JSON (no markdown, no backticks):
 }
 
 
-function buildVerificationPrompt(recognition, candidates, corrections, language = 'he', visionData = null) {
+export function buildVerificationPrompt(recognition, candidates, corrections, language = 'he', visionData = null, forensics = true) {
   const isHe = language === 'he';
 
   const candidateBlock = candidates.length > 0
@@ -622,7 +644,7 @@ VERIFICATION RULES:
 - NEVER exceed 95% final confidence
 - NEVER fabricate a brand that wasn't found in OCR or DB
 
-AUTHENTICITY FORENSICS (required for watches, designer bags, sneakers, jewelry, perfumes, collectibles, high-value electronics):
+${forensics ? `AUTHENTICITY FORENSICS (required for watches, designer bags, sneakers, jewelry, perfumes, collectibles, high-value electronics):
 Apply to: Rolex, Omega, Cartier, Patek Philippe, Audemars Piguet, IWC, Breitling, Tag Heuer, Hublot, Tudor, Chanel, Louis Vuitton, Gucci, Prada, Hermès, Dior, Balenciaga, Off-White, Supreme, Yeezy, Air Jordan, and similar luxury/limited brands.
 DEFAULT status is "unknown" for ALL high-risk items — never assume authentic without clear evidence.
 
@@ -649,7 +671,7 @@ STATUS RULES:
 
 WORDING RULES: NEVER write "This is authentic", "Guaranteed original", "Verified [brand]". Use: "Authenticity not verified", "Requires expert inspection", "Looks like [brand]-style item".
 
-ISRAELI MARKET PRICING RULES:
+` : ''}ISRAELI MARKET PRICING RULES:
 - All prices in Israeli New Shekel (₪)
 - Electronics typically 20-40% more than US retail
 - Used items: 40-70% of new Israeli retail depending on condition
@@ -657,6 +679,12 @@ ISRAELI MARKET PRICING RULES:
 - If brand unidentified: WIDE range (±50% from mid)
 - If brand confirmed by text: NARROW range (±20% from mid)
 
+BREVITY RULES (output is machine-parsed — keep every free-text field tight):
+- confidence_reasoning: ONE sentence, max 15 words
+- selling_tips: ONE tip, max 10 words
+- israeli_market_notes: max 12 words, or "" if nothing useful
+- price_factors: max 2 entries
+${forensics ? '- visual_signals / missing_evidence / red_flags / green_flags: short phrases, max 5 items each\n' : ''}
 Respond ONLY with valid JSON:
 {
   "final_category": "string",
@@ -666,7 +694,7 @@ Respond ONLY with valid JSON:
   "full_name": "Brand Model Name",
   "full_name_hebrew": "${isHe ? 'שם מלא' : ''}",
   "match_confidence": 0.78,
-  "confidence_reasoning": "explanation",
+  "confidence_reasoning": "one short sentence",
   "matched_product_ids": ["uuid-if-matched"],
   "identification_method": "ocr_confirmed|visual_match|db_match|generic_only",
   "brand_confidence": "confirmed_by_text|inferred_from_visuals|db_matched|unidentified",
@@ -679,9 +707,9 @@ Respond ONLY with valid JSON:
   "condition": "Good",
   "is_sellable": true,
   "market_demand": "moderate",
-  "selling_tips": "${isHe ? 'טיפ' : 'tip'}",
-  "israeli_market_notes": "notes",
-  "price_factors": [{"factor":"condition","impact":"-₪100"}],
+  "selling_tips": "${isHe ? 'טיפ קצר' : 'one short tip'}",
+  "israeli_market_notes": "max 12 words",
+  "price_factors": [{"factor":"condition","impact":"-₪100"}]${forensics ? `,
   "authenticity_assessment": {
     "status": "not_required|unknown|likely_original|possible_replica|suspected_fake",
     "confidence": 0.0,
@@ -695,7 +723,7 @@ Respond ONLY with valid JSON:
     },
     "red_flags": ["e.g. dial font spacing irregular"],
     "green_flags": ["e.g. case finishing consistent with authentic"]
-  }
+  }` : ''}
 }`;
 }
 
@@ -1592,7 +1620,12 @@ async function fetchCorrections() {
 // ═══════════════════════════════════════════════════════
 
 async function verifyAndPrice(recognition, candidates, corrections, language, apiKey, visionData = null, attemptTimeoutMs = 12000) {
-  const prompt = buildVerificationPrompt(recognition, candidates, corrections, language, visionData);
+  // SCAN-011: forensics decided once per scan. Non-forensics scans get a
+  // slimmed prompt (no authenticity_assessment in the requested JSON) and a
+  // deterministic stub below, so calibration RULE 9 / assessAuthenticity see
+  // the same shape as a Claude-written "not_required" block.
+  const forensics = needsAuthenticityForensics(recognition, visionData);
+  const prompt = buildVerificationPrompt(recognition, candidates, corrections, language, visionData, forensics);
 
   // GW-002: single attempt (maxRetries=0) with the caller's Stage-2 budget as the
   // per-attempt timeout. Previously used the fetchWithRetry defaults
@@ -1620,7 +1653,14 @@ async function verifyAndPrice(recognition, candidates, corrections, language, ap
 
   const data = await res.json();
   const raw = data.content?.find((c) => c.type === 'text')?.text || '';
-  return parseJSON(raw, 'verification');
+  const parsed = parseJSON(raw, 'verification');
+  // SCAN-011: minimal stub only — confidence/evidence_score stay absent so
+  // assessAuthenticity applies its own risk-based defaults, exactly as it
+  // already does for the buildFallback path (which has no block at all).
+  if (!forensics && !parsed.authenticity_assessment) {
+    parsed.authenticity_assessment = { status: 'not_required', replica_tier: 'none' };
+  }
+  return parsed;
 }
 
 
