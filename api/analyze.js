@@ -3145,29 +3145,107 @@ function assessFallbackIdentity(recognition) {
 //   pricing_confidence ('MEDIUM'|'LOW'|'MANUAL_REQUIRED'), pricing_reason,
 //   pricing_warning, fallback_key, pre_source, _db_retail? }
 
+// ── SCAN-012 (B-21): deterministic anchor compatibility gate ──────────────
+// The old filter was brand-substring + has-price, which anchored a Logitech
+// G Pro Wireless (mouse) on Logitech MX Keys S (keyboard), and evidence-grade
+// rows both bypassed the similarity floor and upgraded the quote to MEDIUM —
+// even when the "evidence" was a brand token leaking through the row's name
+// column. A row may now anchor pricing only when it is compatible with the
+// recognized PRODUCT, not merely the brand. Used ONLY by PRE (§6.5); identity,
+// retrieval, rowEvidenceGrade, and calibration are untouched.
+//
+// Verdict: { ok, reason, modelMatched }.
+//   R0/R4 model overlap (fast reject) — when Stage 1 has a usable model at
+//        ≥0.60 confidence, normalizeModelKey(model minus brand prefix) must
+//        appear in the row's model/name/aliases, or share a model-shaped
+//        token (G502, WH-1000XM5). No overlap → reject, regardless of brand.
+//   R1   brand head must match (same rule as before).
+//   R2   category equality, case-insensitive, FAIL CLOSED on missing.
+//   R3   subcategory word overlap when BOTH sides have one.
+//   Brand-only identities (no usable model) pass on R1+R2+R3 alone; the
+//   caller caps those quotes at LOW (sibling pricing, never model pricing).
+export function isCompatibleAnchor(row, identity, recognition) {
+  const rowText = [row.model, row.name, ...(row.aliases || [])]
+    .filter(Boolean).join(' ').toLowerCase();
+
+  let modelMatched = false;
+  let modelUsable = false;
+  if (identity.modelOk) {
+    const m = identity.model.toLowerCase().trim();
+    const b = (identity.brand || '').toLowerCase().trim();
+    const bare = b && m.startsWith(b + ' ') ? m.slice(b.length + 1) : m; // B-2: models often carry the brand prefix
+    const normModel = normalizeModelKey(bare);
+    const shapedToks = bare.split(/[\s/]+/).filter(isModelShapedToken);
+    modelUsable = normModel.length >= 2 || shapedToks.length > 0;
+    modelMatched = (normModel.length >= 2 && rowText.includes(normModel))
+      || shapedToks.some(t => rowText.includes(t));
+  }
+  // R0/R4 — model compatibility is MANDATORY for a confident, usable model.
+  if (identity.modelOk && identity.modelC >= 0.60 && modelUsable && !modelMatched) {
+    return { ok: false, reason: 'no_model_overlap', modelMatched };
+  }
+  // R1 — brand head.
+  if (!identity.brandOk || !identity.brandHead
+      || !(row.brand || '').toLowerCase().includes(identity.brandHead)) {
+    return { ok: false, reason: 'brand_mismatch', modelMatched };
+  }
+  // R2 — category equality, fail closed.
+  const rowCat = (row.category || '').trim().toLowerCase();
+  const recCat = (recognition.category || '').trim().toLowerCase();
+  if (!rowCat || !recCat || rowCat !== recCat) {
+    return { ok: false, reason: 'category_mismatch', modelMatched };
+  }
+  // R3 — subcategory word overlap when both present (prefix match tolerates
+  // singular/plural: "keyboard" ~ "keyboards").
+  const words = (s) => (s || '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3);
+  const rowSub = words(row.subcategory);
+  const recSub = words(recognition.subcategory);
+  if (rowSub.length && recSub.length
+      && !rowSub.some(a => recSub.some(b2 => a === b2 || a.startsWith(b2) || b2.startsWith(a)))) {
+    return { ok: false, reason: 'subcategory_mismatch', modelMatched };
+  }
+  return { ok: true, reason: modelMatched ? 'model_overlap' : 'brand_category_sibling', modelMatched };
+}
+
 // Source 1 — catalog anchor (deterministic, 0ms, rows already in memory).
-// Evidence-corroborated brand-aligned rows → MEDIUM. Guess-derived rows are
-// acceptable for PRICING at high similarity (sibling products price close to
-// each other, unlike identity) but always graded LOW.
-function preQuoteFromCatalog(ctx) {
-  const { candidates, identity, failReason } = ctx;
+// SCAN-012: every row must pass isCompatibleAnchor before it can anchor.
+// R5: evidence grade is a SORT tiebreaker only. MEDIUM requires evidence that
+//     directly hit the row's model column (_ocr_model_confirmed) AND identity
+//     model overlap; every other anchor — including brand-only sibling
+//     pricing — is LOW.
+// R6: the 0.80 similarity floor applies to everything except those
+//     model-evidence rows; evidence grade alone no longer bypasses it.
+export function preQuoteFromCatalog(ctx) {
+  const { candidates, identity, recognition, failReason } = ctx;
   if (!identity.brandOk || !identity.brandHead) return null;
-  const rows = (candidates || []).filter(c =>
-    (c.avg_used_price_ils > 0) &&
-    (c.brand || '').toLowerCase().includes(identity.brandHead));
-  if (!rows.length) return null;
-  rows.sort((a, b) =>
-    ((b._evidence_grade === true) - (a._evidence_grade === true)) ||
-    ((b.similarity || 0) - (a.similarity || 0)));
-  const row = rows[0];
-  if (!row._evidence_grade && (row.similarity || 0) < 0.80) return null;
+  const compatible = [];
+  for (const c of (candidates || [])) {
+    if (!(c.avg_used_price_ils > 0)) continue;
+    const verdict = isCompatibleAnchor(c, identity, recognition);
+    if (!verdict.ok) {
+      console.log(`[PRE] anchor rejected ${c.brand} ${c.model || c.name}: ${verdict.reason}`);
+      continue;
+    }
+    compatible.push({ row: c, modelMatched: verdict.modelMatched });
+  }
+  if (!compatible.length) return null;
+  compatible.sort((a, b) =>
+    ((b.row._evidence_grade === true) - (a.row._evidence_grade === true)) ||
+    ((b.row.similarity || 0) - (a.row.similarity || 0)));
+  const { row, modelMatched } = compatible[0];
+  const modelEvidence = row._evidence_grade === true && row._ocr_model_confirmed === true;
+  if (!modelEvidence && (row.similarity || 0) < 0.80) {
+    console.log(`[PRE] anchor rejected ${row.brand} ${row.model || row.name}: below_similarity_floor sim=${(row.similarity || 0).toFixed(2)}`);
+    return null;
+  }
+  const grade = (modelEvidence && modelMatched) ? 'MEDIUM' : 'LOW';
   return {
     price_estimate_low:  row.price_low_ils  || Math.round(row.avg_used_price_ils * 0.75),
     price_estimate_mid:  row.avg_used_price_ils,
     price_estimate_high: row.price_high_ils || Math.round(row.avg_used_price_ils * 1.25),
     pricing_status:      'db_fallback',
-    pricing_confidence:  row._evidence_grade ? 'MEDIUM' : 'LOW',
-    pricing_reason:      `Catalog pricing for ${row.brand} ${row.model || row.name}${row._evidence_grade ? '' : ' (closest match, unverified)'}.`,
+    pricing_confidence:  grade,
+    pricing_reason:      `Catalog pricing for ${row.brand} ${row.model || row.name}${grade === 'MEDIUM' ? '' : ' (closest compatible match)'}.`,
     pricing_warning:     `Pricing stage failed (${failReason || 'unknown'}). Using catalog pricing.`,
     fallback_key:        'db_row',
     pre_source:          'catalog',
@@ -3178,13 +3256,19 @@ function preQuoteFromCatalog(ctx) {
 // Source 2 — AI estimator (Claude Haiku, budget-gated, ≤3.5s).
 // Dedicated ~300-token pricing prompt. Sends ONLY minimal structured context —
 // never the scan. Output clamped: AI rescue quotes never exceed MEDIUM.
-function buildRescuePricingPrompt(ctx) {
+export function buildRescuePricingPrompt(ctx) {
   const { recognition, candidates, identity } = ctx;
   const condition = recognition.visual_features?.condition || 'unknown';
   const certainty = identity.identityHigh ? 'high' : identity.brandOk ? 'moderate' : 'low';
-  const anchors = (candidates || [])
-    .filter(c => c.avg_used_price_ils > 0)
-    .slice(0, 3)
+  // SCAN-012 (R7): the same compatibility gate guards the Haiku anchor list —
+  // incompatible rows are excluded here, never left for prompt wording to
+  // reject ("use only if relevant" is not a safety mechanism).
+  const priced = (candidates || []).filter(c => c.avg_used_price_ils > 0);
+  const anchorRows = priced.filter(c => isCompatibleAnchor(c, identity, recognition).ok).slice(0, 3);
+  if (priced.length !== anchorRows.length) {
+    console.log(`[PRE] haiku anchors: kept ${anchorRows.length}/${priced.length} compatible`);
+  }
+  const anchors = anchorRows
     .map(c => `- ${c.brand} ${c.model || c.name}: used avg ₪${c.avg_used_price_ils}, range ₪${c.price_low_ils ?? '?'}-${c.price_high_ils ?? '?'}, new ₪${c.retail_price_ils ?? '?'}`)
     .join('\n');
   return `You are a pricing engine for second-hand goods in ISRAEL. Estimate the current Israeli used-market price in ILS for ONE item. Respond with ONLY JSON.
