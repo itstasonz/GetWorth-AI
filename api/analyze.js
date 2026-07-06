@@ -1008,6 +1008,177 @@ export function parseVisionResponse(response) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// SPRINT-1 M1.2 — OCE LOG-ONLY SCORING
+// Pure scoring of every OCR token (Stage 1 + Vision) for "belongs to the
+// scanned product" vs "background object" (B-18 family). NOTHING in the
+// pipeline consumes these scores yet: retrieval tokens, evidenceTokens,
+// calibration, Stage 2 and PRE are untouched. Output goes only to [OCE] log
+// lines and _debug.ocr_context.scored_tokens, so M1.3 gating can be designed
+// against real production score distributions.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Small curated list for the foreign-brand signal — a token that IS a known
+// brand/product-line but matches nothing in the recognized identity is very
+// likely background-object text (GPU box behind a perfume).
+const OCE_KNOWN_BRANDS = new Set([
+  'logitech', 'razer', 'steelseries', 'corsair', 'msi', 'asus', 'acer', 'dell',
+  'lenovo', 'nvidia', 'geforce', 'radeon', 'ryzen', 'intel', 'apple', 'samsung',
+  'sony', 'xiaomi', 'huawei', 'nintendo', 'microsoft', 'xbox', 'playstation',
+  'canon', 'nikon', 'fujifilm', 'gopro', 'dji', 'bose', 'jbl', 'sennheiser',
+  'anker', 'sandisk', 'kingston', 'seagate', 'casio', 'seiko', 'citizen',
+  'garmin', 'fitbit', 'dyson', 'philips', 'braun', 'nespresso', 'delonghi',
+  'nike', 'adidas', 'puma', 'reebok', 'ikea', 'zara',
+]);
+
+const OCE_CJK_RE = /[぀-ヿ㐀-䶿一-鿿豈-﫿가-힯]/;
+
+// Scoring deltas — additive on a 0.5 base, clamped to [0, 1].
+// Tiers (design memo): TRUSTED ≥ 0.7, SUSPECT 0.4–0.7, BACKGROUND < 0.4.
+const OCE_RULES = {
+  inside_primary_object:    +0.20,
+  near_primary_object:      +0.08,
+  outside_primary_object:   -0.25,
+  matches_recognized_brand: +0.20,
+  matches_model_candidate:  +0.15,
+  cross_source_agreement:   +0.15,
+  logo_text_overlap:        +0.15,
+  foreign_brand_token:      -0.30,
+  cjk_on_latin_product:     -0.30,
+  noisy_fragment:           -0.15,
+  short_fragment:           -0.10,
+};
+
+export function scoreOcrContext(recognition, visionData) {
+  const ctx = visionData?.ocr_context || null;
+  const r2 = (x) => Math.round(x * 100) / 100;
+
+  // ── Recognized identity (post-correction: correction injection runs first) ─
+  const brand = (recognition?.brand_candidates?.[0]?.brand || '').toLowerCase().trim();
+  const brandOk = !!brand && brand !== 'unidentified';
+  const modelStrings = (recognition?.model_candidates || [])
+    .map(m => (m.model || '').toLowerCase()).filter(m => m && m !== 'unidentified');
+  const identityText = [brandOk ? brand : '', ...modelStrings,
+    recognition?.category, recognition?.subcategory]
+    .filter(Boolean).join(' ').toLowerCase();
+  const latinProduct = !OCE_CJK_RE.test(identityText);
+  const logoNames = [
+    ...(recognition?.ocr_text?.logos_detected || []),
+    ...((visionData?.logos || []).map(l => l.description)),
+  ].filter(Boolean).map(s => String(s).toLowerCase());
+
+  // ── Geometry: primary object + estimated pixel extent ─────────────────────
+  // Text/logo boxes are pixel coords; object boxes are normalized 0–1. The
+  // image dimensions are not captured (M1.1 scope), so the pixel extent is
+  // ESTIMATED as the max vertex over all text/logo boxes — a lower bound that
+  // is good enough for inside/outside classification. Log-only, so imprecision
+  // is acceptable; exact dims can join the capture in M1.3 if needed.
+  const rectOf = (bbox) => {
+    if (!bbox?.length) return null;
+    const xs = bbox.map(v => v.x), ys = bbox.map(v => v.y);
+    return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+  };
+  let extentW = 0, extentH = 0;
+  for (const b of [...(ctx?.text_boxes || []), ...(ctx?.logo_boxes || [])]) {
+    for (const v of (b.bbox || [])) { extentW = Math.max(extentW, v.x); extentH = Math.max(extentH, v.y); }
+  }
+  const objects = ctx?.objects || [];
+  const primary = objects.length
+    ? objects.reduce((a, b) => ((b.score || 0) > (a.score || 0) ? b : a)) : null;
+  const pn = primary ? rectOf(primary.bbox) : null;
+  const primaryRect = (pn && extentW > 0 && extentH > 0)
+    ? { x0: pn.x0 * extentW, y0: pn.y0 * extentH, x1: pn.x1 * extentW, y1: pn.y1 * extentH }
+    : null;
+  const expand = (r, f) => {
+    const mx = (r.x1 - r.x0) * f, my = (r.y1 - r.y0) * f;
+    return { x0: r.x0 - mx, y0: r.y0 - my, x1: r.x1 + mx, y1: r.y1 + my };
+  };
+  const contains = (r, cx, cy) => cx >= r.x0 && cx <= r.x1 && cy >= r.y0 && cy <= r.y1;
+  const intersects = (a, b) => a && b && a.x0 <= b.x1 && b.x0 <= a.x1 && a.y0 <= b.y1 && b.y0 <= a.y1;
+  const logoRects = (ctx?.logo_boxes || []).map(l => rectOf(l.bbox)).filter(Boolean);
+
+  // ── Token universe: Stage 1 OCR lines + Vision fragments, merged by token ─
+  // Deliberately UNFILTERED (no isUsefulOcrToken): junk is what OCE must score.
+  const tokens = new Map(); // token -> { raw_text, sources:Set, rect|null }
+  const addToken = (tok, raw, source, rect = null) => {
+    const t = tok.trim();
+    if (!t) return;
+    if (!tokens.has(t)) tokens.set(t, { raw_text: raw, sources: new Set(), rect: null });
+    const e = tokens.get(t);
+    e.sources.add(source);
+    if (rect && !e.rect) { e.rect = rect; e.raw_text = raw; } // prefer the spatial fragment
+  };
+  for (const line of (recognition?.ocr_text?.raw_texts || [])) {
+    for (const w of String(line).toLowerCase().split(/[\s,;|]+/)) addToken(w, line, 'stage1_ocr');
+  }
+  if (ctx?.text_boxes?.length) {
+    for (const tb of ctx.text_boxes) {
+      const rect = rectOf(tb.bbox);
+      for (const w of String(tb.text || '').toLowerCase().split(/[\s,;|]+/)) addToken(w, tb.text, 'vision', rect);
+    }
+  } else {
+    for (const t of (visionData?.text || [])) {
+      for (const w of String(t).toLowerCase().split(/[\s,;|]+/)) addToken(w, t, 'vision');
+    }
+  }
+
+  // ── Score each token ───────────────────────────────────────────────────────
+  const scored = [];
+  for (const [tok, e] of tokens) {
+    const reasons = [];
+    let spatial = null;
+    if (e.rect && primaryRect) {
+      const cx = (e.rect.x0 + e.rect.x1) / 2, cy = (e.rect.y0 + e.rect.y1) / 2;
+      // 25% near-margin: the pixel extent is a lower-bound ESTIMATE (max text
+      // vertex), so the outermost fragment always sits at the extent edge —
+      // a tight margin would misclassify on-product edge text as outside.
+      const rel = contains(primaryRect, cx, cy) ? 'inside'
+        : contains(expand(primaryRect, 0.25), cx, cy) ? 'near' : 'outside';
+      reasons.push(rel === 'inside' ? 'inside_primary_object'
+        : rel === 'near' ? 'near_primary_object' : 'outside_primary_object');
+      spatial = { cx: Math.round(cx), cy: Math.round(cy), rel };
+    } else {
+      reasons.push('no_spatial_data');
+    }
+    if (brandOk && ((tok.length >= 3 && brand.includes(tok)) || (brand.length >= 4 && tok.includes(brand)))) {
+      reasons.push('matches_recognized_brand');
+    } else if (logoNames.some(l => (tok.length >= 3 && l.includes(tok)) || (l.length >= 4 && tok.includes(l)))) {
+      reasons.push('matches_recognized_brand'); // logo hit — same trust class
+    }
+    if ((tok.length >= 3 || isModelShapedToken(tok)) && modelStrings.some(m => m.includes(tok))) {
+      reasons.push('matches_model_candidate');
+    }
+    if (e.sources.size > 1) reasons.push('cross_source_agreement');
+    if (e.rect && logoRects.some(lr => intersects(e.rect, lr))) reasons.push('logo_text_overlap');
+    if (OCE_KNOWN_BRANDS.has(tok) && !identityText.includes(tok)) reasons.push('foreign_brand_token');
+    if (latinProduct && OCE_CJK_RE.test(tok)) reasons.push('cjk_on_latin_product');
+    const nonWord = tok.replace(/[\p{L}\p{N}\-+.']/gu, '').length;
+    if (nonWord > tok.length / 2) reasons.push('noisy_fragment');
+    if (tok.length <= 2) reasons.push('short_fragment');
+
+    const trust = r2(Math.min(1, Math.max(0,
+      0.5 + reasons.reduce((s, r) => s + (OCE_RULES[r] || 0), 0))));
+    scored.push({
+      token: tok,
+      raw_text: e.raw_text,
+      source: e.sources.size > 1 ? 'both' : [...e.sources][0],
+      trust_score: trust,
+      background_probability: r2(1 - trust),
+      tier: trust >= 0.7 ? 'TRUSTED' : trust >= 0.4 ? 'SUSPECT' : 'BACKGROUND',
+      reasons,
+      spatial,
+    });
+  }
+  scored.sort((a, b) => b.trust_score - a.trust_score);
+
+  return {
+    version: 1,
+    primary_object: primary ? { name: primary.name, score: primary.score } : null,
+    spatial_extent_est: extentW > 0 ? { w: extentW, h: extentH } : null,
+    scored_tokens: scored.slice(0, 40),
+  };
+}
+
 async function fallbackVision(imageBase64, supa) {
   const apiKey = process.env.GOOGLE_VISION_API_KEY;
   if (!apiKey) {
@@ -2662,6 +2833,23 @@ async function handleRequest(req) {
       plog('Vision SKIPPED — budget', `rem=${rem()}ms < 12000ms required`);
     }
 
+    // ── SPRINT-1 M1.2: OCE scoring — LOG-ONLY, no pipeline consumer ──
+    // Pure + synchronous (µs, no budget impact). try/catch guarantees a
+    // scoring bug can never affect a scan.
+    let oceContext = null;
+    try {
+      oceContext = scoreOcrContext(recognition, visionData);
+      if (oceContext.scored_tokens.length) {
+        const p = oceContext.primary_object;
+        console.log(`[OCE] primary_object=${p ? `"${p.name}" ${round(p.score * 100)}%` : 'none'} tokens=${oceContext.scored_tokens.length} (log-only)`);
+        for (const t of oceContext.scored_tokens.slice(0, 25)) {
+          console.log(`[OCE] token="${t.token}" trust=${t.trust_score} bg=${t.background_probability} tier=${t.tier} src=${t.source} reasons=${t.reasons.join(',')}`);
+        }
+      }
+    } catch (e) {
+      console.warn('[OCE] scoring failed (log-only, scan unaffected):', e.message);
+    }
+
     // ── EMBEDDING + CORRECTIONS — OPTIONAL, requires >= 9 s remaining ──
     // Both are non-critical — Stage 2 works without them, just produces a broader estimate.
     let queryEmbedding = null;
@@ -2918,10 +3106,20 @@ async function handleRequest(req) {
         budget_ms: BUDGET_MS,
       },
       // SPRINT-1 M1.1 (OCE capture): spatial OCR metadata — debug-only, no
-      // pipeline consumer. null when Vision was skipped OR the result came
-      // from a pre-M1.1 vision_cache entry (24h TTL; boxes appear as the
-      // cache turns over).
-      ocr_context: visionData?.ocr_context || null,
+      // pipeline consumer. Vision fields are null/empty when Vision was
+      // skipped OR the result came from a pre-M1.1 vision_cache entry (24h
+      // TTL; boxes appear as the cache turns over).
+      // M1.2: scored_tokens/primary_object added (log-only scoring) — present
+      // even without Vision (Stage 1 tokens score with no_spatial_data);
+      // null only when there was nothing to score at all.
+      ocr_context: (visionData?.ocr_context || oceContext?.scored_tokens?.length)
+        ? {
+            ...(visionData?.ocr_context
+              ?? { version: 1, full_text: null, text_boxes: [], logo_boxes: [], objects: [] }),
+            primary_object: oceContext?.primary_object ?? null,
+            scored_tokens: oceContext?.scored_tokens ?? [],
+          }
+        : null,
     };
 
     // ── GW-000: SERVER-AUTHORITATIVE PERSISTENCE ──
