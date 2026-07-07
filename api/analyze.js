@@ -21,6 +21,7 @@
 export const config = { maxDuration: 60 };
 
 import { createClient } from '@supabase/supabase-js';
+import { buildRecognitionMemoryKey } from './_lib/recognition-memory.js';
 
 // ═══════════════════════════════════════════════════════
 // MODEL CONFIG — single source of truth for Anthropic model IDs
@@ -2748,6 +2749,14 @@ async function handleRequest(req) {
         const { corrBrand, corrModel, corrText } =
           sanitizeUserCorrection(refineModel, recognition.brand_candidates?.[0]?.brand);
 
+        // SCAN-014 Phase 1: keep the identity the user is correcting AWAY from,
+        // so post-persist can append a 'correction' sample to that key's memory
+        // row (if one exists). Captured BEFORE the override is injected.
+        recognition._pre_correction_identity = {
+          brand: recognition.brand_candidates?.[0]?.brand || null,
+          model: recognition.model_candidates?.[0]?.model || null,
+        };
+
         recognition.brand_candidates = [
           { brand: corrBrand || 'Unknown', confidence: 0.96, evidence: 'user_correction' },
           ...(recognition.brand_candidates || []),
@@ -3037,6 +3046,78 @@ async function handleRequest(req) {
       };
     }
 
+    // ── SCAN-014 Phase 1: RECOGNITION MEMORY LOOKUP — SHADOW ONLY ─────────────
+    // Read-only, debug-only. The result is attached to _debug.memory and kept
+    // for the post-persist sample append below. It does NOT touch pricing,
+    // confidence, retrieval, product_candidate_needed, or any response field
+    // the UI renders. Guarded so a memory failure can never affect a scan.
+    const memoryDebug = {
+      lookup_attempted: false,
+      key: null,
+      key_version: null,
+      evidence_gate_passed: null, // recorded for Phase-2 tuning; NOT enforced in shadow
+      matched: false,
+      memory_id: null,
+      status: null,
+      confirmation_count: null,
+      distinct_user_count: null,
+      price_sample_count: null,
+      last_verified_price_at: null,
+      reputation_score: null,
+      no_match_reason: null,
+    };
+    let memoryRow = null;
+    try {
+      const memKey = buildRecognitionMemoryKey({
+        category: verification.final_category || recognition.category,
+        brand: verification.final_brand,
+        model: verification.final_model,
+      });
+      if (!memKey.ok) {
+        memoryDebug.no_match_reason = `no_key:${memKey.reason}`;
+      } else {
+        memoryDebug.key = memKey.key;
+        memoryDebug.key_version = memKey.keyVersion;
+        // Evidence gate (design §7.2): identity must be text-confirmed or a
+        // user correction. Shadow mode records the verdict without acting on
+        // it so Phase 2 thresholds can be tuned against real scans.
+        memoryDebug.evidence_gate_passed =
+          !!recognition._user_correction
+          || ['confirmed_by_text', 'db_matched'].includes(verification.brand_confidence || '');
+        if (!supa) {
+          memoryDebug.no_match_reason = 'no_db_client';
+        } else if (rem() < 2_500) {
+          memoryDebug.no_match_reason = 'budget_too_low';
+        } else {
+          memoryDebug.lookup_attempted = true;
+          const { data: memRows, error: memErr } = await withTimeout(
+            supa.rpc('memory_lookup', { p_canonical_key: memKey.key }),
+            Math.min(1_500, rem() - 1_000),
+            'memory lookup'
+          );
+          if (memErr) {
+            memoryDebug.no_match_reason = `lookup_error:${String(memErr.message).slice(0, 80)}`;
+          } else if (!memRows?.length) {
+            memoryDebug.no_match_reason = 'no_row';
+          } else {
+            memoryRow = memRows[0];
+            memoryDebug.matched = true;
+            memoryDebug.memory_id = memoryRow.id;
+            memoryDebug.status = memoryRow.status;
+            memoryDebug.confirmation_count = memoryRow.confirmation_count;
+            memoryDebug.distinct_user_count = memoryRow.distinct_user_count;
+            memoryDebug.price_sample_count = memoryRow.price_sample_count;
+            memoryDebug.last_verified_price_at = memoryRow.last_verified_price_at;
+            memoryDebug.reputation_score = memoryRow.recognition_reputation_score;
+          }
+        }
+      }
+      blog(`[Memory] lookup ${memoryDebug.matched ? `HIT id=${memoryDebug.memory_id} conf=${memoryDebug.confirmation_count} rep=${memoryDebug.reputation_score}` : `MISS (${memoryDebug.no_match_reason})`} key=${memoryDebug.key || 'none'} (shadow)`);
+    } catch (e) {
+      memoryDebug.no_match_reason = `lookup_exception:${String(e.message).slice(0, 80)}`;
+      console.warn('[Memory] lookup failed (shadow, scan unaffected):', e.message);
+    }
+
     const totalMs = Date.now() - TREQ;
     blog(`[Pipeline] Response sent — total=${totalMs}ms budget_used=${round(totalMs / BUDGET_MS * 100)}%${totalMs > 16_000 ? ' ⚠ SLOW' : ''}`);
 
@@ -3120,6 +3201,11 @@ async function handleRequest(req) {
             scored_tokens: oceContext?.scored_tokens ?? [],
           }
         : null,
+      // SCAN-014 Phase 1: shadow memory lookup — no pipeline consumer. The
+      // sample_* fields are filled by the post-persist append below, so they
+      // appear in the RESPONSE debug panel but not in the persisted valuation
+      // (record_scan serializes before the append runs — acceptable in shadow).
+      memory: memoryDebug,
     };
 
     // ── GW-000: SERVER-AUTHORITATIVE PERSISTENCE ──
@@ -3178,6 +3264,82 @@ async function handleRequest(req) {
     //    blocks the response or affects valuation durability.
     if (persisted) {
       await updateDerivedWithRetry(supa, recognition, verification, scanUuid).catch(() => {});
+    }
+
+    // ── SCAN-014 Phase 1: MEMORY SAMPLE WRITES — SHADOW, best-effort ─────────
+    // (a) valuation_price sample — appended ONLY when a memory row already
+    //     exists (memoryRow from the lookup above). Rows are created solely by
+    //     memory_record_confirmation (human signal), and memory_append_sample
+    //     re-checks existence in the DB — AI-only scans can never seed memory.
+    // (b) correction sample — when the user corrected the identity this scan,
+    //     the identity they corrected AWAY from takes a 'correction' hit.
+    // Both are wrapped so no memory failure can ever affect the scan response.
+    try {
+      if (persisted && supa && rem() > 1_500) {
+        const sampleCap = Math.min(2_000, rem() - 800);
+
+        // (a) valuation price sample.
+        // Provenance mapping: normal Stage 2 → stage2_comp/stage2_ai by
+        // price_method; PRE Haiku → pre_haiku; PRE catalog anchor →
+        // stage2_comp (comp-derived). Category-bucket / manual PRE quotes are
+        // never appended (junk price signal), nor are replica-adjusted prices.
+        const preSource = verification._pricing_meta?.pre_source || null;
+        const provenance =
+          preSource === 'ai_haiku' ? 'pre_haiku'
+          : preSource === 'catalog' ? 'stage2_comp'
+          : preSource ? null // category_anchor / none → skip
+          : (verification.price_method === 'comp_based' ? 'stage2_comp' : 'stage2_ai');
+        if (memoryRow && provenance
+            && result.marketValue?.mid > 0
+            && result.authenticity?.pricingMode !== 'replica_adjusted') {
+          const { data: sampleId, error: sErr } = await withTimeout(
+            supa.rpc('memory_append_sample', {
+              p_canonical_key: memoryDebug.key,
+              p_sample_type: 'valuation_price',
+              p_price: result.marketValue.mid,
+              p_condition: result.condition || null,
+              p_source_confidence: result.confidence ?? null,
+              p_provenance: provenance,
+              p_user_id: authUser.id,
+              p_scan_uuid: scanUuid,
+              p_valuation_id: valuationId,
+            }),
+            sampleCap, 'memory price sample'
+          );
+          memoryDebug.sample_appended = !sErr && !!sampleId;
+          if (sErr) console.warn('[Memory] price sample failed (shadow):', sErr.message);
+          else blog(`[Memory] valuation_price sample appended ₪${result.marketValue.mid} prov=${provenance} (shadow)`);
+        }
+
+        // (b) correction sample against the PRE-correction identity's key —
+        // only when that key differs from the corrected identity's key.
+        if (recognition._user_correction && recognition._pre_correction_identity) {
+          const prevKey = buildRecognitionMemoryKey({
+            category: recognition.category,
+            brand: recognition._pre_correction_identity.brand,
+            model: recognition._pre_correction_identity.model,
+          });
+          if (prevKey.ok && prevKey.key !== memoryDebug.key) {
+            const { data: corrId, error: cErr } = await withTimeout(
+              supa.rpc('memory_append_sample', {
+                p_canonical_key: prevKey.key,
+                p_sample_type: 'correction',
+                p_provenance: 'user',
+                p_user_id: authUser.id,
+                p_scan_uuid: scanUuid,
+                p_valuation_id: valuationId,
+              }),
+              sampleCap, 'memory correction sample'
+            );
+            // corrId === null ⇒ no memory row for the wrong identity (fine).
+            memoryDebug.correction_recorded = !cErr && !!corrId;
+            if (cErr) console.warn('[Memory] correction sample failed (shadow):', cErr.message);
+            else if (corrId) blog(`[Memory] correction sample appended against ${prevKey.key} (shadow)`);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Memory] sample write failed (shadow, scan unaffected):', e.message);
     }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);

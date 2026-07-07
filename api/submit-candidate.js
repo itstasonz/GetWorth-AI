@@ -22,6 +22,7 @@
 // ══════════════════════════════════════════════════════════════
 
 import { createClient } from '@supabase/supabase-js';
+import { buildRecognitionMemoryKey } from './_lib/recognition-memory.js';
 
 export const config = { runtime: 'edge' };
 
@@ -215,6 +216,41 @@ export default async function handler(req) {
       return reject('rate_check_exception', 503, 'Service temporarily unavailable');
     }
 
+    // ── SCAN-014 Phase 1: recognition memory confirmation (shadow) ──────────
+    // "Yes, this is correct" is the human signal that CREATES/strengthens a
+    // memory row (memory_record_confirmation is the only row-creating path).
+    // Best-effort: any failure is logged and swallowed — the candidate flow's
+    // request/response semantics are unchanged. Fails closed (skips) when
+    // brand/model/category can't form a v1 exact-product key.
+    const recordMemoryConfirmation = async (candidateId) => {
+      try {
+        const memKey = buildRecognitionMemoryKey({ category, brand, model });
+        if (!memKey.ok) {
+          console.log(`[SubmitCandidate] memory skip reason=${memKey.reason}`);
+          return;
+        }
+        const { data: memId, error } = await supa.rpc('memory_record_confirmation', {
+          p_canonical_key: memKey.key,
+          p_key_version: memKey.keyVersion,
+          p_brand: brand,
+          p_model: model,
+          p_display_name: name || brand || model,
+          p_display_name_hebrew: null,
+          p_category: category,
+          p_subcategory: subcategory,
+          p_user_id: userId,
+          p_scan_uuid: null,
+          p_valuation_id: valuationId,
+          p_confidence: confidence,
+          p_candidate_id: candidateId,
+        });
+        if (error) console.warn(`[SubmitCandidate] memory confirmation failed: ${error.message}`);
+        else console.log(`[SubmitCandidate] memory confirmation recorded id=${memId} (shadow)`);
+      } catch (e) {
+        console.warn(`[SubmitCandidate] memory confirmation exception: ${e?.message}`);
+      }
+    };
+
     // ── Duplicate check (parameterized; LIKE wildcards stripped from inputs) ──
     const stripWild = (v) => (v || '').toLowerCase().replace(/[%_\\]/g, '').trim();
     const normBrand    = stripWild(brand);
@@ -247,6 +283,7 @@ export default async function handler(req) {
         })
         .eq('id', existingId);
 
+      await recordMemoryConfirmation(existingId);
       return json({ status: 'deduplicated', candidate_id: existingId }, 200, corsHeaders);
     }
 
@@ -282,6 +319,7 @@ export default async function handler(req) {
       return json({ error: 'Could not save candidate' }, 500, corsHeaders);
     }
 
+    await recordMemoryConfirmation(data.id);
     return json({ status: 'created', candidate_id: data.id }, 201, corsHeaders);
   } catch (err) {
     console.error(`[SubmitCandidate] unhandled ${err?.name || 'Error'} ip=${ip}`);
