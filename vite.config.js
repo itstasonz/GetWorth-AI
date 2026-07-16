@@ -3,10 +3,24 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
+  // FRONTEND-006: build identity injected at build time — replaces the stale
+  // hardcoded BUILD_VERSION constant that advertised a months-old version in
+  // the update banner. No extra infrastructure: Vite's define + build clock.
+  define: {
+    __BUILD_TS__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ') + 'Z'),
+  },
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // FRONTEND-006 (PWA-1): PROMPTED activation. 'autoUpdate' +
+      // skipWaiting/clientsClaim made every deploy force-reload live sessions
+      // (mid-scan, mid-checkout) via App.jsx's controllerchange listener, and
+      // fired a spurious reload on FIRST install (clientsClaim triggers
+      // controllerchange for brand-new visitors). With 'prompt' the new SW
+      // installs and WAITS; the generated worker still listens for the
+      // {type:'SKIP_WAITING'} message, so activation happens exactly when the
+      // user approves the update banner (usePWAUpdate in App.jsx).
+      registerType: 'prompt',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'GetWorth – AI Marketplace',
@@ -101,9 +115,6 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         // Clean up old caches on update
         cleanupOutdatedCaches: true,
-        // Skip waiting so new SW activates immediately
-        skipWaiting: true,
-        clientsClaim: true,
       },
       // Dev options — enable SW in dev for testing
       devOptions: {

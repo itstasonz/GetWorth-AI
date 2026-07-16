@@ -6,7 +6,9 @@ import LoadingScreen from './components/LoadingScreen';
 import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn, ScreenTransition } from './components/ui';
 import { formatPrice, getSellerBadgeStyle, normalizeIsraeliPhone } from './lib/utils';
 
-export const BUILD_VERSION = '2.2.0-20260429';
+// FRONTEND-006: derived at build time (vite define) — never a stale hardcoded
+// string. Format: 'YYYY-MM-DD HH:MMZ' of the build.
+export const BUILD_VERSION = typeof __BUILD_TS__ !== 'undefined' ? __BUILD_TS__ : 'dev';
 
 // Views — eager (needed immediately or very commonly accessed)
 import HomeView from './views/HomeView';
@@ -29,22 +31,49 @@ const LazyNotificationsView = React.lazy(() => import('./views/OrderViews').then
 const LazyAnalyticsView = React.lazy(() => import('./views/AnalyticsView'));
 const LazyAdminPanel = React.lazy(() => import('./views/AdminPanel'));
 
-// ─── PWA update detection ───
-// Watches the SW lifecycle. When a new SW finishes installing and is waiting,
-// sets hasUpdate=true. applyUpdate() sends SKIP_WAITING; the controllerchange
-// event then reloads the page so users get fresh assets.
+// ─── PWA update detection (FRONTEND-006: prompted activation) ───
+// The SW is built with registerType 'prompt' — a new version installs and
+// WAITS; nothing activates or reloads without explicit user approval.
+// Lifecycle here:
+//   waiting worker detected → hasUpdate=true → banner
+//   user taps Update        → SKIP_WAITING message → worker activates
+//   controllerchange        → exactly ONE reload (reloadingRef guard)
+// First install never triggers any of this: without clientsClaim there is no
+// controllerchange on first visit, and the updatefound path requires an
+// existing controller. Multi-tab: another tab's approval fires
+// controllerchange here too — this tab reloads once (its precached assets are
+// superseded), and the guard makes loops impossible.
 function usePWAUpdate() {
   const [hasUpdate, setHasUpdate] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  // Dismissal lives in the hook so the lifecycle can re-surface it: "Later"
+  // silences the banner until the app next returns to the FOREGROUND — the
+  // sensible re-prompt event. Without this, dismiss was session-permanent and
+  // the banner (the only Update CTA) could never be chosen again.
+  const [dismissed, setDismissed] = useState(false);
   const swWaitingRef = useRef(null);
+  const updatingRef = useRef(false);   // sync double-click guard
+  const reloadingRef = useRef(false);  // reload exactly once per page life
+  const retryTimerRef = useRef(null);
+  const regRef = useRef(null);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
+    let cancelled = false;
+    let onUpdateFound = null;
 
-    const onControllerChange = () => window.location.reload();
+    const onControllerChange = () => {
+      if (reloadingRef.current) return;
+      reloadingRef.current = true;
+      window.location.reload();
+    };
     navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
 
     navigator.serviceWorker.getRegistration().then(reg => {
-      if (!reg) return;
+      // Async-resolution guard: never register on a registration after this
+      // effect instance was cleaned up (StrictMode remount / late resolve).
+      if (cancelled || !reg) return;
+      regRef.current = reg;
 
       // Already waiting on re-open (user had the app open across a deploy)
       if (reg.waiting && navigator.serviceWorker.controller) {
@@ -52,35 +81,66 @@ function usePWAUpdate() {
         setHasUpdate(true);
       }
 
-      reg.addEventListener('updatefound', () => {
+      onUpdateFound = () => {
         const installing = reg.installing;
         if (!installing) return;
         installing.addEventListener('statechange', () => {
+          // controller check = not a first install. Repeated deploys in one
+          // session simply re-point the ref at the newest waiting worker
+          // (the browser discards the superseded waiting worker itself).
           if (installing.state === 'installed' && navigator.serviceWorker.controller) {
             swWaitingRef.current = installing;
             setHasUpdate(true);
           }
         });
-      });
+      };
+      reg.addEventListener('updatefound', onUpdateFound);
 
-      // Trigger a background check on mount (catches deploys between sessions)
+      // Background discovery: on mount + every return to foreground (catches
+      // deploys while the PWA was backgrounded). Discovery only — the worker
+      // still waits for approval.
       reg.update().catch(() => {});
     });
 
-    return () => navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      regRef.current?.update().catch(() => {});
+      setDismissed(false); // foreground return re-surfaces a dismissed banner
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+      document.removeEventListener('visibilitychange', onVisibility);
+      if (onUpdateFound) regRef.current?.removeEventListener('updatefound', onUpdateFound);
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+    };
   }, []);
 
   const applyUpdate = useCallback(() => {
-    swWaitingRef.current?.postMessage({ type: 'SKIP_WAITING' });
+    const waiting = swWaitingRef.current;
+    if (!waiting || updatingRef.current) return; // one activation per approval
+    updatingRef.current = true;
+    setUpdating(true);
+    waiting.postMessage({ type: 'SKIP_WAITING' });
+    // Recovery: if the worker never takes control (activation failed/hung),
+    // re-enable the button so the user can retry — the current app stays
+    // fully usable on the old version either way.
+    retryTimerRef.current = setTimeout(() => {
+      if (!reloadingRef.current) { updatingRef.current = false; setUpdating(false); }
+    }, 12000);
   }, []);
 
-  return { hasUpdate, applyUpdate };
+  const dismissUpdate = useCallback(() => setDismissed(true), []);
+
+  return { hasUpdate: hasUpdate && !dismissed, updating, applyUpdate, dismissUpdate };
 }
 
 // ─── Update available banner ───
 // Only renders when hasUpdate=true. Positioned below the header so it
 // doesn't collide with the msg notification banner (z-[55] vs z-[60]).
-function UpdateBanner({ hasUpdate, onUpdate, onDismiss, lang }) {
+function UpdateBanner({ hasUpdate, updating, onUpdate, onDismiss, lang }) {
   if (!hasUpdate) return null;
   return (
     <div
@@ -104,15 +164,17 @@ function UpdateBanner({ hasUpdate, onUpdate, onDismiss, lang }) {
             {lang === 'he' ? 'עדכון זמין' : 'Update available'}
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
-            {lang === 'he' ? 'גרסה חדשה מוכנה' : `v${BUILD_VERSION} is ready`}
+            {/* Honest contract: nothing happens until the user chooses; approving reloads the app. */}
+            {lang === 'he' ? 'יופעל רק באישורך — האפליקציה תיטען מחדש' : 'Applies only when you choose — the app will reload'}
           </p>
         </div>
         <button
           onClick={onUpdate}
-          className="px-3 py-1.5 rounded-xl text-xs font-bold flex-shrink-0 active:scale-95 transition-transform"
+          disabled={updating}
+          className="px-3 py-1.5 rounded-xl text-xs font-bold flex-shrink-0 active:scale-95 transition-transform disabled:opacity-60"
           style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
         >
-          {lang === 'he' ? 'עדכן' : 'Update'}
+          {updating ? (lang === 'he' ? 'מעדכן…' : 'Updating…') : (lang === 'he' ? 'עדכן' : 'Update')}
         </button>
         <button
           onClick={onDismiss}
@@ -206,8 +268,13 @@ function AppShell() {
     cameraBlocked, setCameraBlocked,
   } = useApp();
 
-  const { hasUpdate, applyUpdate } = usePWAUpdate();
-  const [updateDismissed, setUpdateDismissed] = useState(false);
+  const { hasUpdate, updating, applyUpdate, dismissUpdate } = usePWAUpdate();
+  // Active-work gating: the banner never auto-activates anything, but it is
+  // also visually withheld during camera/analyzing where an overlay is
+  // disruptive mid-task. It reappears on the next view. Dismissing ("X")
+  // silences it until the app next returns to the foreground; the waiting
+  // worker persists throughout and activates only on explicit approval.
+  const updateBannerSuppressed = view === 'camera' || view === 'analyzing';
 
   // Stamp version into console + window for devtools inspection
   useEffect(() => {
@@ -280,9 +347,10 @@ function AppShell() {
 
       {/* ── PWA Update Banner — only shown when a new version is waiting ── */}
       <UpdateBanner
-        hasUpdate={hasUpdate && !updateDismissed}
+        hasUpdate={hasUpdate && !updateBannerSuppressed}
+        updating={updating}
         onUpdate={applyUpdate}
-        onDismiss={() => setUpdateDismissed(true)}
+        onDismiss={dismissUpdate}
         lang={lang}
       />
 
