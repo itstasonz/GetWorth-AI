@@ -4,6 +4,7 @@ import { useApp } from '../contexts/AppContext';
 import { camLog } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice, isSerialEligible } from '../lib/utils';
+import { recordObservation } from '../lib/observations';
 
 // ═══════════════════════════════════════════════════════
 // STITCH DESIGN TOKENS — ported from HTML tailwind.config
@@ -910,7 +911,7 @@ function PhotoStrip({ images, canAdd, onAddPhoto, lang, activeIndex = 0, onSelec
 // ═══════════════════════════════════════════════════════
 export function ResultsView() {
   const {
-    lang, t, images, result, startListing, reset,
+    lang, t, images, result, setResult, startListing, reset,
     refineResult, confirmResult, correctResult, saveProductCandidate,
     addPhoto, setHelpModalOpen, helpModalOpen,
     handleAdditionalFile,
@@ -979,6 +980,32 @@ export function ResultsView() {
     await correctResult(correctionInput.trim());
     setCorrectionInput('');
     setRefining(false);
+  };
+
+  // FRONTEND-002 semantic contract for result CTAs:
+  //   CONFIRM (confirmResult)        → user asserts identity is correct; may write trust
+  //   CORRECT (correctResult/refine) → user changes identity
+  //   SKIP    (handleSkipAssist)     → no confirmation, no correction, no memory,
+  //                                    no candidate, no learning signal of any kind
+  //   RESCAN  (reset/retryPipeline)  → no trust writes
+  //
+  // SKIP dismissal lives ON the result object (same client-only pattern as
+  // result.candidateSaved), NOT in component state: ResultsView unmounts when
+  // view leaves 'results' (App.jsx renders it conditionally), and Skip → Add
+  // Photo → cancel camera returns to the SAME result via stopCamera's
+  // addPhotoMode branch — local state would resurrect the dismissed card.
+  // Every genuinely new/refined result is a fresh object from the API, so the
+  // flag auto-resets exactly when it should. It is never sent to any API:
+  // confirm/candidate/publish paths serialize specific fields, and
+  // backupValuation only snapshots the result at pipeline success, before any
+  // skip can occur.
+  const handleSkipAssist = () => {
+    setResult(prev => (prev ? { ...prev, assistDismissed: true } : prev));
+    recordObservation('scan_result_skipped', {
+      category:   result.category,
+      confidence: result.confidence,
+      tier,
+    }, { scanUuid: result.scan_uuid, valuationId: result.valuation_id });
   };
 
   const handleAddPhotoClick = () => {
@@ -1690,7 +1717,7 @@ export function ResultsView() {
       })()}
 
       {/* ═══ TIER: Very Low (<40%) — Broad estimate, need help ═══ */}
-      {tier === 'very_low' && !isConfirmed && (
+      {tier === 'very_low' && !isConfirmed && !result.assistDismissed && (
         <FadeIn delay={75}>
           <Card className="p-4 space-y-3" gradient={styles.gradient}>
             <div className="flex items-start gap-3">
@@ -1738,7 +1765,7 @@ export function ResultsView() {
               </div>
             )}
 
-            <button onClick={confirmResult} className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors">
+            <button onClick={handleSkipAssist} className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors">
               {lang === 'he' ? 'דלג' : 'Skip for now'}
             </button>
           </Card>
