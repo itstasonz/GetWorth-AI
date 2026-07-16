@@ -3059,6 +3059,7 @@ async function handleRequest(req) {
       matched: false,
       memory_id: null,
       status: null,
+      origin: null, // 1.1B: 'ai_observed' rows exist — a HIT is not human trust
       confirmation_count: null,
       distinct_user_count: null,
       price_sample_count: null,
@@ -3104,6 +3105,7 @@ async function handleRequest(req) {
             memoryDebug.matched = true;
             memoryDebug.memory_id = memoryRow.id;
             memoryDebug.status = memoryRow.status;
+            memoryDebug.origin = memoryRow.origin ?? 'human';
             memoryDebug.confirmation_count = memoryRow.confirmation_count;
             memoryDebug.distinct_user_count = memoryRow.distinct_user_count;
             memoryDebug.price_sample_count = memoryRow.price_sample_count;
@@ -3267,13 +3269,18 @@ async function handleRequest(req) {
     }
 
     // ── SCAN-014 Phase 1: MEMORY SAMPLE WRITES — SHADOW, best-effort ─────────
-    // (a) valuation_price sample — appended ONLY when a memory row already
-    //     exists (memoryRow from the lookup above). Rows are created solely by
-    //     memory_record_confirmation (human signal), and memory_append_sample
-    //     re-checks existence in the DB — AI-only scans can never seed memory.
+    // (a) valuation_price sample — appended ONLY to a HUMAN-TRUSTED row
+    //     (memoryRow exists AND confirmation_count > 0). Phase 1.1B retired
+    //     "row exists" as a trust proxy — AI observations may create rows —
+    //     so price percentiles must gate on human confirmations explicitly.
     // (b) correction sample — when the user corrected the identity this scan,
     //     the identity they corrected AWAY from takes a 'correction' hit.
-    // Both are wrapped so no memory failure can ever affect the scan response.
+    // (c) Phase 1.1B: ai_observation sample — full-scan shadow snapshot for
+    //     EVERY persisted scan with a valid key. May create a zero-trust
+    //     origin='ai_observed' memory row (trust derives only from human
+    //     samples; a thousand observations stay trust state 'observed').
+    //     Zero aggregate weight, no recompute, consumed by nothing until 1.1C.
+    // All are wrapped so no memory failure can ever affect the scan response.
     try {
       if (persisted && supa && rem() > 1_500) {
         const sampleCap = Math.min(2_000, rem() - 800);
@@ -3289,7 +3296,7 @@ async function handleRequest(req) {
           : preSource === 'catalog' ? 'stage2_comp'
           : preSource ? null // category_anchor / none → skip
           : (verification.price_method === 'comp_based' ? 'stage2_comp' : 'stage2_ai');
-        if (memoryRow && provenance
+        if (memoryRow && (memoryRow.confirmation_count ?? 0) > 0 && provenance
             && result.marketValue?.mid > 0
             && result.authenticity?.pricingMode !== 'replica_adjusted') {
           const { data: sampleId, error: sErr } = await withTimeout(
@@ -3336,6 +3343,70 @@ async function handleRequest(req) {
             if (cErr) console.warn('[Memory] correction sample failed (shadow):', cErr.message);
             else if (corrId) blog(`[Memory] correction sample appended against ${prevKey.key} (shadow)`);
           }
+        }
+
+        // (c) SCAN-014 Phase 1.1B: AI observation — one per valuation (DB
+        // unique index dedupes replays). Everything observation-specific lives
+        // in the versioned payload, never in the scalar sample columns, so
+        // aggregates cannot ingest it. memory_record_observation creates a
+        // zero-trust origin='ai_observed' row for new keys and NEVER modifies
+        // existing rows (only the ledger grows).
+        if (memoryDebug.key && rem() > 1_200) {
+          const obsPayload = {
+            v: 1,
+            recognition_confidence: verification.raw_match_confidence ?? verification.match_confidence ?? null,
+            final_confidence: result.confidence ?? null,
+            price_low: result.marketValue?.low ?? null,
+            price_mid: result.marketValue?.mid ?? null,
+            price_high: result.marketValue?.high ?? null,
+            price_method: verification.price_method || 'ai_estimate',
+            pricing_status: result.marketValue?.pricing_status ?? null,
+            pricing_confidence: result.marketValue?.pricing_confidence ?? null,
+            pre_source: preSource,
+            pricing_mode: result.authenticity?.pricingMode ?? 'normal',
+            authenticity_status: result.authenticity?.status ?? null,
+            stage2_completed: !stage2FallbackUsed,
+            stage2_fallback_reason: stage2FallbackUsed ? (stage2FallbackReason || 'unknown') : null,
+            vision_used: !!visionData,
+            oce: oceContext
+              ? {
+                  primary_object: oceContext.primary_object?.name ?? null,
+                  scored_tokens: oceContext.scored_tokens?.length ?? 0,
+                }
+              : null,
+            retrieval: {
+              db_match: dbMatchFound,
+              source: candidateSourceTable ?? null,
+              candidates: candidates.length,
+              top_similarity: candidates[0]?.similarity ?? null,
+            },
+            evidence_gate_passed: memoryDebug.evidence_gate_passed,
+            identity: {
+              brand: verification.final_brand ?? null,
+              model: verification.final_model ?? null,
+              category: verification.final_category || recognition.category || null,
+            },
+            total_ms: totalMs,
+          };
+          const { data: obsId, error: oErr } = await withTimeout(
+            supa.rpc('memory_record_observation', {
+              p_canonical_key: memoryDebug.key,
+              p_key_version: memoryDebug.key_version,
+              p_brand: verification.final_brand ?? null,
+              p_model: verification.final_model ?? null,
+              p_display_name: result.name || null,
+              p_category: verification.final_category || recognition.category || null,
+              p_subcategory: recognition.subcategory || null,
+              p_payload: obsPayload,
+              p_user_id: authUser.id,
+              p_scan_uuid: scanUuid,
+              p_valuation_id: valuationId,
+            }),
+            Math.min(sampleCap, rem() - 800), 'memory ai observation'
+          );
+          memoryDebug.observation_appended = !oErr && !!obsId;
+          if (oErr) console.warn('[Memory] ai observation failed (shadow):', oErr.message);
+          else if (obsId) blog(`[Memory] ai_observation appended (shadow)`);
         }
       }
     } catch (e) {
