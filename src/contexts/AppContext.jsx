@@ -291,6 +291,26 @@ export function AppProvider({ children }) {
   const conversationsRef = useRef([]);
   useEffect(() => { activeChatRef.current = activeChat; }, [activeChat]);
   useEffect(() => { conversationsRef.current = conversations; }, [conversations]);
+  // FRONTEND-003 (CHAT-1): monotonic request id — only the NEWEST
+  // loadConversations invocation may write state or IndexedDB; stale responses
+  // are discarded, never applied. Bumped on logout so in-flight responses from
+  // a previous session die silently instead of repopulating cleared state.
+  const convReqIdRef = useRef(0);
+  // FRONTEND-003 (CHAT-5): same guard for loadMessages, plus "which
+  // conversation do the current `messages` belong to" — switching threads must
+  // never render the previous conversation's messages.
+  const msgReqIdRef = useRef(0);
+  const messagesConvIdRef = useRef(null);
+  // FRONTEND-003 session-ownership invariant: a response or realtime event may
+  // write chat state/cache only when BOTH hold — (1) its request generation is
+  // still current (req-id refs above) and (2) the user it was started for is
+  // STILL the authenticated user. This ref is the synchronous source for (2):
+  // it is updated inside the auth listener and at the top of signOut — not in
+  // an effect — so it can never lag behind an auth change the way closures and
+  // effect-timed state do. Ordering alone leaves a microtask window between
+  // signOut and the cleanup effect where an in-flight response could re-write
+  // state (and re-persist conv-{uid} to IndexedDB after signOut deleted it).
+  const currentUserIdRef = useRef(null);
 
   // In-app message notification banner
   const [msgNotification, setMsgNotification] = useState(null);
@@ -402,6 +422,7 @@ export function AppProvider({ children }) {
         }
 
         if (mounted && sessionResult.data?.session?.user) {
+          currentUserIdRef.current = sessionResult.data.session.user.id;
           setUser(sessionResult.data.session.user);
           supabase.rpc('get_own_profile').single()
             .then(({ data }) => { if (mounted && data) setProfile(data); })
@@ -424,6 +445,7 @@ export function AppProvider({ children }) {
       }
       if (!mounted) return;
       if (event === 'PASSWORD_RECOVERY') {
+        currentUserIdRef.current = session.user.id;
         setUser(session.user);
         setPasswordRecovery(true);
         setAuthMode('recovery');
@@ -431,11 +453,12 @@ export function AppProvider({ children }) {
         return;
       }
       if (session?.user) {
+        currentUserIdRef.current = session.user.id;
         setUser(session.user);
         supabase.rpc('get_own_profile').single()
           .then(({ data }) => { if (mounted && data) setProfile(data); })
           .catch(err => { if (DEV) console.error('[Auth] Profile fetch failed:', err); });
-      } else { setUser(null); setProfile(null); }
+      } else { currentUserIdRef.current = null; setUser(null); setProfile(null); }
     });
 
     return () => { mounted = false; subscription.unsubscribe(); };
@@ -467,7 +490,14 @@ export function AppProvider({ children }) {
   // Load user data when auth changes
   useEffect(() => {
     if (user) loadUserData();
-    else { setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); setSelected(null); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0; }
+    else {
+      setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); setSelected(null); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
+      // FRONTEND-003: invalidate in-flight chat requests + thread state on
+      // logout — a response resolving after sign-out must not repopulate
+      // cleared conversations, and the next account must never see this
+      // account's message thread.
+      convReqIdRef.current++; msgReqIdRef.current++; messagesConvIdRef.current = null; setMessages([]);
+    }
   }, [user]);
 
   // Auto-dismiss errors
@@ -499,6 +529,10 @@ export function AppProvider({ children }) {
           { event: 'INSERT', schema: 'public', table: 'messages' },
           async (payload) => {
             const newMsg = payload.new;
+            // Ownership gate: handlers were bound with the subscribing user's
+            // closure; an event buffered in the socket can still fire during
+            // teardown after logout/switch. Drop it before ANY state write.
+            if (!user || currentUserIdRef.current !== user.id) return;
             if (newMsg.sender_id === user.id) return;
 
             // CHAT-002: read the open chat from a ref, never from a setState
@@ -553,17 +587,18 @@ export function AppProvider({ children }) {
             // stays pure. If we're reading this chat right now the preview is stored
             // as already-read — the derived unread count must not include it.
             if (!conversationsRef.current.some(c => c.id === newMsg.conversation_id)) {
-              loadConversations(true);
+              loadConversations(true); // unknown thread — full (request-id-guarded) refetch
             } else {
               const previewMsg = isInThisChat ? { ...newMsg, is_read: true } : newMsg;
-              setConversations(prev => {
-                const idx = prev.findIndex(c => c.id === newMsg.conversation_id);
-                if (idx === -1) return prev;
-                const updated = { ...prev[idx], updated_at: newMsg.created_at, messages: [previewMsg] };
-                const next = [...prev];
-                next.splice(idx, 1);
-                return [updated, ...next];
-              });
+              const cur = conversationsRef.current;
+              const idx = cur.findIndex(c => c.id === newMsg.conversation_id);
+              if (idx !== -1) {
+                const updated = { ...cur[idx], updated_at: newMsg.created_at, messages: [previewMsg] };
+                // applyConversations persists to IndexedDB too (CHAT-4): a
+                // badge earned or cleared in-session now survives app restart
+                // instead of resurrecting from a stale cache snapshot.
+                applyConversations([updated, ...cur.slice(0, idx), ...cur.slice(idx + 1)]);
+              }
             }
           }
         )
@@ -572,6 +607,8 @@ export function AppProvider({ children }) {
           { event: 'UPDATE', schema: 'public', table: 'messages' },
           (payload) => {
             const updated = payload.new;
+            // Ownership gate — see the INSERT handler above.
+            if (!user || currentUserIdRef.current !== user.id) return;
             setMessages((prev) => {
               // Guard: skip if the updated message is not in the current view.
               // Without this, every is_read mark on any conversation creates a
@@ -579,6 +616,19 @@ export function AppProvider({ children }) {
               if (!prev.some((m) => m.id === updated.id)) return prev;
               return prev.map((m) => m.id === updated.id ? { ...m, ...updated } : m);
             });
+            // CHAT-4: also reconcile the conversation PREVIEW + cache — read
+            // marks from elsewhere (same account on another device/tab) must
+            // clear the inbox badge without waiting for a full refetch.
+            const cur = conversationsRef.current;
+            const idx = cur.findIndex(c => (c.messages || []).some(m => m.id === updated.id));
+            if (idx !== -1) {
+              const next = [...cur];
+              next[idx] = {
+                ...cur[idx],
+                messages: cur[idx].messages.map(m => m.id === updated.id ? { ...m, ...updated } : m),
+              };
+              applyConversations(next);
+            }
           }
         ),
     // Re-sync after a reconnect (realtime does not replay events missed while
@@ -827,6 +877,11 @@ export function AppProvider({ children }) {
 
   // ─── CHAT ───────────────────────────────────────────
 
+  // BADGE SEMANTIC (single, explicit): unreadCount = number of CONVERSATIONS
+  // containing messages the current user has not read. It is derived from
+  // `conversations` in exactly one place (the effect below) and never mixes in
+  // notification-table rows (notifUnreadCount — bell badge), transient message
+  // banners (msgNotification), or raw per-message counts.
   // CHAT-002: badge semantics = number of CONVERSATIONS with unread messages.
   // The preview query only carries the last message per conversation, so a
   // per-message total was never obtainable here — the old code mixed both
@@ -842,27 +897,61 @@ export function AppProvider({ children }) {
     setUnreadCount(user ? countUnread(conversations, user.id) : 0);
   }, [conversations, user]);
 
+  // FRONTEND-003: the ONLY write path for conversation-list state (CHAT-1/3/4).
+  // Source-of-truth contract: DB is authoritative; React state is the current
+  // session's representation; IndexedDB is a startup accelerator that must
+  // never look fresher than memory — so every accepted list is written to BOTH
+  // in the same call. The open conversation's preview is coerced to read (the
+  // user is literally looking at it): a fetch that started before a mark-read
+  // commit — the one interleaving request-ids alone can't order — can no
+  // longer resurrect its badge.
+  const applyConversations = useCallback((list) => {
+    // Ownership gate: `user` here is the CLOSURE owner (who the data belongs
+    // to); currentUserIdRef is who is authenticated NOW. Writing state or
+    // conv-{uid} for anyone but the current user is forbidden — this blocks
+    // post-logout re-persistence and any cross-account write, independent of
+    // request ordering.
+    if (!user || currentUserIdRef.current !== user.id) return;
+    const openId = activeChatRef.current?.id;
+    const next = (list || []).map(c =>
+      c.id === openId && (c.messages || []).some(m => !m.is_read && m.sender_id !== user.id)
+        ? { ...c, messages: c.messages.map(m => m.sender_id !== user.id ? { ...m, is_read: true } : m) }
+        : c
+    );
+    setConversations(next); // unreadCount derives from this via effect
+    cacheSet(`conv-${user.id}`, next);
+  }, [user]);
+
   const loadConversations = useCallback(async (force = false) => {
     if (!user) return;
     if (!force && conversationsLastLoadRef.current > 0 && (Date.now() - conversationsLastLoadRef.current < 30000)) return;
 
+    // CHAT-1: stale-response guard. Ids are assigned at start, and mark-read
+    // always triggers a fresh forced load AFTER its commit — so any request
+    // that read the DB pre-commit necessarily has a lower id and is discarded
+    // before it can overwrite state or cache.
+    const reqId = ++convReqIdRef.current;
+    const ownerId = user.id; // captured at start — the user this request is FOR
+    const isStale = () => reqId !== convReqIdRef.current || currentUserIdRef.current !== ownerId;
     const t0 = DEV ? performance.now() : 0;
 
-    // Always show skeleton immediately — cleared as soon as cache or network resolves.
-    // This prevents the brief "No messages yet" flash caused by the async IDB gap.
-    setConversationsLoading(true);
-
-    // Phase 1: IDB cache (~1ms) — skeleton clears immediately on cache hit
-    const cacheKey = `conv-${user.id}`;
-    const cached = await cacheGet(cacheKey);
-    if (cached?.length) {
-      setConversations(cached); // unreadCount derives from this via effect
-      setConversationsLoading(false); // real content from cache — hide skeleton now
-      if (DEV) console.log(`[Chat] IDB cache: ${cached.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
+    // Phase 1: IDB cache — cold-start accelerator ONLY (CHAT-3). Every
+    // in-memory write also wrote the cache, so memory is always at least as
+    // fresh: reapplying cache over live state is what made cleared badges
+    // visibly resurrect. Skip it entirely once state exists for this session.
+    if (conversationsRef.current.length === 0) {
+      setConversationsLoading(true);
+      const cached = await cacheGet(`conv-${user.id}`);
+      if (isStale()) return;
+      if (cached?.length && conversationsRef.current.length === 0) {
+        applyConversations(cached);
+        setConversationsLoading(false);
+        if (DEV) console.log(`[Chat] IDB cache: ${cached.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
+      }
     }
 
-    // Phase 2: lightweight network refresh — ONLY preview data (last 20 msgs per conv).
-    // Full message threads are fetched lazily when the user opens a conversation.
+    // Phase 2: lightweight network refresh — ONLY preview data (last msg per
+    // conv). Full threads are fetched lazily when a conversation opens.
     if (DEV) console.log(`[Chat] Network fetch start (+${(performance.now() - t0).toFixed(0)}ms)`);
     const { data } = await supabase
       .from('conversations')
@@ -875,28 +964,63 @@ export function AppProvider({ children }) {
       .order('updated_at', { ascending: false })
       .order('created_at', { ascending: false, referencedTable: 'messages' })
       .limit(1, { referencedTable: 'messages' });
+    if (isStale()) return; // a newer request owns state, cache, and the skeleton
     if (data) {
-      setConversations(data); // unreadCount derives from this via effect
+      applyConversations(data);
       conversationsLastLoadRef.current = Date.now();
-      cacheSet(cacheKey, data);
       if (DEV) console.log(`[Chat] Network done: ${data.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
     }
     setConversationsLoading(false);
-  }, [user]);
+  }, [user, applyConversations]);
 
   const loadMessages = async (conversationId) => {
-    // Perf: don't clear messages — keep cached ones visible while fetching fresh
+    // CHAT-5: switching threads must never show the previous conversation's
+    // messages — clear immediately when the target conversation changes.
+    // (Re-opening the SAME conversation keeps messages visible while fresh
+    // ones fetch, preserving the original perf behavior.)
+    if (messagesConvIdRef.current !== conversationId) {
+      setMessages([]);
+      messagesConvIdRef.current = conversationId;
+    }
+    const reqId = ++msgReqIdRef.current;
+    const ownerId = user.id; // captured at start — the user this thread belongs to
     setMessagesLoading(true);
     const { data } = await supabase
       .from('messages').select('*')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
+    // Stale guard: a slow fetch for a previously-opened conversation must not
+    // overwrite the thread the user is looking at now — and a response owned
+    // by a signed-out (or switched) account must never render at all.
+    if (reqId !== msgReqIdRef.current
+        || messagesConvIdRef.current !== conversationId
+        || currentUserIdRef.current !== ownerId) return;
     if (data) {
       setMessages(data);
       const unreadIds = data.filter((m) => !m.is_read && m.sender_id !== user.id).map((m) => m.id);
       if (unreadIds.length > 0) {
-        await supabase.from('messages').update({ is_read: true }).in('id', unreadIds);
-        loadConversations(true);
+        // CHAT-2: only a SUCCESSFUL commit may clear unread state. Scope is
+        // schema-safe: ids come from this conversation's rows where the
+        // sender is NOT the current user (recipient-side), and the write is
+        // idempotent. On failure the badge stays honest — retry happens
+        // naturally on the next open and via onRecover's reload while the
+        // chat is still open. No user-facing error for a background write.
+        const { error: readErr } = await supabase.from('messages')
+          .update({ is_read: true }).in('id', unreadIds);
+        if (readErr) {
+          if (DEV) console.warn('[Chat] mark-read failed (badge stays honest):', readErr.message);
+        } else {
+          // Immediate in-place reconciliation of state + cache (badge clears
+          // now, not when the refetch lands), then a guarded refetch to sync
+          // the rest. The refetch starts after the commit, so it can only
+          // confirm the read state.
+          applyConversations(conversationsRef.current.map(c =>
+            c.id === conversationId
+              ? { ...c, messages: (c.messages || []).map(m => m.sender_id !== user.id ? { ...m, is_read: true } : m) }
+              : c
+          ));
+          loadConversations(true);
+        }
       }
     }
     setMessagesLoading(false);
@@ -1085,6 +1209,10 @@ export function AppProvider({ children }) {
   };
 
   const signOut = async () => {
+    // Revoke ownership FIRST — in-flight responses that resolve between the
+    // cache deletes below and the auth event must already fail the ownership
+    // check, or they would re-persist the data being deleted.
+    currentUserIdRef.current = null;
     // Clear user-specific IDB entries so the next user on this device doesn't see stale data
     if (user) {
       await Promise.all([
