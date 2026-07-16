@@ -220,7 +220,7 @@ export function ProfileView() {
     requestVerification, verificationUploading,
     loadOrders,
     valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
-    myReviews: myReviewsRaw, loadMyReviews,
+    myReviews: myReviewsRaw, loadMyReviews, myReviewsLoading, myReviewsError,
   } = useApp();
 
   const myReviews = myReviewsRaw || [];
@@ -607,8 +607,27 @@ export function ProfileView() {
                   </div>
                 )}
 
-                {/* Individual reviews */}
-                {myReviews.length === 0 ? (
+                {/* Individual reviews — loading and error are distinct from a
+                    true empty state (PROF-1: never show "no reviews" for a
+                    failed load) */}
+                {myReviewsLoading && myReviews.length === 0 ? (
+                  <div className="text-center py-6">
+                    <div className="w-6 h-6 mx-auto rounded-full border-2 border-white/10 border-t-[#6FEEE1] animate-spin" />
+                  </div>
+                ) : myReviewsError && myReviews.length === 0 ? (
+                  <div className="text-center py-6 space-y-2">
+                    <p className="text-sm" style={{ color: STITCH.onSurfaceVariant }}>
+                      {lang === 'he' ? 'שגיאה בטעינת הביקורות' : 'Failed to load reviews'}
+                    </p>
+                    <button
+                      onClick={loadMyReviews}
+                      className="px-4 py-1.5 rounded-xl text-xs font-semibold"
+                      style={{ background: 'rgba(111,238,225,0.12)', color: STITCH.primary }}
+                    >
+                      {lang === 'he' ? 'נסה שוב' : 'Retry'}
+                    </button>
+                  </div>
+                ) : myReviews.length === 0 ? (
                   <div className="text-center py-6">
                     <Star className="w-8 h-8 mx-auto mb-2" style={{ color: STITCH.surfaceContainerHighest }} />
                     <p className="text-sm" style={{ color: STITCH.onSurfaceVariant }}>

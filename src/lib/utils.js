@@ -12,6 +12,24 @@ export const sanitizeSearch = (input) => {
 
 export const formatPrice = (p) => p ? `₪${p.toLocaleString()}` : '';
 
+// FRONTEND-005 (UX-1): normalize an Israeli phone for wa.me links.
+// Returns '972XXXXXXXXX' digits (no '+') or null — FAIL CLOSED on anything
+// that can't be confidently normalized, so callers can gate the WhatsApp
+// action on a non-null result and never emit wa.me/972 or a malformed URL.
+// Accepts: 052-123-4567, (052) 1234567, +972 52 1234567, 972521234567, 0521234567.
+// This is format normalization only — it does NOT verify the number exists.
+export const normalizeIsraeliPhone = (raw) => {
+  const digits = String(raw ?? '').replace(/\D/g, ''); // strips +, spaces, dashes, parens
+  if (!digits) return null;
+  let national;
+  if (digits.startsWith('972')) national = digits.slice(3);      // +972 / 972 prefix
+  else if (digits.startsWith('0')) national = digits.slice(1);   // local 0-prefix
+  else return null;                                              // unknown shape — fail closed
+  // Israeli national significant numbers are 8–9 digits (mobile 9, starting 5).
+  if (!/^[2-9]\d{7,8}$/.test(national)) return null;
+  return `972${national}`;
+};
+
 export const timeAgo = (d, t) => {
   if (!d) return '';
   const days = Math.floor((Date.now() - new Date(d)) / 86400000);

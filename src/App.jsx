@@ -4,7 +4,7 @@ import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
 import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn, ScreenTransition } from './components/ui';
-import { formatPrice, getSellerBadgeStyle } from './lib/utils';
+import { formatPrice, getSellerBadgeStyle, normalizeIsraeliPhone } from './lib/utils';
 
 export const BUILD_VERSION = '2.2.0-20260429';
 
@@ -403,19 +403,31 @@ function AppShell() {
                   <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'שלח הודעה באפליקציה' : 'Message in App'}
                 </button>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <a href={`https://wa.me/972${(selected.contact_phone || '').replace(/^0/, '').replace(/-/g, '')}?text=${encodeURIComponent(lang === 'he' ? `היי, ראיתי את המודעה שלך ב-GetWorth: ${selected.title}` : `Hi, I saw your listing on GetWorth: ${selected.title}`)}`}
-                    target="_blank" rel="noopener noreferrer"
-                    className="py-4 rounded-2xl bg-gradient-to-r from-[#25D366] to-[#128C7E] text-center font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 active:scale-95 transition-transform">
-                    💬 WhatsApp
-                  </a>
-                  {selected.contact_phone && (
-                    <a href={`tel:${selected.contact_phone}`}
-                      className="py-4 rounded-2xl bg-white/10 text-center font-semibold flex items-center justify-center gap-2 hover:bg-white/20 transition-all active:scale-95">
-                      <Phone className="w-5 h-5" />{lang === 'he' ? 'התקשר' : 'Call'}
-                    </a>
-                  )}
-                </div>
+                {/* UX-1: WhatsApp renders ONLY with a confidently-normalized
+                    phone (normalizeIsraeliPhone fails closed) — never wa.me/972
+                    or a malformed/double-prefixed URL. In-app messaging above
+                    remains the always-available contact path. */}
+                {(() => {
+                  const waPhone = normalizeIsraeliPhone(selected.contact_phone);
+                  if (!waPhone && !selected.contact_phone) return null;
+                  return (
+                    <div className={`grid gap-3 ${waPhone && selected.contact_phone ? 'grid-cols-2' : 'grid-cols-1'}`}>
+                      {waPhone && (
+                        <a href={`https://wa.me/${waPhone}?text=${encodeURIComponent(lang === 'he' ? `היי, ראיתי את המודעה שלך ב-GetWorth: ${selected.title}` : `Hi, I saw your listing on GetWorth: ${selected.title}`)}`}
+                          target="_blank" rel="noopener noreferrer"
+                          className="py-4 rounded-2xl bg-gradient-to-r from-[#25D366] to-[#128C7E] text-center font-semibold flex items-center justify-center gap-2 shadow-lg shadow-green-500/30 active:scale-95 transition-transform">
+                          💬 WhatsApp
+                        </a>
+                      )}
+                      {selected.contact_phone && (
+                        <a href={`tel:${selected.contact_phone}`}
+                          className="py-4 rounded-2xl bg-white/10 text-center font-semibold flex items-center justify-center gap-2 hover:bg-white/20 transition-all active:scale-95">
+                          <Phone className="w-5 h-5" />{lang === 'he' ? 'התקשר' : 'Call'}
+                        </a>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
 
               <button onClick={() => setShowContact(false)} className="w-full py-3 text-slate-400 text-sm">{lang === 'he' ? 'סגור' : 'Close'}</button>

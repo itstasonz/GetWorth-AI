@@ -233,6 +233,13 @@ export function AppProvider({ children }) {
   const pipelineAbortRef = useRef(null);
   // In-flight guard — prevents duplicate /api/analyze calls from rapid taps.
   const pipelineActiveRef = useRef(false);
+  // SCAN-2: exact snapshot of the last attempted scan input, taken at the top
+  // of every runPipeline. Retry replays THIS — same image, same append
+  // context, same pre-attempt images array — instead of rebuilding from
+  // capturedImageRef, which never knew about appended label photos (retrying
+  // a failed append used to silently drop the photo the user just took).
+  // ownerId makes a stale user's images unreplayable after logout.
+  const lastAttemptRef = useRef(null); // { image, appendMode, imagesBefore, ownerId }
   // Rate-limit cooldown (epoch ms). Scan/retry disabled until now passes this.
   const [scanCooldownUntil, setScanCooldownUntil] = useState(0);
   const scanCooldownUntilRef = useRef(0); // latest value for use inside callbacks
@@ -517,6 +524,7 @@ export function AppProvider({ children }) {
     convReqIdRef.current++; msgReqIdRef.current++; messagesConvIdRef.current = null;
     ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
     currentScanUuidRef.current = null; capturedImageRef.current = null;
+    lastAttemptRef.current = null; // SCAN-2: never replay a signed-out user's images
     profileCacheRef.current = {}; serialLoadingRef.current = false;
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
     if (cameraStreamRef.current) {
@@ -536,6 +544,7 @@ export function AppProvider({ children }) {
     setListingData({ title: '', desc: '', price: 0, phone: '', location: '' });
     setAnswers({}); setCondition(null); setListingStep(0);
     setSellerReviews([]); setSellerProfile(null); setSellerListings([]);
+    setMyReviews([]); setMyReviewsLoading(false); setMyReviewsError(false);
     // 3) Session-transient UI (private overlays, selections, banners, drafts).
     setSelected(null); setActiveChat(null); setMsgNotification(null);
     setShowCheckout(false); setShowContact(false);
@@ -842,6 +851,11 @@ export function AppProvider({ children }) {
 
   const loadListings = useCallback(async (reset = false) => {
     const thisRequestId = ++loadRequestIdRef.current; // Increment request ID
+    // MKT-1: a reset must atomically restore pagination — refresh callers
+    // (pull-to-refresh, Refresh button) fetch page 0 here, so listingsPage
+    // must be 0 too or the next Load More requests page N+1 and silently
+    // skips pages 1..N. (The filter-change effect also sets these; idempotent.)
+    if (reset) { setListingsPage(0); setHasMore(true); }
     const page = reset ? 0 : listingsPage;
     const offset = page * PAGE_SIZE;
     let query = supabase
@@ -1573,20 +1587,62 @@ export function AppProvider({ children }) {
     }
   }, [user, savedIds, showToastMsg]);
 
+  // SELL-3: deletion order is DB-first, storage-second, and each step's
+  // result is checked. The soft delete (status='deleted' — the app's intended
+  // model, listings are never hard-deleted) is the authoritative mutation;
+  // images are only purged AFTER it verifiably succeeded, because purging
+  // first would leave a live listing with broken images marketplace-wide if
+  // the update failed. Storage cleanup failure after a successful delete is
+  // cleanup debt (logged/reported), never a resurrected listing.
+  const deleteInFlightRef = useRef(new Set());
   const deleteListing = async (id) => {
+    if (!user || !id) return false;
+    if (deleteInFlightRef.current.has(id)) return false; // double-tap guard
+    deleteInFlightRef.current.add(id);
     const ownerId = user.id; // FRONTEND-004b ownership
-    const { data: listing } = await supabase
-      .from('listings').select('images').eq('id', id).eq('seller_id', user.id).single();
-    await supabase.from('listings').update({ status: 'deleted' }).eq('id', id).eq('seller_id', user.id);
-    if (currentUserIdRef.current !== ownerId) return;
-    if (listing?.images?.length) {
-      const prefix = '/storage/v1/object/public/listings/';
-      const paths = listing.images
-        .map(url => { try { const idx = url.indexOf(prefix); return idx !== -1 ? url.slice(idx + prefix.length) : null; } catch { return null; } })
-        .filter(Boolean);
-      if (paths.length) supabase.storage.from('listings').remove(paths).catch(() => {});
+    try {
+      const { data: listing } = await supabase
+        .from('listings').select('images').eq('id', id).eq('seller_id', ownerId).single();
+      if (currentUserIdRef.current !== ownerId) return false;
+
+      // Authoritative mutation — .select() returns the affected rows, so an
+      // RLS-filtered or failed update (0 rows) is detected, not assumed away.
+      const { data: updatedRows, error: delErr } = await supabase
+        .from('listings').update({ status: 'deleted' })
+        .eq('id', id).eq('seller_id', ownerId).select('id');
+      if (currentUserIdRef.current !== ownerId) return false;
+      if (delErr || !updatedRows?.length) {
+        if (DEV) console.warn('[Delete] listing update failed:', delErr?.message || '0 rows');
+        showToastMsg(lang === 'he' ? 'שגיאה במחיקת המודעה' : 'Failed to delete listing', 'error');
+        return false; // listing and images untouched
+      }
+
+      // DB success — now (and only now) update UI and purge images best-effort.
+      loadUserData(); // refreshes myListings state + mylistings-{uid} cache
+      showToastMsg(lang === 'he' ? 'המודעה נמחקה' : 'Deleted');
+      if (listing?.images?.length) {
+        const prefix = '/storage/v1/object/public/listings/';
+        const paths = listing.images
+          // Only paths inside OUR public listings bucket become remove()
+          // targets — data/signed/external/malformed URLs fail the prefix
+          // match and are skipped. split('?') strips any query string so a
+          // cache-busted URL never yields a bogus storage object path.
+          .map(url => { try { const idx = url.indexOf(prefix); return idx !== -1 ? url.slice(idx + prefix.length).split('?')[0] : null; } catch { return null; } })
+          .filter(Boolean);
+        if (paths.length) {
+          supabase.storage.from('listings').remove(paths).then(({ error: rmErr }) => {
+            if (rmErr) {
+              // Cleanup debt only — the deletion itself succeeded and stands.
+              console.warn('[Delete] storage cleanup failed (cleanup debt):', rmErr.message);
+              reportError(rmErr, { stage: 'delete_listing_storage_cleanup', listing_id: id });
+            }
+          }).catch(() => {});
+        }
+      }
+      return true;
+    } finally {
+      deleteInFlightRef.current.delete(id);
     }
-    loadUserData(); showToastMsg('Deleted');
   };
 
   // ── FRONTEND-006: minimal listing edit — title/description/price/condition ONLY.
@@ -1968,6 +2024,16 @@ export function AppProvider({ children }) {
     }
     pipelineActiveRef.current = true;
 
+    // SCAN-2: snapshot BEFORE any state mutation — imagesBefore is what the
+    // images array must be restored to for an append retry to reproduce the
+    // exact same [previous..., appended] input instead of double-appending.
+    lastAttemptRef.current = {
+      image: rawDataUrl,
+      appendMode,
+      imagesBefore: imagesRef.current.slice(),
+      ownerId: currentUserIdRef.current,
+    };
+
     // GW-000: fresh scan → new lifecycle id; append → reuse the current one so
     // the whole multi-photo/refine lifecycle stays correlated under one scan_uuid.
     if (!appendMode || !currentScanUuidRef.current) {
@@ -2087,18 +2153,27 @@ export function AppProvider({ children }) {
     }
   }, [analyzeWithRetry, fetchRecognitionHints, backupValuation, playSound, lang]);
 
-  // ── Retry from the failed step ──
+  // ── Retry from the failed step — replays the EXACT last attempt (SCAN-2) ──
   const retryPipeline = useCallback(() => {
-    if (!capturedImageRef.current) return;
+    const attempt = lastAttemptRef.current;
+    if (!attempt?.image) return;
     // Block duplicate runs and respect cooldown (runPipeline re-checks too).
     if (pipelineActiveRef.current || Date.now() < scanCooldownUntilRef.current) return;
+    // Ownership: never resend a signed-out user's images (FRONTEND-004).
+    if (attempt.ownerId !== currentUserIdRef.current) return;
+    // Restore the pre-attempt images array (ref synchronously — runPipeline
+    // reads imagesRef before React re-renders) so an append retry reproduces
+    // [previous..., appended] instead of appending the same photo twice.
+    imagesRef.current = attempt.imagesBefore;
+    setImages(attempt.imagesBefore);
     setView('analyzing');
-    runPipeline(capturedImageRef.current);
+    runPipeline(attempt.image, attempt.appendMode);
   }, [runPipeline]);
 
   // ── Cancel and go home ──
   const cancelPipeline = useCallback(() => {
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    lastAttemptRef.current = null; // SCAN-2: leaving the flow drops the retry snapshot
     setPipelineState('idle');
     setPipelineError(null);
     setAddPhotoMode(false);
@@ -3082,6 +3157,38 @@ export function AppProvider({ children }) {
   const [sellerReviews, setSellerReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
 
+  // FRONTEND-005 (PROF-1): reviews RECEIVED by the current user — the same
+  // concept as profile.rating/review_count (reviews.seller_id = reviewed
+  // party). AuthProfileView read these fields before they existed; now wired
+  // to the same query shape loadSellerReviews uses for public profiles.
+  const [myReviews, setMyReviews] = useState([]);
+  const [myReviewsLoading, setMyReviewsLoading] = useState(false);
+  const [myReviewsError, setMyReviewsError] = useState(false);
+
+  const loadMyReviews = useCallback(async () => {
+    if (!user) return;
+    const ownerId = user.id; // FRONTEND-004 ownership pattern
+    setMyReviewsLoading(true);
+    setMyReviewsError(false);
+    try {
+      const { data, error: err } = await supabase
+        .from('reviews')
+        .select('*, reviewer:profiles!reviewer_id(id, full_name, avatar_url), listing:listings(id, title, title_hebrew, images)')
+        .eq('seller_id', ownerId)
+        .order('created_at', { ascending: false })
+        .limit(30);
+      if (err) throw err;
+      if (currentUserIdRef.current !== ownerId) return;
+      setMyReviews(data || []);
+    } catch (e) {
+      if (currentUserIdRef.current !== ownerId) return;
+      if (DEV) console.warn('[MyReviews] Load error:', e.message);
+      setMyReviewsError(true); // view shows error+retry, never a false "no reviews"
+    } finally {
+      if (currentUserIdRef.current === ownerId) setMyReviewsLoading(false);
+    }
+  }, [user]);
+
   // Submit a review for a completed order (buyer rates seller, or seller rates buyer)
   // seller_id / reviewed_user_id is derived from the order in the DB — never trusted from the caller
   const submitReview = useCallback(async (orderId, listingId, rating, comment, reviewerRole = 'buyer') => {
@@ -3186,6 +3293,7 @@ export function AppProvider({ children }) {
   const reset = () => {
     // Cancel any in-flight pipeline
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    lastAttemptRef.current = null; // SCAN-2: new scan session — drop the retry snapshot
     setNavDirection('pop');
     setPipelineState('idle');
     setPipelineError(null);
@@ -3370,6 +3478,7 @@ export function AppProvider({ children }) {
     loadNotifications, markNotifRead, markAllNotifsRead,
     // Reviews
     sellerReviews, reviewsLoading, submitReview, loadSellerReviews,
+    myReviews, myReviewsLoading, myReviewsError, loadMyReviews,
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline, scanCooldownUntil,
