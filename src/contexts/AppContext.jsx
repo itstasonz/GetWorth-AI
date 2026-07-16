@@ -1947,6 +1947,32 @@ export function AppProvider({ children }) {
     reader.readAsDataURL(file);
   }, [runPipeline, playSound, lang]);
 
+  // ── SCAN-014 Phase 1.1A: universal identity confirmation (fire-and-forget) ──
+  // Every explicit "this identification is correct" reaches Recognition Memory
+  // through this endpoint, independent of the catalog-candidate flow. Only the
+  // valuation_id is sent — the server derives brand/model/category from the
+  // persisted valuation and the DB deduplicates retries, so this is safe to
+  // call unconditionally and must never affect UX.
+  const confirmIdentityRemote = useCallback(async (valuationId) => {
+    if (!valuationId) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) return; // anonymous — server rejects anyway
+      const res = await fetch('/api/confirm-identity', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ valuation_id: valuationId }),
+      });
+      if (DEV) console.log('[ConfirmIdentity] status:', res.status);
+    } catch (e) {
+      if (DEV) console.warn('[ConfirmIdentity] failed:', e?.message);
+      /* never throw — memory confirmation must not affect UX */
+    }
+  }, []);
+
   // ── Refine: re-analyze with a confirmed model name ──
   const refineResult = useCallback(async (modelName) => {
     if (!images[0]) return;
@@ -2006,6 +2032,12 @@ export function AppProvider({ children }) {
         prior_confidence: result?.confidence,
       }, { scanUuid: refined.scan_uuid, valuationId: refined.valuation_id });
 
+      // SCAN-014 Phase 1.1A: a correction IS a confirmation of the corrected
+      // identity. Refined results set userConfirmed directly (confirmResult
+      // never runs for them), so record the memory confirmation here — this
+      // closes the audit's correction hole.
+      confirmIdentityRemote(refined.valuation_id);
+
       if (DEV) console.log('[Refine] Complete:', refined.name);
     } catch (e) {
       if (e.name === 'AbortError') return;
@@ -2014,7 +2046,7 @@ export function AppProvider({ children }) {
       setView('results');
       showToastMsg(lang === 'he' ? 'שגיאה בעדכון, מחירים מקוריים נשמרו' : 'Update failed, original prices kept');
     }
-  }, [images, result, analyzeWithRetry, backupValuation, storeCorrection, playSound, lang, showToastMsg]);
+  }, [images, result, analyzeWithRetry, backupValuation, storeCorrection, playSound, lang, showToastMsg, confirmIdentityRemote]);
 
   // ── Confirm: user says the identification is correct ──
   const confirmResult = useCallback(() => {
@@ -2062,13 +2094,19 @@ export function AppProvider({ children }) {
 
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
 
+    // ── SCAN-014 Phase 1.1A: RECOGNITION MEMORY — unconditional, BEFORE the
+    // catalog branch. Fires on every explicit confirmation regardless of
+    // whether the item is new to the catalog (submit-candidate is now
+    // catalog-only and never writes memory).
+    confirmIdentityRemote(result.valuation_id);
+
     // ── PRODUCT CANDIDATE: save to staging table if item was not in DB ──
     if (result.product_candidate_needed && !result.candidateSaved && result.candidate_payload) {
       saveProductCandidate(result.candidate_payload, null, result.valuation_id).then(() => {
         setResult(prev => prev ? { ...prev, candidateSaved: true } : prev);
       });
     }
-  }, [result, user, playSound, storeConfirmation]); // saveProductCandidate added below — safe: stable ref
+  }, [result, user, playSound, storeConfirmation, confirmIdentityRemote]); // saveProductCandidate added below — safe: stable ref
 
   // ── Save product candidate to staging table (fire-and-forget, safe to retry) ──
   const saveProductCandidate = useCallback(async (candidatePayload, correctionText, valuationId) => {
