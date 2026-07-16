@@ -311,6 +311,11 @@ export function AppProvider({ children }) {
   // signOut and the cleanup effect where an in-flight response could re-write
   // state (and re-persist conv-{uid} to IndexedDB after signOut deleted it).
   const currentUserIdRef = useRef(null);
+  // FRONTEND-004: who was signed in before the current auth state — lets the
+  // user→null cleanup distinguish a REAL logout/expiry (navigate home, delete
+  // that user's caches) from the anonymous app boot, where the same effect
+  // fires but urlSync has just restored a deep link that must not be clobbered.
+  const prevUserIdRef = useRef(null);
 
   // In-app message notification banner
   const [msgNotification, setMsgNotification] = useState(null);
@@ -368,7 +373,9 @@ export function AppProvider({ children }) {
   const refreshProfile = useCallback(async () => {
     if (!user) return;
     if (profileLastLoadRef.current > 0 && (Date.now() - profileLastLoadRef.current < 60000)) return;
+    const ownerId = user.id;
     const { data } = await supabase.rpc('get_own_profile').single();
+    if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004 ownership
     if (data) { setProfile(data); profileLastLoadRef.current = Date.now(); }
   }, [user]);
 
@@ -487,16 +494,79 @@ export function AppProvider({ children }) {
     loadListings(true);
   }, [category, filterCondition, debouncedPriceRange.min, debouncedPriceRange.max, debouncedSearch]);
 
+  // ═══ FRONTEND-004: centralized logout / user-switch reset ═══════════════
+  // The ONE place that erases every user-owned and session-transient atom.
+  // Runs on explicit logout, session expiry, and account switch — safe to
+  // call repeatedly (every operation is idempotent). Ownership guards on the
+  // loaders (currentUserIdRef, FRONTEND-003 pattern) make its timing safe:
+  // even a response resolving mid-reset cannot write for a signed-out user.
+  //
+  // INTENTIONALLY RETAINED (not user-owned):
+  //   lang / soundEnabled          device preferences
+  //   listings + browse filters/pagination   public marketplace cache
+  //   scanCooldownUntil            server rate-limit echo — clearing it on
+  //                                logout would let re-login dodge cooldowns
+  //   toasts                       auto-dismissing; signOut clears explicitly
+  //                                before posting its own confirmation
+  //   hintsCacheRef                global recognition patterns, not user data
+  //   publishing/sendingMessage/*Uploading   in-flight flags their own
+  //                                          finally blocks release
+  const clearUserState = ({ navigate = false, outgoingUserId = null } = {}) => {
+    // 1) Async safety first: invalidate request generations and per-user refs
+    //    so anything in flight dies before the visible state is rebuilt.
+    convReqIdRef.current++; msgReqIdRef.current++; messagesConvIdRef.current = null;
+    ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
+    currentScanUuidRef.current = null; capturedImageRef.current = null;
+    profileCacheRef.current = {}; serialLoadingRef.current = false;
+    if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    if (cameraStreamRef.current) {
+      try { cameraStreamRef.current.getTracks().forEach(t => t.stop()); } catch {}
+      cameraStreamRef.current = null;
+    }
+    // 2) User-owned data.
+    setProfile(null);
+    setMyListings([]); setSavedItems([]); setSavedIds(new Set());
+    setConversations([]); setConversationsLoading(false); setUnreadCount(0);
+    setMessages([]); setMessagesLoading(false); setNewMessage('');
+    setOrders([]); setActiveOrder(null); setActiveOrderId(null); setOrdersLoading(false);
+    setOrderNotifications([]); setNotifUnreadCount(0);
+    setValuations([]); setValuationsLoading(false);
+    setResult(null); setImages([]);
+    setSerialData(null); setSerialLoading(false);
+    setListingData({ title: '', desc: '', price: 0, phone: '', location: '' });
+    setAnswers({}); setCondition(null); setListingStep(0);
+    setSellerReviews([]); setSellerProfile(null); setSellerListings([]);
+    // 3) Session-transient UI (private overlays, selections, banners, drafts).
+    setSelected(null); setActiveChat(null); setMsgNotification(null);
+    setShowCheckout(false); setShowContact(false);
+    setShowSignInModal(false); setSignInAction(null);
+    setHelpModalOpen(false); setAddPhotoMode(false); setCameraBlocked(false);
+    setHeartAnim(null); setShowFlash(false);
+    setPipelineState('idle'); setPipelineError(null);
+    setError(null);
+    setAuthForm({ name: '', email: '', password: '' }); setAuthError(null);
+    setAuthMode('login'); setPasswordRecovery(false);
+    setTorchOn(false); setTorchSupported(false);
+    // 4) User-scoped IndexedDB — idempotent with signOut's deletes, and makes
+    //    session-EXPIRY equivalent to explicit logout on shared devices.
+    if (outgoingUserId) {
+      ['mylistings', 'saved', 'conv', 'orders']
+        .forEach(k => cacheDelete(`${k}-${outgoingUserId}`));
+    }
+    // 5) Navigation — only on a real user→null transition (see prevUserIdRef).
+    if (navigate) { setNavDirection('tab'); setTab('home'); setView('home'); }
+  };
+
   // Load user data when auth changes
   useEffect(() => {
-    if (user) loadUserData();
+    if (user) { prevUserIdRef.current = user.id; loadUserData(); }
     else {
-      setMyListings([]); setSavedItems([]); setSavedIds(new Set()); setConversations([]); setConversationsLoading(false); setUnreadCount(0); setOrders([]); setSelected(null); ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
-      // FRONTEND-003: invalidate in-flight chat requests + thread state on
-      // logout — a response resolving after sign-out must not repopulate
-      // cleared conversations, and the next account must never see this
-      // account's message thread.
-      convReqIdRef.current++; msgReqIdRef.current++; messagesConvIdRef.current = null; setMessages([]);
+      const outgoing = prevUserIdRef.current;
+      prevUserIdRef.current = null;
+      // navigate only when someone was actually signed in — on anonymous boot
+      // this effect also fires, and clobbering the view would break the deep
+      // link urlSync just restored.
+      clearUserState({ navigate: !!outgoing, outgoingUserId: outgoing });
     }
   }, [user]);
 
@@ -648,14 +718,16 @@ export function AppProvider({ children }) {
   // Load notification count + subscribe for live updates
   const loadNotifications = useCallback(async () => {
     if (!user) return;
+    const ownerId = user.id;
     try {
       const { data, error } = await supabase
         .from('notifications')
         .select('id, type, title, body, data, read_at, created_at')
-        .eq('user_id', user.id)
+        .eq('user_id', ownerId)
         .order('created_at', { ascending: false })
         .limit(30);
       if (error) throw error;
+      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004 ownership
       setOrderNotifications(data || []);
       setNotifUnreadCount((data || []).filter(n => !n.read_at).length);
     } catch (e) {
@@ -664,15 +736,21 @@ export function AppProvider({ children }) {
   }, [user]);
 
   const markNotifRead = useCallback(async (notifId) => {
+    const ownerId = currentUserIdRef.current; // whoever tapped
     await supabase.from('notifications').update({ read_at: new Date().toISOString() }).eq('id', notifId);
+    // FRONTEND-004b ownership: a stale completion must not decrement the NEXT
+    // account's freshly-loaded badge.
+    if (!ownerId || currentUserIdRef.current !== ownerId) return;
     setOrderNotifications(prev => prev.map(n => n.id === notifId ? { ...n, read_at: new Date().toISOString() } : n));
     setNotifUnreadCount(prev => Math.max(0, prev - 1));
   }, []);
 
   const markAllNotifsRead = useCallback(async () => {
     if (!user) return;
+    const ownerId = user.id;
     await supabase.from('notifications').update({ read_at: new Date().toISOString() })
-      .eq('user_id', user.id).is('read_at', null);
+      .eq('user_id', ownerId).is('read_at', null);
+    if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b ownership
     setOrderNotifications(prev => prev.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })));
     setNotifUnreadCount(0);
   }, [user]);
@@ -688,6 +766,9 @@ export function AppProvider({ children }) {
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${user.id}` },
           (payload) => {
+            // FRONTEND-004 ownership gate: events buffered during channel
+            // teardown must not repopulate a signed-out user's badge/list.
+            if (!user || currentUserIdRef.current !== user.id) return;
             const notif = payload.new;
             setOrderNotifications(prev => [notif, ...prev]);
             setNotifUnreadCount(prev => prev + 1);
@@ -702,6 +783,7 @@ export function AppProvider({ children }) {
           'postgres_changes',
           { event: 'UPDATE', schema: 'public', table: 'orders' },
           (payload) => {
+            if (!user || currentUserIdRef.current !== user.id) return; // FRONTEND-004 ownership
             const updated = payload.new;
             if (updated.buyer_id !== user.id && updated.seller_id !== user.id) return;
             setOrders(prev => prev.map(o => o.id === updated.id ? { ...o, ...updated } : o));
@@ -712,6 +794,7 @@ export function AppProvider({ children }) {
           'postgres_changes',
           { event: 'INSERT', schema: 'public', table: 'orders' },
           (payload) => {
+            if (!user || currentUserIdRef.current !== user.id) return; // FRONTEND-004 ownership
             const newOrder = payload.new;
             if (newOrder.seller_id === user.id || newOrder.buyer_id === user.id) {
               if (DEV) console.log('[Realtime] New order detected, refreshing orders');
@@ -725,7 +808,8 @@ export function AppProvider({ children }) {
 
   // Tap notification banner → open that conversation
   const openNotification = async (notification) => {
-    if (!notification?.conversationId) return;
+    if (!notification?.conversationId || !user) return;
+    const ownerId = user.id; // FRONTEND-004b: no post-logout navigation/state
     setMsgNotification(null);
     const conv = conversations.find((c) => c.id === notification.conversationId);
     if (conv) {
@@ -741,6 +825,7 @@ export function AppProvider({ children }) {
       .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url)`)
       .eq('id', notification.conversationId)
       .single();
+    if (currentUserIdRef.current !== ownerId) return;
     if (data) {
       const otherUser = data.buyer_id === user.id ? data.seller : data.buyer;
       setActiveChat({ ...data, otherUser });
@@ -824,12 +909,18 @@ export function AppProvider({ children }) {
 
   const loadUserData = async () => {
     if (!user) return;
+    // FRONTEND-004 ownership: responses started for this user must not write
+    // after logout/switch — they would repopulate cleared state and recreate
+    // deleted caches (same invariant as the chat loaders, FRONTEND-003).
+    const ownerId = user.id;
+    const owned = () => currentUserIdRef.current === ownerId;
 
     // Phase 1: IDB cache — fill state before network returns
     const [cachedMy, cachedSaved] = await Promise.all([
-      cacheGet(`mylistings-${user.id}`),
-      cacheGet(`saved-${user.id}`),
+      cacheGet(`mylistings-${ownerId}`),
+      cacheGet(`saved-${ownerId}`),
     ]);
+    if (!owned()) return;
     if (cachedMy?.length) setMyListings(cachedMy);
     if (cachedSaved?.length) {
       setSavedItems(cachedSaved.map(s => s.listing).filter(Boolean));
@@ -838,18 +929,19 @@ export function AppProvider({ children }) {
 
     // Phase 2: network refresh
     const [myResult, savedResult] = await Promise.allSettled([
-      supabase.from('listings').select('*').eq('seller_id', user.id).neq('status', 'deleted').order('created_at', { ascending: false }),
-      supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', user.id)
+      supabase.from('listings').select('*').eq('seller_id', ownerId).neq('status', 'deleted').order('created_at', { ascending: false }),
+      supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', ownerId)
     ]);
+    if (!owned()) return;
     if (myResult.status === 'fulfilled' && myResult.value.data) {
       setMyListings(myResult.value.data);
-      cacheSet(`mylistings-${user.id}`, myResult.value.data);
+      cacheSet(`mylistings-${ownerId}`, myResult.value.data);
     }
     if (savedResult.status === 'fulfilled' && savedResult.value.data) {
       const savedData = savedResult.value.data;
       setSavedItems(savedData.map(s => s.listing).filter(Boolean));
       setSavedIds(new Set(savedData.map(s => s.listing_id)));
-      cacheSet(`saved-${user.id}`, savedData);
+      cacheSet(`saved-${ownerId}`, savedData);
     }
     loadConversations(true);
     loadOrders(true);
@@ -1037,9 +1129,11 @@ export function AppProvider({ children }) {
     if (sellerId === user.id) {
       showToastMsg(lang === 'he' ? 'זה הפריט שלך!' : "That's your own listing!"); return;
     }
+    const ownerId = user.id; // FRONTEND-004b: no post-logout chat navigation
     const { data: existingList } = await supabase.from('conversations').select('*')
       .eq('listing_id', item.id)
       .or(`and(buyer_id.eq.${user.id},seller_id.eq.${sellerId}),and(buyer_id.eq.${sellerId},seller_id.eq.${user.id})`);
+    if (currentUserIdRef.current !== ownerId) return;
     const existing = existingList?.[0];
     if (existing) {
       const otherUserId = existing.buyer_id === user.id ? existing.seller_id : existing.buyer_id;
@@ -1055,12 +1149,14 @@ export function AppProvider({ children }) {
     // INSERT succeeded.
     const { data: rows, error: convError } = await supabase.from('conversations')
       .insert(payload).select();
+    if (currentUserIdRef.current !== ownerId) return;
     if (convError) {
       console.error('[Chat] startConversation failed:', convError);
       console.error('[Chat] error code:', convError.code, '| message:', convError.message);
       // Fallback: conversation may already exist (race, duplicate key, etc.)
       const { data: retryRows } = await supabase.from('conversations').select('*')
         .eq('listing_id', item.id).or(`buyer_id.eq.${user.id},seller_id.eq.${user.id}`).limit(1);
+      if (currentUserIdRef.current !== ownerId) return;
       const retry = retryRows?.[0];
       if (retry) {
         const otherUserId = retry.buyer_id === user.id ? retry.seller_id : retry.buyer_id;
@@ -1080,6 +1176,7 @@ export function AppProvider({ children }) {
       console.error('[Chat] INSERT ok but RETURNING empty — fetching conversation directly');
       const { data: fetchRows } = await supabase.from('conversations').select('*')
         .eq('listing_id', item.id).eq('buyer_id', user.id).eq('seller_id', sellerId).limit(1);
+      if (currentUserIdRef.current !== ownerId) return;
       const fetched = fetchRows?.[0];
       if (fetched) {
         setActiveChat({ ...fetched, listing: item, seller: item.seller, otherUser: item.seller });
@@ -1108,6 +1205,7 @@ export function AppProvider({ children }) {
       setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
       return;
     }
+    const ownerId = user.id; // FRONTEND-004b ownership
     setSendingMessage(true); setNewMessage('');
     const optimisticId = `temp-${Date.now()}`;
     const optimisticMsg = { id: optimisticId, conversation_id: activeChat.id, sender_id: user.id, content: text, is_offer: isOffer, offer_amount: offerAmount, created_at: new Date().toISOString(), is_read: false };
@@ -1131,6 +1229,9 @@ export function AppProvider({ children }) {
       const { error: convUpdateErr } = await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeChat.id);
       if (convUpdateErr) console.warn('[Chat] Conversation timestamp update failed:', convUpdateErr.message);
     } catch (e) {
+      // FRONTEND-004b: a failure resolving post-logout must not restore this
+      // draft or raise an error banner in the next session's UI.
+      if (currentUserIdRef.current !== ownerId) { setSendingMessage(false); return; }
       console.error('[Chat] sendMessage failed:', e);
       console.error('[Chat] activeChat:', activeChat);
       console.error('[Chat] payload:', payload);
@@ -1222,9 +1323,13 @@ export function AppProvider({ children }) {
         cacheDelete(`orders-${user.id}`),
       ]).catch(() => {});
     }
+    const outgoingUserId = user?.id ?? null;
     await supabase.auth.signOut();
-    setTab('home');
-    setView('home');
+    // Immediate synchronous reset (nav + all user state) — no frame renders
+    // User A data post-logout. The [user] effect repeats this idempotently
+    // when the auth event lands; this call just wins the race for the eye.
+    clearUserState({ navigate: true, outgoingUserId });
+    setToasts([]); // drop any previous-account toasts before confirming
     showToastMsg(lang === 'he' ? 'התנתקת' : 'Signed out');
   };
 
@@ -1295,6 +1400,7 @@ export function AppProvider({ children }) {
       return;
     }
 
+    const ownerId = user.id; // FRONTEND-004b ownership
     setAvatarUploading(true);
     try {
       // Read file to dataUrl
@@ -1334,12 +1440,17 @@ export function AppProvider({ children }) {
 
       if (updateErr) throw updateErr;
 
+      // FRONTEND-004b: never patch a signed-out user's avatar into the next
+      // session's profile state.
+      if (currentUserIdRef.current !== ownerId) { setAvatarUploading(false); return; }
+
       // Update local state
       setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
       showToastMsg(lang === 'he' ? 'התמונה עודכנה!' : 'Photo updated!');
       if (DEV) console.log('[Avatar] Uploaded:', publicUrl);
 
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) { setAvatarUploading(false); return; }
       console.error('[Avatar] Upload failed:', e);
       showToastMsg(lang === 'he' ? 'שגיאה בהעלאת התמונה' : 'Failed to upload photo');
     }
@@ -1365,6 +1476,7 @@ export function AppProvider({ children }) {
       return;
     }
 
+    const ownerId = user.id; // FRONTEND-004b ownership
     setVerificationUploading(true);
     try {
       // ── 2. Compress to JPEG ────────────────────────────────────────────────
@@ -1402,6 +1514,7 @@ export function AppProvider({ children }) {
         { body: formData },
       );
 
+      if (currentUserIdRef.current !== ownerId) { setVerificationUploading(false); return; } // FRONTEND-004b
       if (fnErr || !fnData?.ok) {
         const errMsg = fnData?.error ?? fnErr?.message
           ?? (lang === 'he' ? 'שגיאה בשליחת הסלפי' : 'Failed to submit selfie. Please try again.');
@@ -1413,6 +1526,7 @@ export function AppProvider({ children }) {
 
       // ── 5. Sync local profile from DB ─────────────────────────────────────
       const { data: freshProfile, error: fetchErr } = await supabase.rpc('get_own_profile').single();
+      if (currentUserIdRef.current !== ownerId) { setVerificationUploading(false); return; } // FRONTEND-004b
       if (fetchErr || !freshProfile) {
         console.error('[requestVerification] profile refetch failed:', fetchErr);
         // Non-fatal — patch optimistically from function response
@@ -1430,6 +1544,7 @@ export function AppProvider({ children }) {
       showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
 
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) { setVerificationUploading(false); return; } // FRONTEND-004b
       console.error('[requestVerification] unexpected error:', e);
       showToastMsg(lang === 'he' ? 'שגיאה בשליחת הסלפי' : 'Failed to submit selfie. Please try again.', 'error');
     }
@@ -1440,15 +1555,18 @@ export function AppProvider({ children }) {
 
   const toggleSave = useCallback(async (item) => {
     if (!user) { setSignInAction('save'); setShowSignInModal(true); return; }
+    const ownerId = user.id; // FRONTEND-004b ownership
     setHeartAnim(item.id);
     setTimeout(() => setHeartAnim(null), 800);
     if (savedIds?.has(item.id)) {
-      await supabase.from('saved_items').delete().eq('user_id', user.id).eq('listing_id', item.id);
+      await supabase.from('saved_items').delete().eq('user_id', ownerId).eq('listing_id', item.id);
+      if (currentUserIdRef.current !== ownerId) return;
       setSavedIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
       setSavedItems((prev) => prev.filter((i) => i.id !== item.id));
       showToastMsg('Removed');
     } else {
-      await supabase.from('saved_items').insert({ user_id: user.id, listing_id: item.id });
+      await supabase.from('saved_items').insert({ user_id: ownerId, listing_id: item.id });
+      if (currentUserIdRef.current !== ownerId) return;
       setSavedIds((prev) => new Set(prev).add(item.id));
       setSavedItems((prev) => [...prev, item]);
       showToastMsg('Saved!');
@@ -1456,9 +1574,11 @@ export function AppProvider({ children }) {
   }, [user, savedIds, showToastMsg]);
 
   const deleteListing = async (id) => {
+    const ownerId = user.id; // FRONTEND-004b ownership
     const { data: listing } = await supabase
       .from('listings').select('images').eq('id', id).eq('seller_id', user.id).single();
     await supabase.from('listings').update({ status: 'deleted' }).eq('id', id).eq('seller_id', user.id);
+    if (currentUserIdRef.current !== ownerId) return;
     if (listing?.images?.length) {
       const prefix = '/storage/v1/object/public/listings/';
       const paths = listing.images
@@ -1483,6 +1603,7 @@ export function AppProvider({ children }) {
         ...(titleHebrew !== undefined && { title_hebrew: titleHebrew }),
       })
       .eq('id', id).eq('seller_id', user.id).select();
+    if (currentUserIdRef.current !== user.id) return false; // FRONTEND-004b ownership
     if (error || !data?.length) {
       if (DEV) console.warn('[EditListing] update failed:', error?.message);
       showToastMsg(lang === 'he' ? 'שגיאה בעדכון המודעה' : 'Failed to update listing');
@@ -1783,15 +1904,17 @@ export function AppProvider({ children }) {
   // ── Load user's valuation history ──
   const loadValuations = useCallback(async () => {
     if (!user) return;
+    const ownerId = user.id;
     setValuationsLoading(true);
     try {
       const { data, error } = await supabase
         .from('valuations')
         .select('id, ai_name, ai_name_hebrew, ai_category, ai_confidence, price_mid, price_method, user_confirmed, user_correction, created_at')
-        .eq('user_id', user.id)
+        .eq('user_id', ownerId)
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
+      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004 ownership
       setValuations(data || []);
     } catch (e) {
       if (DEV) console.warn('[Valuations] Load error:', e.message);
@@ -2621,6 +2744,7 @@ export function AppProvider({ children }) {
     }
     setPublishing(true);
     setError(null);
+    const ownerId = user.id; // FRONTEND-004b ownership
     try {
       const uploadTs = Date.now();
       const uploadResults = await Promise.all(
@@ -2656,6 +2780,7 @@ export function AppProvider({ children }) {
           }
         })
       );
+      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b (finally still releases `publishing`)
       let imageUrls = uploadResults.filter(Boolean);
       if (imageUrls.length === 0) {
         imageUrls = images.length > 0 ? images : [];
@@ -2688,6 +2813,7 @@ export function AppProvider({ children }) {
         }),
       };
       const insertResult = await supabase.from('listings').insert(listingRow).select();
+      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b
       if (insertResult.error) {
         console.error('[Publish] Insert failed:', insertResult.error.message);
         throw insertResult.error;
@@ -2720,6 +2846,7 @@ export function AppProvider({ children }) {
       showToastMsg(t.published);
       playSound('coin');
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b — no error banner post-logout
       console.error('Publish error:', e);
       setError(e.message || (lang === 'he' ? 'שגיאה בפרסום, נסה שוב' : 'Failed to publish. Please try again.'));
       playSound('error');
@@ -2732,14 +2859,17 @@ export function AppProvider({ children }) {
   const reportListing = async (listingId, reason) => {
     if (!user) { setSignInAction('contact'); setShowSignInModal(true); return false; }
     if (!listingId || !reason) return false;
+    const ownerId = user.id; // FRONTEND-004b ownership
     try {
       const { error: rptError } = await supabase.from('reports').insert({
         listing_id: listingId, reporter_id: user.id, reason,
       });
+      if (currentUserIdRef.current !== ownerId) return false;
       if (rptError) throw rptError;
       showToastMsg(lang === 'he' ? 'הדיווח נשלח, תודה!' : 'Report submitted, thank you!');
       return true;
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) return false;
       console.error('Report error:', e);
       setError(lang === 'he' ? 'שגיאה בדיווח' : 'Failed to submit report');
       return false;
@@ -2752,10 +2882,12 @@ export function AppProvider({ children }) {
   const loadOrders = useCallback(async (force = false) => {
     if (!user) return;
     if (!force && ordersLastLoadRef.current > 0 && (Date.now() - ordersLastLoadRef.current < 30000)) return;
+    const ownerId = user.id; // FRONTEND-004 ownership — see loadUserData
 
     // Phase 1: serve from IDB cache instantly
-    const cacheKey = `orders-${user.id}`;
+    const cacheKey = `orders-${ownerId}`;
     const cached = await cacheGet(cacheKey);
+    if (currentUserIdRef.current !== ownerId) return;
     if (cached?.length) {
       setOrders(cached);
     } else {
@@ -2770,6 +2902,7 @@ export function AppProvider({ children }) {
       const { data, error: err } = await supabase.rpc('get_user_orders');
       if (DEV) console.log(`[Orders] RPC took ${Math.round(performance.now() - t0)}ms`);
       if (err) throw err;
+      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004 ownership
 
       const newOrders = data || [];
       if (DEV) console.log(`[Orders] Loaded ${newOrders.length} orders`);
@@ -2814,6 +2947,7 @@ export function AppProvider({ children }) {
       showToastMsg(lang === 'he' ? 'אי אפשר לקנות מעצמך' : "You can't buy your own listing");
       return null;
     }
+    const ownerId = user.id; // FRONTEND-004b: no post-logout navigation to orderDetail
     try {
       const { data, error: err } = await supabase.rpc('create_order', {
         p_listing_id:       listingId,
@@ -2825,6 +2959,7 @@ export function AppProvider({ children }) {
       });
 
       if (err) throw err;
+      if (currentUserIdRef.current !== ownerId) return null; // FRONTEND-004b
 
       showToastMsg(lang === 'he' ? 'ההזמנה נשלחה למוכר!' : 'Order sent to seller!');
       playSound('coin');
@@ -2840,6 +2975,7 @@ export function AppProvider({ children }) {
 
       // Fetch the full order with joins BEFORE navigating
       const fullOrder = await fetchOrderById(data.id);
+      if (currentUserIdRef.current !== ownerId) return null; // FRONTEND-004b
       setActiveOrder(fullOrder || data);
       setActiveOrderId(data.id);
       setView('orderDetail');
@@ -2849,6 +2985,7 @@ export function AppProvider({ children }) {
 
       return data;
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) return null; // FRONTEND-004b
       console.error('[Orders] Create error:', e);
       const msg = e?.message || (lang === 'he' ? 'שגיאה ביצירת הזמנה' : 'Failed to create order');
       showToastMsg(lang === 'he' ? `שגיאה: ${msg}` : `Error: ${msg}`);
@@ -2860,6 +2997,7 @@ export function AppProvider({ children }) {
   // OPTIMISTIC: updates local state FIRST, then calls backend. Rolls back on error.
   const updateOrderStatus = useCallback(async (orderId, newStatus, meta = {}) => {
     if (!user || !orderId) return false;
+    const ownerId = user.id; // FRONTEND-004b ownership
 
     // ── Step 1: Optimistic local update (instant UI feedback) ──
     const prevOrders = [...orders];
@@ -2898,6 +3036,7 @@ export function AppProvider({ children }) {
       });
 
       if (rpcErr) throw rpcErr;
+      if (currentUserIdRef.current !== ownerId) return true; // FRONTEND-004b — committed server-side, no UI
 
       showToastMsg(statusLabels[newStatus] || (lang === 'he' ? 'עודכן' : 'Updated'));
       playSound(newStatus === 'completed' ? 'coin' : 'tap');
@@ -2912,6 +3051,9 @@ export function AppProvider({ children }) {
       loadOrders(true).catch(() => {});
       return true;
     } catch (e) {
+      // FRONTEND-004b: rolling back would restore the signed-out user's
+      // orders array into the cleared/next session's state.
+      if (currentUserIdRef.current !== ownerId) return false;
       // ── Step 3: ROLLBACK optimistic update on any error ──
       console.error('[Orders] Transition FAILED:', e);
       setOrders(prevOrders);
@@ -2944,6 +3086,7 @@ export function AppProvider({ children }) {
   // seller_id / reviewed_user_id is derived from the order in the DB — never trusted from the caller
   const submitReview = useCallback(async (orderId, listingId, rating, comment, reviewerRole = 'buyer') => {
     if (!user) return false;
+    const ownerId = user.id; // FRONTEND-004b ownership
     try {
       // Fetch order to derive the reviewed party server-side and verify completion
       const { data: orderData, error: orderErr } = await supabase
@@ -2951,6 +3094,7 @@ export function AppProvider({ children }) {
         .select('seller_id, buyer_id, status')
         .eq('id', orderId)
         .single();
+      if (currentUserIdRef.current !== ownerId) return false; // FRONTEND-004b
       if (orderErr || !orderData) {
         showToastMsg(lang === 'he' ? 'שגיאה: ההזמנה לא נמצאה' : 'Error: Order not found');
         return false;
@@ -2986,6 +3130,7 @@ export function AppProvider({ children }) {
       });
 
       if (err) throw err;
+      if (currentUserIdRef.current !== ownerId) return true; // FRONTEND-004b — committed, no UI
 
       // GW-005A: real trust signal — rating on a completed order (never the comment text).
       recordObservation(OBS.REVIEW_SUBMITTED, {
@@ -2999,6 +3144,7 @@ export function AppProvider({ children }) {
       playSound('coin');
       return true;
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) return false; // FRONTEND-004b
       // Log full Supabase error for debugging
       console.error('[Reviews] Submit error:', e?.message, e?.code, e?.details, e?.hint);
       const isDuplicate = e.message?.includes('one_review_per_order')
@@ -3088,6 +3234,7 @@ export function AppProvider({ children }) {
   const submitSerialPhoto = useCallback(async (dataUrl) => {
     // Guard: prevent duplicate calls while already processing
     if (!dataUrl || serialLoadingRef.current) return;
+    const ownerId = currentUserIdRef.current; // FRONTEND-004b ownership
     serialLoadingRef.current = true;
     setSerialLoading(true);
     const t0 = performance.now();
@@ -3119,6 +3266,10 @@ export function AppProvider({ children }) {
         rawText = data.ocrText || data.raw_texts?.[0] || '';
       }
 
+      // FRONTEND-004b: never recreate a signed-out user's serial photo/state.
+      if (currentUserIdRef.current !== ownerId) {
+        serialLoadingRef.current = false; setSerialLoading(false); return;
+      }
       // Extract serial/IMEI from OCR text
       const extracted = extractSerialFromOCR(rawText);
       if (extracted) {
@@ -3144,6 +3295,9 @@ export function AppProvider({ children }) {
         showToastMsg(lang === 'he' ? 'תמונה נשמרה (לא נמצא מספר סידורי)' : 'Photo saved (no serial found)');
       }
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) {
+        serialLoadingRef.current = false; setSerialLoading(false); return;
+      }
       if (DEV) console.error('[Serial] OCR failed:', e);
       showToastMsg(lang === 'he' ? 'שגיאה בקריאת המספר הסידורי' : 'Failed to read serial number');
     }
