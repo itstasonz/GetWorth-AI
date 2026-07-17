@@ -1582,7 +1582,7 @@ export function ListingFlowView() {
   const {
     t, lang, rtl, result, condition, answers, setAnswers,
     listingStep, setListingStep, listingData, setListingData,
-    images, setImages,
+    images, setImages, addListingImages,
     publishing, publishListing, selectCondition, setView,
     reset, goTab, playSound, showToastMsg,
   } = useApp();
@@ -1592,27 +1592,11 @@ export function ListingFlowView() {
   const itemCategory = (result?.category || 'Other').trim();
   const categoryQuestions = getQuestionsForCategory(itemCategory, answers);
 
+  // FRONTEND-008 (Part B): ingestion (validation, compression, ordering,
+  // limits, ownership) lives in the context's addListingImages — the same
+  // contract scan captures go through. This handler only forwards files.
   const addMoreImages = (e) => {
-    const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/'));
-    const available = 6 - images.length;
-    if (files.length > available) {
-      showToastMsg(
-        available > 0
-          ? (lang === 'he' ? `ניתן להוסיף עוד ${available} תמונות בלבד (מקסימום 6)` : `Only ${available} photo${available !== 1 ? 's' : ''} left (max 6)`)
-          : (lang === 'he' ? 'הגעת למגבלת 6 תמונות' : 'Photo limit reached (max 6)'),
-        'error',
-      );
-    }
-    files.slice(0, available).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        setImages((prev) => {
-          if (prev.length >= 6) return prev;
-          return [...prev, ev.target.result];
-        });
-      };
-      reader.readAsDataURL(file);
-    });
+    addListingImages(Array.from(e.target.files || []));
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 

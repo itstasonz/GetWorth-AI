@@ -2885,6 +2885,68 @@ export function AppProvider({ children }) {
 
   // ─── PUBLISH LISTING ───
 
+  // ═══ FRONTEND-008 (Part B): unified listing-image ingestion ════════════
+  // The ONE path for photos added to a listing draft from the device
+  // ("Add More Images"). Applies the SAME canonical contract the scan
+  // pipeline applies to its captures: JPEG via canvas, max dimension
+  // 1280px, quality 0.82, re-encode skipped under 150KB raw
+  // (compressImage). Scan images arrive in `images` already compressed by
+  // runPipeline with identical settings, so after this every element of
+  // `images` satisfies one contract and nothing oversized or raw can reach
+  // publishListing. Order: results are appended in file-selection order in
+  // a single state write (the previous per-file FileReader.onload appends
+  // raced — completion order isn't selection order). Corrupt/unreadable
+  // files are skipped with a toast, never thrown. Ownership: a logout or
+  // account switch during the async read/compress must not write into the
+  // next session's draft — same FRONTEND-004 gate as every long-running op.
+  const addListingImages = useCallback(async (files) => {
+    if (!user) return;
+    const ownerId = user.id;
+    const imageFiles = (files || []).filter(f => f?.type?.startsWith('image/'));
+    if (!imageFiles.length) return;
+    const MAX = 6;
+    const available = MAX - imagesRef.current.length;
+    if (imageFiles.length > available) {
+      showToastMsg(
+        available > 0
+          ? (lang === 'he' ? `ניתן להוסיף עוד ${available} תמונות בלבד (מקסימום 6)` : `Only ${available} photo${available !== 1 ? 's' : ''} left (max 6)`)
+          : (lang === 'he' ? 'הגעת למגבלת 6 תמונות' : 'Photo limit reached (max 6)'),
+        'error',
+      );
+      if (available <= 0) return;
+    }
+    const results = await Promise.all(
+      imageFiles.slice(0, available).map(async (file) => {
+        try {
+          const dataUrl = await new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = (ev) => res(ev.target.result);
+            reader.onerror = () => rej(new Error('File read failed'));
+            reader.readAsDataURL(file);
+          });
+          return await compressImage(dataUrl, 1280, 0.82);
+        } catch (e) {
+          if (DEV) console.warn('[AddImages] file skipped:', file?.name, e?.message);
+          return null; // corrupt/unsupported — skipped, reported below
+        }
+      })
+    );
+    if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004: never write into another session's draft
+    const processed = results.filter(Boolean);
+    const failed = results.length - processed.length;
+    if (processed.length) {
+      setImages(prev => [...prev, ...processed].slice(0, MAX));
+    }
+    if (failed > 0) {
+      showToastMsg(
+        lang === 'he'
+          ? `${failed} ${failed === 1 ? 'תמונה לא נתמכת או פגומה' : 'תמונות לא נתמכות או פגומות'}`
+          : `${failed} photo${failed !== 1 ? 's' : ''} couldn't be processed`,
+        'error',
+      );
+    }
+  }, [user, lang, showToastMsg]);
+
   // FRONTEND-007 (SELL-7): synchronous single-flight lock for publishListing.
   // `publishing` state disables the button only after a re-render — a second
   // tap in the same frame re-enters the function and double-inserts. The ref
@@ -2904,6 +2966,24 @@ export function AppProvider({ children }) {
     setPublishing(true);
     setError(null);
     const ownerId = user.id; // FRONTEND-004b ownership
+    // FRONTEND-008 (Part C): storage paths created by THIS attempt — the only
+    // paths cleanup may ever touch. Pre-existing storage URLs pass through
+    // the upload map without uploading, so they can never end up here.
+    const uploadedPaths = [];
+    // Best-effort, fire-and-forget removal of this attempt's uploads after a
+    // DEFINITE failure. Never throws, never blocks, never masks the original
+    // publish error; a failed removal is logged as cleanup debt (SELL-3
+    // pattern). Callers must NOT invoke this when the insert outcome is
+    // unknown (network loss) — the row may exist and reference these files.
+    const cleanupUploads = (reason) => {
+      if (!uploadedPaths.length) return;
+      supabase.storage.from('listings').remove(uploadedPaths).then(({ error: rmErr }) => {
+        if (rmErr) {
+          console.warn('[Publish] upload cleanup failed (cleanup debt):', rmErr.message);
+          reportError(rmErr, { stage: 'publish_upload_cleanup', reason, count: uploadedPaths.length });
+        }
+      }).catch(() => {});
+    };
     try {
       const uploadTs = Date.now();
       const uploadResults = await Promise.all(
@@ -2925,12 +3005,16 @@ export function AppProvider({ children }) {
               if (DEV) console.warn(`[Publish] Skipping image ${i}: too large (${blob.size} bytes)`);
               return null;
             }
-            const fileName = `${user.id}/${uploadTs}-${i}.jpg`;
+            // FRONTEND-008 (Part C): random suffix makes the path collision-safe
+            // — with upsert:false, two attempts sharing a millisecond (e.g. a
+            // fast retry) previously collided and failed the second upload.
+            const fileName = `${user.id}/${uploadTs}-${i}-${Math.random().toString(36).slice(2, 8)}.jpg`;
             const { error: uploadError } = await supabase.storage.from('listings').upload(fileName, blob, { contentType: 'image/jpeg', upsert: false });
             if (uploadError) {
               if (DEV) console.warn(`[Publish] Upload failed for image ${i}:`, uploadError.message);
               return null;
             }
+            uploadedPaths.push(fileName);
             const { data: { publicUrl } } = supabase.storage.from('listings').getPublicUrl(fileName);
             return publicUrl;
           } catch (err) {
@@ -2939,11 +3023,22 @@ export function AppProvider({ children }) {
           }
         })
       );
-      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b (finally still releases `publishing`)
-      let imageUrls = uploadResults.filter(Boolean);
+      if (currentUserIdRef.current !== ownerId) { // FRONTEND-004b (finally still releases `publishing`)
+        cleanupUploads('logout_during_publish'); // orphans from a session that ended — best-effort
+        return;
+      }
+      const imageUrls = uploadResults.filter(Boolean);
+      // FRONTEND-008 (Part A): a listing row may contain ONLY durable Storage
+      // URLs (fresh uploads or the storage-prefix passthrough above). The old
+      // fallback silently inserted the raw local data: URLs when every upload
+      // failed — multi-MB base64 in the row, images that exist on no server.
+      // Now: no durable image, no listing. The thrown error is recoverable —
+      // the draft (images/fields) is untouched, finally releases the locks,
+      // and tapping Publish again retries the uploads from a known state.
       if (imageUrls.length === 0) {
-        imageUrls = images.length > 0 ? images : [];
-        if (imageUrls.length === 0) throw new Error(lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required');
+        throw new Error(images.length === 0
+          ? (lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required')
+          : (lang === 'he' ? 'העלאת התמונות נכשלה. בדוק את החיבור ונסה שוב.' : 'Image upload failed. Check your connection and try again.'));
       }
       const VALID_CATEGORIES = ['Electronics', 'Furniture', 'Vehicles', 'Watches', 'Clothing', 'Sports', 'Beauty', 'Books', 'Toys', 'Home', 'Tools', 'Music', 'Food', 'Other'];
       const rawCategory = (result?.category || 'Other').trim();
@@ -2972,9 +3067,22 @@ export function AppProvider({ children }) {
         }),
       };
       const insertResult = await supabase.from('listings').insert(listingRow).select();
-      if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b
+      if (currentUserIdRef.current !== ownerId) { // FRONTEND-004b
+        // Cleanup only if the server DEFINITELY rejected the row (postgres
+        // error code present). On success the row references these files; on
+        // ambiguous network loss the row may exist — leave the files alone.
+        if (insertResult.error?.code) cleanupUploads('logout_after_insert_rejected');
+        return;
+      }
       if (insertResult.error) {
         console.error('[Publish] Insert failed:', insertResult.error.message);
+        // FRONTEND-008 (Part C): a definite server-side rejection (postgres
+        // error code) means no row exists — remove this attempt's uploads.
+        // A network-level failure has NO code and an unknowable outcome: the
+        // insert may have committed with the response lost, so deleting the
+        // files could break a live listing. Those files stay (bounded orphan
+        // debt); the duplicate-retry question is the Part D idempotency item.
+        if (insertResult.error.code) cleanupUploads('insert_rejected');
         throw insertResult.error;
       }
 
@@ -3003,6 +3111,19 @@ export function AppProvider({ children }) {
       await loadListings(true);
       setListingStep(3);
       showToastMsg(t.published);
+      // FRONTEND-008 (Part A): partial-upload contract — the listing publishes
+      // with the photos that made it to Storage (supplementary photos should
+      // not sink a sale on a flaky mobile network), but never silently: the
+      // seller is told how many were dropped and can edit/re-add later.
+      const dropped = images.length - imageUrls.length;
+      if (dropped > 0) {
+        showToastMsg(
+          lang === 'he'
+            ? `${dropped} ${dropped === 1 ? 'תמונה לא הועלתה' : 'תמונות לא הועלו'} — המודעה פורסמה עם ${imageUrls.length}`
+            : `${dropped} photo${dropped !== 1 ? 's' : ''} failed to upload — published with ${imageUrls.length}`,
+          'error',
+        );
+      }
       playSound('coin');
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b — no error banner post-logout
@@ -3616,7 +3737,7 @@ export function AppProvider({ children }) {
     priceRange, setPriceRange, sort, setSort,
     filterCondition, setFilterCondition,
     showFilters, setShowFilters,
-    images, setImages, result, setResult,
+    images, setImages, addListingImages, result, setResult,
     listingStep, setListingStep, condition, setCondition,
     answers, setAnswers, listingData, setListingData,
     publishing, publishListing, startListing, selectCondition,
