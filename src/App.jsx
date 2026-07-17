@@ -3,6 +3,7 @@ import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, A
 import { AppProvider, useApp } from './contexts/AppContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
+import NotificationsPanel from './components/NotificationsPanel';
 import { Card, Btn, Toast, FadeIn, SlideUp, ScaleIn, ScreenTransition } from './components/ui';
 import { formatPrice, getSellerBadgeStyle, normalizeIsraeliPhone } from './lib/utils';
 
@@ -266,6 +267,7 @@ function AppShell() {
     // Misc
     myListings, unreadCount, notifUnreadCount, fileRef, orders,
     cameraBlocked, setCameraBlocked,
+    showNotifications, setShowNotifications,
   } = useApp();
 
   const { hasUpdate, updating, applyUpdate, dismissUpdate } = usePWAUpdate();
@@ -344,6 +346,9 @@ function AppShell() {
 
       {/* ── Message Notification Banner (renders above everything) ── */}
       <MessageNotificationBanner />
+
+      {/* ── Notifications panel (bell overlay — current page stays visible) ── */}
+      <NotificationsPanel />
 
       {/* ── PWA Update Banner — only shown when a new version is waiting ── */}
       <UpdateBanner
@@ -551,6 +556,7 @@ function AppShell() {
                 onClick={() => setLang(lang === 'en' ? 'he' : 'en')}
                 className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A]"
                 title={lang === 'en' ? 'עברית' : 'English'}
+                aria-label={lang === 'en' ? 'החלף לעברית' : 'Switch to English'}
               >
                 <Globe className="w-5 h-5" style={{ color: '#BBC9C7' }} />
               </button>
@@ -559,26 +565,33 @@ function AppShell() {
                 onClick={() => setSoundEnabled(!soundEnabled)}
                 className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A]"
                 title={soundEnabled ? (lang === 'he' ? 'השתק' : 'Mute') : (lang === 'he' ? 'הפעל צליל' : 'Sound on')}
+                aria-label={soundEnabled ? (lang === 'he' ? 'השתק' : 'Mute') : (lang === 'he' ? 'הפעל צליל' : 'Sound on')}
               >
                 {soundEnabled
                   ? <Volume2 className="w-5 h-5" style={{ color: '#BBC9C7' }} />
                   : <VolumeX className="w-5 h-5" style={{ color: '#BBC9C7' }} />
                 }
               </button>
-              {/* Notifications bell */}
+              {/* Notifications bell — FRONTEND-009: opens the notification
+                  panel OVER the current page. It previously navigated to
+                  Profile, which no user expects from a bell. */}
               <button
-                onClick={() => goTab('profile')}
+                onClick={() => setShowNotifications(true)}
                 className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A] relative"
                 title={lang === 'he' ? 'התראות' : 'Notifications'}
+                aria-label={lang === 'he' ? 'התראות' : 'Notifications'}
               >
                 <Bell className="w-5 h-5" style={{ color: '#BBC9C7' }} />
                 {notifUnreadCount > 0 && (
-                  <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                  <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-0.5 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold">
+                    {notifUnreadCount > 9 ? '9+' : notifUnreadCount}
+                  </span>
                 )}
               </button>
               {/* Avatar */}
               <button
                 onClick={() => goTab('profile')}
+                aria-label={lang === 'he' ? 'פרופיל' : 'Profile'}
                 className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center"
                 style={{
                   background: '#2A2A2A',
@@ -686,9 +699,9 @@ function AppShell() {
                     {n.id === 'messages' && unreadCount > 0 && (
                       <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-red-500 to-pink-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{unreadCount}</span>
                     )}
-                    {n.id === 'profile' && notifUnreadCount > 0 && !active && (
-                      <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-gradient-to-r from-amber-500 to-orange-500 text-[9px] flex items-center justify-center font-bold animate-pulse">{notifUnreadCount}</span>
-                    )}
+                    {/* FRONTEND-009: the notification count no longer badges the
+                        Profile tab — tapping Profile showed nothing notification-
+                        related. The bell (which opens the panel) owns that count. */}
                   </div>
                   <span
                     className="text-[10px] tracking-wide"

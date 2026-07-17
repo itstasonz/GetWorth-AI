@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { setNavDirection } from '../lib/urlSync';
 import { Card, Btn, Badge, FadeIn, SlideUp, InputField, EmptyState, haptic } from '../components/ui';
 import { formatPrice, timeAgo } from '../lib/utils';
+import { notifIconFor, resolveNotificationTarget } from '../lib/notifications';
 
 // ═══════════════════════════════════════════════════════
 // ORDER STATUS CONFIG
@@ -787,37 +788,23 @@ export function OrderDetailView() {
 // NOTIFICATIONS INBOX
 // ═══════════════════════════════════════════════════════
 export function NotificationsView() {
-  const { lang, user, setView, orderNotifications, notifUnreadCount, loadNotifications, markNotifRead, markAllNotifsRead, loadOrders, viewOrder, fetchOrderById } = useApp();
+  const { lang, user, setView, goTab, orderNotifications, notifUnreadCount, notifLoading, notifError, loadNotifications, markNotifRead, markAllNotifsRead, loadOrders, viewOrder, fetchOrderById, showToastMsg } = useApp();
   useEffect(() => { loadNotifications(); }, [loadNotifications]);
 
   if (!user) return null;
 
-  const ICONS = {
-    ORDER_REQUESTED: { icon: ShoppingBag, color: 'text-amber-400' },
-    ORDER_ACCEPTED:  { icon: Check,        color: 'text-emerald-400' },
-    ORDER_DECLINED:  { icon: ThumbsDown,   color: 'text-red-400' },
-    ORDER_READY:     { icon: MapPin,        color: 'text-[#6FEEE1]' },
-    ORDER_RECEIVED:  { icon: Package,       color: 'text-emerald-400' },
-    ORDER_COMPLETED: { icon: CheckCircle,   color: 'text-emerald-400' },
-    ORDER_CANCELLED: { icon: XCircle,       color: 'text-red-400' },
-    REVIEW_RECEIVED: { icon: Star,          color: 'text-yellow-400' },
-  };
-
+  // FRONTEND-009: type icons + tap destinations come from lib/notifications —
+  // the bell panel and this view can never disagree. REVIEW_RECEIVED used to
+  // dead-end at the orders list; it now opens the profile (where reviews live).
   const handleTap = async (notif) => {
-    if (!notif.read_at) await markNotifRead(notif.id);
-    const oid = notif.data?.order_id;
-    if (oid) {
-      // Fetch the specific order by ID (avoids stale closure on orders array)
-      const order = await fetchOrderById(oid);
-      if (order) {
-        viewOrder(order);
-      } else {
-        // Order not found — go to orders list
-        await loadOrders();
-        setView('orders');
-      }
-      return;
+    if (!notif.read_at) markNotifRead(notif.id);
+    const target = await resolveNotificationTarget(notif, { fetchOrderById });
+    if (target.kind === 'order') { viewOrder(target.order); return; }
+    if (target.kind === 'reviews') { goTab('profile'); return; }
+    if (target.kind === 'missing') {
+      showToastMsg(lang === 'he' ? 'ההזמנה אינה זמינה עוד' : 'This order is no longer available');
     }
+    await loadOrders();
     setView('orders');
   };
 
@@ -831,12 +818,22 @@ export function NotificationsView() {
         </div>
       </FadeIn>
 
-      {orderNotifications.length === 0 ? (
+      {notifLoading && orderNotifications.length === 0 ? (
+        <FadeIn><div className="text-center py-16"><Loader2 className="w-6 h-6 animate-spin mx-auto" style={{ color: '#6FEEE1' }} /></div></FadeIn>
+      ) : notifError && orderNotifications.length === 0 ? (
+        /* FRONTEND-009: failed load shows error+retry — never a false empty */
+        <FadeIn>
+          <div className="text-center py-16 space-y-3">
+            <p className="text-sm text-slate-300">{lang === 'he' ? 'לא ניתן לטעון התראות' : "Couldn't load notifications"}</p>
+            <button onClick={loadNotifications} className="px-4 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-colors">{lang === 'he' ? 'נסה שוב' : 'Retry'}</button>
+          </div>
+        </FadeIn>
+      ) : orderNotifications.length === 0 ? (
         <FadeIn><div className="text-center py-16 space-y-3"><BellOff className="w-12 h-12 text-slate-600 mx-auto" /><p className="text-slate-400">{lang === 'he' ? 'אין התראות' : 'No notifications'}</p></div></FadeIn>
       ) : (
         <div className="space-y-2">
           {orderNotifications.map(notif => {
-            const c = ICONS[notif.type] || { icon: Bell, color: 'text-slate-400' };
+            const c = notifIconFor(notif.type);
             const Icon = c.icon;
             const unread = !notif.read_at;
             return (

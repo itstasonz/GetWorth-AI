@@ -395,6 +395,12 @@ export function AppProvider({ children }) {
   // Notifications state (order events)
   const [orderNotifications, setOrderNotifications] = useState([]);
   const [notifUnreadCount, setNotifUnreadCount] = useState(0);
+  // FRONTEND-009: bell panel overlay (current page stays visible underneath).
+  // Loading/error are surfaced honestly — a failed load must never render as
+  // an empty "no notifications" state.
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [notifLoading, setNotifLoading] = useState(false);
+  const [notifError, setNotifError] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
 
   // Sound
@@ -599,6 +605,7 @@ export function AppProvider({ children }) {
     setMessages([]); setMessagesLoading(false); setNewMessage('');
     setOrders([]); setActiveOrder(null); setActiveOrderId(null); setOrdersLoading(false);
     setOrderNotifications([]); setNotifUnreadCount(0);
+    setShowNotifications(false); setNotifLoading(false); setNotifError(false);
     setValuations([]); setValuationsLoading(false);
     setResult(null); setImages([]);
     setSerialData(null); setSerialLoading(false);
@@ -803,6 +810,8 @@ export function AppProvider({ children }) {
   const loadNotifications = useCallback(async () => {
     if (!user) return;
     const ownerId = user.id;
+    setNotifLoading(true);
+    setNotifError(false);
     try {
       const { data, error } = await supabase
         .from('notifications')
@@ -815,7 +824,11 @@ export function AppProvider({ children }) {
       setOrderNotifications(data || []);
       setNotifUnreadCount((data || []).filter(n => !n.read_at).length);
     } catch (e) {
+      if (currentUserIdRef.current !== ownerId) return;
       if (DEV) console.warn('[Notifs] Load error:', e.message);
+      setNotifError(true); // FRONTEND-009: panel shows error+retry, never a false empty
+    } finally {
+      if (currentUserIdRef.current === ownerId) setNotifLoading(false);
     }
   }, [user]);
 
@@ -3744,6 +3757,7 @@ export function AppProvider({ children }) {
     showSignInModal, setShowSignInModal: dismissSignInModal,
     showCheckout, setShowCheckout,
     showContact, setShowContact,
+    showNotifications, setShowNotifications,
     user,
   });
 
@@ -3776,7 +3790,8 @@ export function AppProvider({ children }) {
     showCheckout, setShowCheckout, openCheckout,
     loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder, fetchOrderById,
     // Order notifications
-    orderNotifications, notifUnreadCount,
+    orderNotifications, notifUnreadCount, notifLoading, notifError,
+    showNotifications, setShowNotifications,
     loadNotifications, markNotifRead, markAllNotifsRead,
     // Reviews
     sellerReviews, reviewsLoading, sellerReviewsError, sellerReviewsTotal, submitReview, loadSellerReviews,

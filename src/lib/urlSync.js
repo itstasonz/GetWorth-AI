@@ -97,7 +97,8 @@ export function parseUrlToState(pathname) {
 }
 
 // ── Modal priority helper ─────────────────────────────────────────────────────
-function getTopModal({ showSignInModal, showCheckout, showContact }) {
+function getTopModal({ showSignInModal, showCheckout, showContact, showNotifications }) {
+  if (showNotifications) return 'notifications'; // FRONTEND-009: bell panel
   if (showSignInModal) return 'signIn';
   if (showCheckout)    return 'checkout';
   if (showContact)     return 'contact';
@@ -116,6 +117,7 @@ export function useUrlSync({
   showSignInModal, setShowSignInModal,
   showCheckout,    setShowCheckout,
   showContact,     setShowContact,
+  showNotifications, setShowNotifications,
   user,
 }) {
   // Guards & previous-value tracking
@@ -238,12 +240,13 @@ export function useUrlSync({
       // ── Modal interception ───────────────────────────────────────────────
       // Any open modal/sheet absorbs the back press. Re-push current URL so
       // the browser position doesn't actually change, then close the modal.
-      const topModal = getTopModal({ showSignInModal, showCheckout, showContact });
+      const topModal = getTopModal({ showSignInModal, showCheckout, showContact, showNotifications });
       if (topModal) {
         const currentUrl =
           buildUrlFromState({ view, selected, activeChat, activeOrder }) ??
           window.location.pathname;
         history.pushState({ view, tab }, '', currentUrl);
+        if (topModal === 'notifications') setShowNotifications(false);
         if (topModal === 'signIn')   setShowSignInModal(false);
         if (topModal === 'checkout') setShowCheckout(false);
         if (topModal === 'contact')  setShowContact(false);
@@ -288,10 +291,10 @@ export function useUrlSync({
   }, [
     // All closure values that the handler reads
     view, tab, selected, activeChat, activeOrder,
-    showSignInModal, showCheckout, showContact,
+    showSignInModal, showCheckout, showContact, showNotifications,
     user,
     stopCamera, cancelPipeline,
     setView, setTab, setSelected, setActiveChat, setActiveOrder,
-    setShowSignInModal, setShowCheckout, setShowContact,
+    setShowSignInModal, setShowCheckout, setShowContact, setShowNotifications,
   ]);
 }
