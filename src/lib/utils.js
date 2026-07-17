@@ -1,4 +1,4 @@
-import T from './translations';
+import T from './translations.js';
 
 // [CRITICAL FIX #4] Sanitize search input to prevent PostgREST filter injection
 // Strips characters that could manipulate .ilike filters: %, _, (, ), ., ,

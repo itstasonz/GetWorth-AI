@@ -220,7 +220,7 @@ export function ProfileView() {
     requestVerification, verificationUploading,
     loadOrders,
     valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
-    myReviews: myReviewsRaw, loadMyReviews, myReviewsLoading, myReviewsError,
+    myReviews: myReviewsRaw, loadMyReviews, myReviewsLoading, myReviewsError, myReviewsTotal,
   } = useApp();
 
   const myReviews = myReviewsRaw || [];
@@ -657,7 +657,7 @@ export function ProfileView() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-semibold" style={{ color: STITCH.onSurface }}>
-                              {review.reviewer?.full_name || (lang === 'he' ? 'משתמש' : 'User')}
+                              {review.reviewer?.full_name || (lang === 'he' ? 'משתמש לא זמין' : 'User unavailable')}
                             </span>
                             <div className="flex items-center gap-0.5">
                               {[1,2,3,4,5].map(s => (
@@ -665,6 +665,15 @@ export function ProfileView() {
                                   style={{ color: s <= review.rating ? '#FBBF24' : STITCH.surfaceContainerHighest }} />
                               ))}
                             </div>
+                            {/* Direction: reviewer_role='buyer' → you were reviewed as the seller */}
+                            {(review.reviewer_role === 'buyer' || review.reviewer_role === 'seller') && (
+                              <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded"
+                                style={{ background: 'rgba(255,255,255,0.05)', color: STITCH.onSurfaceVariant }}>
+                                {review.reviewer_role === 'buyer'
+                                  ? (lang === 'he' ? 'כמוכר' : 'As seller')
+                                  : (lang === 'he' ? 'כקונה' : 'As buyer')}
+                              </span>
+                            )}
                           </div>
                           {review.comment && (
                             <p className="text-xs mt-1" style={{ color: STITCH.onSurfaceVariant }}>{review.comment}</p>
@@ -674,7 +683,9 @@ export function ProfileView() {
                               <img src={review.listing.images[0]} alt="" className="w-4 h-4 rounded object-cover" />
                             )}
                             <span className="text-[10px]" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
-                              {lang === 'he' && review.listing?.title_hebrew ? review.listing.title_hebrew : (review.listing?.title || '')}
+                              {lang === 'he'
+                                ? (review.listing?.title_hebrew || review.listing?.title || 'המוצר אינו זמין')
+                                : (review.listing?.title || 'Listing unavailable')}
                             </span>
                             <span className="text-[10px]" style={{ color: STITCH.onSurfaceVariant, opacity: 0.4 }}>•</span>
                             <span className="text-[10px]" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
@@ -685,6 +696,13 @@ export function ProfileView() {
                       </div>
                     </div>
                   ))
+                )}
+                {myReviewsTotal > myReviews.length && (
+                  <p className="text-[11px] text-center" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
+                    {lang === 'he'
+                      ? `מציג ${myReviews.length} מתוך ${myReviewsTotal} ביקורות`
+                      : `Showing ${myReviews.length} of ${myReviewsTotal} reviews`}
+                  </p>
                 )}
               </div>
             )}

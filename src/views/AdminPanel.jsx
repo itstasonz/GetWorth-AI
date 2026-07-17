@@ -8,6 +8,7 @@ import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { formatPrice, timeAgo } from '../lib/utils';
+import { fetchAllReviews, fetchReviewsFor } from '../lib/reviews';
 
 // ─── Admin Tabs ───
 const TABS = [
@@ -205,13 +206,10 @@ export default function AdminPanel() {
     setLoading(true);
     setLoadError(null);
     try {
-      const { data, error } = await supabase
-        .from('reviews')
-        .select('*, reviewer:profiles!reviewer_id(id, full_name, avatar_url), reviewed:profiles!seller_id(id, full_name), listing:listings(id, title, title_hebrew, images)')
-        .order('created_at', { ascending: false })
-        .limit(50);
-      if (error) throw error;
-      setAllReviews(data || []);
+      // FRONTEND-008C: authoritative path — the old profiles!reviewer_id
+      // embed 400'd in production (no reviews→profiles FK exists).
+      const { rows } = await fetchAllReviews({ limit: 50 });
+      setAllReviews(rows);
     } catch (e) {
       console.error('[Admin] Reviews error:', e);
       setLoadError('reviews');
@@ -505,11 +503,11 @@ function AdminUserCard({ u, lang }) {
         const [listings, orders, reviews] = await Promise.all([
           supabase.from('listings').select('id, status', { count: 'exact' }).eq('seller_id', u.id).limit(500),
           supabase.from('orders').select('id, status, buyer_id', { count: 'exact' }).or(`buyer_id.eq.${u.id},seller_id.eq.${u.id}`).limit(500),
-          supabase.from('reviews')
-            .select('id, rating, comment, created_at, reviewer:profiles!reviewer_id(full_name)')
-            .eq('seller_id', u.id).order('created_at', { ascending: false }).limit(3),
+          // FRONTEND-008C: authoritative review path (no reviews→profiles FK
+          // exists — the old embed 400'd in production)
+          fetchReviewsFor(u.id, { limit: 3 }),
         ]);
-        if (listings.error || orders.error || reviews.error) throw (listings.error || orders.error || reviews.error);
+        if (listings.error || orders.error) throw (listings.error || orders.error);
         const ls = listings.data || [];
         const os = orders.data || [];
         setDetail({
@@ -517,7 +515,7 @@ function AdminUserCard({ u, lang }) {
           listingsActive: ls.filter(l => l.status === 'active').length,
           ordersTotal: orders.count ?? os.length,
           ordersAsBuyer: os.filter(o => o.buyer_id === u.id).length,
-          recentReviews: reviews.data || [],
+          recentReviews: reviews.rows,
         });
       } catch (e) {
         console.error('[Admin] User detail error:', e);

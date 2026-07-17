@@ -405,7 +405,9 @@ export function DetailView() {
                   )}
                   {selected.seller.review_count >= 3 && (
                     <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(251,191,36,0.1)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.2)' }}>
-                      <Star className="w-2.5 h-2.5 fill-current" />{selected.seller.review_count} {lang === 'he' ? 'קונים דירגו' : 'buyers rated'}
+                      {/* FRONTEND-008C: review_count includes seller→buyer reviews,
+                          so "buyers rated" overstated — label as reviews */}
+                      <Star className="w-2.5 h-2.5 fill-current" />{selected.seller.review_count} {lang === 'he' ? 'ביקורות' : 'reviews'}
                     </span>
                   )}
                 </div>
@@ -564,7 +566,7 @@ export function DetailView() {
 
 // ─── Seller Profile View ───
 export function SellerProfileView() {
-  const { lang, rtl, sellerProfile, sellerListings, loadingSeller, setView, tab, savedIds, heartAnim, toggleSave, viewItem, sellerReviews, reviewsLoading, loadSellerReviews } = useApp();
+  const { lang, rtl, sellerProfile, sellerListings, loadingSeller, setView, tab, savedIds, heartAnim, toggleSave, viewItem, sellerReviews, reviewsLoading, sellerReviewsError, sellerReviewsTotal, loadSellerReviews } = useApp();
 
   // Load reviews when seller profile loads
   React.useEffect(() => {
@@ -659,6 +661,20 @@ export function SellerProfileView() {
             <p className="text-xs text-slate-500 mt-2">{lang === 'he' ? 'טוען ביקורות...' : 'Loading reviews...'}</p>
           </Card>
         </FadeIn>
+      ) : sellerReviewsError ? (
+        /* FRONTEND-008C: a failed query is an ERROR with retry — never
+           disguised as "No reviews yet" while the header shows stars. */
+        <FadeIn delay={100}>
+          <Card className="p-5 text-center">
+            <p className="text-sm font-medium text-slate-300">{lang === 'he' ? 'לא ניתן לטעון ביקורות' : "Couldn't load reviews"}</p>
+            <button
+              onClick={() => loadSellerReviews(sellerProfile.id)}
+              className="mt-2 px-4 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-colors"
+            >
+              {lang === 'he' ? 'נסה שוב' : 'Retry'}
+            </button>
+          </Card>
+        </FadeIn>
       ) : sellerReviews.length === 0 ? (
         <FadeIn delay={100}>
           <Card className="p-5 text-center">
@@ -675,8 +691,17 @@ export function SellerProfileView() {
                 <Star className="w-5 h-5 text-yellow-400" />
                 {lang === 'he' ? 'ביקורות' : 'Reviews'}
               </h3>
-              <Badge>{sellerProfile.review_count > sellerReviews.length ? sellerProfile.review_count : sellerReviews.length}</Badge>
+              {/* FRONTEND-008C: count = authoritative DB total from the same
+                  query that loaded the rows (never a diverging aggregate). */}
+              <Badge>{sellerReviewsTotal || sellerReviews.length}</Badge>
             </div>
+            {sellerReviewsTotal > sellerReviews.length && (
+              <p className="text-[11px] text-slate-500">
+                {lang === 'he'
+                  ? `מציג ${sellerReviews.length} מתוך ${sellerReviewsTotal} ביקורות`
+                  : `Showing ${sellerReviews.length} of ${sellerReviewsTotal} reviews`}
+              </p>
+            )}
             {sellerReviews.map((review) => (
               <Card key={review.id} className="p-4">
                 <div className="flex items-start gap-3">
@@ -689,7 +714,7 @@ export function SellerProfileView() {
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-semibold">{review.reviewer?.full_name || (lang === 'he' ? 'משתמש' : 'User')}</span>
+                      <span className="text-sm font-semibold">{review.reviewer?.full_name || (lang === 'he' ? 'משתמש לא זמין' : 'User unavailable')}</span>
                       <div className="flex items-center gap-0.5">
                         {[1, 2, 3, 4, 5].map((s) => (
                           <Star key={s} className={`w-3 h-3 ${s <= review.rating ? 'text-yellow-400 fill-current' : 'text-slate-600'}`} />
@@ -713,7 +738,11 @@ export function SellerProfileView() {
                         <img src={review.listing.images[0]} alt="" className="w-5 h-5 rounded object-cover" />
                       )}
                       <span className="text-[10px] text-slate-500">
-                        {lang === 'he' && review.listing?.title_hebrew ? review.listing.title_hebrew : (review.listing?.title || '')}
+                        {/* FRONTEND-008C: honest fallback — sold/removed listings are
+                            hidden by RLS, but the review itself must still render */}
+                        {lang === 'he'
+                          ? (review.listing?.title_hebrew || review.listing?.title || 'המוצר אינו זמין')
+                          : (review.listing?.title || 'Listing unavailable')}
                       </span>
                       <span className="text-[10px] text-slate-600">•</span>
                       <span className="text-[10px] text-slate-500">{timeAgo(review.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })}</span>

@@ -7,6 +7,7 @@ import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
+import { fetchReviewsFor } from '../lib/reviews';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -477,7 +478,7 @@ export function AppProvider({ children }) {
           supabase.auth.getSession(),
           supabase
             .from('listings')
-            .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+            .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
             .eq('status', 'active')
             .order('created_at', { ascending: false })
             .limit(PAGE_SIZE),
@@ -604,7 +605,8 @@ export function AppProvider({ children }) {
     setListingData({ title: '', desc: '', price: 0, phone: '', location: '' });
     setAnswers({}); setCondition(null); setListingStep(0);
     setSellerReviews([]); setSellerProfile(null); setSellerListings([]);
-    setMyReviews([]); setMyReviewsLoading(false); setMyReviewsError(false);
+    setSellerReviewsError(false); setSellerReviewsTotal(0);
+    setMyReviews([]); setMyReviewsLoading(false); setMyReviewsError(false); setMyReviewsTotal(0);
     // 3) Session-transient UI (private overlays, selections, banners, drafts).
     setSelected(null); setActiveChat(null); setMsgNotification(null);
     setShowCheckout(false); setShowContact(false);
@@ -933,7 +935,7 @@ export function AppProvider({ children }) {
     const offset = page * PAGE_SIZE;
     let query = supabase
       .from('listings')
-      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -969,7 +971,7 @@ export function AppProvider({ children }) {
     const offset = nextPage * PAGE_SIZE;
     let query = supabase
       .from('listings')
-      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -1043,7 +1045,7 @@ export function AppProvider({ children }) {
     const [{ data: profileData, error: profileErr }, { data: listingsData, error: listingsErr }] = await Promise.all([
       supabase.from('profiles').select('id, full_name, avatar_url, is_verified, rating, review_count, badge, total_sales, reputation_points, response_rate, created_at').eq('id', sellerId).single(),
       supabase.from('listings')
-        .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+        .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
         .eq('seller_id', sellerId).eq('status', 'active')
         .order('created_at', { ascending: false })
     ]);
@@ -3362,6 +3364,8 @@ export function AppProvider({ children }) {
 
   const [sellerReviews, setSellerReviews] = useState([]);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [sellerReviewsError, setSellerReviewsError] = useState(false);
+  const [sellerReviewsTotal, setSellerReviewsTotal] = useState(0);
 
   // FRONTEND-005 (PROF-1): reviews RECEIVED by the current user — the same
   // concept as profile.rating/review_count (reviews.seller_id = reviewed
@@ -3370,6 +3374,7 @@ export function AppProvider({ children }) {
   const [myReviews, setMyReviews] = useState([]);
   const [myReviewsLoading, setMyReviewsLoading] = useState(false);
   const [myReviewsError, setMyReviewsError] = useState(false);
+  const [myReviewsTotal, setMyReviewsTotal] = useState(0);
 
   const loadMyReviews = useCallback(async () => {
     if (!user) return;
@@ -3377,15 +3382,13 @@ export function AppProvider({ children }) {
     setMyReviewsLoading(true);
     setMyReviewsError(false);
     try {
-      const { data, error: err } = await supabase
-        .from('reviews')
-        .select('*, reviewer:profiles!reviewer_id(id, full_name, avatar_url), listing:listings(id, title, title_hebrew, images)')
-        .eq('seller_id', ownerId)
-        .order('created_at', { ascending: false })
-        .limit(30);
-      if (err) throw err;
+      // FRONTEND-008C: authoritative path — base rows first, optional
+      // enrichment after. The old profiles!reviewer_id embed 400'd in
+      // production (no reviews→profiles FK exists).
+      const { rows, total } = await fetchReviewsFor(ownerId, { limit: 30 });
       if (currentUserIdRef.current !== ownerId) return;
-      setMyReviews(data || []);
+      setMyReviews(rows);
+      setMyReviewsTotal(total);
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) return;
       if (DEV) console.warn('[MyReviews] Load error:', e.message);
@@ -3474,24 +3477,30 @@ export function AppProvider({ children }) {
     }
   }, [user, lang, showToastMsg, playSound]);
 
-  // Load reviews for a seller
+  // Load reviews RECEIVED by a viewed profile (public seller profile).
+  // FRONTEND-008C: authoritative path (see lib/reviews.js). A failed base
+  // query sets an ERROR state — never a false "No reviews yet". A stale
+  // response (user already navigated to another seller) is discarded.
+  const sellerReviewsReqRef = useRef(0);
   const loadSellerReviews = useCallback(async (sellerId) => {
     if (!sellerId) return;
+    const req = ++sellerReviewsReqRef.current;
     setReviewsLoading(true);
+    setSellerReviewsError(false);
     try {
-      const { data, error: err } = await supabase
-        .from('reviews')
-        .select('*, reviewer:profiles!reviewer_id(id, full_name, avatar_url), listing:listings(id, title, title_hebrew, images)')
-        .eq('seller_id', sellerId)
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (err) throw err;
-      setSellerReviews(data || []);
+      const { rows, total } = await fetchReviewsFor(sellerId, { limit: 20 });
+      if (sellerReviewsReqRef.current !== req) return; // stale — newer request owns the state
+      setSellerReviews(rows);
+      setSellerReviewsTotal(total);
     } catch (e) {
+      if (sellerReviewsReqRef.current !== req) return;
       console.error('[Reviews] Load error:', e);
       setSellerReviews([]);
+      setSellerReviewsTotal(0);
+      setSellerReviewsError(true);
+    } finally {
+      if (sellerReviewsReqRef.current === req) setReviewsLoading(false);
     }
-    setReviewsLoading(false);
   }, []);
 
   // ─── NAVIGATION ────────────────────────────────────
@@ -3575,7 +3584,7 @@ export function AppProvider({ children }) {
     try {
       const [{ data: listing }, { data: existingOrders }] = await Promise.all([
         supabase.from('listings')
-          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
           .eq('id', listingId).maybeSingle(),
         supabase.from('orders').select('id')
           .eq('listing_id', listingId).eq('buyer_id', forUserId)
@@ -3752,8 +3761,8 @@ export function AppProvider({ children }) {
     orderNotifications, notifUnreadCount,
     loadNotifications, markNotifRead, markAllNotifsRead,
     // Reviews
-    sellerReviews, reviewsLoading, submitReview, loadSellerReviews,
-    myReviews, myReviewsLoading, myReviewsError, loadMyReviews,
+    sellerReviews, reviewsLoading, sellerReviewsError, sellerReviewsTotal, submitReview, loadSellerReviews,
+    myReviews, myReviewsLoading, myReviewsError, myReviewsTotal, loadMyReviews,
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline, scanCooldownUntil,
