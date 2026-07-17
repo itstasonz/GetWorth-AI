@@ -261,7 +261,7 @@ function AppShell() {
     error, setError, toasts, dismissToast,
     soundEnabled, setSoundEnabled,
     // Modals
-    showSignInModal, setShowSignInModal, signInAction,
+    showSignInModal, setShowSignInModal, signInAction, dismissSignInModal,
     showContact, setShowContact, selected, startConversation,
     // Misc
     myListings, unreadCount, notifUnreadCount, fileRef, orders,
@@ -388,9 +388,10 @@ function AppShell() {
                 <User className="w-10 h-10" style={{ color: '#6FEEE1' }} />
               </div>
               <h3 className="text-2xl font-bold">{t.signInReq}</h3>
-              <p className="text-slate-400">{signInAction === 'save' ? t.signInSave : signInAction === 'contact' ? t.signInContact : t.signInList}</p>
+              <p className="text-slate-400">{signInAction === 'save' ? t.signInSave : signInAction === 'contact' ? t.signInContact : signInAction === 'buy' ? t.signInBuy : t.signInList}</p>
               <div className="flex gap-3 pt-2">
-                <Btn className="flex-1" onClick={() => setShowSignInModal(false)}>{t.cancel}</Btn>
+                {/* MKT-3: cancel clears the pending buy intent, not just the modal */}
+                <Btn className="flex-1" onClick={dismissSignInModal}>{t.cancel}</Btn>
                 <Btn primary className="flex-1" onClick={() => { setShowSignInModal(false); goTab('profile'); }}>{t.signIn}</Btn>
               </div>
             </Card>

@@ -11,6 +11,54 @@ import { recordObservation, OBS } from '../lib/observations';
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+// ═══ FRONTEND-007A (MKT-3): pending buy intent — sessionStorage-backed ═════
+// A signed-out Buy tap stores an intent so the flow can resume after sign-in.
+// OAuth (Google etc.) performs a FULL-PAGE redirect, so the intent must
+// survive a document reload: sessionStorage does (same tab, across
+// navigations and cross-origin round-trips) and dies with the tab — exactly
+// the lifetime a "come right back" intent should have. localStorage/IDB are
+// deliberately NOT used: the intent must never outlive the browser session.
+//
+// SINGLE SOURCE OF TRUTH: these four helpers are the only accessors. Every
+// mutation updates sessionStorage and the in-memory fallback in the same
+// synchronous call, so the two can never drift; the fallback is read only
+// when storage is unavailable (private-mode quota), where it preserves the
+// FRONTEND-007 same-document behavior. Payload is ONLY {listingId, ts} —
+// never form data, listing/seller/pricing snapshots, or auth state.
+// Consumption is take-semantics (read+delete in one synchronous step), so an
+// intent can resume at most once per storage write.
+const PENDING_BUY_KEY = 'gw-pending-buy';
+const PENDING_BUY_TTL_MS = 5 * 60 * 1000; // intent older than this is stale — drop, don't resume
+let pendingBuyFallback = null; // used only when sessionStorage throws
+
+const writePendingBuy = (listingId) => {
+  const intent = { listingId: String(listingId), ts: Date.now() };
+  pendingBuyFallback = intent;
+  try { sessionStorage.setItem(PENDING_BUY_KEY, JSON.stringify(intent)); } catch {}
+};
+const clearPendingBuy = () => {
+  pendingBuyFallback = null;
+  try { sessionStorage.removeItem(PENDING_BUY_KEY); } catch {}
+};
+const readPendingBuy = () => {
+  let intent = pendingBuyFallback;
+  try {
+    const raw = sessionStorage.getItem(PENDING_BUY_KEY);
+    if (raw) intent = JSON.parse(raw);
+  } catch { /* corrupt or unavailable — fall through to fallback/cleanup */ }
+  if (!intent || typeof intent.listingId !== 'string' || typeof intent.ts !== 'number'
+      || Date.now() - intent.ts >= PENDING_BUY_TTL_MS) {
+    if (intent) clearPendingBuy(); // expired/malformed: delete, never resume
+    return null;
+  }
+  return intent;
+};
+const takePendingBuy = () => { // consume-once: read and delete synchronously
+  const intent = readPendingBuy();
+  clearPendingBuy();
+  return intent;
+};
+
 // ── Camera debug log — visible on-screen panel for iPhone debugging ──
 const camLogs = [];
 export const camLog = (msg) => {
@@ -277,6 +325,10 @@ export function AppProvider({ children }) {
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [showSignInModal, setShowSignInModal] = useState(false);
   const [signInAction, setSignInAction] = useState(null);
+  // FRONTEND-007 (MKT-3): pending buy intent — set when a signed-out user
+  // taps Buy, consumed exactly once by the sign-in effect. See the
+  // sessionStorage-backed helpers at module scope (FRONTEND-007A): the
+  // intent survives OAuth full-page redirects and dies with the tab.
   const [showContact, setShowContact] = useState(false);
   const [heartAnim, setHeartAnim] = useState(null);
 
@@ -525,6 +577,14 @@ export function AppProvider({ children }) {
     ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
     currentScanUuidRef.current = null; capturedImageRef.current = null;
     lastAttemptRef.current = null; // SCAN-2: never replay a signed-out user's images
+    // MKT-3: a REAL logout/expiry/switch must drop the buy intent so it can
+    // never resume in another account's session. Guarded by outgoingUserId:
+    // this function also runs on the anonymous boot — which is exactly the
+    // document the OAuth redirect returns to — and clearing there would
+    // delete the persisted intent moments before the restored session
+    // consumes it. (Intents are only ever written while signed OUT, so an
+    // intent present during a boot belongs to this tab's current visitor.)
+    if (outgoingUserId) clearPendingBuy();
     profileCacheRef.current = {}; serialLoadingRef.current = false;
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
     if (cameraStreamRef.current) {
@@ -568,7 +628,20 @@ export function AppProvider({ children }) {
 
   // Load user data when auth changes
   useEffect(() => {
-    if (user) { prevUserIdRef.current = user.id; loadUserData(); }
+    if (user) {
+      prevUserIdRef.current = user.id;
+      loadUserData();
+      // MKT-3: consume the pending buy intent exactly once. takePendingBuy
+      // deletes the stored intent synchronously BEFORE the async resume, so
+      // rapid auth transitions, a second effect run from a token refresh, a
+      // double OAuth callback, or a page refresh after a successful resume
+      // can never replay it. TTL/shape validation lives in the helper.
+      const pending = takePendingBuy();
+      if (pending) {
+        setSignInAction(null);
+        resumeBuyIntent(pending.listingId, user.id);
+      }
+    }
     else {
       const outgoing = prevUserIdRef.current;
       prevUserIdRef.current = null;
@@ -2812,11 +2885,22 @@ export function AppProvider({ children }) {
 
   // ─── PUBLISH LISTING ───
 
+  // FRONTEND-007 (SELL-7): synchronous single-flight lock for publishListing.
+  // `publishing` state disables the button only after a re-render — a second
+  // tap in the same frame re-enters the function and double-inserts. The ref
+  // flips synchronously before the first await and is released in the same
+  // finally that releases `publishing`, which runs on every exit inside the
+  // try: success, upload failure, DB failure, thrown exception, and the
+  // FRONTEND-004b post-logout ownership returns.
+  const publishLockRef = useRef(false);
+
   const publishListing = async () => {
+    if (publishLockRef.current) return; // second tap: no upload, no insert, no toast
     if (!user) { setError(lang === 'he' ? 'יש להתחבר תחילה' : 'Please sign in first'); return; }
     if (!listingData.title || !listingData.price || !listingData.phone || !listingData.location) {
       setError(lang === 'he' ? 'נא למלא את כל השדות' : 'Please fill all fields'); return;
     }
+    publishLockRef.current = true;
     setPublishing(true);
     setError(null);
     const ownerId = user.id; // FRONTEND-004b ownership
@@ -2926,6 +3010,7 @@ export function AppProvider({ children }) {
       setError(e.message || (lang === 'he' ? 'שגיאה בפרסום, נסה שוב' : 'Failed to publish. Please try again.'));
       playSound('error');
     } finally {
+      publishLockRef.current = false;
       setPublishing(false);
     }
   };
@@ -3325,6 +3410,72 @@ export function AppProvider({ children }) {
     setShowContact(true);
   }, [user]);
 
+  // ═══ FRONTEND-007 (MKT-3): auth gate at the Buy tap ═══════════════════
+  // The ONE authoritative gate for opening checkout. Signed out → no form is
+  // ever shown; a listing-id-only intent is stored and sign-in is requested.
+  // Signed in → the same seller/availability rules that guard the server RPC
+  // are pre-checked here so the sheet can't open for an unbuyable listing.
+  const openCheckout = useCallback((listing) => {
+    if (!listing?.id || listing.id.toString().startsWith('s')) return; // sample/demo listings
+    if (!user) {
+      writePendingBuy(listing.id); // survives OAuth's full-page redirect (007A)
+      setSignInAction('buy');
+      setShowSignInModal(true);
+      return;
+    }
+    if (listing.seller_id === user.id) {
+      showToastMsg(lang === 'he' ? 'אי אפשר לקנות מעצמך' : "You can't buy your own listing");
+      return;
+    }
+    if (listing.status && listing.status !== 'active') {
+      showToastMsg(lang === 'he' ? 'הפריט כבר לא זמין' : 'This listing is no longer available');
+      return;
+    }
+    setShowCheckout(true);
+  }, [user, lang, showToastMsg]);
+
+  // MKT-3: cancelling sign-in must drop the buy intent too — otherwise a
+  // later, unrelated sign-in would teleport the user into an abandoned
+  // checkout.
+  const dismissSignInModal = useCallback(() => {
+    setShowSignInModal(false);
+    setSignInAction(null);
+    clearPendingBuy(); // cancellation drops the persisted intent too (007A)
+  }, []);
+
+  // MKT-3: after sign-in, return the user to the listing whose Buy tap
+  // prompted authentication. The listing and the buyer's existing orders are
+  // RE-FETCHED — the pre-auth snapshot is never trusted — so availability,
+  // self-buy and duplicate-order rules are evaluated against the CURRENT
+  // user and CURRENT listing state. Checkout reopens only if every gate a
+  // normal signed-in Buy tap passes also passes here; otherwise the user
+  // simply lands on the listing. create_order remains the final authority.
+  const resumeBuyIntent = async (listingId, forUserId) => {
+    try {
+      const [{ data: listing }, { data: existingOrders }] = await Promise.all([
+        supabase.from('listings')
+          .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count)')
+          .eq('id', listingId).maybeSingle(),
+        supabase.from('orders').select('id')
+          .eq('listing_id', listingId).eq('buyer_id', forUserId)
+          .not('status', 'in', '("cancelled","completed","declined")')
+          .limit(1),
+      ]);
+      if (currentUserIdRef.current !== forUserId) return; // FRONTEND-004 ownership
+      if (!listing) return;
+      setNavDirection('push');
+      setSelected(listing);
+      setTab('browse');
+      setView('detail');
+      const canBuy = listing.status === 'active'
+        && listing.seller_id !== forUserId
+        && !(existingOrders?.length > 0);
+      if (canBuy) setShowCheckout(true);
+    } catch (e) {
+      if (DEV) console.warn('[Checkout] Buy-intent resume failed:', e);
+    }
+  };
+
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
@@ -3439,7 +3590,10 @@ export function AppProvider({ children }) {
     activeChat, setActiveChat,
     activeOrder, setActiveOrder,
     stopCamera, cancelPipeline,
-    showSignInModal, setShowSignInModal,
+    // MKT-3: back-press dismissal of the sign-in modal is a cancellation —
+    // it must drop the pending buy intent too. urlSync only ever calls this
+    // to close the modal, so the dismisser is a safe drop-in.
+    showSignInModal, setShowSignInModal: dismissSignInModal,
     showCheckout, setShowCheckout,
     showContact, setShowContact,
     user,
@@ -3451,7 +3605,7 @@ export function AppProvider({ children }) {
     signInGoogle, signInEmail, signOut, sendPasswordReset, updatePassword, passwordRecovery,
     uploadAvatar, avatarUploading, refreshProfile,
     requestVerification, verificationUploading,
-    showSignInModal, setShowSignInModal, signInAction, setSignInAction,
+    showSignInModal, setShowSignInModal, signInAction, setSignInAction, dismissSignInModal,
     tab, setTab, view, setView, goTab, reset,
     listings, myListings, savedIds, savedItems,
     hasMore, loadingMore, loadMoreListings, loadListings,
@@ -3471,7 +3625,7 @@ export function AppProvider({ children }) {
     serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
     // Orders / Checkout
     orders, activeOrder, setActiveOrder, activeOrderId, ordersLoading,
-    showCheckout, setShowCheckout,
+    showCheckout, setShowCheckout, openCheckout,
     loadOrders, createOrder, updateOrderStatus, cancelOrder, viewOrder, fetchOrderById,
     // Order notifications
     orderNotifications, notifUnreadCount,

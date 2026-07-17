@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Package, Truck, MapPin, Clock, Check, CheckCircle, XCircle,
   ChevronRight, ArrowLeft, ShoppingBag, Loader2, AlertTriangle,
@@ -50,28 +50,49 @@ function bgCls(color) {
 // ═══════════════════════════════════════════════════════
 // CHECKOUT SHEET — buyer fills delivery details
 // ═══════════════════════════════════════════════════════
+// FRONTEND-007 (ORD-7): the sheet is a thin gate — all form state lives in
+// CheckoutForm, which mounts only while checkout is open and is keyed by
+// listing id. Closing the sheet unmounts the form, so no draft (address,
+// notes, delivery method) survives to appear under another seller's
+// listing; switching listings remounts it clean. Reopening the SAME listing
+// also starts clean by design: a money flow restarts from a known state
+// rather than an invisible draft.
 export function CheckoutSheet() {
-  const { lang, selected, user, createOrder, showCheckout, setShowCheckout } = useApp();
+  const { selected, showCheckout } = useApp();
+  if (!showCheckout || !selected) return null;
+  return <CheckoutForm key={selected.id} listing={selected} />;
+}
+
+function CheckoutForm({ listing }) {
+  const { lang, createOrder, setShowCheckout } = useApp();
   const [deliveryMethod, setDeliveryMethod] = useState('pickup');
   const [shippingAddress, setShippingAddress] = useState('');
   const [buyerNote, setBuyerNote] = useState('');
   const [submitting, setSubmitting] = useState(false);
-
-  if (!showCheckout || !selected) return null;
+  // Synchronous double-tap guard — `submitting` disables the button only
+  // after a re-render (same class of bug as SELL-7).
+  const submitLockRef = useRef(false);
 
   const handleSubmit = async () => {
+    if (submitLockRef.current) return;
     if (deliveryMethod === 'shipping' && !shippingAddress.trim()) return;
+    submitLockRef.current = true;
     setSubmitting(true);
-    await createOrder({
-      listingId: selected.id, sellerId: selected.seller_id, price: selected.price,
-      deliveryMethod,
-      shippingAddress: deliveryMethod === 'shipping' ? shippingAddress.trim() : null,
-      buyerNote: buyerNote.trim() || null,
-    });
-    setSubmitting(false);
+    try {
+      // Payload fields come from the same captured `listing` that keyed this
+      // mount — a mid-flight change of the selected listing can never mix
+      // one listing's form data into another's order.
+      await createOrder({
+        listingId: listing.id, sellerId: listing.seller_id, price: listing.price,
+        deliveryMethod,
+        shippingAddress: deliveryMethod === 'shipping' ? shippingAddress.trim() : null,
+        buyerNote: buyerNote.trim() || null,
+      });
+    } finally {
+      submitLockRef.current = false;
+      setSubmitting(false);
+    }
   };
-
-  const listing = selected;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-fadeIn">

@@ -269,7 +269,7 @@ export function BrowseView() {
 // DETAIL VIEW — with report + quality badge + seller trust
 // ═══════════════════════════════════════════════════════
 export function DetailView() {
-  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing, setShowCheckout, orders, viewOrder } = useApp();
+  const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing, openCheckout, orders, viewOrder } = useApp();
   const [showReport, setShowReport] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reporting, setReporting] = useState(false);
@@ -469,14 +469,15 @@ export function DetailView() {
 
           {/* Buy Now — only show if not own listing AND no active order */}
           {user && selected.seller_id !== user?.id && !selected.id?.toString().startsWith('s') && !existingOrder && (
-            <Btn primary className="w-full py-4" onClick={() => setShowCheckout(true)}>
+            <Btn primary className="w-full py-4" onClick={() => openCheckout(selected)}>
               <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
             </Btn>
           )}
 
-          {/* Not logged in — show Buy that triggers sign-in */}
+          {/* Not logged in — MKT-3: Buy prompts sign-in immediately; the
+              checkout form never opens (and never collects data) signed out */}
           {!user && !selected.id?.toString().startsWith('s') && (
-            <Btn primary className="w-full py-4" onClick={() => setShowCheckout(true)}>
+            <Btn primary className="w-full py-4" onClick={() => openCheckout(selected)}>
               <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
             </Btn>
           )}
