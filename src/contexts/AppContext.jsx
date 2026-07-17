@@ -1031,6 +1031,10 @@ export function AppProvider({ children }) {
       setSavedItems(savedData.map(s => s.listing).filter(Boolean));
       setSavedIds(new Set(savedData.map(s => s.listing_id)));
       cacheSet(`saved-${ownerId}`, savedData);
+    } else if (savedResult.status === 'fulfilled' && savedResult.value.error) {
+      // FRONTEND-009: this SELECT was 403ing for every user (saved_items RLS,
+      // migration 20260719000002) and the failure vanished without a trace.
+      console.error('[Saved] Load failed:', savedResult.value.error.message);
     }
     loadConversations(true);
     loadOrders(true);
@@ -1647,20 +1651,34 @@ export function AppProvider({ children }) {
     const ownerId = user.id; // FRONTEND-004b ownership
     setHeartAnim(item.id);
     setTimeout(() => setHeartAnim(null), 800);
+    // FRONTEND-009: check the write result — the DB was rejecting saved_items
+    // DELETEs (42501, see migration 20260719000002) while the UI still said
+    // "Removed" and un-hearted locally, resurrecting the heart on reload.
+    // A failed write must say so and leave state untouched.
     if (savedIds?.has(item.id)) {
-      await supabase.from('saved_items').delete().eq('user_id', ownerId).eq('listing_id', item.id);
+      const { error } = await supabase.from('saved_items').delete().eq('user_id', ownerId).eq('listing_id', item.id);
       if (currentUserIdRef.current !== ownerId) return;
+      if (error) {
+        console.error('[Saved] Remove failed:', error.message);
+        showToastMsg(lang === 'he' ? 'שגיאה בהסרה — נסה שוב' : 'Remove failed — try again', 'error');
+        return;
+      }
       setSavedIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
       setSavedItems((prev) => prev.filter((i) => i.id !== item.id));
       showToastMsg('Removed');
     } else {
-      await supabase.from('saved_items').insert({ user_id: ownerId, listing_id: item.id });
+      const { error } = await supabase.from('saved_items').insert({ user_id: ownerId, listing_id: item.id });
       if (currentUserIdRef.current !== ownerId) return;
+      if (error) {
+        console.error('[Saved] Save failed:', error.message);
+        showToastMsg(lang === 'he' ? 'שגיאה בשמירה — נסה שוב' : 'Save failed — try again', 'error');
+        return;
+      }
       setSavedIds((prev) => new Set(prev).add(item.id));
       setSavedItems((prev) => [...prev, item]);
       showToastMsg('Saved!');
     }
-  }, [user, savedIds, showToastMsg]);
+  }, [user, savedIds, showToastMsg, lang]);
 
   // SELL-3: deletion order is DB-first, storage-second, and each step's
   // result is checked. The soft delete (status='deleted' — the app's intended
