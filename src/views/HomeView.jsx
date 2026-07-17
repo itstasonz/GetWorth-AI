@@ -1,9 +1,9 @@
 import React, { useRef, useEffect, useCallback } from 'react';
 import {
-  Camera, Upload, ArrowRight, ArrowLeft, Flame
+  Camera, Upload, ArrowRight, ArrowLeft
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { formatPrice } from '../lib/utils';
+import { formatPrice, timeAgo, getConditionLabel } from '../lib/utils';
 
 // ═══════════════════════════════════════════════════════════════════════
 // STITCH DESIGN TOKENS — ported faithfully from the HTML tailwind.config
@@ -290,7 +290,6 @@ export default function HomeView() {
                 <HotCard
                   key={`hot-${item.id}-${i}`}
                   item={item}
-                  index={i % carouselItems.length}
                   lang={lang}
                   onClick={() => viewItem(item)}
                 />
@@ -308,12 +307,14 @@ export default function HomeView() {
 // ═══════════════════════════════════════════════════════════════════════
 // HOT CARD — faithful glass-panel port
 // ═══════════════════════════════════════════════════════════════════════
-function HotCard({ item, index, lang, onClick }) {
-  // Rotate 3 badge states to match the HTML mockup (Card 1/2/3)
-  const badgeType = index % 3;
-  const isNew = badgeType === 0;
-  const isHot = badgeType === 1;
-  // badgeType === 2 → no badge
+function HotCard({ item, lang, onClick }) {
+  // FRONTEND-009: badges and meta are REAL listing facts only. The mockup port
+  // rotated fabricated states by card index — "HOT DEAL", "Trending now",
+  // "12 bids active" — inventing bids and demand signals the platform does
+  // not have. A marketplace that fakes activity loses the user's trust the
+  // moment they notice.
+  const isNew = item.created_at
+    && (Date.now() - new Date(item.created_at).getTime()) < 7 * 86400000;
 
   return (
     <div
@@ -326,28 +327,18 @@ function HotCard({ item, index, lang, onClick }) {
         border: STITCH.GLASS_BORDER,
       }}
     >
-      {/* Badge */}
-      {(isNew || isHot) && (
+      {/* Badge — only the real "newly listed" fact (created within 7 days) */}
+      {isNew && (
         <div className="absolute top-3 right-3 z-10">
           <span
             className="text-[10px] font-bold px-2 py-1 rounded-full backdrop-blur-md"
-            style={
-              isNew
-                ? {
-                    background: 'rgba(111, 238, 225, 0.20)',
-                    color: STITCH.primary,
-                    border: '1px solid rgba(111, 238, 225, 0.20)',
-                  }
-                : {
-                    background: 'rgba(249, 115, 22, 0.20)',
-                    color: '#fb923c',
-                    border: '1px solid rgba(249, 115, 22, 0.20)',
-                  }
-            }
+            style={{
+              background: 'rgba(111, 238, 225, 0.20)',
+              color: STITCH.primary,
+              border: '1px solid rgba(111, 238, 225, 0.20)',
+            }}
           >
-            {isNew
-              ? (lang === 'he' ? 'חדש' : 'NEWLY LISTED')
-              : (lang === 'he' ? 'מבצע חם' : 'HOT DEAL')}
+            {lang === 'he' ? 'חדש' : 'NEWLY LISTED'}
           </span>
         </div>
       )}
@@ -384,42 +375,15 @@ function HotCard({ item, index, lang, onClick }) {
           </span>
         </div>
 
-        {/* Meta row */}
-        <div className="flex items-center gap-2">
-          {isHot ? (
-            <>
-              <Flame className="w-3.5 h-3.5" fill="#fb923c" style={{ color: '#fb923c' }} />
-              <p className="text-xs font-medium" style={{ color: STITCH.onSurfaceVariant }}>
-                {lang === 'he' ? 'פופולרי עכשיו' : 'Trending now'}
-              </p>
-            </>
-          ) : isNew ? (
-            <>
-              <div className="flex -space-x-2">
-                <div
-                  className="w-5 h-5 rounded-full"
-                  style={{
-                    background: 'rgba(200, 198, 197, 0.5)',
-                    border: `1px solid ${STITCH.background}`,
-                  }}
-                />
-                <div
-                  className="w-5 h-5 rounded-full"
-                  style={{
-                    background: 'rgba(111, 238, 225, 0.5)',
-                    border: `1px solid ${STITCH.background}`,
-                  }}
-                />
-              </div>
-              <p className="text-xs font-medium" style={{ color: STITCH.onSurfaceVariant }}>
-                {lang === 'he' ? '12 הצעות פעילות' : '12 bids active'}
-              </p>
-            </>
-          ) : (
-            <p className="text-xs font-medium" style={{ color: STITCH.onSurfaceVariant }}>
-              {item.location || (lang === 'he' ? 'מצב מעולה' : 'Near Mint Condition')}
-            </p>
-          )}
+        {/* Meta row — real facts only: condition, location, listing age */}
+        <div className="flex items-center gap-2 min-w-0">
+          <p className="text-xs font-medium truncate" style={{ color: STITCH.onSurfaceVariant }}>
+            {[
+              item.condition ? getConditionLabel(item.condition, lang) : null,
+              item.location || null,
+              item.created_at ? timeAgo(item.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' }) : null,
+            ].filter(Boolean).join(' • ')}
+          </p>
         </div>
       </div>
     </div>
