@@ -16,12 +16,17 @@ const TABS = [
   { id: 'reports', label: { en: 'Reports', he: 'דיווחים' }, icon: Flag },
   { id: 'orders', label: { en: 'Orders', he: 'הזמנות' }, icon: Package },
   { id: 'users', label: { en: 'Users', he: 'משתמשים' }, icon: Users },
+  { id: 'reviews', label: { en: 'Reviews', he: 'ביקורות' }, icon: Star },
 ];
 
 export default function AdminPanel() {
   const { lang, setView, profile, showToastMsg } = useApp();
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(false);
+  // ADMIN-001: every loader used to swallow failures (several destructured
+  // {data} and never looked at {error}), so an RLS/RPC failure rendered as a
+  // convincing empty panel. One error slot per visit; retry re-runs the tab.
+  const [loadError, setLoadError] = useState(null);
 
   // Data
   const [stats, setStats] = useState(null);
@@ -29,9 +34,12 @@ export default function AdminPanel() {
   const [reports, setReports] = useState([]);
   const [allOrders, setAllOrders] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
+  const [allReviews, setAllReviews] = useState([]);
+  const [userSearch, setUserSearch] = useState('');
 
   // ─── Load Overview Stats ───
   const loadStats = async () => {
+    setLoadError(null);
     try {
       const [users, listings, orders, reviews, convos, rpts] = await Promise.all([
         supabase.from('profiles').select('id', { count: 'exact', head: true }),
@@ -67,6 +75,7 @@ export default function AdminPanel() {
       });
     } catch (e) {
       console.error('[Admin] Stats error:', e);
+      setLoadError('stats');
     }
   };
 
@@ -116,16 +125,19 @@ export default function AdminPanel() {
   // ─── Load Reports ───
   const loadReports = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('reports')
         .select('*, reporter:profiles!reports_reporter_id_fkey(full_name), listing:listings(id, title, title_hebrew, images, price, seller_id, status)')
         .order('created_at', { ascending: false })
         .limit(50);
+      if (error) throw error;
       setReports(data || []);
     } catch (e) {
       console.error('[Admin] Reports error:', e);
       setReports([]);
+      setLoadError('reports');
     }
     setLoading(false);
   };
@@ -157,15 +169,18 @@ export default function AdminPanel() {
   // ─── Load Orders ───
   const loadAllOrders = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('orders')
         .select('*, listing:listings(id, title, title_hebrew, images), buyer:profiles!orders_buyer_id_fkey(full_name), seller:profiles!orders_seller_id_fkey(full_name)')
         .order('created_at', { ascending: false })
         .limit(50);
+      if (error) throw error;
       setAllOrders(data || []);
     } catch (e) {
       console.error('[Admin] Orders error:', e);
+      setLoadError('orders');
     }
     setLoading(false);
   };
@@ -173,13 +188,51 @@ export default function AdminPanel() {
   // ─── Load Users ───
   const loadAllUsers = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
-      const { data } = await supabase.rpc('admin_list_users');
+      const { data, error } = await supabase.rpc('admin_list_users');
+      if (error) throw error; // was silently discarded — empty panel with no cause
       setAllUsers(data || []);
     } catch (e) {
-      console.error('[Admin] Users error:', e);
+      console.error('[Admin] Users error:', e?.code, e?.message, e?.details);
+      setLoadError('users');
     }
     setLoading(false);
+  };
+
+  // ─── Load Reviews (moderation) ───
+  const loadAllReviews = async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*, reviewer:profiles!reviewer_id(id, full_name, avatar_url), reviewed:profiles!seller_id(id, full_name), listing:listings(id, title, title_hebrew, images)')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      if (error) throw error;
+      setAllReviews(data || []);
+    } catch (e) {
+      console.error('[Admin] Reviews error:', e);
+      setLoadError('reviews');
+    }
+    setLoading(false);
+  };
+
+  // ─── Delete review (moderation) ───
+  const deleteReview = async (reviewId, reason) => {
+    try {
+      const { error } = await supabase.rpc('admin_delete_review', {
+        p_review_id: reviewId,
+        p_reason: reason || null,
+      });
+      if (error) throw error;
+      setAllReviews(prev => prev.filter(r => r.id !== reviewId));
+      showToastMsg(lang === 'he' ? 'הביקורת הוסרה' : 'Review removed');
+    } catch (e) {
+      console.error('[Admin] Delete review error:', e);
+      showToastMsg(lang === 'he' ? 'שגיאה בהסרת הביקורת' : 'Failed to remove review', 'error');
+    }
   };
 
   // ─── Admin override order status ───
@@ -198,16 +251,26 @@ export default function AdminPanel() {
   };
 
   // Auto-load on tab change
+  const loadTab = (which) => {
+    if (which === 'overview') loadStats();
+    if (which === 'verify') loadVerifications();
+    if (which === 'reports') loadReports();
+    if (which === 'orders') loadAllOrders();
+    if (which === 'users') loadAllUsers();
+    if (which === 'reviews') loadAllReviews();
+  };
   useEffect(() => {
     if (!profile?.is_admin) return;
-    if (tab === 'overview') loadStats();
-    if (tab === 'verify') loadVerifications();
-    if (tab === 'reports') loadReports();
-    if (tab === 'orders') loadAllOrders();
-    if (tab === 'users') loadAllUsers();
-  }, [tab, profile?.is_admin]);
+    loadTab(tab);
+  }, [tab, profile?.is_admin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const t = (en, he) => lang === 'he' ? he : en;
+
+  const filteredUsers = userSearch.trim()
+    ? allUsers.filter(u =>
+        (u.full_name || '').toLowerCase().includes(userSearch.trim().toLowerCase())
+        || (u.email || '').toLowerCase().includes(userSearch.trim().toLowerCase()))
+    : allUsers;
 
   // Guard is here — after all hooks — so React hook call count stays constant.
   if (!profile?.is_admin) {
@@ -259,6 +322,17 @@ export default function AdminPanel() {
         <div className="text-center py-8">
           <Loader2 className="w-6 h-6 animate-spin text-[#6FEEE1] mx-auto" />
         </div>
+      )}
+
+      {/* ADMIN-001: surfaced load failure — never an unexplained empty panel */}
+      {loadError && !loading && (
+        <Card className="p-4 text-center space-y-2" gradient="linear-gradient(135deg, rgba(239,68,68,0.12), rgba(239,68,68,0.04))">
+          <AlertTriangle className="w-6 h-6 text-red-400 mx-auto" />
+          <p className="text-sm text-red-300">{t('Failed to load data for this tab', 'טעינת הנתונים נכשלה')}</p>
+          <button onClick={() => loadTab(tab)} className="text-xs font-semibold underline underline-offset-2" style={{ color: '#6FEEE1' }}>
+            {t('Retry', 'נסה שוב')}
+          </button>
+        </Card>
       )}
 
       {/* ═══ OVERVIEW TAB ═══ */}
@@ -322,7 +396,7 @@ export default function AdminPanel() {
       )}
 
       {/* ═══ REPORTS TAB ═══ */}
-      {tab === 'reports' && !loading && (
+      {tab === 'reports' && !loading && !loadError && (
         <div className="space-y-3">
           {reports.length === 0 ? (
             <FadeIn>
@@ -346,7 +420,7 @@ export default function AdminPanel() {
       )}
 
       {/* ═══ ORDERS TAB ═══ */}
-      {tab === 'orders' && !loading && (
+      {tab === 'orders' && !loading && !loadError && (
         <div className="space-y-3">
           {allOrders.length === 0 ? (
             <FadeIn>
@@ -369,46 +443,220 @@ export default function AdminPanel() {
       )}
 
       {/* ═══ USERS TAB ═══ */}
-      {tab === 'users' && !loading && (
+      {tab === 'users' && !loading && !loadError && (
         <div className="space-y-2">
-          <p className="text-xs text-slate-500">{allUsers.length} {t('users', 'משתמשים')}</p>
-          {allUsers.map((u) => (
-            <FadeIn key={u.id}>
-              <Card className="p-3">
-                <div className="flex items-center gap-3">
-                  {u.avatar_url ? (
-                    <img src={u.avatar_url} alt="" className="w-10 h-10 rounded-xl object-cover" />
-                  ) : (
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-600 to-slate-500 flex items-center justify-center text-sm font-bold">
-                      {u.full_name?.charAt(0) || '?'}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-semibold truncate">{u.full_name || 'Anonymous'}</span>
-                      {u.is_verified && <CheckCircle className="w-3.5 h-3.5 text-[#6FEEE1] flex-shrink-0" />}
-                      {u.is_admin && <Shield className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />}
-                    </div>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      <span className="text-[10px] text-slate-500">{u.email}</span>
-                    </div>
-                    <div className="flex items-center gap-3 mt-0.5">
-                      {u.rating > 0 && (
-                        <span className="text-[10px] text-yellow-400 flex items-center gap-0.5">
-                          <Star className="w-2.5 h-2.5 fill-current" />{u.rating} ({u.review_count || 0})
-                        </span>
-                      )}
-                      <span className="text-[10px] text-slate-500">{u.total_sales || 0} {t('sales', 'מכירות')}</span>
-                      <span className="text-[10px] text-slate-600">{timeAgo(u.created_at, { ago: t('ago', 'לפני') })}</span>
-                    </div>
-                  </div>
-                </div>
-              </Card>
+          <input
+            value={userSearch}
+            onChange={(e) => setUserSearch(e.target.value)}
+            placeholder={t('Search name or email...', 'חפש שם או אימייל...')}
+            className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/40"
+            dir="auto"
+          />
+          <p className="text-xs text-slate-500">
+            {filteredUsers.length} / {allUsers.length} {t('users', 'משתמשים')}
+            {allUsers.length >= 100 && <span className="text-slate-600"> · {t('newest 100 shown', '100 האחרונים')}</span>}
+          </p>
+          {filteredUsers.length === 0 ? (
+            <div className="text-center py-10">
+              <Users className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+              <p className="text-slate-500 text-sm">{allUsers.length === 0 ? t('No users loaded', 'לא נטענו משתמשים') : t('No match', 'אין התאמה')}</p>
+            </div>
+          ) : (
+            filteredUsers.map((u) => <AdminUserCard key={u.id} u={u} lang={lang} />)
+          )}
+        </div>
+      )}
+
+      {/* ═══ REVIEWS TAB (moderation) ═══ */}
+      {tab === 'reviews' && !loading && !loadError && (
+        <div className="space-y-2">
+          {allReviews.length === 0 ? (
+            <FadeIn>
+              <div className="text-center py-12">
+                <Star className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-slate-400 text-sm">{t('No reviews yet', 'אין ביקורות')}</p>
+              </div>
             </FadeIn>
-          ))}
+          ) : (
+            allReviews.map((review) => (
+              <AdminReviewCard key={review.id} review={review} lang={lang} onDelete={deleteReview} />
+            ))
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+// ─── Admin User Card — expandable detail (ADMIN-001 C2/C3) ───
+// Collapsed: identity + reputation summary from admin_list_users.
+// Expanded: live counts fetched on demand through the admin-bypass RLS
+// policies (listings all-status, orders) and the public reviews policy —
+// nothing here invents data the schema doesn't hold.
+function AdminUserCard({ u, lang }) {
+  const [expanded, setExpanded] = useState(false);
+  const [detail, setDetail] = useState(null); // null=not loaded | 'error' | {…}
+  const t = (en, he) => lang === 'he' ? he : en;
+
+  useEffect(() => {
+    if (!expanded || detail) return;
+    (async () => {
+      try {
+        const [listings, orders, reviews] = await Promise.all([
+          supabase.from('listings').select('id, status', { count: 'exact' }).eq('seller_id', u.id).limit(500),
+          supabase.from('orders').select('id, status, buyer_id', { count: 'exact' }).or(`buyer_id.eq.${u.id},seller_id.eq.${u.id}`).limit(500),
+          supabase.from('reviews')
+            .select('id, rating, comment, created_at, reviewer:profiles!reviewer_id(full_name)')
+            .eq('seller_id', u.id).order('created_at', { ascending: false }).limit(3),
+        ]);
+        if (listings.error || orders.error || reviews.error) throw (listings.error || orders.error || reviews.error);
+        const ls = listings.data || [];
+        const os = orders.data || [];
+        setDetail({
+          listingsTotal: listings.count ?? ls.length,
+          listingsActive: ls.filter(l => l.status === 'active').length,
+          ordersTotal: orders.count ?? os.length,
+          ordersAsBuyer: os.filter(o => o.buyer_id === u.id).length,
+          recentReviews: reviews.data || [],
+        });
+      } catch (e) {
+        console.error('[Admin] User detail error:', e);
+        setDetail('error');
+      }
+    })();
+  }, [expanded, detail, u.id]);
+
+  return (
+    <FadeIn>
+      <Card className="p-3">
+        <button onClick={() => setExpanded(!expanded)} className="w-full text-left">
+          <div className="flex items-center gap-3">
+            {u.avatar_url ? (
+              <img src={u.avatar_url} alt="" className="w-10 h-10 rounded-xl object-cover" />
+            ) : (
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-600 to-slate-500 flex items-center justify-center text-sm font-bold">
+                {u.full_name?.charAt(0) || '?'}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-semibold truncate">{u.full_name || 'Anonymous'}</span>
+                {u.is_verified && <CheckCircle className="w-3.5 h-3.5 text-[#6FEEE1] flex-shrink-0" />}
+                {u.is_admin && <Shield className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />}
+              </div>
+              <div className="flex items-center gap-3 mt-0.5">
+                <span className="text-[10px] text-slate-500">{u.email}</span>
+              </div>
+              <div className="flex items-center gap-3 mt-0.5">
+                {u.rating > 0 && (
+                  <span className="text-[10px] text-yellow-400 flex items-center gap-0.5">
+                    <Star className="w-2.5 h-2.5 fill-current" />{u.rating} ({u.review_count || 0})
+                  </span>
+                )}
+                <span className="text-[10px] text-slate-500">{u.total_sales || 0} {t('sales', 'מכירות')}</span>
+                <span className="text-[10px] text-slate-600">{timeAgo(u.created_at, { ago: t('ago', 'לפני') })}</span>
+              </div>
+            </div>
+            {expanded ? <ChevronUp className="w-4 h-4 text-slate-500" /> : <ChevronDown className="w-4 h-4 text-slate-500" />}
+          </div>
+        </button>
+
+        {expanded && (
+          <div className="mt-3 pt-3 border-t border-white/5">
+            {detail === null ? (
+              <div className="text-center py-3"><Loader2 className="w-4 h-4 animate-spin text-slate-500 mx-auto" /></div>
+            ) : detail === 'error' ? (
+              <p className="text-xs text-red-300 text-center py-2">{t('Failed to load detail', 'טעינת הפרטים נכשלה')}</p>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                  <span>{t('Listings', 'מודעות')}: {detail.listingsTotal} ({detail.listingsActive} {t('active', 'פעילות')})</span>
+                  <span>{t('Orders', 'הזמנות')}: {detail.ordersTotal} ({detail.ordersAsBuyer} {t('as buyer', 'כקונה')})</span>
+                </div>
+                {detail.recentReviews.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{t('Recent reviews received', 'ביקורות אחרונות')}</p>
+                    {detail.recentReviews.map(r => (
+                      <div key={r.id} className="bg-white/[0.03] rounded-lg px-2.5 py-1.5">
+                        <span className="text-[10px] text-yellow-400">★ {r.rating}</span>
+                        <span className="text-[10px] text-slate-400 ml-1.5">{r.reviewer?.full_name || '?'}</span>
+                        {r.comment && <p className="text-[11px] text-slate-300 mt-0.5 line-clamp-2">{r.comment}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+    </FadeIn>
+  );
+}
+
+// ─── Admin Review Card — moderation via admin_delete_review RPC ───
+function AdminReviewCard({ review, lang, onDelete }) {
+  const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState('');
+  const t = (en, he) => lang === 'he' ? he : en;
+
+  return (
+    <FadeIn>
+      <Card className="p-4">
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-semibold">{review.reviewer?.full_name || '?'}</span>
+              <span className="text-[10px] text-slate-500">→ {review.reviewed?.full_name || '?'}</span>
+              <span className="text-xs text-yellow-400">★ {review.rating}</span>
+              {review.reviewer_role && (
+                <span className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-white/5 text-slate-400">{review.reviewer_role}</span>
+              )}
+            </div>
+            {review.comment && <p className="text-sm text-slate-300 mt-1">{review.comment}</p>}
+            <div className="flex items-center gap-2 mt-1.5">
+              {review.listing?.images?.[0] && <img src={review.listing.images[0]} alt="" className="w-5 h-5 rounded object-cover" />}
+              <span className="text-[10px] text-slate-500 truncate">
+                {lang === 'he' && review.listing?.title_hebrew ? review.listing.title_hebrew : (review.listing?.title || '')}
+              </span>
+              <span className="text-[10px] text-slate-600">{timeAgo(review.created_at, { ago: t('ago', 'לפני') })}</span>
+            </div>
+          </div>
+        </div>
+        {!confirming ? (
+          <button
+            onClick={() => setConfirming(true)}
+            className="mt-3 w-full py-2 rounded-xl bg-red-600/10 border border-red-500/20 text-xs font-semibold text-red-300/80 flex items-center justify-center gap-1.5 hover:bg-red-600/20 transition-all"
+          >
+            <Trash2 className="w-3.5 h-3.5" />{t('Remove review', 'הסר ביקורת')}
+          </button>
+        ) : (
+          <div className="mt-3 space-y-2">
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder={t('Moderation reason (optional)', 'סיבת ההסרה (אופציונלי)')}
+              className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-400/40"
+              dir="auto"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => { onDelete(review.id, reason.trim() || null); setConfirming(false); setReason(''); }}
+                className="flex-1 py-2 rounded-xl bg-red-600/20 border border-red-500/30 text-xs font-semibold text-red-300 flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />{t('Confirm removal', 'אשר הסרה')}
+              </button>
+              <button
+                onClick={() => { setConfirming(false); setReason(''); }}
+                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-slate-400"
+              >
+                {t('Cancel', 'ביטול')}
+              </button>
+            </div>
+          </div>
+        )}
+      </Card>
+    </FadeIn>
   );
 }
 
@@ -580,6 +828,7 @@ function ReportCard({ report, lang, onRemove, onDismiss }) {
 // ─── Admin Order Card ───
 function AdminOrderCard({ order, lang, onUpdate }) {
   const [expanded, setExpanded] = useState(false);
+  const [confirmAction, setConfirmAction] = useState(null); // 'completed' | 'cancelled' | null
   const t = (en, he) => lang === 'he' ? he : en;
 
   const statusColors = {
@@ -632,22 +881,49 @@ function AdminOrderCard({ order, lang, onUpdate }) {
               {order.buyer_note && <span className="col-span-2">{t('Note', 'הערה')}: {order.buyer_note}</span>}
             </div>
 
-            {/* Admin override actions */}
+            {/* Admin override actions — ADMIN-001: state-changing overrides
+                require an explicit second tap; single-tap force actions on a
+                live order were an accidental-click hazard. */}
             {order.status !== 'completed' && order.status !== 'cancelled' && (
-              <div className="flex gap-2 mt-2">
-                <button
-                  onClick={() => onUpdate(order.id, 'completed')}
-                  className="flex-1 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-[11px] font-semibold text-emerald-300 flex items-center justify-center gap-1"
-                >
-                  <CheckCircle className="w-3 h-3" />{t('Force Complete', 'השלם')}
-                </button>
-                <button
-                  onClick={() => onUpdate(order.id, 'cancelled')}
-                  className="flex-1 py-2 rounded-lg bg-red-600/20 border border-red-500/30 text-[11px] font-semibold text-red-300 flex items-center justify-center gap-1"
-                >
-                  <XCircle className="w-3 h-3" />{t('Force Cancel', 'בטל')}
-                </button>
-              </div>
+              confirmAction ? (
+                <div className="mt-2 space-y-1.5">
+                  <p className="text-[11px] text-slate-400 text-center">
+                    {confirmAction === 'completed'
+                      ? t('Force-complete this order?', 'להשלים את ההזמנה בכפייה?')
+                      : t('Force-cancel this order?', 'לבטל את ההזמנה בכפייה?')}
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { onUpdate(order.id, confirmAction); setConfirmAction(null); }}
+                      className={`flex-1 py-2 rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1 ${confirmAction === 'completed' ? 'bg-emerald-600/30 border border-emerald-500/40 text-emerald-200' : 'bg-red-600/30 border border-red-500/40 text-red-200'}`}
+                    >
+                      {confirmAction === 'completed' ? <CheckCircle className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                      {t('Confirm', 'אשר')}
+                    </button>
+                    <button
+                      onClick={() => setConfirmAction(null)}
+                      className="px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-[11px] text-slate-400"
+                    >
+                      {t('Cancel', 'ביטול')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => setConfirmAction('completed')}
+                    className="flex-1 py-2 rounded-lg bg-emerald-600/20 border border-emerald-500/30 text-[11px] font-semibold text-emerald-300 flex items-center justify-center gap-1"
+                  >
+                    <CheckCircle className="w-3 h-3" />{t('Force Complete', 'השלם')}
+                  </button>
+                  <button
+                    onClick={() => setConfirmAction('cancelled')}
+                    className="flex-1 py-2 rounded-lg bg-red-600/20 border border-red-500/30 text-[11px] font-semibold text-red-300 flex items-center justify-center gap-1"
+                  >
+                    <XCircle className="w-3 h-3" />{t('Force Cancel', 'בטל')}
+                  </button>
+                </div>
+              )
             )}
           </div>
         )}
