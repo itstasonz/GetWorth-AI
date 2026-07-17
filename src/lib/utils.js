@@ -274,9 +274,14 @@ export const computeSellerTrust = (seller, listingsCount = 0) => {
     isVerified:      !!seller.is_verified,
     isPhoneVerified: !!seller.phone_verified,
     listingsCount,
-    salesCount:      seller.sales_count        || 0,
+    // FRONTEND-008B: the live schema's fields are total_sales/review_count —
+    // the old names (sales_count/rating_count) don't exist on profiles, so
+    // these inputs were silently 0 and the trust score undercounted every
+    // seller with sales or ratings. Old names kept as fallback for callers
+    // passing legacy shapes.
+    salesCount:      seller.total_sales  ?? seller.sales_count  ?? 0,
     sellerRating:    seller.rating             || 0,
-    sellerRatingCount: seller.rating_count     || 0,
+    sellerRatingCount: seller.review_count ?? seller.rating_count ?? 0,
     accountAgeDays:  seller.created_at
       ? Math.floor((Date.now() - new Date(seller.created_at)) / 86400000)
       : 0,

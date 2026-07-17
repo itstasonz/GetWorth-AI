@@ -648,8 +648,26 @@ export function SellerProfileView() {
         </Card>
       </FadeIn>
 
-      {/* Reviews Section */}
-      {sellerReviews.length > 0 && (
+      {/* Reviews Section — FRONTEND-008B: honest loading + empty states (the
+          section used to vanish entirely with no reviews, leaving the header
+          stars unexplained), role labels for direction, and all loaded
+          reviews rendered instead of a silent cap of 5. */}
+      {reviewsLoading && sellerReviews.length === 0 ? (
+        <FadeIn delay={100}>
+          <Card className="p-6 text-center">
+            <Loader2 className="w-5 h-5 animate-spin mx-auto" style={{ color: '#6FEEE1' }} />
+            <p className="text-xs text-slate-500 mt-2">{lang === 'he' ? 'טוען ביקורות...' : 'Loading reviews...'}</p>
+          </Card>
+        </FadeIn>
+      ) : sellerReviews.length === 0 ? (
+        <FadeIn delay={100}>
+          <Card className="p-5 text-center">
+            <Star className="w-6 h-6 text-slate-600 mx-auto mb-1.5" />
+            <p className="text-sm font-medium text-slate-400">{lang === 'he' ? 'אין ביקורות עדיין' : 'No reviews yet'}</p>
+            <p className="text-[11px] text-slate-500 mt-0.5">{lang === 'he' ? 'משתמש חדש בשוק' : 'New to the marketplace'}</p>
+          </Card>
+        </FadeIn>
+      ) : (
         <FadeIn delay={100}>
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -657,9 +675,9 @@ export function SellerProfileView() {
                 <Star className="w-5 h-5 text-yellow-400" />
                 {lang === 'he' ? 'ביקורות' : 'Reviews'}
               </h3>
-              <Badge>{sellerReviews.length}</Badge>
+              <Badge>{sellerProfile.review_count > sellerReviews.length ? sellerProfile.review_count : sellerReviews.length}</Badge>
             </div>
-            {sellerReviews.slice(0, 5).map((review) => (
+            {sellerReviews.map((review) => (
               <Card key={review.id} className="p-4">
                 <div className="flex items-start gap-3">
                   {review.reviewer?.avatar_url ? (
@@ -670,13 +688,22 @@ export function SellerProfileView() {
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{review.reviewer?.full_name || (lang === 'he' ? 'קונה' : 'Buyer')}</span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-sm font-semibold">{review.reviewer?.full_name || (lang === 'he' ? 'משתמש' : 'User')}</span>
                       <div className="flex items-center gap-0.5">
                         {[1, 2, 3, 4, 5].map((s) => (
                           <Star key={s} className={`w-3 h-3 ${s <= review.rating ? 'text-yellow-400 fill-current' : 'text-slate-600'}`} />
                         ))}
                       </div>
+                      {/* Direction chip: reviewer_role='buyer' → this user was
+                          reviewed as the SELLER of the order, and vice versa */}
+                      {(review.reviewer_role === 'buyer' || review.reviewer_role === 'seller') && (
+                        <span className="text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded bg-white/5 text-slate-400">
+                          {review.reviewer_role === 'buyer'
+                            ? (lang === 'he' ? 'כמוכר' : 'As seller')
+                            : (lang === 'he' ? 'כקונה' : 'As buyer')}
+                        </span>
+                      )}
                     </div>
                     {review.comment && (
                       <p className="text-sm text-slate-300 mt-1">{review.comment}</p>

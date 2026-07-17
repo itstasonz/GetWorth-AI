@@ -318,6 +318,10 @@ export function OrderDetailView() {
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  // FRONTEND-008B: synchronous double-tap guard — `reviewSubmitting` disables
+  // the button only after a re-render (same class as SELL-7/ORD-7 locks).
+  // The DB unique index (one_review_per_order_role) is the final authority.
+  const reviewLockRef = useRef(false);
   // null = check in flight | false = confirmed no review | true = confirmed reviewed
   const [reviewDone, setReviewDone] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -678,13 +682,19 @@ export function OrderDetailView() {
                   : ['','Poor','Fair','Good','Great','Excellent!'][reviewRating]}
               </p>
             )}
-            <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} placeholder={lang === 'he' ? 'ספר על החוויה...' : 'Tell about your experience...'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-yellow-500/50" rows={2} />
+            <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} maxLength={500} placeholder={lang === 'he' ? 'ספר על החוויה...' : 'Tell about your experience...'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-yellow-500/50" rows={2} />
             <Btn primary className="w-full py-3.5" disabled={reviewRating === 0 || reviewSubmitting}
               onClick={async () => {
+                if (reviewLockRef.current) return; // second tap in same frame
+                reviewLockRef.current = true;
                 setReviewSubmitting(true);
-                const ok = await submitReview(order.id, order.listing_id, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
-                setReviewSubmitting(false);
-                if (ok) setReviewDone(true);
+                try {
+                  const ok = await submitReview(order.id, order.listing_id, reviewRating, reviewComment, isBuyer ? 'buyer' : 'seller');
+                  if (ok) setReviewDone(true);
+                } finally {
+                  reviewLockRef.current = false;
+                  setReviewSubmitting(false);
+                }
               }}>
               {reviewSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Submitting...'}</> : <><Star className="w-4 h-4" />{lang === 'he' ? 'שלח ביקורת' : 'Submit Review'}</>}
             </Btn>
