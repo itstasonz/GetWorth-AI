@@ -526,11 +526,16 @@ function AppShell() {
             <div
               className="flex items-center gap-4 cursor-pointer"
               onClick={isBackView ? () => history.back() : () => { reset(); goTab('home'); }}
+              role="button"
+              aria-label={isBackView ? (lang === 'he' ? 'חזרה' : 'Back') : (lang === 'he' ? 'לדף הבית' : 'Go home')}
             >
-              {rtl
+              {/* FRONTEND-009: no back arrow on Home — there is nowhere to go
+                  back to, and a dead-looking arrow erodes trust in every
+                  other arrow. Other root tabs keep it as an "up to home". */}
+              {view !== 'home' && (rtl
                 ? <ChevronRight className="w-6 h-6 cursor-pointer hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} />
                 : <ArrowLeft className="w-6 h-6 cursor-pointer hover:opacity-80 transition-opacity" style={{ color: '#6FEEE1' }} />
-              }
+              )}
               <h1
                 className="text-lg font-semibold tracking-tight"
                 style={{ fontFamily: '"Manrope", system-ui, sans-serif', color: '#6FEEE1' }}

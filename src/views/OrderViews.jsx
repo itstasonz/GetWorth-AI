@@ -249,7 +249,15 @@ export function OrdersView() {
     <div className="space-y-5">
       <FadeIn>
         <div className="flex items-center gap-3 mb-2">
-          <button onClick={() => setView('myListings')} className="p-2 rounded-xl bg-white/5 hover:bg-white/10"><ArrowLeft className="w-5 h-5" /></button>
+          {/* FRONTEND-009: Orders is entered from Profile OR My Listings — a
+              hardcoded setView('myListings') sent profile-arrivals to the
+              wrong screen and contradicted the header back. history.back()
+              returns to the actual origin (orders is pushed at depth 2). */}
+          <button
+            onClick={() => { if (window.history.length > 1) history.back(); else setView('myListings'); }}
+            aria-label={lang === 'he' ? 'חזרה' : 'Back'}
+            className="p-2 rounded-xl bg-white/5 hover:bg-white/10"
+          ><ArrowLeft className="w-5 h-5" /></button>
           <h2 className="text-xl font-bold flex-1">{lang === 'he' ? 'ההזמנות שלי' : 'My Orders'}</h2>
           <button onClick={() => setView('notifications')} className="p-2 rounded-xl bg-white/5 hover:bg-white/10 relative">
             <Bell className="w-5 h-5" />

@@ -36,9 +36,13 @@ export const setNavDirection  = (dir) => { navDirectionRef.current = dir; };
 //  2 sub-views within a tab
 const VIEW_DEPTH = {
   home:          0,
-  browse:        1, myListings: 1, inbox: 1, orders: 1,
+  browse:        1, myListings: 1, inbox: 1,
   profile:       1, auth:       1, saved: 1,
-  detail:        2, sellerProfile: 2, chat:  2, orderDetail: 2,
+  // FRONTEND-009: orders is a depth-2 back-view (entered from profile or
+  // myListings, header shows a back arrow that calls history.back()). At
+  // depth 1 the profile→orders transition REPLACED the history entry, so
+  // back skipped the screen the user actually came from.
+  detail:        2, sellerProfile: 2, chat:  2, orders: 2, orderDetail: 2,
   admin:         2, notifications: 2, analytics: 2,
   // Ephemeral scan flow
   camera: -1, analyzing: -1, results: -1, listing: -1,
