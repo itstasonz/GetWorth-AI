@@ -272,7 +272,9 @@ export const computeSellerTrust = (seller, listingsCount = 0) => {
     hasAvatar:       !!seller.avatar_url,
     hasBio:          false, // bio column removed from live schema
     isVerified:      !!seller.is_verified,
-    isPhoneVerified: !!seller.phone_verified,
+    // SECURITY-002: the live column is is_phone_verified (server-controlled);
+    // phone_verified never existed, so this trust input was always 0.
+    isPhoneVerified: !!(seller.is_phone_verified ?? seller.phone_verified),
     listingsCount,
     // FRONTEND-008B: the live schema's fields are total_sales/review_count —
     // the old names (sales_count/rating_count) don't exist on profiles, so
