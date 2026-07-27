@@ -37,7 +37,11 @@
 -- Rollback: see the ROLLBACK block at the foot of this file.
 -- ══════════════════════════════════════════════════════════════════════════════
 
-\set ON_ERROR_STOP on
+-- Apply via the Supabase SQL Editor or `supabase db push` (both run this as a
+-- single transaction, so any error aborts the whole migration). With raw psql,
+-- pass -v ON_ERROR_STOP=1 on the command line. Do not reintroduce an in-file
+-- ON_ERROR_STOP directive: that is a psql meta-command, not SQL, and is a
+-- syntax error over a plain Postgres connection (Supabase SQL Editor included).
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 0. Preconditions — this migration targets the LIVE profiles schema. Abort loudly
