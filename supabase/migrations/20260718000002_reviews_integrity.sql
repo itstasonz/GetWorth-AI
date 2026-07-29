@@ -52,6 +52,27 @@ CREATE POLICY "reviews_insert_order_party_only"
 --    The exact constraint name the frontend's error handler has expected
 --    since FRONTEND-005. Wrapped so pre-existing duplicate rows fail loudly
 --    with operator guidance instead of aborting the whole migration.
+--
+--    ⚠ SUPERSEDED — HISTORICAL. Kept verbatim because this migration shipped
+--    (267e9b2) and was applied to production on 2026-07-17; rewriting applied
+--    history would make this file disagree with what every existing database
+--    actually ran. It is corrected forward by
+--    20260729000001_reviews_uniqueness_canonical.sql. Two defects, both fixed
+--    there — do not copy this block as a pattern:
+--
+--    (a) WRONG KEY. The canonical rule is UNIQUE(order_id, reviewer_role). An
+--        order has exactly one buyer and one seller, so role alone identifies
+--        the party; including reviewer_id WEAKENS the rule, because
+--        (order, alice, 'buyer') and (order, bob, 'buyer') become distinct keys.
+--
+--    (b) SILENT NO-OP ON PRODUCTION. `CREATE UNIQUE INDEX IF NOT EXISTS <name>`
+--        matches on NAME ONLY and never compares the column list. A two-column
+--        index of this name already existed on production from the dashboard
+--        era, so this statement logged `relation ... already exists, skipping`
+--        and changed nothing. That is why production is correct while a rebuild
+--        from these migrations was not — and why the `EXCEPTION WHEN others
+--        THEN RAISE WARNING` wrapper is the wrong instinct: it converts "the
+--        duplicate guard was never created" into a successful migration.
 DO $$
 BEGIN
   CREATE UNIQUE INDEX IF NOT EXISTS one_review_per_order_role
@@ -127,8 +148,12 @@ WHERE NOT EXISTS (SELECT 1 FROM reviews r WHERE r.seller_id = p.id)
 -- ── Verification ─────────────────────────────────────────────────────────────
 -- SELECT policyname FROM pg_policies WHERE tablename = 'reviews';
 --   → reviews_insert_order_party_only, "Reviews are public"
--- SELECT indexname FROM pg_indexes WHERE tablename = 'reviews'
+-- SELECT indexdef FROM pg_indexes WHERE tablename = 'reviews'
 --   AND indexname = 'one_review_per_order_role';                → 1 row
+--   Check the DEFINITION, not just the row count: the canonical key is
+--   (order_id, reviewer_role). Matching this index by name alone is exactly what
+--   let the repo and production diverge — see the SUPERSEDED note in section 2
+--   and 20260729000001_reviews_uniqueness_canonical.sql.
 -- SELECT tgname FROM pg_trigger WHERE tgname = 'trg_reviews_recompute_rating';
 --   → 1 row
 -- Spot check: profiles.rating/review_count match

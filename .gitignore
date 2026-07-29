@@ -26,3 +26,4 @@ products-backup-*.json
 test-api.mjs
 dist/
 db-expansion.log
+.vercel

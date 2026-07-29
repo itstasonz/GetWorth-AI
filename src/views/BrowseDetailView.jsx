@@ -357,7 +357,7 @@ export function DetailView() {
               }}
             >
               <div className="flex items-center gap-4">
-                <div className={`relative w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).gradient} ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).shadow}`}>
+                <div className={`relative w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(sellerTrust?.badge).gradient} ${getSellerBadgeStyle(sellerTrust?.badge).shadow}`}>
                   {selected.seller.full_name?.charAt(0) || 'S'}
                   {selected.seller.is_verified && (
                     <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full flex items-center justify-center border-2 border-[#131313]" style={{ background: '#6FEEE1' }}>
@@ -369,10 +369,10 @@ export function DetailView() {
                   <div className="flex items-center gap-2">
                     <span className="font-bold">{selected.seller.full_name || 'Seller'}</span>
                   </div>
-                  {(sellerTrust?.badge || selected.seller.badge) && (
+                  {(sellerTrust?.badge) && (
                     <div className="mt-1">
-                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).bg} ${getSellerBadgeStyle(sellerTrust?.badge || selected.seller.badge).text}`}>
-                        {getSellerBadgeLabel(sellerTrust?.badge || selected.seller.badge, lang)}
+                      <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${getSellerBadgeStyle(sellerTrust?.badge).bg} ${getSellerBadgeStyle(sellerTrust?.badge).text}`}>
+                        {getSellerBadgeLabel(sellerTrust?.badge, lang)}
                       </span>
                     </div>
                   )}
