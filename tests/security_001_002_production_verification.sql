@@ -267,10 +267,12 @@
 -- that the paragraph below leaves open — it does NOT make the local reconstruction
 -- any more trustworthy as evidence, and the caveat still governs every future run.
 --
--- THE RECONSTRUCTION FAILS S002.15 and S002.16, and now S002.17 as well (the
--- migration declares a 3-column index; production has the correct 2-column one).
--- Read the next paragraph before drawing any conclusion about production from
--- a local run in either direction.
+-- THE RECONSTRUCTION FAILS S002.15 and S002.16 (its RLS and constraint state is
+-- migration-derived — see below). S002.17 now PASSES on a fresh rebuild:
+-- 20260729000001_reviews_uniqueness_canonical.sql converged the repository onto
+-- production's 2-column rule, verified by replaying both migrations in order onto
+-- a clean schema. Read the next paragraph before drawing any conclusion about
+-- production from a local run in either direction.
 --
 -- WHAT THE RECONSTRUCTION IS, AND WHAT ITS FAILURES DO NOT PROVE. It was built
 -- from live TABLE STRUCTURE plus a replay of `supabase/migrations/`. Those two
@@ -1201,11 +1203,15 @@ UNION ALL
 -- role would pass. That is why a 3-column index FAILS this check rather than
 -- satisfying it, and why the equality below is exact rather than "contains".
 --
--- Note the deployed index name `one_review_per_order_role` is accurate for this
--- 2-column rule; migration 20260718000002 declares it over three columns, so the
--- repo and production disagree here. Production is authoritative per the
--- SECURITY-002 business-rule decision; the migration is the thing that needs
--- correcting, under its own ticket.
+-- The deployed index name `one_review_per_order_role` is accurate for this
+-- 2-column rule. History worth keeping: 20260718000002 declares it over THREE
+-- columns and shipped that way, yet production has the 2-column form — because
+-- `CREATE UNIQUE INDEX IF NOT EXISTS <name>` matches on NAME ONLY and skipped
+-- silently over a dashboard-era index of the same name. The repo and production
+-- diverged for a year of migrations without anyone noticing, because the guard
+-- was only ever matched by name. That is why this check matches on the exact key
+-- SET instead. 20260729000001_reviews_uniqueness_canonical.sql now converges the
+-- repository onto production's rule, so a fresh rebuild and production agree.
 --
 -- Four ways this can be satisfied on paper but not in fact, all mutation-tested:
 --   • index absent            — 20260718000002 creates it inside a
