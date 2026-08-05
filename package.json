@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tests/reputation.integration.mjs"
+    "test": "node tests/reputation.integration.mjs && node --test tests/valuation-guard.test.mjs",
+    "test:mutation": "node tests/mutations/run.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

@@ -1890,10 +1890,21 @@ export function AppProvider({ children }) {
       }
 
       // Create a per-attempt controller that aborts on timeout OR user cancel.
-      // 50s > server BUDGET_MS (45s on the Node runtime) so the server always
-      // responds first — the client only aborts if the function truly hangs.
+      //
+      // VAL-001 (D7) — INVARIANT:
+      //   client_abort > BUDGET_MS + tail_reserve + cold_start_allowance
+      //
+      // The client clock starts BEFORE the server's: it includes request upload
+      // and a possible function cold start. So an abort set equal to the
+      // server's budget fires while the server is still writing its response —
+      // paid Sonnet work is thrown away and, because an abort is not a
+      // retryable status, it is not re-requested either.
+      // Server BUDGET_MS is 50s (it was 45s when the old 50000 was chosen; the
+      // comment here was never updated, which is how the margin reached zero).
+      // 58s leaves ~8s for the persistence tail, upload and cold start.
+      // Raising BUDGET_MS requires raising this in the same change.
       const attemptCtrl = new AbortController();
-      const timeoutId = setTimeout(() => attemptCtrl.abort(), 50000);
+      const timeoutId = setTimeout(() => attemptCtrl.abort(), 58000);
       const onPipelineAbort = () => { clearTimeout(timeoutId); attemptCtrl.abort(); };
       pipelineSignal.addEventListener('abort', onPipelineAbort);
 
@@ -3637,15 +3648,31 @@ export function AppProvider({ children }) {
     }
   };
 
+  // VAL-001: calcPrice returns null when there is no computable price
+  // (manual_required, or a missing/invalid mid). The price field is a
+  // controlled input, so null becomes '' — an EMPTY box the user fills in.
+  // Never 0: publishListing already blocks on a falsy price, so an empty box
+  // gates publishing instead of shipping a confident ₪0.
+  const suggestPrice = (c) => {
+    const p = calcPrice(result?.marketValue, c, answers, result?.category);
+    return p == null ? '' : p;
+  };
+
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
-    setListingData({ title: result?.name || '', desc: '', price: result?.marketValue?.mid || 0, phone: '', location: '' });
+    // No condition chosen yet, so this is the server's mid as-is — the delta is
+    // applied on the condition step, once, by selectCondition.
+    const mv = result?.marketValue;
+    const opening = (mv?.pricing_status === 'manual_required' || !(Number(mv?.mid) > 0))
+      ? ''
+      : Number(mv.mid);
+    setListingData({ title: result?.name || '', desc: '', price: opening, phone: '', location: '' });
     setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
   };
 
   const selectCondition = (c) => {
     setCondition(c);
-    setListingData((prev) => ({ ...prev, price: calcPrice(result?.marketValue?.mid, c, answers, result?.category) }));
+    setListingData((prev) => ({ ...prev, price: suggestPrice(c) }));
     // Show category-specific questions for used/poor; skip for new/likeNew
     setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
   };

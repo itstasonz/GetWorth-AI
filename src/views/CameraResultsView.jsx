@@ -709,14 +709,57 @@ function getConfidenceStyles(tier) {
   }
 }
 
-function getConfidenceLabel(tier, lang) {
-  const labels = {
-    high:     { en: 'Strong match',        he: 'התאמה מדויקת'      },
-    moderate: { en: 'Confirm to improve',  he: 'אשר לשיפור הדיוק'  },
-    low:      { en: 'Needs confirmation',  he: 'זקוק לאישור'        },
-    very_low: { en: 'Estimated range',      he: 'הערכת טווח'         },
+// VAL-001: this labels IDENTITY only — how sure we are what the item is.
+// 'very_low' used to read "Estimated range" / "הערכת טווח", a pricing phrase
+// on an identity tier; that conflation is the bug this task exists to fix.
+function getConfidenceLabel(tier, t) {
+  const keys = {
+    high:     'idStrong',
+    moderate: 'idModerate',
+    low:      'idLow',
+    very_low: 'idVeryLow',
   };
-  return labels[tier]?.[lang === 'he' ? 'he' : 'en'] || labels.moderate.en;
+  return t?.[keys[tier] || 'idModerate'] || '';
+}
+
+// VAL-001: how much evidence backed the PRICE. Deliberately verbal — the
+// backend grade is a 4-level ordinal, not a probability, so rendering it as a
+// percentage would invent precision that does not exist.
+// MEDIUM maps to "Limited" on purpose: it is the DEFAULT for any non-comp
+// Stage 2 result (api/analyze.js emits it whenever price_method !== 'comp_based'),
+// i.e. an AI estimate with no comparable sales behind it.
+function getPricingEvidence(pricingConfidence, t) {
+  switch (pricingConfidence) {
+    case 'HIGH':
+      return { label: t?.priceEvidStrong, color: 'text-green-400' };
+    case 'LOW':
+      return { label: t?.priceEvidWeak, color: 'text-orange-400' };
+    case 'MANUAL_REQUIRED':
+      return { label: t?.priceEvidNone, color: 'text-red-400' };
+    case 'MEDIUM':
+    default:
+      return { label: t?.priceEvidLimited, color: 'text-amber-400' };
+  }
+}
+
+// Provenance caption for the price — replaces a 6-deep ternary that silently
+// lumped db_fallback and rescue_estimate in with healthy Stage 2 output.
+// Both of those mean the pricing stage FAILED and something rescued it, so
+// they must not read the same as a comp-based price.
+function getPricingSourceLabel({ pricingMode, pricingStatus, priceMethod }, t) {
+  if (pricingMode === 'verification_required') return t?.priceVerificationPending;
+  if (pricingMode === 'replica_adjusted') return t?.priceReplicaAdjusted;
+  const byStatus = {
+    manual_required:   t?.priceSetManually,
+    category_fallback: t?.priceFromCategory,
+    db_fallback:       t?.priceFromCatalog,
+    rescue_estimate:   t?.priceQuickEst,
+    db_based:          t?.priceFromComps,
+    ai_estimate:       t?.priceFromAi,
+  };
+  if (byStatus[pricingStatus]) return byStatus[pricingStatus];
+  // No status (older response): fall back to the model's declared method.
+  return priceMethod === 'comp_based' ? t?.priceFromComps : t?.priceFromAi;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1265,20 +1308,21 @@ export function ResultsView() {
             </p>
           )}
           {(priceMethod || result.marketValue?.pricing_status) && (
-            <p className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
-              {result.authenticity?.pricingMode === 'verification_required'
-                ? (lang === 'he' ? 'מחיר תלוי אימות אותנטיות' : 'Price subject to authenticity verification')
-                : result.authenticity?.pricingMode === 'replica_adjusted'
-                ? (lang === 'he' ? 'מחיר מותאם לרפליקה' : 'Replica-adjusted estimate')
-                : result.marketValue?.pricing_status === 'category_fallback'
-                ? (lang === 'he' ? 'הערכה לפי קטגוריה' : 'Estimated from category data')
-                : result.marketValue?.pricing_status === 'manual_required'
-                ? (lang === 'he' ? 'קבע מחיר ידנית' : 'Set your own price')
-                : priceMethod === 'comp_based'
-                ? (lang === 'he' ? 'מבוסס על מחירי שוק' : 'Based on market data')
-                : (lang === 'he' ? 'הערכת שוק' : 'Market estimate')}
+            <p dir="auto" className="text-[10px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.5 }}>
+              {getPricingSourceLabel({
+                pricingMode:   result.authenticity?.pricingMode,
+                pricingStatus: result.marketValue?.pricing_status,
+                priceMethod,
+              }, t)}
             </p>
           )}
+          {/* VAL-001: every price on this screen is an estimate. Stated once,
+              always, so no tier or fallback path can quietly omit it. */}
+          <p dir="auto" className="text-[10px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
+            {result.marketValue?.pricing_status === 'manual_required'
+              ? t.enterPricePrompt
+              : t.estimateOnly}
+          </p>
         </div>
       </FadeIn>
 
@@ -1294,7 +1338,11 @@ export function ResultsView() {
                 className="text-xs font-semibold uppercase tracking-wider"
                 style={{ color: STITCH.onSurfaceVariant }}
               >
-                {lang === 'he' ? 'דיוק זיהוי' : 'Scan accuracy'}
+                {/* VAL-001 §10: this number describes IDENTITY only. The old
+                    copy ("Scan accuracy" / "דיוק זיהוי") read as accuracy of the
+                    PRICE sitting directly above it. The accuracy word does not
+                    survive anywhere near a price. */}
+                {t.idConfidence}
               </p>
               <p
                 className="text-3xl font-bold mt-1"
@@ -1303,7 +1351,7 @@ export function ResultsView() {
                 {confidencePercent}%
               </p>
               <p className={`text-[10px] font-medium mt-0.5 ${styles.color}`}>
-                {getConfidenceLabel(tier, lang)}
+                {getConfidenceLabel(tier, t)}
               </p>
             </div>
             <div className="text-right">
@@ -1311,22 +1359,22 @@ export function ResultsView() {
                 className="text-[10px] font-medium uppercase mb-2"
                 style={{ color: STITCH.onSurfaceVariant }}
               >
-                {lang === 'he' ? 'דיוק סריקה' : 'Scanning precision'}
+                {t.pricingEvidence}
               </p>
-              {/* Bar visualizer — heights proportional to confidence */}
-              <div className="flex gap-0.5 items-end">
-                {[0.45, 0.70, 0.95, 0.55, 0.80, 1.0].map((h, i) => (
-                  <div
-                    key={i}
-                    className={`w-1 rounded-full ${i === 5 ? 'animate-pulse' : ''}`}
-                    style={{
-                      height: `${Math.max(8, Math.round(h * confidencePercent * 0.4))}px`,
-                      background: STITCH.primary,
-                      animationDuration: '2s',
-                    }}
-                  />
-                ))}
-              </div>
+              {/* VAL-001 §10: how much evidence backed the PRICE, stated
+                  verbally. This replaced a bar visualizer whose heights were
+                  driven by confidencePercent — an IDENTITY signal — under a
+                  heading about pricing. The backend grade is a 4-level ordinal,
+                  so there is deliberately no percentage and no bar here: both
+                  would invent precision the grade does not carry. */}
+              {(() => {
+                const evidence = getPricingEvidence(result.marketValue?.pricing_confidence, t);
+                return (
+                  <p dir="auto" className={`text-sm font-semibold ${evidence.color}`}>
+                    {evidence.label}
+                  </p>
+                );
+              })()}
             </div>
           </div>
           <div
