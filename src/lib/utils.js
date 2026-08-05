@@ -37,9 +37,90 @@ export const timeAgo = (d, t) => {
   return days === 0 ? (t.today || 'today') : days === 1 ? (t.yesterday || 'yesterday') : `${days}${t.daysAgo || 'd ago'}`;
 };
 
-export const calcPrice = (base, cond, ans, category) => {
-  if (!base) return 0;
-  const disc = { newSealed: 0, likeNew: 0.15, used: 0.3, poor: 0.7 }[cond] || 0;
+// ═══════════════════════════════════════════════════════
+// CONDITION PRICING (VAL-001 / decision D1)
+// ═══════════════════════════════════════════════════════
+
+// Mirrors CONDITION_LADDER in api/_lib/valuation-guard.js. The server sends its
+// own versioned copy on marketValue.condition_ladder; this local constant is
+// the fallback for responses that predate that field (e.g. a client running
+// against an older deploy, or a cached result).
+export const CONDITION_LADDER = Object.freeze({
+  newSealed: 0,
+  likeNew:   0.15,
+  used:      0.30,
+  poor:      0.70,
+});
+
+// Maps free-text / legacy condition strings onto the four ladder rungs.
+// Returns null for anything unrecognized — callers MUST treat null as
+// "no condition information", never as a rung.
+export const normalizeConditionBasis = (s) => {
+  const k = String(s ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '');
+  if (!k) return null;
+  if (k === 'newsealed' || k === 'new' || k === 'sealed' || k === 'brandnew') return 'newSealed';
+  if (k === 'likenew' || k === 'excellent' || k === 'mint' || k === 'openbox') return 'likeNew';
+  if (k === 'used' || k === 'good' || k === 'fair') return 'used';
+  if (k === 'poor' || k === 'damaged' || k === 'forparts' || k === 'broken') return 'poor';
+  return null;
+};
+
+// A ladder that arrived over the wire is untrusted input: it must be a plain
+// object whose four rungs are all finite numbers, or we ignore it entirely.
+// A partially-valid ladder is rejected rather than merged — mixing a server
+// rung with a local one would silently produce a delta neither side intended.
+const resolveLadder = (wire) => {
+  if (!wire || typeof wire !== 'object') return CONDITION_LADDER;
+  const keys = Object.keys(CONDITION_LADDER);
+  const ok = keys.every((k) => Number.isFinite(wire[k]));
+  return ok ? wire : CONDITION_LADDER;
+};
+
+// conditionDelta — RESIDUAL adjustment, never an absolute discount.
+// Stage 2 already prices the item AT its observed condition (condition_basis),
+// so applying the absolute ladder on top of that marked the same wear down
+// twice (a used item took the model's used-price AND another 30%).
+// The residual is ladder[userCond] - ladder[basis]: re-picking the basis
+// condition is a no-op, and only the user's DISAGREEMENT with the model moves
+// the price.
+// FAIL-SAFE (binding, VAL-001 D1): an absent or unmappable basis yields 0.
+// Condition is applied exactly once — by the server, or here — never twice.
+// There is deliberately no fallback to the old absolute discount.
+export const conditionDelta = (basis, userCond, ladder = CONDITION_LADDER) => {
+  const b = normalizeConditionBasis(basis);
+  const u = normalizeConditionBasis(userCond);
+  if (!b || !u) return 0;
+  const from = ladder[b];
+  const to = ladder[u];
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return 0;
+  return to - from;
+};
+
+// calcPrice — the listing flow's suggested price.
+//
+// Returns `null` — NOT 0 — when there is no computable price. 0 is a real
+// price and rendering it reads as "this item is worth nothing"; null means
+// "the user has to tell us", which is what manual_required actually is.
+//
+// `mv` is the whole marketValue object (it carries mid/low/high, the basis and
+// the ladder). A bare number is still accepted and treated as `{ mid }`, which
+// degrades to delta 0 — that keeps the fail-safe intact if a call site is
+// updated later than this function.
+export const calcPrice = (mv, cond, ans = {}, category) => {
+  const m = (mv && typeof mv === 'object') ? mv : { mid: mv };
+
+  // Deliberate zero-state: the server found no pricing evidence at all.
+  if (m.pricing_status === 'manual_required') return null;
+
+  const base = Number(m.mid);
+  if (!Number.isFinite(base) || base <= 0) return null;
+
+  const ladder = resolveLadder(m.condition_ladder);
+  const delta = conditionDelta(m.condition_basis, cond, ladder);
+
+  // Answer-driven wear extras stay ABSOLUTE. They encode what the user can see
+  // and the model could not, so they are independent of the basis and apply
+  // even when the delta fails safe to 0.
   let extra = 0;
   if (cond === 'used' || cond === 'poor') {
     if (ans.scratches === 'yes') extra += 0.02;
@@ -49,7 +130,24 @@ export const calcPrice = (base, cond, ans, category) => {
     if (hasBattery && ans.battery === 'poor') extra += 0.02;
     if (hasBattery && ans.battery === 'degraded') extra += 0.01;
   }
-  return Math.round(base * (1 - disc - extra));
+
+  const price = Math.round(base * (1 - delta - extra));
+
+  // UPSIDE clamp only (lead ruling, VAL-001 D1). An inverted delta — basis
+  // 'poor' + user 'newSealed' = -0.70 — would otherwise inflate the suggested
+  // price 70% above the server's own estimate on nothing but client input, so
+  // the validated `high` caps it.
+  //
+  // There is deliberately NO downside clamp. `low` is the server's band at the
+  // BASIS condition, and a user reporting worse-than-observed condition is
+  // giving us information the model did not have: basis 'newSealed' + user
+  // 'poor' should reach base*0.30 even though `low` is typically base*0.75.
+  // Clamping there would swallow the markdown and quietly re-introduce the
+  // "condition barely moves the price" bug from the other direction.
+  const high = Number(m.high);
+  const price2 = (Number.isFinite(high) && high > 0) ? Math.min(price, high) : price;
+
+  return Math.max(0, price2);
 };
 
 // CHAT-002: image messages are stored as `__chat_img__<url>` (see ChatViews).

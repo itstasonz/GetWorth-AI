@@ -1666,19 +1666,41 @@ export function ListingFlowView() {
               </FadeIn>
             ))}
           </div>
+          {/* VAL-001: pass the whole marketValue, not just `mid`. calcPrice needs
+              condition_basis + condition_ladder to apply the RESIDUAL condition
+              delta; given a bare number it fail-safes to no adjustment at all,
+              which silently made the condition selector inert here. */}
           <FadeIn delay={150}>
-            <Card className="p-5 text-center" gradient="linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))" glow>
-              <p className="text-sm text-emerald-300 mb-1">{t?.yourPrice || 'Your Price'}</p>
-              <p className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
-                {formatPrice(calcPrice(result?.marketValue?.mid, condition, answers, itemCategory))}
-              </p>
-            </Card>
+            {(() => {
+              const suggested = calcPrice(result?.marketValue, condition, answers, itemCategory);
+              // null = the server found no pricing evidence (manual_required).
+              // Showing ₪0 in a celebratory green card reads as "worthless".
+              return suggested === null ? (
+                <Card className="p-5 text-center">
+                  <p className="text-sm text-slate-300 mb-1">{t?.priceSetManually || 'Set your own price'}</p>
+                  <p className="text-xs text-slate-400">{t?.estimateOnly || 'An estimate, not a guaranteed sale price.'}</p>
+                </Card>
+              ) : (
+                <Card className="p-5 text-center" gradient="linear-gradient(135deg, rgba(16,185,129,0.15), rgba(16,185,129,0.05))" glow>
+                  <p className="text-sm text-emerald-300 mb-1">{t?.yourPrice || 'Your Price'}</p>
+                  <p className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+                    {formatPrice(suggested)}
+                  </p>
+                  <p className="mt-2 text-[10px] text-slate-400" dir="auto">
+                    {t?.estimateOnly || 'An estimate, not a guaranteed sale price.'}
+                  </p>
+                </Card>
+              );
+            })()}
           </FadeIn>
           <FadeIn delay={200}>
             <Btn primary className="w-full py-4" onClick={() => {
+              const suggested = calcPrice(result?.marketValue, condition, answers, itemCategory);
               setListingData((prev) => ({
                 ...prev,
-                price: calcPrice(result?.marketValue?.mid, condition, answers, itemCategory),
+                // null → leave the field empty so the user enters a price,
+                // rather than prefilling a meaningless 0.
+                price: suggested === null ? '' : suggested,
               }));
               setListingStep(2);
             }}>
@@ -1761,7 +1783,15 @@ export function ListingFlowView() {
               <div className="flex items-center gap-2 mt-2">
                 <span className="text-3xl font-bold text-green-400">₪</span>
                 <input type="number" className="flex-1 bg-transparent text-3xl font-bold text-green-400 focus:outline-none"
-                  value={listingData.price} onChange={(e) => setListingData({ ...listingData, price: parseInt(e.target.value) || 0 })} />
+                  value={listingData.price}
+                  onChange={(e) => {
+                    // VAL-001: clearing the box must leave it EMPTY, not 0.
+                    // `parseInt(...) || 0` turned a cleared field into a visible
+                    // "0", contradicting the never-show-a-bare-zero rule the
+                    // rest of this flow follows (AppContext suggestPrice).
+                    const n = parseInt(e.target.value, 10);
+                    setListingData({ ...listingData, price: Number.isFinite(n) && n >= 0 ? n : '' });
+                  }} />
               </div>
             </Card>
           </FadeIn>

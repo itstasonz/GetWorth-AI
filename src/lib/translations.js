@@ -93,6 +93,34 @@ const T = {
     range: 'Range',
     live: 'Your listing is now live!',
 
+    // Valuation trust (VAL-001)
+    // Two SEPARATE axes. Identity = how sure we are WHAT this is (a calibrated
+    // score, so a % is legitimate). Pricing = how much evidence backed the
+    // PRICE (a 4-level ordinal, so it is verbal — a % would be false precision).
+    idConfidence:      'Identification confidence',
+    idStrong:          'Strong match',
+    idModerate:        'Confirm to improve identification',
+    idLow:             'Needs confirmation',
+    idVeryLow:         'Not clearly identified',
+
+    pricingEvidence:   'Pricing evidence',
+    priceEvidStrong:   'Strong pricing evidence',
+    priceEvidLimited:  'Limited pricing evidence',
+    priceEvidWeak:     'Weak pricing evidence',
+    priceEvidNone:     'No pricing evidence',
+
+    priceFromComps:    'Based on comparable sales',
+    priceFromAi:       'AI estimate, no comparable sales',
+    priceFromCatalog:  'Based on a similar catalog item',
+    priceQuickEst:     'Quick estimate — verify before listing',
+    priceFromCategory: 'Estimated from category data',
+    priceSetManually:  'Set your own price',
+    priceVerificationPending: 'Price subject to authenticity verification',
+    priceReplicaAdjusted:     'Replica-adjusted estimate',
+
+    estimateOnly:      'An estimate, not a guaranteed sale price.',
+    enterPricePrompt:  'Enter a price to continue',
+
     // Time
     today: 'Today',
     yesterday: 'Yesterday',
@@ -298,6 +326,33 @@ const T = {
     max: 'מקס׳',
     range: 'טווח',
     live: 'המודעה שלך פורסמה!',
+
+    // Valuation trust (VAL-001) — must carry the SAME claim as the English.
+    // The word דיוק (accuracy) is deliberately absent from this whole block:
+    // it is what made the old copy read as a promise about the price.
+    idConfidence:      'ביטחון בזיהוי',
+    idStrong:          'התאמה חזקה',
+    idModerate:        'אשר כדי לשפר את הזיהוי',
+    idLow:             'דורש אישור',
+    idVeryLow:         'לא זוהה בבירור',
+
+    pricingEvidence:   'בסיס התמחור',
+    priceEvidStrong:   'בסיס תמחור חזק',
+    priceEvidLimited:  'בסיס תמחור מוגבל',
+    priceEvidWeak:     'בסיס תמחור חלש',
+    priceEvidNone:     'אין בסיס תמחור',
+
+    priceFromComps:    'מבוסס על מכירות דומות',
+    priceFromAi:       'הערכת AI, ללא מכירות דומות להשוואה',
+    priceFromCatalog:  'מבוסס על פריט דומה בקטלוג',
+    priceQuickEst:     'הערכה מהירה — בדוק לפני פרסום',
+    priceFromCategory: 'הערכה לפי נתוני קטגוריה',
+    priceSetManually:  'קבע מחיר בעצמך',
+    priceVerificationPending: 'מחיר תלוי אימות אותנטיות',
+    priceReplicaAdjusted:     'מחיר מותאם לרפליקה',
+
+    estimateOnly:      'הערכה בלבד — לא מחיר מכירה מובטח.',
+    enterPricePrompt:  'הזן מחיר כדי להמשיך',
 
     // Time
     today: 'היום',
