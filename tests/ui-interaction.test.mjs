@@ -408,6 +408,283 @@ describe('Sheet', () => {
   });
 });
 
+// ── UI-002B primitives ──────────────────────────────────────────────────────
+describe('IconButton', () => {
+  const Dot = (props) => h('svg', props);
+
+  test('the icon-only control carries an accessible name', async () => {
+    // Without this an icon button is announced as just "button". It is the
+    // single most common icon-button defect and it is invisible on screen.
+    const view = await mount(h(UI.IconButton, { icon: Dot, label: 'Dismiss' }));
+    const btn = container.querySelector('button');
+    assert.equal(btn.getAttribute('aria-label'), 'Dismiss');
+    await view.unmount();
+  });
+
+  test('clears the 44px minimum target without growing the glyph', async () => {
+    const view = await mount(h(UI.IconButton, { icon: Dot, label: 'Save', size: 'sm' }));
+    const btn = container.querySelector('button');
+    assert.match(btn.className, /min-w-tap/, 'the tappable area must be expanded');
+    assert.match(btn.className, /min-h-tap/);
+    // The glyph stays at its declared size — the hit area grows around it.
+    assert.match(container.querySelector('svg').getAttribute('class'), /w-4 h-4/);
+    await view.unmount();
+  });
+
+  test('announces a toggle state only when it is actually a toggle', async () => {
+    // aria-pressed on a plain action button announces "not pressed" on every
+    // control, which reads as a toggle that does not work.
+    const plain = await mount(h(UI.IconButton, { icon: Dot, label: 'Share' }));
+    assert.equal(container.querySelector('button').hasAttribute('aria-pressed'), false);
+    await plain.unmount();
+
+    const toggle = await mount(h(UI.IconButton, { icon: Dot, label: 'Save', selected: false }));
+    assert.equal(container.querySelector('button').getAttribute('aria-pressed'), 'false');
+    await toggle.unmount();
+  });
+
+  test('never defaults to a submit button', async () => {
+    // A bare <button> is type="submit". IconButton is built on HitArea, so an
+    // unguarded default would make every icon button in the app submit the form
+    // it happens to sit in — and the chat composer and SellViews forms are
+    // exactly where these go next.
+    const view = await mount(h(UI.IconButton, { icon: Dot, label: 'Send' }));
+    assert.equal(container.querySelector('button').getAttribute('type'), 'button');
+    await view.unmount();
+  });
+
+  test('softDisabled stays focusable and announces itself, unlike native disabled', async () => {
+    // An icon-only control carries its whole meaning in aria-label. Native
+    // `disabled` removes it from the tab order, so a user cannot focus it to
+    // hear what it is or why it is off — and on touch there is no hover tooltip
+    // to fall back on.
+    let clicks = 0;
+    const view = await mount(
+      h(UI.IconButton, { icon: Dot, label: 'Publish', softDisabled: true, onClick: () => clicks++ }));
+    const btn = container.querySelector('button');
+
+    assert.equal(btn.disabled, false, 'softDisabled must remain focusable');
+    assert.equal(btn.getAttribute('aria-disabled'), 'true');
+    btn.focus();
+    assert.equal(document.activeElement, btn, 'the user must be able to reach it to learn why it is off');
+    btn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(clicks, 0, 'softDisabled must not invoke its action');
+    await view.unmount();
+  });
+
+  test('disabled reaches the DOM, not just the opacity', async () => {
+    let clicks = 0;
+    const view = await mount(h(UI.IconButton, { icon: Dot, label: 'Save', disabled: true, onClick: () => clicks++ }));
+    const btn = container.querySelector('button');
+    assert.equal(btn.disabled, true, 'a dimmed-but-clickable control is not disabled');
+    btn.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(clicks, 0);
+    await view.unmount();
+  });
+});
+
+describe('TextArea', () => {
+  test('pairs its label to the control', async () => {
+    const view = await mount(h(UI.TextArea, { label: 'Description', value: '', onChange() {} }));
+    const label = container.querySelector('label');
+    const field = container.querySelector('textarea');
+    assert.ok(field.id, 'the control must have an id to be labelled');
+    assert.equal(label.getAttribute('for'), field.id);
+    await view.unmount();
+  });
+
+  test('holds the 16px floor that stops iOS zooming on focus', async () => {
+    const view = await mount(h(UI.TextArea, { label: 'x', value: '', onChange() {} }));
+    assert.match(container.querySelector('textarea').className, /\btext-base\b/);
+    await view.unmount();
+  });
+
+  test('an error is announced and marks the field invalid', async () => {
+    const view = await mount(h(UI.TextArea, { label: 'x', error: 'Too short', value: '', onChange() {} }));
+    const field = container.querySelector('textarea');
+    assert.equal(field.getAttribute('aria-invalid'), 'true');
+    const describedBy = field.getAttribute('aria-describedby');
+    assert.ok(describedBy, 'the error must be referenced, not merely rendered nearby');
+    assert.equal(document.getElementById(describedBy.split(' ')[0]).textContent, 'Too short');
+    await view.unmount();
+  });
+
+  test('the character cap is discoverable rather than discovered by losing text', async () => {
+    const view = await mount(
+      h(UI.TextArea, { label: 'x', maxLength: 500, showCount: true, value: 'abc', onChange() {} }));
+    const field = container.querySelector('textarea');
+    const ids = field.getAttribute('aria-describedby').split(' ');
+    const count = ids.map((id) => document.getElementById(id)).find((el) => /\d+\/\d+/.test(el?.textContent ?? ''));
+    assert.ok(count, 'the counter must be wired into aria-describedby');
+    assert.equal(count.textContent, '3/500');
+    await view.unmount();
+  });
+
+  test('an error and the counter are both announced, error first', async () => {
+    const view = await mount(
+      h(UI.TextArea, { label: 'x', error: 'Bad', maxLength: 10, showCount: true, value: 'ab', onChange() {} }));
+    const ids = container.querySelector('textarea').getAttribute('aria-describedby').split(' ');
+    assert.equal(ids.length, 2);
+    assert.equal(document.getElementById(ids[0]).textContent, 'Bad', 'the error must be read before the count');
+    await view.unmount();
+  });
+
+  test('the hint survives an error — guidance must not vanish when it is needed most', async () => {
+    // The composition used to be [error || hint, count], so the sentence
+    // explaining what valid input looks like disappeared at exactly the moment
+    // the user got it wrong.
+    const view = await mount(h(UI.TextArea, {
+      label: 'x', error: 'Too short', hint: 'At least 30 characters', value: '', onChange() {},
+    }));
+    const ids = container.querySelector('textarea').getAttribute('aria-describedby').split(' ');
+    const described = ids.map((id) => document.getElementById(id)?.textContent);
+    assert.ok(described.includes('Too short'), 'the error must be announced');
+    assert.ok(described.includes('At least 30 characters'), 'the hint must survive the error');
+    assert.equal(described[0], 'Too short', 'the error is still the most urgent, so it is read first');
+    await view.unmount();
+  });
+
+  test('direction is resolved from content, not forced by the UI language', async () => {
+    // A Hebrew marketplace is full of Latin model strings ("iPhone 14 Pro Max").
+    // Forcing rtl there makes the caret jump and strands trailing punctuation.
+    const auto = await mount(h(UI.TextArea, { label: 'x', value: '', onChange() {} }));
+    assert.equal(container.querySelector('textarea').getAttribute('dir'), 'auto');
+    await auto.unmount();
+
+    // An explicit direction is still available for fields that must be pinned.
+    const pinned = await mount(h(UI.TextArea, { label: 'x', dir: 'ltr', value: '', onChange() {} }));
+    assert.equal(container.querySelector('textarea').getAttribute('dir'), 'ltr');
+    await pinned.unmount();
+  });
+
+  test('forwards a ref to the real control', async () => {
+    // ChatViews drives auto-grow and post-send refocus through a ref; without
+    // this the highest-value adoption site cannot migrate at all.
+    const ref = React.createRef();
+    const view = await mount(h(UI.TextArea, { ref, label: 'x', value: '', onChange() {} }));
+    assert.ok(ref.current, 'ref was not forwarded');
+    assert.equal(ref.current.tagName, 'TEXTAREA');
+    await view.unmount();
+  });
+});
+
+describe('Stack', () => {
+  test('gap comes from the closed scale', async () => {
+    for (const [gap, cls] of [['stack', 'gap-stack'], ['group', 'gap-group'], ['section', 'gap-section']]) {
+      const view = await mount(h(UI.Stack, { gap, 'data-probe': 'x' }, 'c'));
+      assert.match(container.querySelector('[data-probe]').className, new RegExp(`\\b${cls}\\b`));
+      await view.unmount();
+    }
+  });
+
+  test('an unrecognised gap falls back to the scale rather than emitting nothing', async () => {
+    const view = await mount(h(UI.Stack, { gap: 'enormous', 'data-probe': 'x' }, 'c'));
+    assert.match(container.querySelector('[data-probe]').className, /\bgap-stack\b/);
+    await view.unmount();
+  });
+
+  test('align and justify emit REAL utilities, not interpolated ones', async () => {
+    // `items-${align}` is a class Tailwind's text scanner can never see, so the
+    // utility is never emitted and the prop silently does nothing. This asserts
+    // the lookup-table form that actually compiles.
+    const view = await mount(
+      h(UI.Stack, { row: true, align: 'center', justify: 'between', 'data-probe': 'x' }, 'c'));
+    const cls = container.querySelector('[data-probe]').className;
+    assert.match(cls, /\bitems-center\b/);
+    assert.match(cls, /\bjustify-between\b/);
+    assert.ok(!/\$\{/.test(cls), 'an unresolved template literal reached the DOM');
+    await view.unmount();
+  });
+
+  test('a row is laid out by flexbox so RTL needs no prop', async () => {
+    const view = await mount(h(UI.Stack, { row: true, 'data-probe': 'x' }, 'c'));
+    const cls = container.querySelector('[data-probe]').className;
+    assert.match(cls, /\bflex\b/);
+    assert.match(cls, /\bflex-row\b/);
+    // Nothing may hardcode a physical side — that is what breaks under dir=rtl.
+    assert.ok(!/\b(left|right)-/.test(cls), 'a row Stack must not pin a physical side');
+    await view.unmount();
+  });
+});
+
+describe('Section', () => {
+  test('is a landmark named by its own visible heading', async () => {
+    const view = await mount(h(UI.Section, { title: 'Recent listings' }, 'body'));
+    const section = container.querySelector('section');
+    assert.ok(section, 'a titled Section must render a real <section>');
+    const id = section.getAttribute('aria-labelledby');
+    assert.ok(id, 'the landmark must be named');
+    assert.equal(document.getElementById(id).textContent, 'Recent listings');
+    assert.equal(document.getElementById(id).tagName, 'H2', 'the name must come from a real heading');
+    await view.unmount();
+  });
+
+  test('an untitled Section adds no unnamed landmark', async () => {
+    // An unnamed <section> is announced as a bare "region" and clutters the
+    // rotor without telling the user anything.
+    const view = await mount(h(UI.Section, null, 'body'));
+    assert.equal(container.querySelector('section'), null);
+    assert.ok(!container.firstElementChild.hasAttribute('aria-labelledby'));
+    await view.unmount();
+  });
+
+  test('carries at most one trailing action, placed by flexbox', async () => {
+    const view = await mount(
+      h(UI.Section, { title: 'Saved', action: h('button', { id: 'see-all' }, 'See all') }, 'body'));
+    assert.ok(document.getElementById('see-all'), 'the action must render');
+    const row = document.getElementById('see-all').closest('div').parentElement;
+    assert.match(row.className, /\bflex\b/);
+    assert.ok(!/\b(left|right)-/.test(row.className), 'the action must not be pinned to a physical side');
+    await view.unmount();
+  });
+
+  test('heading level is explicit, so nested sections produce a real outline', async () => {
+    // A hardcoded <h2> means a nested Section emits a sibling h2 and the
+    // document outline is flat — screen-reader users navigate by level, so a
+    // flat outline removes the structure this primitive exists to provide.
+    const view = await mount(h(UI.Section, { title: 'Outer' },
+      h(UI.Section, { title: 'Inner', level: 3 }, 'body')));
+    assert.equal(container.querySelector('h2').textContent, 'Outer');
+    assert.equal(container.querySelector('h3').textContent, 'Inner');
+    await view.unmount();
+  });
+
+  test('the degrade rule covers every landmark tag, not just <section>', async () => {
+    // An untitled `as="aside"` kept its tag under the old check and produced an
+    // unnamed landmark — the exact rotor noise the rule exists to prevent.
+    for (const tag of ['aside', 'nav', 'section']) {
+      const view = await mount(h(UI.Section, { as: tag }, 'body'));
+      assert.equal(container.querySelector(tag), null,
+        `an untitled <${tag}> must degrade rather than become an unnamed landmark`);
+      await view.unmount();
+    }
+
+    // A NAMED landmark keeps its tag — the rule quiets noise, it does not strip
+    // semantics the caller asked for.
+    const named = await mount(h(UI.Section, { as: 'aside', title: 'Related' }, 'body'));
+    assert.ok(container.querySelector('aside'));
+    await named.unmount();
+  });
+
+  test('a long title wraps rather than being clipped with no way to read it', async () => {
+    const view = await mount(h(UI.Section, { title: 'A very long section heading' }, 'body'));
+    const heading = container.querySelector('h2');
+    assert.ok(!/\btruncate\b/.test(heading.className),
+      'clipping a heading fails at 200% zoom and on long Hebrew titles');
+    await view.unmount();
+  });
+
+  test('draws no box of its own', async () => {
+    // A section that paints its own container is what turns a mobile screen
+    // into a dashboard of nested panels.
+    const view = await mount(h(UI.Section, { title: 'T' }, 'body'));
+    const cls = container.querySelector('section').className;
+    assert.ok(!/\bbg-|\bborder\b|\brounded-|\bshadow-/.test(cls),
+      `Section must stay layout-only — got "${cls}"`);
+    await view.unmount();
+  });
+});
+
 // ── Trust surfaces ──────────────────────────────────────────────────────────
 describe('trust labelling', () => {
   // AuthProfileView renders this exact string for a seller who passed operator

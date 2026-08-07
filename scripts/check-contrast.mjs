@@ -9,7 +9,7 @@
  * Why this exists: UI-001 found six shipped text pairs below 4.5:1, including a
  * 1.71:1 failure on condition — the single most price-relevant fact on a listing.
  * Contrast was previously asserted in review comments and drifted. Here it is
- * arithmetic that runs in CI.
+ * arithmetic that runs from `npm test`. (There is no CI runner in this repo.)
  *
  * Method: sRGB → linear (WCAG 2.x transfer), L = 0.2126R + 0.7152G + 0.0722B,
  * ratio = (Lhi + 0.05) / (Llo + 0.05). Translucent fills are alpha-composited

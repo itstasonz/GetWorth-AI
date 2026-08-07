@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, useId } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useId, forwardRef } from 'react';
 import { CheckCircle, AlertCircle, Info, AlertTriangle, X, ChevronRight, ChevronLeft, RefreshCw } from 'lucide-react';
 import { BADGE_COLORS } from '../lib/utils';
 import { navDirectionRef } from '../lib/urlSync';
@@ -81,6 +81,12 @@ export const haptic = (pattern = 10) => {
  */
 export const HitArea = ({ children, className = '', as: As = 'button', ...p }) => (
   <As
+    // A bare <button> defaults to type="submit", so a HitArea inside a form
+    // submits it. That was latent while Toast's dismiss was the only consumer;
+    // UI-002B built IconButton on top of this, which would have made every icon
+    // button in the app a submit button the moment one landed in the chat
+    // composer or a SellViews form. `Btn` has guarded this since UI-002.
+    {...(As === 'button' ? { type: 'button' } : null)}
     className={`relative inline-flex items-center justify-center min-w-tap min-h-tap ${className}`}
     {...p}
   >
@@ -178,14 +184,18 @@ export const Toast = ({ id, message, type = 'success', rtl: appRtl = false, onDi
         {message}
       </span>
 
-      {/* 44px hit area around a 14px glyph — the dismiss control was 26×26px. */}
-      <HitArea
+      {/* 44px hit area around a 16px glyph — the dismiss control was 26×26px.
+          UI-002B: this was the app's only hand-rolled icon button, and it is now
+          the proof that the shared one carries the same contract — the negative
+          margin keeps the expanded target from padding the toast out. */}
+      <IconButton
+        icon={X}
+        label="Dismiss"
+        variant="muted"
+        size="sm"
         onClick={handleDismiss}
-        aria-label="Dismiss"
-        className="-m-2 flex-shrink-0 rounded-control text-text-muted state-layer"
-      >
-        <X style={{ width: 16, height: 16 }} />
-      </HitArea>
+        className="-m-2 flex-shrink-0"
+      />
     </div>
   );
 };
@@ -496,6 +506,320 @@ export const InputField = ({ label, icon: Icon, rtl, id, error, hint, className 
       {error && <p id={`${inputId}-err`} className="text-meta text-danger">{error}</p>}
       {!error && hint && <p id={`${inputId}-hint`} className="text-meta text-text-muted">{hint}</p>}
     </div>
+  );
+};
+
+// ── TextArea ─────────────────────────────────────────────────────────────────
+/**
+ * InputField's contract, for multi-line entry.
+ *
+ * UI-002A raised every form control to `text-base` because iOS Safari zooms the
+ * page on focus below 16px, and 5 of the 8 controls it fixed were <textarea>:
+ * the review comment, the cancellation reason, the moderation reason, the
+ * listing description and the chat composer. Those had no shared component, so
+ * each one had reinvented its own padding, border and error handling — and none
+ * of them wired a label.
+ *
+ * Everything here mirrors InputField deliberately: same id/htmlFor pairing, same
+ * aria-invalid/aria-describedby wiring, same border roles, same 16px floor. A
+ * user should not be able to feel which of the two they are typing into.
+ *
+ * `maxLength` + `showCount` exist because the review and description fields cap
+ * length server-side. A cap the user cannot see is a cap they discover by losing
+ * a sentence; the counter is wired into aria-describedby so it is announced.
+ */
+export const TextArea = forwardRef(({
+  label, rtl, dir, id, error, hint, rows = 3, maxLength, showCount = false,
+  value, className = '', ...p
+}, ref) => {
+  const autoId = useId();
+  const fieldId = id || autoId;
+  const countId = `${fieldId}-count`;
+  const showingCount = showCount && typeof maxLength === 'number';
+
+  // A counter that reads 0/500 while the user types is worse than no counter.
+  // It happens whenever the field is uncontrolled, because `used` is derived
+  // from the `value` prop that an uncontrolled field never passes.
+  if (process.env.NODE_ENV !== 'production' && showingCount && typeof value !== 'string') {
+    console.warn('[TextArea] `showCount` needs a string `value` — an uncontrolled field would report 0 forever.');
+  }
+
+  // Order matters: the error is the most urgent thing to announce, the count the
+  // least, and `aria-describedby` is read in the order given.
+  //
+  // The hint is NOT dropped when there is an error. It used to be, which meant
+  // format guidance disappeared at exactly the moment the user got the format
+  // wrong — the error says "invalid", and the sentence explaining what valid
+  // looks like vanished with it.
+  const describedBy = [
+    error ? `${fieldId}-err` : null,
+    hint ? `${fieldId}-hint` : null,
+    showingCount ? countId : null,
+  ].filter(Boolean).join(' ') || undefined;
+
+  const used = typeof value === 'string' ? value.length : 0;
+
+  return (
+    <div className="space-y-2">
+      {label && (
+        <label htmlFor={fieldId} className="block text-label text-text-secondary">
+          {label}
+        </label>
+      )}
+      <textarea
+        ref={ref}
+        id={fieldId}
+        rows={rows}
+        maxLength={maxLength}
+        value={value}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy}
+        className={[
+          // 16px like InputField, and for the same reason — see the note there.
+          'w-full px-4 py-3 rounded-control text-base resize-none',
+          'bg-surface-high text-text-primary placeholder-text-muted',
+          'border transition-colors duration-quick',
+          error ? 'border-danger' : 'border-strong focus:border-accent',
+          className,
+        ].join(' ')}
+        // `auto` resolves direction from the first strong character the user
+        // types, which is the right default for a bilingual marketplace: a
+        // Hebrew UI is full of Latin model strings ("iPhone 14 Pro Max"), and
+        // forcing rtl there makes the caret jump and strands trailing
+        // punctuation. Toast already detects direction per message for the same
+        // reason (see its `hasHebrew` check) — this is that rule applied to
+        // input, implemented by the browser. `dir` remains available for the
+        // rare field that must be pinned (phone number, IBAN); the legacy `rtl`
+        // prop still forces a direction so existing call sites keep working.
+        dir={dir ?? (rtl === undefined ? 'auto' : rtl ? 'rtl' : 'ltr')}
+        {...p}
+      />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          {error && <p id={`${fieldId}-err`} className="text-meta text-danger">{error}</p>}
+          {hint && <p id={`${fieldId}-hint`} className="text-meta text-text-muted">{hint}</p>}
+        </div>
+        {showingCount && (
+          <p
+            id={countId}
+            // Announced on demand, not on every keystroke — a live counter would
+            // interrupt the sentence the user is composing.
+            className={`text-meta shrink-0 gw-numeric ${used >= maxLength ? 'text-warning' : 'text-text-muted'}`}
+          >
+            {used}/{maxLength}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+});
+TextArea.displayName = 'TextArea';
+
+// ── IconButton ───────────────────────────────────────────────────────────────
+/**
+ * An icon-only control that is guaranteed to have a name and a 44px target.
+ *
+ * These are the two failures icon buttons produce, and this app had both: UI-001
+ * measured 6×4px and 8×8px hit areas on the photo-dot indicators, and the
+ * dismiss control on Toast was 26×26px. Separately, an icon with no text is
+ * invisible to a screen reader unless something names it — an unnamed icon
+ * button is announced as just "button".
+ *
+ * So `label` is REQUIRED and becomes the accessible name. The glyph never grows
+ * to fill the target: `HitArea` expands the tappable region around a 20px icon,
+ * which is what keeps deliberately tight layouts tight while still clearing the
+ * minimum. Growing the glyph instead is the mistake that makes an app look like
+ * it was designed for a tablet.
+ */
+const ICON_BUTTON_VARIANTS = {
+  ghost:   'text-text-secondary',
+  // A recessive control that must not compete with the content beside it — the
+  // dismiss affordance on a toast, a clear-field control inside an input.
+  muted:   'text-text-muted',
+  surface: 'bg-surface-high text-text-primary border border-subtle',
+  primary: 'bg-action-primary text-on-action',
+  danger:  'text-danger',
+};
+
+const ICON_BUTTON_GLYPH = { sm: 'w-4 h-4', md: 'w-5 h-5', lg: 'w-6 h-6' };
+
+export const IconButton = ({
+  icon: Icon, label, variant = 'ghost', size = 'md',
+  selected, disabled, softDisabled, onClick, className = '', ...p
+}) => {
+  if (process.env.NODE_ENV !== 'production' && !label) {
+    console.warn('[IconButton] `label` is required — an icon with no accessible name is announced as just "button".');
+  }
+  // Two kinds of "off", and they are not interchangeable.
+  //
+  // Native `disabled` removes the control from the tab order, so the user cannot
+  // focus it to hear what it is or why it is unavailable. For a control whose
+  // entire meaning lives in its aria-label, and on touch where there is no hover
+  // tooltip to fall back on, that leaves a grey glyph with no way to interrogate
+  // it. Use it only where the control is inert and self-evidently so.
+  //
+  // `softDisabled` is for anything gated on user-fixable state — the submit of an
+  // incomplete form. It stays focusable and announces itself as unavailable, so
+  // `aria-describedby` can carry the reason.
+  return (
+    <HitArea
+      aria-label={label}
+      // `aria-pressed` only when the control is genuinely a toggle. Setting it
+      // unconditionally would announce every plain action button as "not
+      // pressed", which reads as a broken toggle.
+      aria-pressed={typeof selected === 'boolean' ? selected : undefined}
+      disabled={disabled}
+      aria-disabled={softDisabled ? true : undefined}
+      onClick={softDisabled ? (e) => e.preventDefault() : onClick}
+      data-selected={selected ? 'true' : undefined}
+      className={[
+        'rounded-control state-layer transition-colors duration-quick',
+        // 40% opacity is the legacy dim for the inert case. A softDisabled
+        // control stays legible — it is focusable, so its glyph has to remain
+        // readable at 4.5:1 rather than fading to ~2.7:1.
+        disabled ? 'disabled:opacity-40 disabled:pointer-events-none' : '',
+        softDisabled ? 'text-text-muted cursor-default' : '',
+        ICON_BUTTON_VARIANTS[variant] ?? ICON_BUTTON_VARIANTS.ghost,
+        className,
+      ].filter(Boolean).join(' ')}
+      {...p}
+    >
+      {Icon && <Icon className={ICON_BUTTON_GLYPH[size] ?? ICON_BUTTON_GLYPH.md} aria-hidden="true" />}
+    </HitArea>
+  );
+};
+
+// ── Stack ────────────────────────────────────────────────────────────────────
+/**
+ * Spacing rhythm, and nothing else.
+ *
+ * Deliberately has NO visual opinion — no background, no border, no radius. Its
+ * entire job is to make the closed spacing scale the path of least resistance,
+ * because UI-001's finding was not that the spacing was ugly but that it was
+ * arbitrary: related elements and unrelated elements were the same distance
+ * apart, so the layout carried no grouping information at all.
+ *
+ * `gap` is restricted to the named scale on purpose. A numeric gap prop would
+ * reopen exactly the arbitrary-spacing hole this closes.
+ *
+ * Direction is handled by flexbox, which is already writing-mode aware — a row
+ * Stack reverses itself under `dir="rtl"` with no prop and no conditional. That
+ * is the mechanism new code should use instead of the legacy `rtl ? a : b`
+ * ternaries; those cannot be linted and are wrong by default.
+ */
+const STACK_GAP = {
+  none:    'gap-0',
+  tight:   'gap-2',       // 8px  — within one control
+  stack:   'gap-stack',   // 12px — between related elements
+  group:   'gap-group',   // 24px — between groups
+  section: 'gap-section', // 40px — between sections
+};
+
+// Written out rather than interpolated. Tailwind's content scanner is a plain
+// TEXT match over the source, so `items-${align}` is not a class it can ever
+// see: the utility is never emitted and the prop silently does nothing. That
+// failure is invisible in review — the JSX reads correctly and the element just
+// does not align. Every dynamic class in this file must come from a lookup like
+// this one.
+const STACK_ALIGN = {
+  start:    'items-start',
+  center:   'items-center',
+  end:      'items-end',
+  baseline: 'items-baseline',
+  stretch:  'items-stretch',
+};
+
+const STACK_JUSTIFY = {
+  start:   'justify-start',
+  center:  'justify-center',
+  end:     'justify-end',
+  between: 'justify-between',
+};
+
+export const Stack = ({
+  children, gap = 'stack', row = false, align, justify, wrap = false,
+  as: As = 'div', className = '', ...p
+}) => (
+  <As
+    className={[
+      'flex',
+      row ? 'flex-row' : 'flex-col',
+      STACK_GAP[gap] ?? STACK_GAP.stack,
+      align ? STACK_ALIGN[align] : '',
+      justify ? STACK_JUSTIFY[justify] : '',
+      wrap ? 'flex-wrap' : '',
+      className,
+    ].filter(Boolean).join(' ')}
+    {...p}
+  >
+    {children}
+  </As>
+);
+
+// ── Section ──────────────────────────────────────────────────────────────────
+/**
+ * A titled region of a screen, with the landmark semantics that come with it.
+ *
+ * Renders a real <section> named by its own heading via aria-labelledby, so a
+ * screen reader's landmark list becomes a usable table of contents. UI-001 found
+ * the app rendered headings as styled <div>s almost everywhere, which produces a
+ * document with no outline: rotor navigation lands on nothing.
+ *
+ * A section with no title degrades to a plain <div>. An unnamed <section> is
+ * not a landmark in the accessibility tree anyway, so keeping the tag would add
+ * a meaningless node; and marking it `role="presentation"` would be worse still,
+ * because that strips semantics the caller may have asked for by passing `as`.
+ *
+ * `action` is the one trailing control a section may carry (a "See all"). It is
+ * placed by flexbox, so it sits on the correct side in both directions without a
+ * conditional. There is deliberately no `variant` and no background: a section
+ * that draws its own box is what makes a mobile screen read as a dashboard.
+ */
+// An unnamed landmark is exposed by assistive tech as a bare "region"/"nav"/
+// "complementary" and clutters the rotor without telling the user anything. The
+// degrade rule has to cover every landmark tag, not just `section` — an untitled
+// `as="aside"` would otherwise keep its tag and produce exactly the noise the
+// rule exists to prevent.
+const LANDMARK_TAGS = new Set(['section', 'aside', 'nav', 'article', 'main', 'form']);
+
+export const Section = ({
+  title, subtitle, action, children, gap = 'stack', level = 2,
+  as: As = 'section', className = '', ...p
+}) => {
+  const headingId = useId();
+  const titled = Boolean(title);
+  const Tag = titled || !LANDMARK_TAGS.has(As) ? As : 'div';
+  // Heading level is explicit, not guessed. A hardcoded <h2> means nested
+  // Sections emit sibling h2s and the document outline is wrong — screen-reader
+  // users navigate by heading level, so a flat outline removes the structure
+  // this primitive exists to provide (WCAG 1.3.1).
+  const Heading = `h${Math.min(Math.max(level, 1), 6)}`;
+  return (
+    <Tag
+      {...(titled ? { 'aria-labelledby': headingId } : null)}
+      className={`space-y-stack ${className}`}
+      {...p}
+    >
+      {(titled || action) && (
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="min-w-0">
+            {titled && (
+              // Deliberately NOT `truncate`: clipping a section title with no
+              // way to read the rest fails at 200% zoom and on long Hebrew
+              // headings. Wrapping is the correct overflow behaviour for a
+              // heading; the flex parent's `min-w-0` keeps it from pushing the
+              // trailing action off-screen.
+              <Heading id={headingId} className="text-title text-text-primary">
+                {title}
+              </Heading>
+            )}
+            {subtitle && <p className="text-body-sm text-text-muted mt-0.5">{subtitle}</p>}
+          </div>
+          {action && <div className="shrink-0">{action}</div>}
+        </div>
+      )}
+      <Stack gap={gap}>{children}</Stack>
+    </Tag>
   );
 };
 
@@ -837,7 +1161,10 @@ export const ConfirmSheet = ({
       )}
       {body && <p className="text-body-sm text-text-muted leading-relaxed">{body}</p>}
     </div>
-    <div className="flex gap-3 pt-1">
+    {/* UI-002B: `flex gap-3` by hand became `Stack row gap="stack"` — the same
+        12px, taken from the scale instead of retyped. Laid out by flexbox, so it
+        reverses correctly under dir="rtl" with no conditional. */}
+    <Stack row gap="stack" className="pt-1">
       <Btn variant="secondary" fullWidth onClick={onClose}>{cancelLabel}</Btn>
       <Btn
         variant={destructive ? 'destructive' : 'primary'}
@@ -846,6 +1173,6 @@ export const ConfirmSheet = ({
       >
         {confirmLabel}
       </Btn>
-    </div>
+    </Stack>
   </Sheet>
 );

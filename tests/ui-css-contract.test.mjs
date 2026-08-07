@@ -147,6 +147,137 @@ describe('prefers-reduced-motion', () => {
   });
 });
 
+// ── UI-002B: the closed scales, as COMPILED ─────────────────────────────────
+// A scale that is "closed" in the config but emits extra steps, or emits its
+// steps at the wrong value, is not closed. These read the stylesheet.
+describe('closed scales', () => {
+  test('the sanctioned radius steps compile to their declared values, 6px apart', () => {
+    // Named for what it actually checks. It does NOT assert exclusivity — the
+    // bundle still ships rounded-md/lg/xl/2xl/3xl from ~246 un-migrated call
+    // sites, which is the `arbitrary-radius` budget's job to retire.
+    const px = (sel) => {
+      const rule = rules().find((r) => r.selector === sel);
+      assert.ok(rule, `${sel} must exist`);
+      const n = Number(rule.decls.match(/border-radius:\s*([\d.]+)px/)?.[1]);
+      assert.ok(Number.isFinite(n), `${sel} has no pixel border-radius`);
+      return n;
+    };
+    const control = px('.rounded-control');
+    const container = px('.rounded-container');
+    assert.equal(control, 10);
+    assert.equal(container, 16);
+    // Subtracting the PARSED values, not the literals. Written as `16 - 10 === 6`
+    // this asserted arithmetic about two constants and would have held while
+    // both tokens changed underneath it. The nesting rule (inner = outer −
+    // padding) only works while the real gap stays 6px.
+    assert.equal(container - control, 6,
+      'the nesting rule depends on this gap — a correctly-padded control no longer lands on `control`');
+  });
+
+  test('every sanctioned elevation utility resolves to its token', () => {
+    // Tailwind emits a utility only where it has SEEN it, so an unused step
+    // legitimately produces no rule — `shadow-raised` currently has zero call
+    // sites. What must hold is that each step which IS in the bundle reads the
+    // custom property rather than carrying its own copy of the numbers; two
+    // copies of a shadow is how the app reached 13 distinct shadow strings.
+    const sanctioned = ['raised', 'overlay', 'sheet']
+      .map((n) => rules().find((r) => r.selector === `.shadow-${n}`))
+      .filter(Boolean);
+
+    // `> 0` would pass with two of the three silently gone. `shadow-raised` has
+    // no call sites today (recorded as debt), so the honest floor is the two
+    // that Sheet and Toast actually use.
+    assert.ok(sanctioned.length >= 2,
+      `only ${sanctioned.length} sanctioned elevation utilities reached the bundle; Sheet and Toast need shadow-sheet and shadow-overlay`);
+    for (const rule of sanctioned) {
+      assert.match(rule.decls, /var\(--gw-shadow-/,
+        `${rule.selector} inlines its shadow instead of reading the token`);
+    }
+  });
+
+  test('the design system itself ships no coloured glow', () => {
+    // A coloured shadow is a glow, and a glow is the single clearest "neon
+    // fintech / gaming UI" signal. Views still carry several (tracked by the
+    // `ad-hoc-shadow` budget in scripts/design-lint.mjs, which only ratchets
+    // down); what this asserts is narrower and permanent — none of them may
+    // come from a token the design system declares.
+    for (const name of ['raised', 'overlay', 'sheet']) {
+      const rule = rules().find((r) => r.selector === `.shadow-${name}`);
+      if (!rule) continue;
+      const coloured = /(?:rgb|hsl)a?\([^)]*\)/g;
+      for (const c of rule.decls.match(coloured) ?? []) {
+        const nums = c.match(/[\d.]+/g)?.slice(0, 3).map(Number) ?? [];
+        assert.ok(nums.length < 3 || (nums[0] === nums[1] && nums[1] === nums[2]),
+          `${rule.selector} carries a coloured shadow (${c}) — elevation is neutral`);
+      }
+    }
+  });
+
+  test('the named spacing steps compile to the 8-point rhythm', () => {
+    const gap = (n) => rules().find((r) => r.selector === `.gap-${n}`)?.decls ?? '';
+    assert.match(gap('stack'), /gap:\s*0\.75rem/,   'stack = 12px, between related elements');
+    assert.match(gap('group'), /gap:\s*1\.5rem/,    'group = 24px, between groups');
+    assert.match(gap('section'), /gap:\s*2\.5rem/,  'section = 40px, between sections');
+  });
+
+  test('the 44px touch floor is a real utility, not a convention', () => {
+    const h = rules().find((r) => r.selector === '.min-h-tap');
+    const w = rules().find((r) => r.selector === '.min-w-tap');
+    assert.ok(h && w, 'both min-h-tap and min-w-tap must exist');
+    assert.match(h.decls, /min-height:\s*2\.75rem/);
+    assert.match(w.decls, /min-width:\s*2\.75rem/);
+  });
+});
+
+// ── Brand typography is actually applied ────────────────────────────────────
+describe('global typography', () => {
+  test('the brand face reaches the document, not just the inline call sites', () => {
+    // UI-001's highest-leverage finding: the app preloaded three brand font
+    // files and then rendered ~99% of its text in the OS UI font, because
+    // nothing set a family on html or body. Preloading a font you do not apply
+    // is a pure cost. This asserts the family actually lands.
+    const applied = rules().filter(
+      (r) => /(^|,)\s*(html|body)\s*$/.test(r.selector) && /font-family/.test(r.decls)
+    );
+    assert.ok(applied.length > 0, 'neither html nor body declares a font-family');
+    const decls = applied.map((r) => r.decls).join(' ');
+    assert.match(decls, /Inter/, 'the brand body face must be applied globally');
+    assert.match(decls, /Heebo/, 'the Hebrew face must be in the global stack, not only inline');
+  });
+
+  test('Hebrew has real coverage rather than a silent fallback', () => {
+    // Manrope and Inter carry no Hebrew glyphs. Heebo is aliased UNDER both
+    // family names by unicode-range so Hebrew resolves automatically at the
+    // ~58 call sites that name a Latin family inline. If those @font-face
+    // blocks lose their Hebrew range, Hebrew silently falls back to the OS font
+    // and the app renders in two typefaces at once.
+    const hebrew = [...css.matchAll(/@font-face\s*\{([^}]*)\}/g)]
+      .map((m) => m[1])
+      .filter((b) => /unicode-range:[^;]*U\+0590/i.test(b));
+    assert.ok(hebrew.length >= 2,
+      'expected Hebrew-ranged faces aliased under both Latin family names');
+    const families = hebrew.map((b) => b.match(/font-family:\s*'([^']+)'/)?.[1]);
+    for (const f of ['Manrope', 'Inter']) {
+      assert.ok(families.includes(f), `"${f}" has no Hebrew-ranged face — Hebrew would fall back`);
+    }
+  });
+
+  test('the type floor is a variable, and Hebrew raises it', () => {
+    // Heebo has a smaller x-height at the same nominal size and no case
+    // distinction to aid word-shape recognition, so the DEFAULT language was
+    // strictly harder to read than the secondary one until this existed.
+    const root = rules().filter((r) => r.selector === ':root').map((r) => r.decls).join(' ');
+    const he = rules().find((r) => r.selector === ':lang(he)');
+    assert.match(root, /--gw-type-floor:\s*12px/);
+    assert.ok(he, ':lang(he) must raise the floor');
+    assert.match(he.decls, /--gw-type-floor:\s*13px/);
+    // Order matters: identical specificity, both match <html>, so Hebrew must
+    // come second to win.
+    assert.ok(css.indexOf(':lang(he)') > css.lastIndexOf('--gw-type-floor: 12px'),
+      'the Hebrew floor must be declared after the default or it never applies');
+  });
+});
+
 // ── iOS input zoom ──────────────────────────────────────────────────────────
 describe('iOS input zoom', () => {
   test('the document base size is at or above the 16px zoom threshold', () => {

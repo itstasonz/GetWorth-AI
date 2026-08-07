@@ -15,17 +15,50 @@
  *
  *     node scripts/design-lint.mjs --update
  *
- * Lowering a budget is a normal part of a migration commit. RAISING one
- * requires deleting this comment and explaining yourself in the PR.
+ * ── UI-002B: --update is now RATCHET-ONLY ──
+ * It previously rewrote every budget to the CURRENT count, which meant the
+ * documented rule ("may only ratchet down") was enforced by nothing but good
+ * manners: adding 40 gradients and running --update turned a red build green
+ * and recorded the regression as the new normal, in a diff line that reads
+ * identically to a legitimate improvement. A budget that rises to meet reality
+ * is not a budget.
  *
- * Escape hatch: `// design-lint-disable` on the offending line.
+ * --update now writes a number ONLY when it is lower than the recorded one, and
+ * REFUSES THE WHOLE UPDATE if any rule is over budget. Raising a budget requires
+ * hand-editing the ledger below, which is visible in review as exactly what it
+ * is. There is deliberately no --force.
+ *
+ * Escape hatch: `// design-lint-disable` on the offending line — itself budgeted
+ * as `lint-suppression`, so silencing a rule costs a visible ledger edit.
  */
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+// Assembled rather than written literally, so this file's own use of the marker
+// in comments and rule text does not register as a suppression when the linter
+// is ever pointed at a tree containing it.
+const DISABLE_MARKER = 'design-lint' + '-disable';
+
 const ROOT = new URL('..', import.meta.url).pathname;
-const SRC = join(ROOT, 'src');
-const SELF = new URL(import.meta.url).pathname;
+
+// ── Fixture mode ────────────────────────────────────────────────────────────
+// The linter must be testable against a fixture tree — a linter nobody tests
+// silently stops matching after a refactor and reports a clean build forever.
+//
+// But the first version of this read DESIGN_LINT_SRC straight from the
+// environment on the production path, which meant a single variable disabled
+// the entire gate:
+//
+//     DESIGN_LINT_SRC=/tmp/empty npm test     → 14/14 rules pass, exit 0
+//
+// `npm test` inherits the caller's environment, so that is not a hypothetical.
+// A gate whose corpus is caller-supplied is not a gate. The redirect now
+// requires an EXPLICIT --fixture argument as well: an env var alone cannot move
+// the target, and --fixture in a CI invocation or an npm script is visible in
+// review as exactly what it is.
+const FIXTURE = process.argv.includes('--fixture');
+const SRC = (FIXTURE && process.env.DESIGN_LINT_SRC) || join(ROOT, 'src');
+const SELF = (FIXTURE && process.env.DESIGN_LINT_SELF) || new URL(import.meta.url).pathname;
 
 // ── Budget ledger ───────────────────────────────────────────────────────────
 const BUDGET = {
@@ -35,6 +68,17 @@ const BUDGET = {
   'off-ladder-alpha': 17,
   'legacy-token-object': 0,
   'promotional-copy': 0,
+  // ── UI-002B decoration budgets. Seeded at the counts measured when the rules
+  // were written, so the build stays green while growth becomes impossible.
+  // These are the Temu-removal ledger: every one of them is retired by DELETION
+  // during UI-003, never by a redesign that keeps the effect and renames it.
+  'decorative-gradient': 77,
+  'glassmorphism': 67,
+  'ad-hoc-shadow': 44,
+  'arbitrary-radius': 246,
+  'interpolated-class': 0,
+  'lint-suppression': 0,
+  'legacy-token-import': 5,
   // ── UI-002A. Both are hard zeroes, not budgets ratcheting down: each was
   // fixed completely, and a single reintroduction is a real accessibility
   // regression rather than un-migrated legacy.
@@ -48,8 +92,14 @@ const RULES = [
     why: 'Colour literals bypass the token layer. Use a token class or src/lib/tokens.js.',
     // src/lib/tokens.js is the sanctioned JS mirror — it is REQUIRED to hold
     // literals, because inline style={{}} props cannot use Tailwind classes.
-    // Its values are checked against index.css by the token-drift rule below,
-    // so exempting it here does not create a second source of truth.
+    //
+    // WARNING: this comment previously claimed those values "are checked against
+    // index.css by the token-drift rule below". No such rule has ever existed,
+    // in this file or anywhere else — the `/* @gw <role> */` annotations in
+    // tokens.js are read by nothing. So the one file licensed to hold colour
+    // literals is currently unverified, and the exemption below is a real hole
+    // rather than the safe trade the comment described. Writing the rule is
+    // tracked in docs/DESIGN_SYSTEM.md § Known debt.
     exempt: (rel) => rel === 'src/lib/tokens.js',
     test: (line) => (line.match(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g) || []).length,
   },
@@ -96,6 +146,105 @@ const RULES = [
       if (line.trimStart().startsWith('*') || line.trimStart().startsWith('//')) return 0;
       return (line.match(/['"`][^'"`]*\b(HOT DEAL|TRENDING NOW|SELLING FAST|מבצע חם|נמכר מהר)\b/gi) || []).length;
     },
+  },
+  // ── UI-002B: the decoration rules ──────────────────────────────────────────
+  // These four are what separate "we wrote it down" from "it cannot come back".
+  // Each is seeded at the CURRENT count, so the build stays green today and the
+  // number can only fall. None of them can be satisfied by a redesign — they are
+  // satisfied by DELETION, which is the point.
+  {
+    id: 'decorative-gradient',
+    // A gradient is the single most reliable "generated mockup" signal in this
+    // codebase: a teal→teal ramp on a button, a green→emerald ramp on a price,
+    // a black→transparent ramp on a photo. Only the last is doing real work
+    // (a legibility scrim), and it should say so with an explicit disable.
+    why: 'Gradient fill. Depth here is carried by surface TONE, not by a ramp. A scrim that genuinely aids legibility may opt out with `// design-lint-disable`.',
+    test: (line) => {
+      const s = line.trimStart();
+      if (s.startsWith('*') || s.startsWith('//') || s.startsWith('/*')) return 0;
+      return (line.match(/linear-gradient|radial-gradient|conic-gradient|\bbg-gradient-to-[a-z]+/g) || []).length;
+    },
+  },
+  {
+    id: 'glassmorphism',
+    // 75 uses, most of them over an OPAQUE surface where the blur samples a
+    // solid colour, costs a GPU layer, and changes nothing on screen.
+    why: 'Backdrop blur. Over an opaque surface it blurs nothing and still costs a compositing layer; it also makes text contrast unverifiable, because the backdrop is unknown.',
+    test: (line) => {
+      const s = line.trimStart();
+      if (s.startsWith('*') || s.startsWith('//') || s.startsWith('/*')) return 0;
+      return (line.match(/\bbackdrop-blur[a-z-]*|backdropFilter|GLASS_[A-Z]+/g) || []).length;
+    },
+  },
+  {
+    id: 'ad-hoc-shadow',
+    // Three shadows are sanctioned: raised, overlay, sheet. Everything else is
+    // a one-off, and one-offs are how the app reached 13 distinct shadow
+    // strings with no two alike.
+    why: 'Shadow outside the closed set (raised / overlay / sheet). Coloured shadows are glows and are banned outright.',
+    test: (line) => {
+      const s = line.trimStart();
+      if (s.startsWith('*') || s.startsWith('//') || s.startsWith('/*')) return 0;
+      const tw = (line.match(/\bshadow-(?!raised\b|overlay\b|sheet\b|none\b)[a-z0-9[]/g) || []).length;
+      // An inline boxShadow is fine only when it reads a shadow token.
+      const inline = (line.match(/boxShadow:\s*(?!['"`]?var\(--gw-shadow)/g) || []).length;
+      return tw + inline;
+    },
+  },
+  {
+    id: 'arbitrary-radius',
+    // 8 distinct radii across 399 uses. `rounded-full` is NOT counted: the pill
+    // is the sanctioned Chip shape (a control the user sets) and the avatar
+    // shape. Everything between control (10px) and container (16px) is noise —
+    // nobody can see the difference between xl and 2xl, but everybody can see
+    // that two adjacent cards disagree.
+    why: 'Radius outside the closed set (control 10px / container 16px / full / none). Nesting rule: inner = outer − padding.',
+    test: (line) => {
+      const s = line.trimStart();
+      if (s.startsWith('*') || s.startsWith('//') || s.startsWith('/*')) return 0;
+      const tw = (line.match(/\brounded(?:-(?:t|b|l|r|s|e|tl|tr|bl|br|ss|se|es|ee))?-(?:sm|md|lg|xl|2xl|3xl|\[[^\]]+\])\b/g) || []).length;
+      const inline = (line.match(/border(?:Top|Bottom)?(?:Left|Right)?Radius:\s*(?![^,;\n]*var\(--gw)/g) || []).length;
+      return tw + inline;
+    },
+  },
+  {
+    id: 'lint-suppression',
+    // Counted by the walker rather than by this `test`, because the walker has
+    // to see the marker before it skips the line. Kept in RULES so it appears
+    // in the report and carries a budget like everything else.
+    why: 'A suppressed line. The escape hatch is legitimate but not free — using it costs an explicit ledger edit, so the suppression is visible in review rather than buried in a comment.',
+    test: () => 0,
+  },
+  {
+    id: 'interpolated-class',
+    // Found by tests/mutations/ui-run.mjs, which showed this defect is invisible
+    // to a DOM test: `items-${align}` and the lookup-table form produce the SAME
+    // runtime className, so the rendered markup is identical and every
+    // assertion about the element passes. What differs is build time —
+    // Tailwind's content scanner is a plain TEXT match, so it never sees the
+    // completed name, never emits the rule, and the prop silently does nothing.
+    // Only source inspection can catch it, which is why it is a lint rule.
+    why: 'A utility name completed by interpolation. Tailwind never sees it, so the rule is never emitted and the class silently does nothing. Use a lookup table of whole class names.',
+    test: (line) => {
+      const s = line.trimStart();
+      if (s.startsWith('*') || s.startsWith('//') || s.startsWith('/*')) return 0;
+      // Interpolating a WHOLE class name (`${animClass} ${className}`) is fine
+      // and extremely common; only a PARTIAL utility completed by a value is
+      // the hazard, so the prefix must be attached to the `${`.
+      return (line.match(
+        /\b(?:items|justify|self|place|content|bg|text|border|ring|outline|divide|rounded|shadow|opacity|gap|space-[xy]|[pm][xytrbles]?|[wh]|min-[wh]|max-[wh]|flex|grid-cols|col-span|row-span|order|z|top|bottom|left|right|inset|translate-[xy]|scale|rotate|duration|delay|ease|animate)-\$\{/g
+      ) || []).length;
+    },
+  },
+  {
+    id: 'legacy-token-import',
+    // The STITCH/C shims exist only so seven parallel token objects could be
+    // deleted without touching their call sites. Every import here is a call
+    // site that has not yet moved to a className. The shim is finished when
+    // this number reaches 0 — at which point the shim itself gets deleted.
+    why: 'Deprecated token shim (STITCH / SELL_STITCH / C). Inline style props are the only legitimate reason; if it can be a className, it MUST be a className.',
+    exempt: (rel) => rel === 'src/lib/tokens.js',
+    test: (line) => (/^\s*import\s*\{[^}]*\b(STITCH|SELL_STITCH|C)\b[^}]*\}\s*from\s*['"][^'"]*lib\/tokens/.test(line) ? 1 : 0),
   },
   {
     id: 'focus-suppression',
@@ -155,7 +304,14 @@ const hits = [];
 
 for (const file of walk(SRC)) {
   if (file === SELF) continue;
-  const rel = relative(ROOT, file);
+  // Relative to the tree being LINTED, not to this file's own location. It used
+  // to be `relative(ROOT, …)`, where ROOT derives from the linter's path — so a
+  // copy of the linter running against the real src/ produced `../../…` paths
+  // and every `exempt` predicate silently stopped matching. That made the
+  // exemptions dead code under exactly the conditions the tests and the mutation
+  // harness run in: `raw-hex` reported 292 instead of 273 because
+  // src/lib/tokens.js was no longer exempt.
+  const rel = relative(join(SRC, '..'), file);
   const source = readFileSync(file, 'utf8');
 
   for (const rule of FILE_RULES) {
@@ -168,7 +324,16 @@ for (const file of walk(SRC)) {
 
   const lines = source.split('\n');
   lines.forEach((line, i) => {
-    if (line.includes('design-lint-disable')) return;
+    // The escape hatch is itself budgeted. It used to be unlimited, uncounted
+    // and — after UI-002B advertised it in the gradient rule's own message —
+    // the cheapest way to silence any rule in this file. Counting it FIRST
+    // (before the skip) is what makes suppression cost a visible ledger edit
+    // instead of a comment nobody greps for.
+    if (line.includes(DISABLE_MARKER)) {
+      counts['lint-suppression'] += 1;
+      hits.push({ id: 'lint-suppression', loc: `${rel}:${i + 1}`, text: line.trim().slice(0, 90) });
+      return;
+    }
     for (const rule of RULES) {
       if (rule.exempt?.(rel)) continue;
       const n = rule.test(line);
@@ -180,14 +345,45 @@ for (const file of walk(SRC)) {
   });
 }
 
-// ── --update: rewrite the ledger to current reality ─────────────────────────
+// ── --json: machine-readable counts ─────────────────────────────────────────
+// Used by tests/mutations/ui-run.mjs to judge a mutation DIFFERENTIALLY: lint
+// the original file and the mutated file in isolation and compare counts. A
+// pass/fail exit code cannot answer that question, because a whole-file copy of
+// a legacy view fails a zeroed ledger either way — what matters is whether the
+// mutation made any rule count go UP.
+if (process.argv.includes('--json')) {
+  console.log(JSON.stringify({ counts, hits: hits.length }));
+  process.exit(0);
+}
+
+// ── --update: ratchet the ledger DOWN, never up ─────────────────────────────
+// The whole value of a budget is that it cannot absorb a regression. So this
+// refuses to run at all while anything is over budget, and only ever writes a
+// smaller number. See the ratchet note in the header.
 if (process.argv.includes('--update')) {
+  const over = Object.entries(counts).filter(([id, n]) => n > BUDGET[id]);
+  if (over.length) {
+    console.error('\n✗ Refusing to update: these rules are OVER budget.\n');
+    for (const [id, n] of over) console.error(`    ${id.padEnd(21)} ${n} > ${BUDGET[id]}  (+${n - BUDGET[id]})`);
+    console.error('\n  --update lowers budgets; it does not raise them. Fix the violations,');
+    console.error('  or hand-edit the ledger in this file so the increase is visible in review.\n');
+    process.exit(1);
+  }
+
+  const lowered = Object.entries(counts).filter(([id, n]) => n < BUDGET[id]);
+  if (!lowered.length) {
+    console.log('\nAll budgets already match reality — nothing to lower.\n');
+    process.exit(0);
+  }
+
   let src = readFileSync(SELF, 'utf8');
-  for (const [id, n] of Object.entries(counts)) {
+  for (const [id, n] of lowered) {
     src = src.replace(new RegExp(`('${id}': )\\d+`), `$1${n}`);
   }
   writeFileSync(SELF, src);
-  console.log('Budgets updated to current counts:', counts);
+  console.log('\nBudgets ratcheted down:\n');
+  for (const [id, n] of lowered) console.log(`    ${id.padEnd(21)} ${BUDGET[id]} → ${n}  (−${BUDGET[id] - n})`);
+  console.log('');
   process.exit(0);
 }
 
