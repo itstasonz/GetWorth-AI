@@ -3,38 +3,24 @@ import {
   MessageCircle, ChevronRight, ChevronLeft,
   DollarSign, Loader2, Send, Check, CheckCheck,
   X, ArrowDown, Shield, Search, PlusCircle,
-  MoreVertical, Camera,
+  Camera,
 } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
 import { Btn, FadeIn, SlideUp } from '../components/ui';
 import { formatPrice, formatMessageTime, formatMessagePreview } from '../lib/utils';
 
-// ─── Stitch design tokens ─────────────────────────────────────────────────────
-// surface-dim:             #131313  — page / inbox background
-// surface-container-low:  #1c1b1b  — selected inbox row, cards
-// surface-container:       #201f1f  — mid-level containers
-// surface-container-high:  #2a2a2a  — incoming bubbles, hover states
-// surface-container-lowest:#0e0e0e  — messages area background, composer bg
-// primary:                 #6FEEE1  — teal accent
-// primary-container:       #4FD1C5  — gradient end
-// on-primary:              #003733  — text on teal (dark green)
-// on-surface:              #e5e2e1  — primary text
-// on-surface-variant:      #bbc9c7  — secondary text
-// outline-variant:         #3c4947  — borders
-
-const C = {
-  surfaceDim:     '#131313',
-  surfaceLow:     '#1c1b1b',
-  surface:        '#201f1f',
-  surfaceHigh:    '#2a2a2a',
-  surfaceLowest:  '#0e0e0e',
-  primary:        '#6FEEE1',
-  primaryCont:    '#4FD1C5',
-  onPrimary:      '#003733',
-  onSurface:      '#e5e2e1',
-  onSurfaceVar:   '#bbc9c7',
-  outline:        '#3c4947',
-};
+// UI-002: the file-local token object that used to live here is gone.
+//
+// A hand-maintained token dictionary in comments also lived here, in kebab-case,
+// directly above a camelCase object with different key names — a third naming
+// variant describing values that already existed twice elsewhere. It is removed
+// with the object: src/lib/tokens.js and src/index.css are now the only places
+// a colour is written down, and scripts/design-lint.mjs keeps them in step.
+// Seven parallel declarations (this one, four siblings, :root and the
+// Tailwind config) had already drifted — GLASS_BG shipped at 0.4 here and
+// 0.6 in CameraResultsView, so glass panels were different weights on
+// adjacent screens. Key names are unchanged, so no call site moved.
+import { C } from '../lib/tokens';
 
 // liquid-gradient: Stitch's signature outgoing bubble — bright teal
 const LIQUID_GRADIENT = `linear-gradient(135deg, ${C.primary} 0%, ${C.primaryCont} 100%)`;
@@ -150,7 +136,7 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
                 onChange={e => { setAmount(e.target.value); setError(''); }}
                 onKeyDown={e => e.key === 'Enter' && handleSend()}
                 placeholder="0" min="1"
-                className={`w-full py-4 ${rtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} rounded-2xl text-2xl font-bold text-center focus:outline-none transition-colors`}
+                className={`w-full py-4 ${rtl ? 'pr-10 pl-4' : 'pl-10 pr-4'} rounded-2xl text-2xl font-bold text-center transition-colors`}
                 style={{
                   background: C.surfaceHigh,
                   border: `1px solid ${C.outline}`,
@@ -290,7 +276,7 @@ export function InboxView() {
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder={lang === 'he' ? 'חפש שיחות...' : 'Search conversations...'}
-              className={`w-full py-3 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-xl text-sm focus:outline-none transition-all`}
+              className={`w-full py-3 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-xl text-base transition-all`}
               style={{
                 background: C.surfaceLowest,
                 color: C.onSurface,
@@ -804,16 +790,27 @@ export function ChatView() {
           </div>
         </div>
 
-        {/* Header overflow */}
-        <div className="flex items-center flex-shrink-0">
-          <button
-            className="w-10 h-10 flex items-center justify-center rounded-full transition-colors active:scale-90"
-            style={{ color: C.onSurfaceVar }}
-            aria-label={lang === 'he' ? 'אפשרויות' : 'More options'}
-          >
-            <MoreVertical className="w-5 h-5" />
-          </button>
-        </div>
+        {/* UI-002 PHASE 0 / trust fix 3 — dead safety control removed.
+         *
+         * This slot held a MoreVertical button with an aria-label and NO onClick:
+         * a rendered, focusable, screen-reader-announced control that did nothing.
+         * Chat is where harassment, scam pressure and off-platform payment demands
+         * actually happen, so a user in distress tapped the one affordance that
+         * looked like it should help and got silence — strictly worse than an
+         * honest absence.
+         *
+         * It is REMOVED rather than wired because the intended Report/Block flow
+         * cannot be built inside UI-002's scope: `reports` accepts only
+         * { listing_id, reporter_id, reason } (AppContext.reportListing), with no
+         * reported_user_id / conversation_id column, and UI-002 must not touch the
+         * Supabase schema. Shipping a report button that can only file against a
+         * LISTING from a PERSON-to-person conversation would be a second false
+         * affordance.
+         *
+         * UI-003 / follow-up: add reported_user_id + conversation_id to `reports`,
+         * then restore this slot with a Report user / Block user sheet built on the
+         * <Sheet> primitive. Tracked in docs/DESIGN_SYSTEM.md § Marketplace trust.
+         */}
       </div>
 
       {/* ── Listing context strip ── */}
@@ -1189,7 +1186,7 @@ export function ChatView() {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
             placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Message…'}
-            className="flex-1 bg-transparent border-none text-[15px] focus:outline-none focus:ring-0 py-1.5 resize-none overflow-hidden"
+            className="flex-1 bg-transparent border-none text-[15px] py-1.5 resize-none overflow-hidden"
             style={{ color: C.onSurface, maxHeight: '120px', lineHeight: '1.45' }}
             dir={rtl ? 'rtl' : 'ltr'}
           />

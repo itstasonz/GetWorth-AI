@@ -27,3 +27,7 @@ test-api.mjs
 dist/
 db-expansion.log
 .vercel
+
+# Mutation-harness scratch copies (tests/mutations/ui-run.mjs). They are removed
+# on exit, including on ^C — this is the net for a hard kill.
+*.__mutant__.*

@@ -138,7 +138,7 @@ function CheckoutForm({ listing }) {
             <label className="text-sm text-slate-400 mb-1.5 block">{lang === 'he' ? 'הערה למוכר (אופציונלי)' : 'Note to seller (optional)'}</label>
             <textarea value={buyerNote} onChange={e => setBuyerNote(e.target.value)}
               placeholder={lang === 'he' ? 'למשל: זמין בערבים...' : 'e.g. Available evenings...'}
-              className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-[#6FEEE1]/50" rows={2} />
+              className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-base text-white placeholder-slate-500 resize-none focus:border-[#6FEEE1]/50" rows={2} />
           </div>
           {/* What happens next — structured steps, not a wall of text */}
           <div className="rounded-2xl overflow-hidden" style={{ border: '1px solid rgba(111,238,225,0.15)', background: 'rgba(111,238,225,0.04)' }}>
@@ -691,7 +691,7 @@ export function OrderDetailView() {
                   : ['','Poor','Fair','Good','Great','Excellent!'][reviewRating]}
               </p>
             )}
-            <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} maxLength={500} placeholder={lang === 'he' ? 'ספר על החוויה...' : 'Tell about your experience...'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-yellow-500/50" rows={2} />
+            <textarea value={reviewComment} onChange={e => setReviewComment(e.target.value)} maxLength={500} placeholder={lang === 'he' ? 'ספר על החוויה...' : 'Tell about your experience...'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-base text-white placeholder-slate-500 resize-none focus:border-yellow-500/50" rows={2} />
             <Btn primary className="w-full py-3.5" disabled={reviewRating === 0 || reviewSubmitting}
               onClick={async () => {
                 if (reviewLockRef.current) return; // second tap in same frame
@@ -768,7 +768,7 @@ export function OrderDetailView() {
             <div className="bg-gradient-to-b from-[#1c1b1b] to-[#131313] rounded-t-[2rem] p-6 space-y-4">
               <div className="w-12 h-1 bg-white/20 rounded-full mx-auto" />
               <h3 className="text-lg font-bold text-center text-red-300">{lang === 'he' ? 'בטל הזמנה?' : 'Cancel Order?'}</h3>
-              <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder={lang === 'he' ? 'סיבה (אופציונלי)' : 'Reason (optional)'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 resize-none focus:outline-none focus:border-red-500/50" rows={2} />
+              <textarea value={cancelReason} onChange={e => setCancelReason(e.target.value)} placeholder={lang === 'he' ? 'סיבה (אופציונלי)' : 'Reason (optional)'} className="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-base text-white placeholder-slate-500 resize-none focus:border-red-500/50" rows={2} />
               <div className="flex gap-3">
                 <button onClick={() => setShowCancel(false)} className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium">{lang === 'he' ? 'חזור' : 'Go Back'}</button>
                 <button onClick={handleCancel} disabled={updating} className="flex-1 py-3 rounded-xl bg-red-600/20 border border-red-500/30 text-sm font-semibold text-red-300 flex items-center justify-center gap-2">

@@ -2,7 +2,14 @@
 <html lang="he" dir="rtl">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- UI-002 accessibility minimum: pinch-zoom restored.
+         `maximum-scale=1.0, user-scalable=no` was a direct WCAG 1.4.4 (AA)
+         failure. It mattered here more than usual: the app ships 181 type
+         instances below 12px, and disabling zoom left low-vision users with no
+         way to compensate — there is no in-app text-resize control either.
+         `viewport-fit=cover` is retained; it is what makes the safe-area insets
+         work and has nothing to do with scaling. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     
     <!-- PWA Meta Tags -->
     <meta name="theme-color" content="#131313" />

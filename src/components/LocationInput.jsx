@@ -58,7 +58,7 @@ const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
       <div className="relative">
         <MapPin className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500`} />
         <input 
-          className={`w-full px-4 py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all`}
+          className={`w-full px-4 py-4 ${rtl ? 'pr-12 pl-14' : 'pl-12 pr-14'} rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all`}
           dir={rtl ? 'rtl' : 'ltr'}
           value={value}
           onChange={onChange}
