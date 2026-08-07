@@ -9,25 +9,12 @@ import { recordObservation } from '../lib/observations';
 // ═══════════════════════════════════════════════════════
 // STITCH DESIGN TOKENS — ported from HTML tailwind.config
 // ═══════════════════════════════════════════════════════
-const STITCH = {
-  background:              '#131313',
-  primary:                 '#6FEEE1',
-  primaryContainer:        '#4FD1C5',
-  onPrimary:               '#003733',
-  onSurface:               '#e5e2e1',
-  onSurfaceVariant:        '#BBC9C7',
-  surfaceContainerLowest:  '#0e0e0e',
-  surfaceContainerLow:     '#1C1B1B',
-  surfaceContainer:        '#201f1f',
-  surfaceContainerHigh:    '#2A2A2A',
-  surfaceContainerHighest: '#353534',
-  outlineVariant:          '#3c4947',
-  GRADIENT_PRIMARY: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)',
-  GLASS_BG:    'rgba(53, 53, 52, 0.6)',
-  GLASS_BLUR:  'blur(24px)',
-  FONT_HEADLINE: '"Manrope", system-ui, -apple-system, sans-serif',
-  FONT_BODY:     '"Inter", system-ui, -apple-system, sans-serif',
-};
+// UI-002: the file-local token object that used to live here is gone.
+// Seven parallel declarations (this one, four siblings, :root and the
+// Tailwind config) had already drifted — GLASS_BG shipped at 0.4 here and
+// 0.6 in CameraResultsView, so glass panels were different weights on
+// adjacent screens. Key names are unchanged, so no call site moved.
+import { STITCH } from '../lib/tokens';
 
 // ═══════════════════════════════════════════════════════
 // POPULAR BRANDS PER CATEGORY — for quick-select chips
@@ -889,7 +876,7 @@ function HelpIdentifyModal() {
             <div className="flex gap-2">
               <input type="text" value={brandInput} onChange={(e) => setBrandInput(e.target.value)}
                 placeholder={lang === 'he' ? 'מותג ודגם...' : 'Brand & model...'}
-                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
               />
               <button onClick={handleSubmit} disabled={!brandInput.trim()}
@@ -1685,7 +1672,7 @@ export function ResultsView() {
                           }
                         }}
                         placeholder={lang === 'he' ? 'הזן מספר סידורי...' : 'Enter serial number...'}
-                        className="flex-1 bg-transparent text-[13px] font-mono outline-none min-w-0 placeholder-slate-600"
+                        className="flex-1 bg-transparent text-[13px] font-mono min-w-0 placeholder-slate-600"
                         style={{ color: STITCH.onSurface, caretColor: STITCH.primary }}
                       />
                       <button
@@ -1787,7 +1774,7 @@ export function ResultsView() {
             <div className="flex gap-2">
               <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
                 placeholder={lang === 'he' ? 'הקלד מותג ודגם...' : 'Type brand & model...'}
-                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
+                className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                 autoFocus
               />
@@ -1863,11 +1850,10 @@ export function ResultsView() {
             )}
 
             {!showCorrection ? (
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-5">
                 <button onClick={() => setShowCorrection(true)} className="text-xs transition-colors" style={{ color: '#6FEEE1' }}>
                   {lang === 'he' ? 'זה משהו אחר' : 'Not quite right'}
                 </button>
-                <span className="text-slate-700">|</span>
                 <button onClick={() => setHelpModalOpen(true)} className="text-xs text-purple-400 hover:text-purple-300 transition-colors">
                   {lang === 'he' ? 'עזרה בזיהוי' : 'Help identify'}
                 </button>
@@ -1876,7 +1862,7 @@ export function ResultsView() {
               <div className="flex gap-2">
                 <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
                   placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                   autoFocus
                 />
@@ -1934,7 +1920,7 @@ export function ResultsView() {
               <div className="flex gap-2">
                 <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
                   placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
-                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all"
+                  className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                   autoFocus
                 />
@@ -2051,7 +2037,7 @@ export function ResultsView() {
                     value={correctionInput}
                     onChange={(e) => setCorrectionInput(e.target.value)}
                     placeholder={lang === 'he' ? 'שם נכון...' : 'Correct name...'}
-                    className="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-xs focus:border-[#6FEEE1]/50 transition-all"
+                    className="flex-1 min-w-0 px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                     onKeyDown={(e) => { if (e.key === 'Enter' && correctionInput.trim()) handleSubmitCorrection(); }}
                     autoFocus
                   />

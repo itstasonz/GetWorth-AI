@@ -4,24 +4,17 @@ import { ShoppingBag, Scan, Eye, Clock, Trash2, Heart, Box, Sparkles, Package, A
 // ═══════════════════════════════════════════════════════
 // STITCH DESIGN TOKENS — My Listings dashboard
 // ═══════════════════════════════════════════════════════
-const SELL_STITCH = {
-  background:              '#131313',
-  primary:                 '#6FEEE1',
-  primaryContainer:        '#4FD1C5',
-  onPrimary:               '#003733',
-  onSurface:               '#e5e2e1',
-  onSurfaceVariant:        '#BBC9C7',
-  surfaceContainerLow:     '#1C1B1B',
-  surfaceContainerHigh:    '#2A2A2A',
-  GRADIENT_PRIMARY:        'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)',
-  FONT_HEADLINE:           '"Manrope", system-ui, -apple-system, sans-serif',
-  FONT_BODY:               '"Inter", system-ui, -apple-system, sans-serif',
-};
+// UI-002: the file-local token object that used to live here is gone.
+// Seven parallel declarations (this one, four siblings, :root and the
+// Tailwind config) had already drifted — GLASS_BG shipped at 0.4 here and
+// 0.6 in CameraResultsView, so glass panels were different weights on
+// adjacent screens. Key names are unchanged, so no call site moved.
+import { STITCH as SELL_STITCH, T } from '../lib/tokens';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, ScaleIn, SlideUp, InputField, BackButton, ConfirmSheet, EmptyState, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import LocationInput from '../components/LocationInput';
-import { formatPrice, timeAgo, calcPrice } from '../lib/utils';
+import { formatPrice, timeAgo, calcPrice, getQualityBadge } from '../lib/utils';
 
 export function MyListingsView() {
   const { t, lang, rtl, user, myListings, deleteListing, updateListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
@@ -202,6 +195,25 @@ export function MyListingsView() {
             const pill  = getStatusPill(item);
             const title = lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title;
             const meta  = `${timeAgo(item.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })} • ${item.category || ''}`;
+
+            // UI-002A — copy-quality feedback lives HERE, and only here.
+            //
+            // This score rates the ad the seller wrote (title length,
+            // description length, photo count). It used to be shown to BUYERS
+            // on the shared ListingCard and on the listing detail page, where
+            // "Improve" read as a statement about the item and the green tier's
+            // ✓ read as a verified credential. It is genuinely useful to the
+            // author, so it moves to the author's own screen.
+            //
+            // Rendered typographically rather than as a pill: the design system
+            // reserves boxed shapes for facts the platform ASSERTS, and a
+            // machine judgement about someone's writing is not one of those.
+            // Only the two actionable tiers appear — telling a seller their ad
+            // is already fine is noise on a list they came here to work on.
+            const quality = item.quality_score != null && item.quality_score > 0
+              ? getQualityBadge(item.quality_score, lang)
+              : null;
+            const qualityHint = quality && quality.color !== 'green' ? quality : null;
             return (
               <FadeIn key={item.id} delay={i * 40}>
                 <div
@@ -235,6 +247,15 @@ export function MyListingsView() {
                         style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY }}>
                         {meta}
                       </p>
+                      {qualityHint && (
+                        <p className="text-xs truncate mt-1"
+                          style={{ color: SELL_STITCH.onSurfaceVariant, fontFamily: SELL_STITCH.FONT_BODY }}>
+                          {lang === 'he' ? 'איכות המודעה: ' : 'Listing quality: '}
+                          <span style={{ color: quality.color === 'red' ? T.warning : SELL_STITCH.onSurfaceVariant }}>
+                            {quality.label}
+                          </span>
+                        </p>
+                      )}
                     </div>
 
                     <div className="flex items-center justify-between mt-2">
@@ -358,7 +379,7 @@ function EditListingSheet({ item, lang, rtl, t, onClose, onSave }) {
             <input
               value={title}
               onChange={e => setTitle(e.target.value)}
-              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
+              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
             />
           </div>
 
@@ -369,7 +390,7 @@ function EditListingSheet({ item, lang, rtl, t, onClose, onSave }) {
               value={desc}
               onChange={e => setDesc(e.target.value)}
               rows={3}
-              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 resize-none focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
+              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 resize-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
             />
           </div>
 
@@ -382,7 +403,7 @@ function EditListingSheet({ item, lang, rtl, t, onClose, onSave }) {
               type="number"
               inputMode="numeric"
               min="1"
-              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
+              className="w-full px-4 py-3.5 rounded-2xl bg-white/5 border border-white/10 text-white placeholder-slate-500 focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all"
             />
           </div>
 
@@ -430,15 +451,32 @@ function EditListingSheet({ item, lang, rtl, t, onClose, onSave }) {
 }
 
 export function SavedView() {
-  const { t, lang, rtl, savedItems, viewItem, toggleSave, user, goTab } = useApp();
+  const { t, lang, rtl, savedItems, savedIds, heartAnim, viewItem, toggleSave, user, goTab } = useApp();
   return (
     <div className="space-y-5">
       <FadeIn><h2 className="text-2xl font-bold">{t.saved}</h2></FadeIn>
       {savedItems.length > 0 ? (
         <div className="space-y-4">
           {savedItems.map((item, i) => (
+            // UI-002A: this call site passed `onClick`, which ListingCard does
+            // not accept, and none of the props it does. Tapping a saved card
+            // therefore called an undefined `viewItem` and threw, tapping the
+            // heart threw on an undefined `toggleSave`, the heart never showed
+            // as filled (no `savedIds`), and every label rendered in English
+            // inside a Hebrew-default UI (no `lang`/`t`). The Saved tab is one
+            // of four primary destinations and it was inert.
             <FadeIn key={item.id} delay={i * 50}>
-              <ListingCard item={item} onClick={() => viewItem(item)} />
+              <ListingCard
+                item={item}
+                index={i}
+                lang={lang}
+                t={t}
+                rtl={rtl}
+                savedIds={savedIds}
+                heartAnim={heartAnim}
+                toggleSave={toggleSave}
+                viewItem={viewItem}
+              />
             </FadeIn>
           ))}
         </div>
@@ -1782,7 +1820,7 @@ export function ListingFlowView() {
               <span className="text-sm text-slate-400">{t.yourPrice}</span>
               <div className="flex items-center gap-2 mt-2">
                 <span className="text-3xl font-bold text-green-400">₪</span>
-                <input type="number" className="flex-1 bg-transparent text-3xl font-bold text-green-400 focus:outline-none"
+                <input type="number" className="flex-1 bg-transparent text-3xl font-bold text-green-400"
                   value={listingData.price}
                   onChange={(e) => {
                     // VAL-001: clearing the box must leave it EMPTY, not 0.

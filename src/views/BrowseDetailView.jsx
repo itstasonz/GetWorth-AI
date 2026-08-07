@@ -4,7 +4,7 @@ import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn, SlideUp, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import ImageGallery from '../components/ImageGallery';
-import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, getQualityBadge, computeSellerTrust, STAT_COLORS } from '../lib/utils';
+import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, computeSellerTrust, STAT_COLORS } from '../lib/utils';
 
 export function BrowseView() {
   const {
@@ -118,7 +118,7 @@ export function BrowseView() {
           <div className="relative flex-1 min-w-0">
             <Search className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'right-4' : 'left-4'} w-5 h-5 text-slate-500 pointer-events-none`} />
             <input type="text" placeholder={lang === 'he' ? 'חיפוש לפי שם, תיאור, קטגוריה...' : 'Search name, description, category...'} value={search} onChange={(e) => setSearch(e.target.value)}
-              className={`w-full h-12 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all text-sm`} />
+              className={`w-full h-12 ${rtl ? 'pr-12 pl-4' : 'pl-12 pr-4'} rounded-2xl bg-white/5 border border-white/10 focus:border-[#6FEEE1]/50 focus:bg-white/10 transition-all text-base`} />
           </div>
           <button onClick={() => setShowFilters(!showFilters)}
             className={`relative flex-shrink-0 h-12 w-12 rounded-2xl flex items-center justify-center transition-all ${showFilters ? '' : 'bg-white/5 border border-white/10 hover:bg-white/10'}`}
@@ -157,9 +157,9 @@ export function BrowseView() {
             <div>
               <p className="text-xs text-slate-400 mb-2">{lang === 'he' ? 'טווח מחיר' : 'Price Range'}</p>
               <div className="flex items-center gap-2">
-                <input type="number" inputMode="numeric" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all" />
+                <input type="number" inputMode="numeric" placeholder={t.min} value={priceRange.min} onChange={(e) => setPriceRange({ ...priceRange, min: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all" />
                 <span className="flex-shrink-0 text-slate-500 text-sm">—</span>
-                <input type="number" inputMode="numeric" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm focus:border-[#6FEEE1]/50 transition-all" />
+                <input type="number" inputMode="numeric" placeholder={t.max} value={priceRange.max} onChange={(e) => setPriceRange({ ...priceRange, max: e.target.value })} className="flex-1 min-w-0 w-full px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all" />
               </div>
             </div>
 
@@ -266,7 +266,7 @@ export function BrowseView() {
 }
 
 // ═══════════════════════════════════════════════════════
-// DETAIL VIEW — with report + quality badge + seller trust
+// DETAIL VIEW — with report + seller trust
 // ═══════════════════════════════════════════════════════
 export function DetailView() {
   const { t, lang, rtl, user, selected, setSelected, setView, tab, savedIds, toggleSave, contactSeller, viewSellerProfile, reportListing, openCheckout, orders, viewOrder } = useApp();
@@ -293,11 +293,17 @@ export function DetailView() {
     completed:    { en: 'Completed',           he: 'הושלם',           color: 'emerald' },
   };
 
-  // Only surface quality badge to buyers if it's genuinely high — the "Improve"
-  // label (red, !) refers to listing description quality, not item condition.
-  // Showing a red "!" badge on a listing misleads buyers into thinking the item is damaged.
-  const qualityRaw = selected.quality_score != null && selected.quality_score > 0 ? getQualityBadge(selected.quality_score, lang) : null;
-  const quality = qualityRaw?.color === 'green' ? qualityRaw : null; // only show the ✓ green badge
+  // UI-002A: the buyer-facing copy-quality badge is removed, not filtered.
+  //
+  // The previous rule ("only show the green ✓") correctly stopped buyers seeing
+  // the red "Improve" imperative — that label grades the seller's WRITING and
+  // was being read as a statement about the item's condition. But what survived
+  // the filter was a green pill with a ✓ glyph sitting beside the seller's
+  // verified-identity marker, claiming a credential nothing had verified: the
+  // score is computed from title length, description length and photo count.
+  //
+  // Listing-copy quality is authoring feedback. It now appears only on the
+  // seller's own My Listings rows (SellViews), where every tier is actionable.
   const sellerTrust = selected.seller ? computeSellerTrust(selected.seller) : null;
   const serialVerified = selected.serial_verified === true;
 
@@ -419,14 +425,11 @@ export function DetailView() {
           </FadeIn>
         )}
 
-        {/* Title & Price + Quality badge */}
+        {/* Title & Price */}
         <FadeIn delay={50}>
           <div>
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               {selected.category && <Badge>{selected.category}</Badge>}
-              {quality && (
-                <Badge color={quality.color}>{quality.icon} {quality.label}</Badge>
-              )}
               <span className="text-xs text-slate-500 flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{selected.views || 0} {lang === 'he' ? 'צפיות' : 'views'}</span>
               <span className="text-xs text-slate-500 flex items-center gap-1"><Clock className="w-3.5 h-3.5" />{timeAgo(selected.created_at, t)}</span>
             </div>

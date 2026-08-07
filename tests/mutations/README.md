@@ -1,3 +1,8 @@
+> Two harnesses live here, sharing one idea. `run.mjs` + `mutants.mjs` cover the
+> VAL-001 valuation guard (below); `ui-run.mjs` + `ui-mutants.mjs` cover the
+> UI-002A interaction and CSS contract suites (at the end of this file).
+> `npm run test:mutation` runs both.
+
 # VAL-001 — Mutation harness for the valuation guard
 
 The contract suite (`tests/valuation-guard.test.mjs`) proves the guard behaves
@@ -94,3 +99,74 @@ Add to `MUTANTS` in `mutants.mjs`:
 
 Then run it. If it survives, you have found a test gap — write the contract test
 that kills it, in section H, naming the mutant.
+
+---
+
+# UI-002A — Mutation harness for the interaction and CSS suites
+
+Same question, different code: **if one of the UI-002A fixes were silently
+reverted, would any test notice?**
+
+```bash
+node tests/mutations/ui-run.mjs              # full run
+node tests/mutations/ui-run.mjs --list       # catalog, no execution
+node tests/mutations/ui-run.mjs --filter U07 # one mutant
+node tests/mutations/ui-run.mjs --verbose    # show the failing suite output
+```
+
+This is worth having here in particular because **every defect UI-002A fixed
+rendered correctly**. The markup was right in all of them; the bug lived in
+focus movement, timer lifetime, event ownership, or a stylesheet that quietly
+emitted no rule. Assertions about that class of behaviour are unusually easy to
+write in a way that passes without checking anything, so the assertions
+themselves need checking.
+
+## How it works
+
+For each entry in `ui-mutants.mjs` the runner writes a broken **copy** of its
+target *beside* the original — `src/components/ui.__mutant__.jsx` and friends —
+points the suite at it through an env var (`UI002A_UI_PATH`, `UI002A_CSS_PATH`,
+`UI002A_TW_CONFIG`, …) and runs the suite. Real files are never written to.
+
+Placement beside the original is load-bearing: `./ui`, `../lib/utils`, the
+Tailwind content globs and the `@tailwind` directives all resolve from the
+file's own directory, so a copy in a temp dir would fail for reasons unrelated
+to the mutation and every mutant would "die" spuriously. Copies are removed on
+exit, including on `^C`; `*.__mutant__.*` is gitignored as the net for a hard
+kill.
+
+Before scoring anything, the runner asserts each suite is **green against
+unmodified source**. An already-failing suite kills every mutant for the wrong
+reason and reports a flawless 100%.
+
+| Target | File | Suite |
+|---|---|---|
+| `ui` | `src/components/ui.jsx` | interaction |
+| `card` | `src/components/ListingCard.jsx` | interaction |
+| `utils` | `src/lib/utils.js` | interaction |
+| `css` | `src/index.css` | CSS contract |
+| `tailwind` | `tailwind.config.js` | CSS contract |
+| `html` | `index.html` | CSS contract |
+
+## Layered defences need multi-line mutants
+
+Some invariants are held by more than one guard. A sheet rejects an inside click
+via *both* the scrim's target check and the panel's `stopPropagation`; removing
+either alone leaves the behaviour correct, so a single-line mutant would survive
+for a good reason and be indistinguishable in the report from a genuine test
+gap. Those entries carry `edits: [...]` and remove every layer at once.
+
+## Adding a mutant
+
+```js
+{
+  id: 'U41-SHORT-SLUG',
+  target: 'ui',                  // key in TARGETS
+  invariant: 'The one sentence a reader must believe after this test passes.',
+  kills: ['name of the test expected to catch it'],   // documentation only
+  find: 'exact source substring, must match exactly once',
+  replace: 'the broken version (must still parse)',
+}
+```
+
+If it survives, you have found a test gap — write the test that kills it.

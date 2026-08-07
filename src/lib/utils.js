@@ -255,11 +255,29 @@ export const getSellerBadgeStyle = (badge) => {
   return map[badge] || map.newSeller;
 };
 
+// UI-002 PHASE 0 / trust fix 1 — "verified" is reserved for facts an operator checked.
+//
+// `trustedSeller` is a SCORE-DERIVED tier: computeTrustScore can cross its
+// threshold from profile completeness + account age alone, with zero completed
+// sales and no identity check (see computeTrustScore below). Its Hebrew label
+// used to read "מוכר מאומת" — the exact string AuthProfileView renders for a
+// seller who actually passed operator identity review. In English the two read
+// "Trusted" vs "Verified Seller" and are clearly distinct; in Hebrew — the app's
+// DEFAULT language — they were identical, so the tier silently claimed a
+// verification the user did not have, and simultaneously made the real badge
+// worthless by being indistinguishable from the free one.
+//
+// מהימן (reliable) is now used for the earned-by-score tier; מאומת (verified)
+// is reserved exclusively for `is_verified` / `serial_verified`.
+// Do not reintroduce מאומת into any formula-derived label.
 export const getSellerBadgeLabel = (badge, lang) => {
   const labels = {
     eliteSeller: lang === 'he' ? '⭐ מוכר עילית' : '⭐ Elite Seller',
     topSeller: lang === 'he' ? '🏆 מוכר מוביל' : '🏆 Top Seller',
-    trustedSeller: lang === 'he' ? '✓ מוכר מאומת' : '✓ Trusted',
+    // The ✓ is dropped along with the wording: a checkmark glyph IS the
+    // credential signal, so keeping it would have preserved the "the platform
+    // vouches for this person" reading that the label change exists to remove.
+    trustedSeller: lang === 'he' ? 'מוכר מהימן' : 'Trusted',
     newSeller: lang === 'he' ? '🆕 מוכר חדש' : '🆕 New Seller',
   };
   return labels[badge] || labels.newSeller;
@@ -278,8 +296,22 @@ export const computeQualityScore = ({ title, description, images, condition, pri
   return Math.min(100, score);
 };
 
+// UI-002A / trust fix 4 — listing-COPY quality is not a credential.
+//
+// This scores how well the SELLER wrote the ad (title length, description
+// length, photo count). It says nothing about the item, the seller's identity,
+// or whether anyone checked anything. It was nonetheless rendered to buyers as
+// a green pill with a ✓ glyph — the same shape and the same checkmark the app
+// uses for operator-verified identity — so a well-written ad for a dubious item
+// out-signalled a terse ad from a verified seller.
+//
+// The ✓ is removed here because a checkmark IS the credential signal; the
+// remaining tiers keep their glyphs because they are only ever shown to the
+// seller who wrote the copy, where "~" and "!" read as editing feedback.
+// Buyer-facing render sites are gone entirely — see ListingCard and
+// BrowseDetailView.
 export const getQualityBadge = (score, lang) => {
-  if (score >= 75) return { label: lang === 'he' ? 'איכות גבוהה' : 'High Quality', color: 'green', icon: '✓' };
+  if (score >= 75) return { label: lang === 'he' ? 'איכות גבוהה' : 'High Quality', color: 'green', icon: '' };
   if (score >= 45) return { label: lang === 'he' ? 'סביר' : 'Fair', color: 'yellow', icon: '~' };
   return { label: lang === 'he' ? 'שפר מודעה' : 'Improve', color: 'red', icon: '!' };
 };
@@ -402,7 +434,10 @@ export const getBuyerBadgeStyle = (badge) => {
 export const getBuyerBadgeLabel = (badge, lang) => {
   const labels = {
     topBuyer:     lang === 'he' ? '🏆 קונה מוביל'   : '🏆 Top Buyer',
-    trustedBuyer: lang === 'he' ? '✓ קונה מהימן'    : '✓ Trusted Buyer',
+    // ✓ dropped for the same reason as `trustedSeller` above: `trustedBuyer` is
+    // reached from purchase count and rating alone, with no identity check, so
+    // a checkmark asserts a verification that nobody performed.
+    trustedBuyer: lang === 'he' ? 'קונה מהימן'      : 'Trusted Buyer',
     newBuyer:     lang === 'he' ? '🆕 קונה חדש'     : '🆕 New Buyer',
   };
   return labels[badge] || labels.newBuyer;

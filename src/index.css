@@ -68,24 +68,125 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* ── GetWorth design tokens ──────────────────────────────────────────────────
- * Stage 1: CSS variable foundation. Tailwind extends these via tailwind.config.js
- * so screens can use bg-app, bg-surface-low, text-primary, border-outline, etc.
- * Existing hardcoded colors are left unchanged until Stage 2 migration.
- * ─────────────────────────────────────────────────────────────────────────── */
+/* ═══════════════════════════════════════════════════════════════════════════
+ * GetWorth design tokens — UI-002
+ *
+ * ONE canonical source. Everything else is derived from here.
+ *
+ * ── Why the values are stored as SPACE-SEPARATED RGB CHANNELS ──
+ * UI-001 measured design-token adoption at 0.89% (8 var() references in the
+ * whole of src/) and found the cause was mechanical, not cultural: the previous
+ * tokens mapped to `var(--color-x)`, which returns a COMPLETE color. Tailwind
+ * cannot then apply an opacity modifier, so `bg-primary/20` silently produced
+ * nothing. The team's dominant idiom is exactly that — 999 alpha-bearing sites
+ * across the app. The token system was architecturally incompatible with how
+ * the code is actually written, so it was bypassed everywhere.
+ *
+ * Storing bare channels ("19 19 19") lets tailwind.config.js emit
+ * `rgb(var(--gw-canvas) / <alpha-value>)`, which makes bg-canvas, bg-canvas/40
+ * and border-subtle/60 all work. Fix the mechanism first; adoption follows.
+ *
+ * ── Naming ──
+ * Roles, never appearances. UI-001 found `BADGE_COLORS.blue` holding teal and,
+ * worse, a `text-primary` utility that painted text TEAL (because Tailwind's
+ * `primary` color was the brand hue) while `--color-text-primary` meant
+ * near-white body text and had zero uses — the naming made the correct token
+ * unusable. The brand hue is now `accent`; `text-primary` unambiguously means
+ * primary TEXT.
+ *
+ * Contrast for every pair below is verified arithmetically by
+ * scripts/check-contrast.mjs, which runs in `npm test`. Change a value here and
+ * the check will tell you what it costs. 50/50 pairs currently pass WCAG AA.
+ * ═══════════════════════════════════════════════════════════════════════════ */
 :root {
-  --color-app:            #131313;
+  /* ── Surfaces (tonal ramp; elevation is expressed by TONE, not shadow) ──── */
+  --gw-canvas:          19 19 19;      /* #131313 app background            */
+  --gw-surface:         28 27 27;      /* #1C1B1B cards, sheets             */
+  --gw-elevated:        32 31 31;      /* #201F1F raised within a card      */
+  --gw-surface-high:    42 42 42;      /* #2A2A2A inputs, pressed states    */
+  --gw-surface-highest: 53 53 52;      /* #353534 highest tonal step        */
+  --gw-scrim:            0  0  0;      /* modal backdrop                    */
+
+  /* ── Text ───────────────────────────────────────────────────────────────
+   * ONE grey temperature. UI-001 found two systems in opposite directions —
+   * warm sage #BBC9C7 (14 uses) beside cool slate #94a3b8 (117 uses) — in the
+   * same viewport constantly. Nobody names it; everybody feels "two designers".
+   * The warm family wins because it harmonises with the teal accent, and
+   * because the cool ramp's lower steps (#64748B 3.90:1, #475569 2.45:1) were
+   * the app's largest contrast failure.
+   *
+   * Each step is set at the value that clears 4.5:1 on the HIGHEST surface in
+   * the ramp, not merely on canvas — that is the real worst case, and checking
+   * only against canvas is how the previous ramp shipped a muted grey that
+   * failed on three of four surfaces.                                        */
+  --gw-text-primary:   237 235 234;    /* #EDEBEA 15.64:1 canvas / 12.08 high */
+  --gw-text-secondary: 194 203 201;    /* #C2CBC9 11.22:1 canvas /  8.66 high */
+  --gw-text-muted:     150 163 161;    /* #96A3A1  7.12:1 canvas /  4.71 high */
+
+  /* ── Accent ─────────────────────────────────────────────────────────────
+   * UI-001 found this hue carrying ELEVEN meanings (brand, active tab, filter
+   * chip, verified, order-status, link, spinner, focus ring, price, progress,
+   * unread). When the brand colour is also the generic "something is
+   * interactive" colour it stops reading as a brand and starts reading as a
+   * template default. It now means exactly three things: brand identity,
+   * primary action, and current/selected state. See docs/DESIGN_SYSTEM.md.   */
+  --gw-accent:      111 238 225;       /* #6FEEE1 13.27:1 on canvas         */
+  --gw-accent-dim:   79 209 197;       /* #4FD1C5 pressed / dim variant     */
+  --gw-on-accent:     0  55  51;       /* #003733  9.40:1 on accent fill    */
+
+  /* ── Semantic — exactly ONE hue per meaning ─────────────────────────────
+   * Replaces: two money hues (green 53 + emerald 47), four caution hues
+   * (amber/yellow/orange/star), and a red doing BOTH destructive AND save.
+   * All four are tuned for dark-surface legibility, so the sanctioned badge
+   * recipe (semantic text over its own 12% tint) passes AA on every surface.
+   *
+   * INFO HAS NO HUE. A blue "info" family would reintroduce exactly the
+   * pre-rebrand blue residue UI-001 flagged (the Card `glow` shipping
+   * rgba(59,130,246,.15) in a teal app, and the blue→purple seller tint).
+   * Informational surfaces use the neutral ramp and let the icon carry the
+   * meaning; the token below is an alias of text-secondary so the name exists
+   * for API completeness without adding an eleventh hue.                     */
+  --gw-success: 63 207 147;            /* #3FCF93  9.34:1 canvas / 4.96 tint */
+  --gw-warning: 239 176 58;            /* #EFB03A  9.68:1 canvas / 5.02 tint */
+  --gw-danger:  255 158 147;           /* #FF9E93  9.35:1 canvas / 4.88 tint */
+  --gw-info:    194 203 201;           /* neutral by design — see above      */
+
+  /* ── Borders ────────────────────────────────────────────────────────────
+   * subtle = decorative grouping and dividers (WCAG 1.4.11 does not apply).
+   * strong = the boundary of an interactive component (inputs, focusable
+   * containers), so it MUST clear 3:1 on every surface it can sit on. The old
+   * #3C4947 managed only 1.98:1 and could not serve that role.               */
+  --gw-border-subtle: 46 45 45;        /* #2E2D2D                            */
+  --gw-border-strong: 124 138 134;     /* #7C8A86 3.41–5.16:1 across the ramp*/
+
+  /* ── Elevation — ONE mechanism ──────────────────────────────────────────
+   * UI-001 found 18 inline boxShadow declarations in 13 distinct strings (no
+   * two alike) plus a Card stacking FOUR depth cues at once: gradient fill,
+   * 1px border, drop shadow, AND an inset "bevel" faking a light source no
+   * other element acknowledges. Material 3's tonal model is the reference:
+   * depth is carried by SURFACE TONE. Shadow survives only where content must
+   * be separated from arbitrary content beneath it (floating chrome, sheets). */
+  --gw-shadow-raised:  0 1px 2px rgb(0 0 0 / 0.30);
+  --gw-shadow-overlay: 0 8px 24px rgb(0 0 0 / 0.44);
+  --gw-shadow-sheet:   0 -8px 32px rgb(0 0 0 / 0.48);
+
+  /* ═══ DEPRECATED ALIASES — do not use in new code ═════════════════════════
+   * Kept so the pre-UI-002 call sites in components/ui.jsx and
+   * components/LoadingScreen.jsx keep rendering during migration. These are
+   * derived from the canonical channels above, so they can no longer drift.
+   * Removal is tracked in docs/DESIGN_SYSTEM.md § Migration.               */
+  --color-app:            rgb(var(--gw-canvas));
   --color-surface-lowest: #0E0E0E;
-  --color-surface-low:    #1C1B1B;
-  --color-surface-high:   #2A2A2A;
-  --color-primary:        #6FEEE1;
-  --color-primary-dark:   #4FD1C5;
-  --color-primary-on:     #003733;
-  --color-outline:        #3C4947;
-  --color-text-primary:   #F8FAFC;
-  --color-text-secondary: #BBC9C7;
-  --color-text-muted:     #64748B;
-  --color-surface-muted:  rgba(255,255,255,0.05);
+  --color-surface-low:    rgb(var(--gw-surface));
+  --color-surface-high:   rgb(var(--gw-surface-high));
+  --color-primary:        rgb(var(--gw-accent));
+  --color-primary-dark:   rgb(var(--gw-accent-dim));
+  --color-primary-on:     rgb(var(--gw-on-accent));
+  --color-outline:        rgb(var(--gw-border-subtle));
+  --color-text-primary:   rgb(var(--gw-text-primary));
+  --color-text-secondary: rgb(var(--gw-text-secondary));
+  --color-text-muted:     rgb(var(--gw-text-muted));
+  --color-surface-muted:  rgb(var(--gw-surface) / 0.72);
 }
 
 /*
@@ -104,17 +205,179 @@
  */
 html,
 body {
-  background-color: #131313;
+  background-color: rgb(var(--gw-canvas));
   overscroll-behavior: none;
 }
 
 #root {
-  background-color: #131313;
+  background-color: rgb(var(--gw-canvas));
 }
 
-/* Brand focus ring — replaces browser-default blue outline with teal */
+/* ── Global typography application ────────────────────────────────────────────
+ * UI-001's single highest-leverage finding: the app preloads three brand font
+ * files on first paint and then rendered ~99% of its text in the OS UI font.
+ * tailwind.config.js extended only `colors` — no fontFamily — and neither
+ * index.css nor <body> set a family, so Tailwind Preflight left the document on
+ * `ui-sans-serif, system-ui`. The brand faces applied ONLY at the 58 inline
+ * `fontFamily:` props. Manrope headings sat directly above San Francisco body
+ * copy: on iOS that reads "half-finished", on Android it reads broken.
+ *
+ * Preflight sets `html { font-family: theme('fontFamily.sans') }`, so declaring
+ * fontFamily.sans in the Tailwind config fixes this globally on its own. The
+ * explicit body rule below is belt-and-braces — this is too important to depend
+ * on one mechanism.
+ *
+ * `font-variant-numeric: tabular-nums` on prices/metrics is applied per-role via
+ * the `.gw-numeric` utility, not globally — proportional figures read better in
+ * running prose.
+ * ─────────────────────────────────────────────────────────────────────────── */
+body {
+  font-family: 'Inter', 'Heebo', system-ui, -apple-system, sans-serif;
+  color: rgb(var(--gw-text-primary));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Headline face. Applied by the `font-display` utility and by role classes —
+ * NOT globally, so body copy keeps Inter's superior small-size legibility. */
+.gw-display {
+  font-family: 'Manrope', 'Heebo', system-ui, -apple-system, sans-serif;
+}
+
+/* Lining tabular figures — for prices, counts, timers and any column of
+ * numbers that must not jitter as values change. */
+.gw-numeric {
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: 'tnum' 1, 'lnum' 1;
+}
+
+/* ── Focus ─────────────────────────────────────────────────────────────────
+ * Verified 10.25–13.27:1 against every surface in the ramp (see
+ * scripts/check-contrast.mjs), comfortably clearing WCAG 1.4.11's 3:1 for
+ * non-text UI. Kept as `:focus-visible` so pointer users don't see rings on tap
+ * but keyboard users always do.
+ *
+ * The extra dark outer ring guarantees the indicator stays visible when a
+ * focused control sits on an accent-coloured or photographic background — a
+ * teal ring on a teal button would otherwise vanish.
+ * ────────────────────────────────────────────────────────────────────────── */
+/* NOTE: no `border-radius` here. A bare `:focus-visible` has the same
+ * specificity (0,1,0) as `.rounded-control` / `.rounded-full` but is emitted
+ * later, so setting a radius on this rule RESHAPES the focused control — a
+ * focused pill would collapse to a 4px rectangle, and `.state-layer::after`
+ * inherits it. The outline already follows the element's own radius. */
 :focus-visible {
-  outline: 2px solid #6FEEE1;
+  outline: 2px solid rgb(var(--gw-accent));
   outline-offset: 2px;
-  border-radius: 4px;
+  box-shadow: 0 0 0 4px rgb(var(--gw-canvas) / 0.85);
+}
+
+/* Contrast-safe inversion.
+ *
+ * The one surface the accent ring cannot be seen against is the accent itself:
+ * a focused primary button or selected chip would draw a teal ring on a teal
+ * fill and vanish. Inverting to the canvas colour uses the identical pair in
+ * reverse — 13.27:1 — so it always passes. */
+.bg-action-primary:focus-visible,
+.bg-accent:focus-visible,
+[aria-pressed='true'].bg-action-primary:focus-visible {
+  outline-color: rgb(var(--gw-canvas));
+  box-shadow: 0 0 0 4px rgb(var(--gw-accent) / 0.55);
+}
+
+/* ── State layer ───────────────────────────────────────────────────────────
+ * Material 3's interaction model: a full-bleed overlay in the content's own
+ * colour, composited above the base fill, whose OPACITY encodes the state.
+ *
+ * This replaces `active:scale-*`, which UI-001 found applied inconsistently and
+ * far too slowly — `Card` used `transition-all duration-500`, so tapping a
+ * listing produced a half-second scale settle, while `Btn` used 80ms. A 6×
+ * difference in tactile response between the app's two primary tap targets is
+ * one of the most reliable "this feels cheap" signals there is, and it never
+ * shows up on a visual audit.
+ *
+ * `currentColor` means the layer automatically matches its content, so one rule
+ * works on an accent-filled button, a tonal card and a ghost chip alike.
+ *
+ * HOVER IS GATED behind a real pointer. UI-001 counted 116 `hover:` utilities
+ * in a touch-first PWA, where hover either never fires or — worse — fires and
+ * STICKS after a tap, leaving controls in a permanent phantom hover state.
+ * ────────────────────────────────────────────────────────────────────────── */
+.state-layer { position: relative; }
+
+.state-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .state-layer:hover::after { opacity: 0.08; }
+}
+
+.state-layer:active::after { opacity: 0.12; }
+
+.state-layer[aria-pressed='true']::after,
+.state-layer[data-selected='true']::after { opacity: 0.12; }
+
+/* ── Motion ────────────────────────────────────────────────────────────────
+ * UI-001 found the previous reduced-motion rule covered ten named transition
+ * classes but missed every INFINITE animation: shimmer, shimmer-fast,
+ * spin-slow, scan, progress, float, notifProgress, Tailwind's own
+ * animate-pulse (17 uses), and an inline <style> block inside
+ * CameraResultsView.jsx driving three concurrent loops on the full-screen
+ * scanning view — a separate stylesheet the App.jsx media query could never
+ * reach.
+ *
+ * This rule is global and universal, so it reaches component-level <style>
+ * blocks too. Infinite decorative loops are stopped outright rather than merely
+ * shortened; `animation-iteration-count: 1` prevents a 0.01ms animation from
+ * respawning forever and pinning the CPU.
+ * ────────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Type floor ────────────────────────────────────────────────────────────
+ * UI-001 counted 181 type instances below 12px (122 at 10px, 33 at 9px, 2 at
+ * 8px) while index.html disabled pinch-zoom, so users had no way to compensate.
+ * Dense micro-type in washed-out grey is a primary "Temu" signal AND an
+ * accessibility failure.
+ *
+ * Hebrew needs a higher floor than Latin: Heebo has a smaller x-height at the
+ * same nominal size and no case distinction to aid word-shape recognition, so
+ * the DEFAULT language was strictly harder to read than the secondary one.
+ * `:lang()` raises the floor automatically wherever Hebrew is rendered.
+ *
+ * These are safety nets for un-migrated screens. New code should use the type
+ * scale (text-meta is the smallest sanctioned role); scripts/check-ui-rules.mjs
+ * fails the build on any NEW sub-12px literal.
+ * ────────────────────────────────────────────────────────────────────────── */
+body { font-size: 16px; }
+
+/* `text-meta` (the smallest sanctioned role) resolves to this variable, so the
+ * Hebrew floor applies automatically wherever Hebrew is rendered — no per-call-
+ * site conditional and no second type scale.
+ *
+ * Order matters: `:root` and `:lang(he)` have identical specificity and both
+ * match <html>, so the Hebrew rule MUST come second to win. */
+:root {
+  --gw-type-floor: 12px;
+}
+
+:lang(he) {
+  --gw-type-floor: 13px;
 }

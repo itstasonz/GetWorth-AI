@@ -1,13 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Heart, MapPin, Clock, CheckCircle, Camera } from 'lucide-react';
+import { Heart, MapPin, Clock, Camera } from 'lucide-react';
 import { Card, haptic } from './ui';
-import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getQualityBadge } from '../lib/utils';
-
-const QUALITY_COLORS = {
-  green: { bg: 'bg-emerald-500/80', text: 'text-white' },
-  yellow: { bg: 'bg-amber-500/80', text: 'text-white' },
-  red: { bg: 'bg-red-500/70', text: 'text-white' },
-};
+import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha } from '../lib/utils';
 
 // ─── Lazy Image with skeleton placeholder ───
 // Only loads when card enters viewport (IntersectionObserver)
@@ -54,9 +48,29 @@ const LazyImage = React.memo(({ src, alt, className }) => {
 });
 LazyImage.displayName = 'LazyImage';
 
+/**
+ * UI-002A / trust fix — the copy-quality badge is gone from this card entirely.
+ *
+ * `getQualityBadge` scores the LISTING COPY (title length, description length,
+ * photo count) — not the item, not the seller. Below 45 it returns a red "!" /
+ * "Improve" / "שפר מודעה" badge, which is an imperative addressed to the
+ * SELLER; this shared card shipped it to every buyer on Browse, Saved and
+ * seller-profile grids, publicly grading sellers as deficient on exactly the
+ * listings that most need a sale.
+ *
+ * Filtering to green-only (the previous fix, copied from BrowseDetailView) took
+ * care of the insult but left the deeper problem: what reached buyers was then
+ * a green pill with a ✓ — visually identical to the app's verified-identity
+ * marker — asserting a credential that nothing had verified. A buyer cannot
+ * distinguish "an operator checked this person's ID" from "this person wrote a
+ * long description", and the second is worth nothing to them.
+ *
+ * So the whole control is removed from the buyer surface rather than restyled.
+ * The feedback is genuinely useful to the person who wrote the copy, and it now
+ * lives on the seller's own My Listings rows (SellViews), where all three tiers
+ * are actionable and none of them make a claim to a third party.
+ */
 const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggleSave, viewItem }) => {
-  const quality = item.quality_score != null ? getQualityBadge(item.quality_score, lang) : null;
-  const qColor = quality ? QUALITY_COLORS[quality.color] : null;
   const imageCount = item.images?.length || 0;
   const isSaved = savedIds?.has(item.id) ?? false;
 
@@ -74,14 +88,6 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
           >
             <Heart className={`w-5 h-5 transition-all ${isSaved ? 'fill-current scale-110' : ''}`} />
           </button>
-
-          {/* Quality badge — top-left */}
-          {quality && qColor && (
-            <div className={`absolute top-3 ${rtl ? 'right-14' : 'left-3'} px-2 py-1 rounded-lg text-[9px] font-bold backdrop-blur-md flex items-center gap-1 ${qColor.bg} ${qColor.text}`}>
-              {quality.color === 'green' && <CheckCircle className="w-3 h-3" />}
-              {quality.label}
-            </div>
-          )}
 
           {/* Image count badge */}
           {imageCount > 1 && (

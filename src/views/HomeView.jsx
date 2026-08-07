@@ -8,24 +8,12 @@ import { formatPrice, timeAgo, getConditionLabel } from '../lib/utils';
 // ═══════════════════════════════════════════════════════════════════════
 // STITCH DESIGN TOKENS — ported faithfully from the HTML tailwind.config
 // ═══════════════════════════════════════════════════════════════════════
-const STITCH = {
-  background:          '#131313',
-  primary:             '#6FEEE1',
-  primaryContainer:    '#4FD1C5',
-  onPrimary:           '#003733',
-  onSurface:           '#e5e2e1',
-  onSurfaceVariant:    '#BBC9C7',
-  surfaceContainerLow: '#1C1B1B',
-  surfaceContainerHigh:'#2A2A2A',
-  surfaceContainerHighest:'#353534',
-  outlineVariant:      '#3c4947',
-  GRADIENT_PRIMARY: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)',
-  GLASS_BG:        'rgba(53, 53, 52, 0.4)',
-  GLASS_BORDER:    '1px solid rgba(255, 255, 255, 0.05)',
-  GLASS_BLUR:      'blur(24px)',
-  FONT_HEADLINE:   '"Manrope", system-ui, -apple-system, sans-serif',
-  FONT_BODY:       '"Inter", system-ui, -apple-system, sans-serif',
-};
+// UI-002: the file-local token object that used to live here is gone.
+// Seven parallel declarations (this one, four siblings, :root and the
+// Tailwind config) had already drifted — GLASS_BG shipped at 0.4 here and
+// 0.6 in CameraResultsView, so glass panels were different weights on
+// adjacent screens. Key names are unchanged, so no call site moved.
+import { STITCH } from '../lib/tokens';
 
 // ─── Auto-scroll hook (touch-pause) ─────────────────────────────────
 function useAutoScroll(speed = 0.4) {
@@ -131,7 +119,7 @@ export default function HomeView() {
                 color: STITCH.onSurface,
               }}
             >
-              {lang === 'he' ? 'GetWorth AI' : 'GetWorth AI'}
+              GetWorth AI
             </h2>
             <p
               className="font-medium leading-snug mx-auto"

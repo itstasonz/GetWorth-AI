@@ -447,7 +447,7 @@ export default function AdminPanel() {
             value={userSearch}
             onChange={(e) => setUserSearch(e.target.value)}
             placeholder={t('Search name or email...', 'חפש שם או אימייל...')}
-            className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#6FEEE1]/40"
+            className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-base text-white placeholder-slate-500 focus:border-[#6FEEE1]/40"
             dir="auto"
           />
           <p className="text-xs text-slate-500">
@@ -634,7 +634,7 @@ function AdminReviewCard({ review, lang, onDelete }) {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder={t('Moderation reason (optional)', 'סיבת ההסרה (אופציונלי)')}
-              className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-red-400/40"
+              className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-base text-white placeholder-slate-500 focus:border-red-400/40"
               dir="auto"
             />
             <div className="flex gap-2">
@@ -744,7 +744,7 @@ function VerificationCard({ user, lang, onApprove, onReject }) {
                 onChange={(e) => setRejectionReason(e.target.value)}
                 placeholder={t('Reason for rejection (optional)', 'סיבת הדחייה (אופציונלי)')}
                 rows={2}
-                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-red-400/40 resize-none"
+                className="w-full px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-base text-white placeholder-slate-500 focus:border-red-400/40 resize-none"
                 dir="auto"
               />
               <div className="flex gap-2">

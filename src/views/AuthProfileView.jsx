@@ -7,21 +7,12 @@ import { STAT_COLORS, timeAgo } from '../lib/utils';
 // ═══════════════════════════════════════════════════════════════════════
 // STITCH DESIGN TOKENS — from Stitch Profile HTML
 // ═══════════════════════════════════════════════════════════════════════
-const STITCH = {
-  background:              '#131313',
-  primary:                 '#6FEEE1',
-  primaryContainer:        '#4FD1C5',
-  onPrimary:               '#003733',
-  onSurface:               '#e5e2e1',
-  onSurfaceVariant:        '#BBC9C7',
-  surfaceContainerLowest:  '#0e0e0e',
-  surfaceContainerLow:     '#1C1B1B',
-  surfaceContainerHigh:    '#2A2A2A',
-  surfaceContainerHighest: '#353534',
-  error:                   '#ffb4ab',
-  FONT_HEADLINE: '"Manrope", system-ui, -apple-system, sans-serif',
-  FONT_BODY:     '"Inter", system-ui, -apple-system, sans-serif',
-};
+// UI-002: the file-local token object that used to live here is gone.
+// Seven parallel declarations (this one, four siblings, :root and the
+// Tailwind config) had already drifted — GLASS_BG shipped at 0.4 here and
+// 0.6 in CameraResultsView, so glass panels were different weights on
+// adjacent screens. Key names are unchanged, so no call site moved.
+import { STITCH } from '../lib/tokens';
 
 export function AuthView() {
   const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset, updatePassword } = useApp();
@@ -269,10 +260,19 @@ export function ProfileView() {
               className="absolute -inset-1 rounded-full blur opacity-25 group-hover:opacity-50 transition duration-1000"
               style={{ background: `linear-gradient(to top right, ${STITCH.primary}, ${STITCH.primaryContainer})` }}
             />
+            {/* UI-002A: the outline-suppression + uncoloured-ring utility pair
+                was removed from this button. Together they cancelled the app's
+                accent focus ring at specificity (0,2,0) and replaced it with a
+                2px ring carrying no ring COLOUR, which falls back to Tailwind's
+                default blue — a pre-rebrand hue this app deleted everywhere
+                else. The global `:focus-visible` rule already draws a
+                contrast-verified ring that follows this button's own
+                `rounded-full`. (Class names intentionally not spelled out: the
+                Tailwind scanner is a plain-text match and would re-emit them.) */}
             <button
               onClick={() => avatarInputRef.current?.click()}
               disabled={avatarUploading}
-              className="relative h-32 w-32 rounded-full overflow-hidden focus:outline-none focus:ring-2"
+              className="relative h-32 w-32 rounded-full overflow-hidden"
               style={{
                 border: `2px solid ${STITCH.surfaceContainerHigh}`,
                 background: STITCH.surfaceContainerLow,
