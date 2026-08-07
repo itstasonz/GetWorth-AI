@@ -72,6 +72,14 @@ export const TARGETS = {
     env: 'UI002A_INDEX_HTML',
     suite: 'tests/ui-css-contract.test.mjs',
   },
+  // UI-002B. The linter is the only thing preventing a slow return to 340
+  // literals, so it gets the same treatment as the code it guards.
+  lint: {
+    src: 'scripts/design-lint.mjs',
+    mutant: 'scripts/design-lint.__mutant__.mjs',
+    env: 'UI002B_LINT_PATH',
+    suite: 'tests/design-lint.test.mjs',
+  },
 };
 
 export const UI_MUTANTS = [
@@ -473,6 +481,247 @@ export const UI_MUTANTS = [
     kills: ['tokens are channel triplets so opacity modifiers can apply at all'],
     find: "        accent:             'rgb(var(--gw-accent) / <alpha-value>)',",
     replace: "        accent:             'var(--color-primary)',",
+  },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // UI-002B — design-system foundation
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── IconButton ────────────────────────────────────────────────────────────
+  {
+    id: 'U41-ICON-BUTTON-UNNAMED',
+    target: 'ui',
+    invariant: 'An icon-only control always carries an accessible name.',
+    // Without a name it is announced as just "button" — the defect is invisible
+    // on screen, which is exactly why it needs a test rather than a review.
+    kills: ['the icon-only control carries an accessible name'],
+    find: '      aria-label={label}',
+    replace: '      title={label}',
+  },
+  {
+    id: 'U42-ICON-BUTTON-FAKE-TOGGLE',
+    target: 'ui',
+    invariant: 'aria-pressed appears only on controls that are genuinely toggles.',
+    kills: ['announces a toggle state only when it is actually a toggle'],
+    find: "      aria-pressed={typeof selected === 'boolean' ? selected : undefined}",
+    replace: '      aria-pressed={Boolean(selected)}',
+  },
+  {
+    id: 'U43-TOUCH-TARGET-COLLAPSES',
+    target: 'ui',
+    invariant: 'The 44px minimum target is expanded around the glyph, not painted on it.',
+    kills: ['clears the 44px minimum target without growing the glyph'],
+    find: '    className={`relative inline-flex items-center justify-center min-w-tap min-h-tap ${className}`}',
+    replace: '    className={`relative inline-flex items-center justify-center ${className}`}',
+  },
+  {
+    id: 'U44-ICON-BUTTON-DISABLED-IS-COSMETIC',
+    target: 'ui',
+    invariant: 'A disabled icon button is disabled in the DOM, not merely dimmed.',
+    kills: ['disabled reaches the DOM, not just the opacity'],
+    find: "      disabled={disabled}\n      aria-disabled={softDisabled ? true : undefined}\n      onClick={softDisabled ? (e) => e.preventDefault() : onClick}",
+    replace: '      onClick={onClick}',
+  },
+
+  // ── TextArea ──────────────────────────────────────────────────────────────
+  {
+    id: 'U45-TEXTAREA-BELOW-ZOOM-FLOOR',
+    target: 'ui',
+    invariant: 'Multi-line controls hold the 16px floor that stops iOS zooming on focus.',
+    kills: ['holds the 16px floor that stops iOS zooming on focus'],
+    find: "          'w-full px-4 py-3 rounded-control text-base resize-none',",
+    replace: "          'w-full px-4 py-3 rounded-control text-sm resize-none',",
+  },
+  {
+    id: 'U46-TEXTAREA-ERROR-NOT-ANNOUNCED',
+    target: 'ui',
+    invariant: 'A field error is referenced by aria-describedby, not merely rendered beside the field.',
+    // Narrowed: it used to strip aria-describedby wholesale, which also broke
+    // the counter and overlapped U47, so neither mutant isolated its own claim.
+    // This drops ONLY the error id.
+    kills: ['an error is announced and marks the field invalid'],
+    find: "    error ? `${fieldId}-err` : null,",
+    replace: '    null,',
+  },
+  {
+    id: 'U57-TEXTAREA-HINT-LOST-ON-ERROR',
+    target: 'ui',
+    invariant: 'The hint survives an error — format guidance must not vanish at the moment the format was wrong.',
+    kills: ['the hint survives an error — guidance must not vanish when it is needed most'],
+    find: "    hint ? `${fieldId}-hint` : null,",
+    replace: '    null,',
+  },
+  {
+    id: 'U58-TEXTAREA-NO-REF',
+    target: 'ui',
+    invariant: 'TextArea forwards a ref, or the chat composer can never adopt it.',
+    kills: ['forwards a ref to the real control'],
+    find: '        ref={ref}\n        id={fieldId}',
+    replace: '        id={fieldId}',
+  },
+  {
+    id: 'U59-TEXTAREA-FORCES-UI-DIRECTION',
+    target: 'ui',
+    invariant: 'Direction is resolved from content, not forced by the UI language.',
+    kills: ['direction is resolved from content, not forced by the UI language'],
+    find: "        dir={dir ?? (rtl === undefined ? 'auto' : rtl ? 'rtl' : 'ltr')}",
+    replace: "        dir={rtl ? 'rtl' : 'ltr'}",
+  },
+  {
+    id: 'U60-HITAREA-SUBMITS-THE-FORM',
+    target: 'ui',
+    invariant: 'A HitArea button never defaults to type="submit".',
+    // One latent bug became systemic the moment IconButton was built on it.
+    kills: ['never defaults to a submit button'],
+    find: "    {...(As === 'button' ? { type: 'button' } : null)}",
+    replace: '    {...null}',
+  },
+  {
+    id: 'U61-SOFT-DISABLED-BECOMES-INERT',
+    target: 'ui',
+    invariant: 'A softDisabled control stays focusable so the user can discover why it is unavailable.',
+    kills: ['softDisabled stays focusable and announces itself, unlike native disabled'],
+    find: '      disabled={disabled}\n      aria-disabled={softDisabled ? true : undefined}',
+    replace: '      disabled={off}',
+  },
+  {
+    id: 'U62-SECTION-HARDCODES-H2',
+    target: 'ui',
+    invariant: 'Heading level is explicit, so nested Sections produce a real document outline.',
+    kills: ['heading level is explicit, so nested sections produce a real outline'],
+    find: '  const Heading = `h${Math.min(Math.max(level, 1), 6)}`;',
+    replace: "  const Heading = 'h2';",
+  },
+  {
+    id: 'U63-DEGRADE-RULE-LEAKS-LANDMARKS',
+    target: 'ui',
+    invariant: 'Every landmark tag degrades when untitled — not just <section>.',
+    kills: ['the degrade rule covers every landmark tag, not just <section>'],
+    find: "  const Tag = titled || !LANDMARK_TAGS.has(As) ? As : 'div';",
+    replace: "  const Tag = titled || As !== 'section' ? As : 'div';",
+  },
+  {
+    id: 'U47-TEXTAREA-COUNT-SILENT',
+    target: 'ui',
+    invariant: 'A character cap the user can see is also a cap a screen reader can reach.',
+    kills: ['the character cap is discoverable rather than discovered by losing text'],
+    find: '    showingCount ? countId : null,',
+    replace: '    null,',
+  },
+
+  // ── Stack ─────────────────────────────────────────────────────────────────
+  {
+    id: 'U48-STACK-INTERPOLATED-CLASS',
+    target: 'ui',
+    suite: 'lint',
+    expectRule: 'interpolated-class',
+    invariant: 'Dynamic utilities come from a lookup table, because Tailwind cannot see an interpolated class.',
+    // This one SURVIVED on its first run and is the reason the `interpolated-class`
+    // lint rule exists. Both forms produce the SAME runtime className, so the
+    // rendered DOM is byte-identical and every jsdom assertion passes; what
+    // differs is build time, where Tailwind's text scanner never sees the
+    // completed name and emits no rule. A DOM test cannot observe that, so the
+    // invariant is enforced by source inspection instead — note `suite: 'lint'`,
+    // which judges this mutant with the linter rather than the interaction suite.
+    kills: ['interpolated-class is enforced, not merely declared'],
+    find: "      align ? STACK_ALIGN[align] : '',\n      justify ? STACK_JUSTIFY[justify] : '',",
+    replace: "      align ? `items-${align}` : '',\n      justify ? `justify-${justify}` : '',",
+  },
+  {
+    id: 'U49-STACK-GAP-FALLS-OFF-SCALE',
+    target: 'ui',
+    invariant: 'An unrecognised gap falls back onto the closed scale rather than emitting no spacing.',
+    kills: ['an unrecognised gap falls back to the scale rather than emitting nothing'],
+    find: '      STACK_GAP[gap] ?? STACK_GAP.stack,',
+    replace: '      STACK_GAP[gap],',
+  },
+
+  // ── Section ───────────────────────────────────────────────────────────────
+  {
+    id: 'U50-SECTION-UNNAMED-LANDMARK',
+    target: 'ui',
+    invariant: 'An untitled Section contributes no unnamed landmark to the rotor.',
+    kills: ['an untitled Section adds no unnamed landmark'],
+    find: "  const Tag = titled || !LANDMARK_TAGS.has(As) ? As : 'div';",
+    replace: '  const Tag = As;',
+  },
+  {
+    id: 'U51-SECTION-NOT-NAMED-BY-ITS-HEADING',
+    target: 'ui',
+    invariant: 'A titled Section is named by its own visible heading.',
+    kills: ['is a landmark named by its own visible heading'],
+    find: "      {...(titled ? { 'aria-labelledby': headingId } : null)}",
+    replace: '      {...null}',
+  },
+  {
+    id: 'U52-SECTION-DRAWS-A-BOX',
+    target: 'ui',
+    invariant: 'Section is layout-only — a section that paints its own container turns a screen into a dashboard.',
+    kills: ['draws no box of its own'],
+    find: '      className={`space-y-stack ${className}`}',
+    replace: '      className={`space-y-stack bg-surface border border-subtle rounded-container p-4 ${className}`}',
+  },
+
+  // ── The ratchet ───────────────────────────────────────────────────────────
+  // If these survive, every budget in the ledger is decorative.
+  {
+    id: 'U53-BUDGET-RATCHET-ACCEPTS-A-RAISE',
+    target: 'lint',
+    invariant: '--update refuses to raise a budget; a regression cannot be laundered into the ledger.',
+    kills: ['REFUSES to raise a budget, and writes nothing'],
+    find: '  const over = Object.entries(counts).filter(([id, n]) => n > BUDGET[id]);',
+    replace: '  const over = [];',
+  },
+  {
+    id: 'U54-REFUSAL-STILL-WRITES',
+    target: 'lint',
+    invariant: 'A refused update writes nothing at all — a partial write is a silent raise.',
+    kills: ['REFUSES to raise a budget, and writes nothing'],
+    // Models the defect precisely: the refusal is printed and the exit code is
+    // still 1, but a budget is raised on the way out. Only the "wrote nothing"
+    // half of the test can see this — checking the exit code alone would pass.
+    find: '    process.exit(1);\n  }\n\n  const lowered',
+    replace:
+      "    writeFileSync(SELF, readFileSync(SELF, 'utf8').replace(/'glassmorphism': \\d+/, \"'glassmorphism': 999\"));\n" +
+      '    process.exit(1);\n  }\n\n  const lowered',
+  },
+  {
+    id: 'U55-A-RULE-CAN-LOSE-ITS-BUDGET',
+    target: 'lint',
+    invariant: 'Every rule has a budget entry — a rule without one compares against undefined and can never fail.',
+    kills: ['every rule has a budget and every budget has a rule'],
+    find: "  'glassmorphism': 67,\n",
+    replace: '',
+  },
+  {
+    id: 'U64-LEDGER-KEY-ORPHANED',
+    target: 'lint',
+    invariant: 'A budget entry with no matching rule is caught — the ledger is a set, not a wish list.',
+    // U55 removes a budget, which ALSO breaks that rule's fire test, so the
+    // ledger-completeness assertion was never independently verified. Renaming a
+    // key is invisible to every fire test and visible only to completeness.
+    kills: ['every rule has a budget and every budget has a rule'],
+    find: "  'ad-hoc-shadow': 44,",
+    replace: "  'ad-hoc-shadows': 44,",
+  },
+  {
+    id: 'U65-HARD-ZERO-QUIETLY-RAISED',
+    target: 'lint',
+    invariant: 'The accessibility hard zeros stay at zero — they are not migration budgets.',
+    // Nothing exercised this assertion before; a hard zero could have drifted
+    // upward in a diff that reads like every other budget edit.
+    kills: ['the hard-zero accessibility rules are still zero'],
+    find: "  'focus-suppression': 0,",
+    replace: "  'focus-suppression': 3,",
+  },
+  {
+    id: 'U56-DECORATION-RULE-STOPS-MATCHING',
+    target: 'lint',
+    invariant: 'The gradient rule actually matches a gradient.',
+    // A regex that quietly stops matching reports a clean build forever.
+    kills: ['decorative-gradient is enforced, not merely declared'],
+    find: '      return (line.match(/linear-gradient|radial-gradient|conic-gradient|\\bbg-gradient-to-[a-z]+/g) || []).length;',
+    replace: '      return 0;',
   },
 ];
 

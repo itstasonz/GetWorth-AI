@@ -72,7 +72,7 @@ export default {
         strong: 'rgb(var(--gw-border-strong) / <alpha-value>)',
 
         // ── DEPRECATED aliases — pre-UI-002 call sites only. Do not use in new
-        // code; scripts/check-ui-rules.mjs warns on growth. Tracked for removal
+        // code; scripts/design-lint.mjs `legacy-token-import` budgets them. Removal tracked
         // in docs/DESIGN_SYSTEM.md § Migration.
         'app':           'rgb(var(--gw-canvas) / <alpha-value>)',
         'app-secondary': 'rgb(var(--gw-text-secondary) / <alpha-value>)',

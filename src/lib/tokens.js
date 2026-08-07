@@ -2,10 +2,17 @@
  * GetWorth design tokens — JS mirror (UI-002)
  *
  * This file exists for ONE reason: inline `style={{}}` props cannot use Tailwind
- * classes, and the app has ~340 of them across five view files. It is NOT a
- * second source of truth — the `/* @gw <role> *\/` annotations below are checked
- * against src/index.css by scripts/design-lint.mjs, so the two cannot drift.
+ * classes, and the app has ~340 of them across five view files.
  * If it can be a className, it MUST be a className.
+ *
+ * ── The `@gw` annotations are NOT yet checked ──
+ * This header used to claim they "are checked against src/index.css by
+ * scripts/design-lint.mjs, so the two cannot drift". That was never true: no
+ * such rule exists, and nothing reads these annotations. They are a convention
+ * waiting for its enforcement, and until that rule is written this file CAN
+ * drift from index.css silently — which matters more here than anywhere else,
+ * because design-lint exempts this file from `raw-hex`.
+ * Tracked in docs/DESIGN_SYSTEM.md § Known debt.
  *
  * ── Why the STITCH/C re-exports at the bottom ──
  * UI-001 found SEVEN parallel token declarations: :root, tailwind.config.js, and
@@ -74,8 +81,13 @@ export const SAFE_AREA = {
 export const ELEVATION = {
   flat:    { background: T.canvas },
   raised:  { background: T.surface, border: `1px solid ${T.borderSubtle}` },
-  overlay: { background: T.elevated, border: `1px solid ${T.borderSubtle}`, boxShadow: '0 8px 24px rgb(0 0 0 / 0.44)' },
-  sheet:   { background: T.surface, boxShadow: '0 -8px 32px rgb(0 0 0 / 0.48)' },
+  // The shadow values are READ from the custom properties rather than retyped.
+  // They used to be literals here and in index.css — two copies of the same
+  // number, which is the exact drift this file exists to prevent, reintroduced
+  // one level down. scripts/design-lint.mjs `ad-hoc-shadow` now enforces that an
+  // inline boxShadow may only reference a --gw-shadow-* token.
+  overlay: { background: T.elevated, border: `1px solid ${T.borderSubtle}`, boxShadow: 'var(--gw-shadow-overlay)' },
+  sheet:   { background: T.surface, boxShadow: 'var(--gw-shadow-sheet)' },
 };
 
 // ═══════════════════════════════════════════════════════════════════════════

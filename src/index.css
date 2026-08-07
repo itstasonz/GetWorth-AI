@@ -363,8 +363,9 @@ body {
  * `:lang()` raises the floor automatically wherever Hebrew is rendered.
  *
  * These are safety nets for un-migrated screens. New code should use the type
- * scale (text-meta is the smallest sanctioned role); scripts/check-ui-rules.mjs
- * fails the build on any NEW sub-12px literal.
+ * scale (text-meta is the smallest sanctioned role); scripts/design-lint.mjs
+ * `tiny-type` budgets any NEW sub-12px literal — though only in the `text-[Npx]`
+ * form; an inline `fontSize: 0.6rem` is still invisible to it (see § Known debt).
  * ────────────────────────────────────────────────────────────────────────── */
 body { font-size: 16px; }
 

@@ -1,8 +1,10 @@
 # GetWorth Design System
 
-**Status:** UI-002 foundation — landed, enforced in CI.
+**Status:** UI-002B foundation — landed, enforced by `npm test`, and the enforcement is itself tested.
+**There is no CI runner in this repo.** No `.github/` exists, so every gate below runs only when a human types `npm test`. Earlier revisions of this document said "enforced in CI" four times; that was false and is corrected here. Wiring `npm test` into a required PR check is the single highest-leverage thing left — see § Known debt.
 **Source of truth:** `src/index.css` (`:root`) → `tailwind.config.js` → `src/lib/tokens.js`.
-**Enforced by:** `scripts/check-contrast.mjs` and `scripts/design-lint.mjs`, both wired into `npm test`.
+**Enforced by:** `scripts/check-contrast.mjs` and `scripts/design-lint.mjs`, both wired into `npm test` (§15).
+**Screens are not yet migrated.** UI-002B built and closed the system; UI-003 applies it. The budgets in §15 are the honest measure of how much of the old app is still standing.
 
 This system exists because of a measured failure, not a preference. UI-001 found seven parallel token declarations, **0.89% token adoption** (8 `var()` references in all of `src/`), brand fonts downloaded but applied to ~1% of text, 158 raw `<button>` against 24 `<Btn>`, 11 hand-rolled bottom sheets against 1 primitive, and six text pairs below WCAG AA. The diagnosis was not bad taste — it was **absent authorship**: screens were transcribed one at a time from generated mockups, so nothing was ever decided once.
 
@@ -202,17 +204,38 @@ All primitives live in `src/components/ui.jsx`. Each is the only sanctioned way 
 | Primitive | Purpose | Forbids |
 |---|---|---|
 | `Btn` | 4 variants × 3 sizes | Per-screen button treatments; sub-44px targets |
+| `IconButton` | Icon-only control | An unnamed icon; growing the glyph to reach 44px; `aria-pressed` on a non-toggle |
 | `Card` | e1 surface | Stacked depth cues; blur; hover lift |
 | `Badge` | Platform-asserted state | Solid fills with white text |
 | `Chip` | A control the **user** sets | Looking like a fact |
 | `Credential` | A fact backed by a stored value | `tier`, `color`, `variant`, caller-supplied labels |
 | `InputField` | Labelled input | Unassociated labels |
+| `TextArea` | Labelled multi-line input | Sub-16px type; an invisible character cap |
+| `Stack` | Spacing rhythm | Off-scale gaps; `rtl ? a : b` for row order |
+| `Section` | A titled region + its landmark | Unnamed landmarks; a section that paints its own box |
 | `Sheet` | **The** overlay | Any hand-rolled modal |
 | `ConfirmSheet` | Destructive confirmation | — |
 | `HitArea` | 44px hit-slop | Growing the glyph to hit target size |
 | `EmptyState` / `ErrorState` / `LoadingState` | The three wait/none states | A failed load rendering as "you have nothing" |
 | `AnchoredAction` | Thumb-zone primary action | Use on multi-action screens |
 | `Toast` | Transient feedback | Saturated gradient surfaces |
+
+### Layout primitives have no visual opinion
+
+`Stack` and `Section` deliberately render no background, border, radius or shadow. This is the rule that keeps a mobile screen from becoming a dashboard: nested panels each drawing their own box is what makes an app read as an admin console rather than a marketplace. A `Section` is a heading plus rhythm; if a region needs a surface, it contains a `Card` — it does not become one.
+
+`Stack`'s `gap` accepts only the named scale (`none` · `tight` 8 · `stack` 12 · `group` 24 · `section` 40). There is no numeric escape, because a numeric `gap` prop reopens exactly the arbitrary-spacing hole the scale closes. An unrecognised value falls back to `stack` rather than emitting nothing.
+
+### Dynamic class names must come from a lookup table
+
+Never build a utility by interpolation:
+
+```jsx
+className={`items-${align}`}      // ✗ never emitted
+className={STACK_ALIGN[align]}    // ✓
+```
+
+Tailwind's content scanner is a plain **text** match over the source. It never sees the completed name, so the rule is never emitted and the prop silently does nothing — while the rendered DOM looks correct in every test, because at runtime both forms produce the identical `className` string. This defect is invisible to a DOM test by construction; it is caught by the `interpolated-class` lint rule, which exists because a mutation run proved the DOM test could not catch it.
 
 ### Badge / Chip / Credential — the taxonomy that survives a glance
 
@@ -224,7 +247,7 @@ UI-001 found a trust chip, a category filter and a valuation-confidence grade re
 
 ### The only sanctioned badge recipe
 
-Semantic text over its **own** 12% tint, with a 20% border. Solid, high-opacity fills with white text are **banned outright** — that pattern produced 1.71:1 on the condition badge, the single most price-relevant fact on a second-hand listing. The tinted form passes AA on every surface (4.88–10.22:1), verified in CI.
+Semantic text over its **own** 12% tint, with a 20% border. Solid, high-opacity fills with white text are **banned outright** — that pattern produced 1.71:1 on the condition badge, the single most price-relevant fact on a second-hand listing. The tinted form passes AA on every surface (4.88–10.22:1), verified by `scripts/check-contrast.mjs`.
 
 ### Overlay contract
 
@@ -267,13 +290,26 @@ Hebrew is the **default** (`<html lang="he" dir="rtl">`).
 - Type floor rises to 13px under `:lang(he)`.
 - Test every screen in Hebrew *first*. The existing RTL handling is structurally good — `dir` propagation, logical margins, direction-aware transitions, per-message direction detection in `Toast` — and should be preserved.
 
+### Prefer the mechanism that cannot be got wrong
+
+The codebase's dominant RTL idiom is a boolean prop and a ternary:
+
+```jsx
+className={`absolute ${rtl ? 'left-3' : 'right-3'}`}   // legacy
+className="absolute end-3"                              // preferred
+```
+
+Both work. Only one is **correct by default**. The ternary form requires every call site to receive an `rtl` prop, remember to use it, and get the branch the right way round; nothing can lint it, and a missed site fails silently in the language most users see. Logical properties need no prop at all.
+
+New primitives use flexbox and logical properties exclusively — a `Stack row` reverses under `dir="rtl"` with no prop and no conditional, and `Section`'s trailing action is placed by `justify-between` rather than pinned to a side. Migrating the ~40 existing ternaries is UI-003 work; writing new ones is not sanctioned.
+
 ---
 
 ## 10. Accessibility minimums
 
 Non-negotiable, and testable:
 
-1. **Contrast** — body/label ≥4.5:1 against its *composited* background; non-text UI ≥3:1. Verified in CI by `scripts/check-contrast.mjs` (50 assertions).
+1. **Contrast** — body/label ≥4.5:1 against its *composited* background; non-text UI ≥3:1. Verified by `scripts/check-contrast.mjs` (50 assertions), run from `npm test`.
 2. **Touch targets** — ≥44×44px hit area via `min-h-tap`/`HitArea`. Padding counts; visual size may stay small.
 3. **Zoom** — never `user-scalable=no` or `maximum-scale` < 5.
 4. **Labels** — every input has an associated `htmlFor`/`id`; every icon-only control has `aria-label`.
@@ -395,7 +431,54 @@ Budgets **only ratchet down**. Run `node scripts/design-lint.mjs --update` after
 
 ---
 
-## 15. Component adoption inventory
+## 15. Enforcement
+
+A design system that is only documented decays at the speed of the next deadline. UI-001's root-cause finding was exactly that: a comment in `index.css` saying "screens can use `text-primary`" produced **zero** uses, and pointed at the wrong token.
+
+So every rule that can be mechanised is mechanised, in `scripts/design-lint.mjs`, wired into `npm test`.
+
+### The ledger
+
+| Rule | Budget | Retired by |
+|---|---|---|
+| `raw-hex` | 273 | token classes / `tokens.js` |
+| `tiny-type` | 180 | the 12px floor (13px Hebrew) |
+| `emoji-in-jsx` | 44 | real icons |
+| `off-ladder-alpha` | 17 | the closed `/04 /08 /12 /20 /40 /64` ladder |
+| `decorative-gradient` | 77 | deletion — depth is tone |
+| `glassmorphism` | 67 | deletion — opaque surfaces |
+| `ad-hoc-shadow` | 44 | `raised` / `overlay` / `sheet` |
+| `arbitrary-radius` | 246 | `control` 10 / `container` 16 / `full` |
+| `legacy-token-import` | 5 | className adoption; then the shim is deleted |
+| `interpolated-class` | **0** | — hard zero |
+| `legacy-token-object` | **0** | — hard zero |
+| `promotional-copy` | **0** | — hard zero |
+| `focus-suppression` | **0** | — hard zero |
+| `input-zoom-floor` | **0** | — hard zero |
+
+A **budget** is a migration debt that may only fall. A **hard zero** is not a budget: each was fixed completely, and one reintroduction is a real regression rather than un-migrated legacy.
+
+### The ratchet
+
+`--update` used to rewrite every budget to the **current** count. That made "may only ratchet down" a matter of good manners: adding forty gradients and running `--update` turned a red build green and recorded the regression as the new normal — in a diff line that reads identically to a legitimate improvement.
+
+`--update` now writes a number **only when it is lower**, and refuses the entire update if anything is over budget. There is no `--force`. Raising a budget means hand-editing the ledger, which is visible in review as exactly what it is.
+
+### The linter is tested
+
+`tests/design-lint.test.mjs` proves every rule **fires** on a real violation, against a zeroed ledger in a temp fixture tree. This is not ceremony: a rule whose regex stops matching after a refactor does not fail loudly — it reports a clean build forever, and the number in the ledger becomes a monument to a rule that no longer runs.
+
+It also proves the ratchet refuses a raise **and writes nothing while refusing**, that no flag bypasses it, that the escape hatch is per-line, that naming an anti-pattern in a comment is not itself a violation, and that every rule has a budget entry — a rule without one compares against `undefined`, and `n > undefined` is `false`, so it could never fail.
+
+`tests/mutations/ui-run.mjs` then attacks the linter itself: reverting the ratchet, deleting a budget entry, or breaking a rule's regex are all mutants that must be killed.
+
+### What lint cannot do
+
+Lint sees source, not pixels. It cannot judge whether a layout has hierarchy, whether a screen has one primary action, or whether copy is honest. Those stay human review items, and §13–14 are the checklist for them.
+
+---
+
+## 16. Component adoption inventory
 
 Counts measured at UI-002 landing. Priority: **P0** blocks UI-003 · **P1** first migration wave · **P2** opportunistic · **P3** deferred.
 
@@ -419,12 +502,14 @@ Counts measured at UI-002 landing. Priority: **P0** blocks UI-003 · **P1** firs
 
 ---
 
-## 16. Migration strategy
+## 17. Migration strategy
 
 **Sequencing matters.** Ship the mechanism before the policy — an adoption mandate issued before the channel-triplet form existed is precisely what produced 0.89%.
 
-1. **Landed (UI-002).** Channel-triplet tokens · global font · type scale · spacing/radius/elevation/z-index ladders · primitives · contrast + lint gates in CI · 7 token declarations → 1 · 3 trust fixes.
-2. **Wave 1 (P0).** `Btn` codemod; `Sheet` migration; `ErrorState` into the three loaders; `InputField` for auth and listing forms. Lower budgets after each.
+1. **Landed (UI-002).** Channel-triplet tokens · global font · type scale · spacing/radius/elevation/z-index ladders · primitives · contrast + lint gates in `npm test` · 7 token declarations → 1 · 3 trust fixes.
+1b. **Landed (UI-002A).** Overlay stack, focus trap, refcounted scroll lock, focus restore, toast lifecycle, reduced motion, iOS 16px inputs, focus rings — behaviour-tested and mutation-verified.
+1c. **Landed (UI-002B).** `IconButton` · `TextArea` · `Stack` · `Section`; five decoration rules + `interpolated-class`; the `--update` ratchet; the linter's own test suite; elevation tokens de-duplicated between `tokens.js` and `index.css`.
+2. **Wave 1 (P0).** `Btn` codemod; `Sheet` migration; `ErrorState` into the three loaders; `InputField`/`TextArea` for auth and listing forms. Lower budgets after each.
 3. **Wave 2 (P1).** Badge/Credential consolidation; `Card` adoption; `HitArea`; anchored results CTA.
 4. **Wave 3 (P2).** `text-slate-*` purge; gradient and ornamental-pulse removal; loading convergence.
 5. **Wave 4 (P3/UI-003).** Screen redesigns; server-side trust values; report/block schema.
@@ -435,6 +520,80 @@ Counts measured at UI-002 landing. Priority: **P0** blocks UI-003 · **P1** firs
 - Delete a `tokens.js` shim key when its last consumer becomes a className. The shim is finished when `STITCH` and `C` are empty.
 - Any visual delta gets stated in the PR body. "No visual change" is a claim that must be true.
 
+### The budgets will not ratchet themselves
+
+A budget seeded at the measured count **legalises the current level**. `decorative-gradient: 77` licenses any screen to keep gradients so long as it adds none, and the predictable outcome is that every UI-003 PR lands "no net new" and the number still reads 77 at the end — at which point the app looks the same and the lint suite reports success. A ratchet that only blocks increase is debt insurance, not debt repayment.
+
+Three mechanisms, all decidable, to be in place before UI-003 step 1:
+
+1. **Publish exit targets now**, as the acceptance criterion for the wave — gradients 0 (bar the three §14 survivors), glassmorphism 3 (app bar, bottom nav, camera HUD), arbitrary radii 0, legacy token imports 0.
+2. **Assign each remaining count to a specific screen** in the order below, so every screen PR carries a numeric debt it must retire.
+3. A PR that touches a view file and leaves every budget unchanged should be treated as incomplete.
+
+### UI-003 order
+
+Sequenced by *blast radius per unit of proof*, not by screen importance. Each step lowers a §15 budget, and the budget is the acceptance criterion — "it looks better" is not.
+
+1. **`text-slate-*` purge and `raw-hex` sweep.** Mechanical, no layout risk, and it retires the largest number. Do it first so every later diff is readable.
+2. **Radius convergence** (`arbitrary-radius` 246 → 0). Pure find-and-replace onto `control`/`container`; the two-value scale means there is nothing to decide per site.
+3. **Gradient and glass deletion** (77 + 67 → near 0). Highest visual payoff of the whole programme. Expect real pixel change and state it in each PR.
+4. **Shadow convergence** (44 → 0), including the four coloured glows still in the bundle.
+5. **`Btn` / `InputField` / `TextArea` adoption** — the P0 rows in §16. Behavioural risk, so it goes after the cosmetic sweeps, not before.
+6. **`Sheet` migration** for the remaining hand-rolled modals. Highest risk in the programme; UI-002A's overlay tests are the safety net.
+7. **Screen redesigns**, in the order **Listing Detail → Marketplace → Valuation → Scan → Home → Profile → Orders → Chat.**
+
+   *This order was corrected on review.* The earlier plan led with Valuation on the reasoning that the peak moment should set the language. That is backwards: Valuation is the **least typical** surface in the app — a one-off full-bleed moment with tier branching, an off-screen CTA needing a layout change, and a live correctness bug at `CameraResultsView.jsx:148-151` (Tailwind classes inside a CSS `border` property). What the other seven screens must inherit is the *repeating* vocabulary — card, row, price, condition badge, seller block, section header, empty state.
+
+   **Listing Detail** contains every one of those in ordinary composition, is read-only, has no tier branching, and `ListingCard` falls out of it as a compression. **Marketplace second**, because a card at density is the actual Temu test — a card that survives a grid of 20 is proven. **Valuation third**: spend the language there, don't author it there. Scan is the least reusable surface (camera HUD, the one place blur stays legal) and belongs late.
+
+### Live defects found by specialist review — UI-003 wave 0
+
+Nine specialists reviewed the implemented UI-002B. These are verified, pre-existing, and out of UI-002B's scope; several are more serious than anything the design work addressed. **Fix these before any screen redesign begins.**
+
+**Keyboard and screen-reader**
+1. **`Card` with `onClick` renders a non-interactive `<div>`** — `ui.jsx` `Card`, live at `ListingCard.jsx:79`. No `role`, no `tabIndex`, no Enter/Space handler, so the app's primary browse affordance is unreachable by keyboard or switch control. **Highest-severity accessibility defect in the codebase.** Fix in the primitive.
+2. **The document language never updates.** `index.html` is `lang="he"`; `App.jsx` sets `dir` on a wrapper div and never writes `lang` to `<html>`. English UI is announced in a Hebrew voice (WCAG 3.1.1), and `:lang(he)` applies the 13px Hebrew floor to English text.
+3. `BackButton` emits a `<button>` with no `type` — it submits any enclosing form.
+4. `Toast` accepts an `rtl` prop and never reads it.
+
+**Trust honesty — the gap UI-002B should have closed**
+5. **`CameraResultsView.jsx:1130,1436` render "מאומת"/"Authenticated"/"Authenticity Verified" with Shield glyphs, derived from an AI `authenticityStatus`.** This is the exact defect UI-002A fixed one layer down in `utils.js`, still live one layer up: reserved wording, reserved glyph, machine source.
+6. **A degraded valuation renders ₪0 as a confident price.** `valuation-guard.js` emits 0/0/0 with `MANUAL_REQUIRED`, but `analyze.js` only maps to `manual_required` when `pricing_source` also says so, so the degrade path falls through to `ai_estimate` and `CameraResultsView.jsx:1251` prints `formatPrice(0)` at 5xl under an "estimate" disclaimer. **Branch on `mid > 0`, never on a status string.**
+7. `computeSellerTrust` runs at render time in `BrowseDetailView.jsx:307,589` — the "computed in a view" pattern §11 bans, and the cause of "same seller, two badges, one tap apart".
+8. `getSellerBadgeStyle` still returns per-tier gradient/shadow/gold/purple (`utils.js:248-256`), consumed at four call sites. §11's "rank is expressed by content, never by hue" is text only.
+
+**Mobile**
+9. **`AnchoredAction` has zero call sites and its z-order is inverted** — it uses `z-sticky` (20) while the bottom nav is a raw `z-40`, so an anchored CTA would paint *behind* the nav. The first UI-003 screen to adopt it hits this.
+10. **`ImageGallery` is broken under RTL** — the flex track reverses, `translateX(-current*100%)` does not, so slides move away from the viewport.
+11. **`ScreenTransition` runs backwards in Hebrew** — CSS transforms are direction-blind. Both this and #10 are fixed by one mechanism: a `--gw-dir: 1/-1` custom property on `[dir]`, with keyframes written as `translateX(calc(var(--gw-dir) * 100%))`.
+12. **58 `active:scale-*` remain against 6 `state-layer` uses.** The M3 state layer did not displace what it replaced; the invariant is prose in `ui.jsx` and enforced nowhere.
+13. No `-webkit-tap-highlight-color` reset — the OS paints its own rectangle above the state layer, so a `rounded-full` Chip shows a rectangular highlight.
+
+**Enforcement**
+14. **`design-lint.mjs` never reads `.css` or the Tailwind config** (`walk()` filters `/\.(jsx?|mjs)$/`). Decoration moved out of JSX into CSS escapes every budget — the cheapest way for UI-003 to "reduce" a number without deleting anything.
+15. **No negative fixtures.** Broadening `arbitrary-radius` to match `rounded-full`, or stripping `ad-hoc-shadow`'s sanctioned-vocabulary lookahead, leaves all lint tests green. The false-positive side of every new regex is untested.
+16. `off-ladder-alpha` permits fourteen values while §3 claims six.
+17. The token-drift rule still does not exist, so `tokens.js` — exempt from `raw-hex` — is verified by nothing. `tokens.js` declares `sunken: '#0E0E0E'` against a `--gw-sunken` that is **not in `index.css`**: live drift, today.
+
+### Found by adversarial review, not yet fixed
+
+An independent critique of UI-002B verified the following. All are real; none are fixed, and each is listed here rather than quietly left in place.
+
+1. **No CI runner.** `npm test` is the only gate and a human has to type it. Wiring it to a required PR check is worth more than every other item on this list combined. *Nothing else here matters without it.*
+2. **The alpha ladder is not closed.** §3 says `/04 /08 /12 /20 /40 /64`; `off-ladder-alpha` actually permits fourteen values (it also allows 5/10/30/50/60/70/80/90). The lint opened the ladder the doc claims it closes.
+3. **The token-drift rule does not exist.** Comments in `design-lint.mjs` and `tokens.js` claimed for two phases that the `@gw` annotations are checked against `index.css`. Nothing reads them. Both comments are now corrected to say so, but `tokens.js` remains exempt from `raw-hex` and therefore unverified.
+4. **`emoji-in-jsx` is budgeted at 44, and some are on trust surfaces** — `OrderViews.jsx:676` renders `⭐` on a rating surface and `:642` a `🎉`, against §1.5's ban on emoji in trust chrome.
+5. **`tiny-type` only matches `text-[Npx]`.** An inline `fontSize: '0.6rem'` (9.6px) at `SellViews.jsx:85` is below the floor and invisible to the rule.
+6. **Budgets are global totals, not per-file.** Deleting a gradient in one file funds adding one in another.
+7. **Fabricated telemetry still ships** — `AnalyticsView.jsx:222` renders a hardcoded `99.9%` beside a green dot, which §1.1 forbids outright.
+8. **Purple is live** at `CameraResultsView.jsx:2270` despite §3 stating no token exists for it, inside a `🔬 Pipeline Debug` panel on a user surface.
+9. **The four new primitives have zero call sites outside `ui.jsx`.** §1.6 says the primitive must be the path of least resistance; four primitives nobody imports are a path nobody is on. UI-003 step 5 is where that changes.
+10. **Nothing observes a rendered pixel.** Fourteen lint rules grep source; fifty contrast assertions compare declared tokens to each other. Live classes like `text-yellow-400` and `text-emerald-200` are unmeasured — which is the same shape as the failure that motivated the whole token rewrite. A headless render sampling one composited pixel would close it.
+
+**What the review confirmed is genuinely fixed:** the `--update` ratchet is mechanical rather than mannerly; `tests/design-lint.test.mjs` proves each rule fires; and the `DESIGN_LINT_SRC` bypass it found — one env var made all rules pass over an empty directory — now requires an explicit `--fixture` flag, with a test asserting the corpus cannot be redirected by environment alone.
+
+**An honest label for UI-002B:** it is a *measurement and enforcement* release, not a visual one. The application is byte-identical to before it apart from two pixel-equivalent swaps. What changed is that the numbers are written down and cannot grow.
+
 ### Known debt carried forward
 
 - `tiny-type` 181 and `raw-hex` 273 remain; both are budgeted and only ratchet down.
@@ -442,3 +601,7 @@ Counts measured at UI-002 landing. Priority: **P0** blocks UI-003 · **P1** firs
 - `Card`'s `glow` prop is accepted and **neutralised** (it emitted a blue glow in a teal app).
 - `CameraResultsView.jsx:148-151` puts Tailwind classes inside a CSS `border` property — a real correctness bug the colour rules cannot catch. Needs a separate fix.
 - The chat Report/Block flow is removed, not implemented: `reports` has no `reported_user_id`/`conversation_id`, and schema changes are out of UI-002 scope.
+- **`shadow-raised` has zero call sites.** The elevation scale declares three steps and only two are used. Either adopt it during UI-003 step 4 or delete it — a token with no consumer is a claim the system does not keep.
+- **Four coloured glows are live in the bundle** (`shadow-green-500`, `shadow-purple-500`, `shadow-red-500`, `shadow-slate-500`). They are inside the `ad-hoc-shadow` budget; the CSS contract suite separately guarantees none can arrive via a *token*.
+- **`src/components/ui.jsx` is ~1,060 lines** against the repo's 500-line guideline. Splitting it was deliberately deferred: `tests/ui-interaction.test.mjs` and the mutation harness bundle it as their entry point, and UI-002B's remit was explicitly not to churn production-verified overlay code. The split (a barrel re-exporting `ui/overlay`, `ui/forms`, `ui/layout`, `ui/feedback`) belongs in UI-003 step 5, where the primitives are being touched anyway.
+- ~40 `rtl ? a : b` ternaries remain in views. New code uses logical properties (§9); migrating the old ones is UI-003.
