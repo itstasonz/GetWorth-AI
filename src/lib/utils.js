@@ -10,7 +10,89 @@ export const sanitizeSearch = (input) => {
     .slice(0, 100); // Limit length
 };
 
-export const formatPrice = (p) => p ? `₪${p.toLocaleString()}` : '';
+// formatPrice — renders exactly the number it is given.
+//
+// UI-003 Wave 0: this was `p ? … : ''`, which rendered ANY falsy price as an
+// empty string. That made ₪0 invisible by accident and quietly promoted a
+// display helper into the app's only defence against a zero valuation — a
+// defence every consumer that doesn't route through it (a template literal, an
+// aggregate, a chart, a persisted row) bypassed. Hiding a zero is not fixing a
+// zero. It renders ₪0 now, so a zero that reaches a render site is visible as
+// the bug it is; deciding whether a price EXISTS belongs to the caller, via
+// hasRealPrice() or calcPrice() (which returns null, not 0).
+//
+// Absent input — null / undefined / '' / non-numeric — still renders '': there
+// is nothing to format, which is a different statement from "the value is 0".
+export const formatPrice = (p) => {
+  if (p === null || p === undefined || p === '') return '';
+  const n = Number(p);
+  return Number.isFinite(n) ? `₪${n.toLocaleString()}` : '';
+};
+
+// hasRealPrice — the CLIENT half of the VAL-001 priced/unpriced boundary.
+//
+// MIRRORS isPricedMarketValue() in api/_lib/valuation-guard.js; the contract
+// suite compares the two bodies and fails on drift (same arrangement as
+// CONDITION_LADDER / test C-10). It is duplicated rather than imported because
+// the guard is a serverless module carrying the whole envelope table, and the
+// client needs one predicate, not 40 price buckets.
+//
+// The numeric half is NOT redundant with the status check. A result cached in
+// localStorage or read back from `valuations.ai_raw_response` may have been
+// produced by a deploy that predates the server-side fix, and will carry
+// `pricing_status: 'ai_estimate'` over a 0 mid. This rejects it locally,
+// without waiting for that data to be rewritten.
+export const hasRealPrice = (mv) => {
+  if (!mv) return false;
+  if (mv.pricing_status === 'manual_required') return false;
+  const mid = Number(mv.mid), low = Number(mv.low), high = Number(mv.high);
+  if (!Number.isFinite(mid) || mid <= 0) return false;
+  if (!Number.isFinite(low) || low <= 0) return false;
+  if (!Number.isFinite(high) || high < mid) return false;
+  return true;
+};
+
+// observedPriceMid — the ONLY way an AI-derived price may enter an observation.
+//
+// UI-003 Wave 0 (observations sink). `marketValue.mid` is `guardPrices.mid`
+// (api/analyze.js:2710), which is a literal 0 on a degraded verdict — the guard
+// emits 0/0/0 precisely so a caller that ignores `action` fails loudly. Three
+// GW-005A call sites wrote that number straight into `event_payload`, so a
+// REJECTED valuation was recorded as an OBSERVED market price of ₪0. The
+// observations table is the declared substrate for future pricing intelligence
+// (its migration says it "only COLLECTS" today), so a zero there is a landmine
+// with no present symptom.
+//
+// Returns null — NOT 0 — for anything unpriced, because cleanPayload() in
+// src/lib/observations.js DROPS null/undefined keys entirely (`if (v === null ||
+// v === undefined) continue`). So the price key is simply ABSENT from the row
+// while every other signal in the payload survives. That is the existing
+// architecture's own encoding for "no value"; nothing new is invented here, and
+// no numeric sentinel (0, -1) is written that a future AVG() could pick up.
+//
+// It delegates to hasRealPrice and defines NO price rule of its own. It exists
+// so the rule has exactly one call site per payload rather than three inline
+// ternaries — a fourth observation added later fails review by not using it,
+// and the mutation suite kills any attempt to route around it.
+export const observedPriceMid = (mv) => (hasRealPrice(mv) ? Number(mv.mid) : null);
+
+// positivePriceOrNull — the CLIENT half of the Gap B reference-price rule.
+//
+// MIRRORS positivePriceOrNull() in api/_lib/valuation-guard.js; test PB-12
+// compares the two across a generated corpus and fails on drift, the same
+// arrangement as hasRealPrice / PB-08 and CONDITION_LADDER / C-10. Duplicated
+// rather than imported for the same reason: the guard is a serverless module
+// carrying the whole envelope table.
+//
+// Used for `new_retail` ONLY — a lone reference figure, normalized to a real
+// number or null. It is NOT a band predicate: whether an item is priced is
+// hasRealPrice's question and stays hasRealPrice's question. A degraded
+// valuation may still carry a known retail price, and that fact is kept.
+export const positivePriceOrNull = (v) => {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+};
 
 // FRONTEND-005 (UX-1): normalize an Israeli phone for wa.me links.
 // Returns '972XXXXXXXXX' digits (no '+') or null — FAIL CLOSED on anything
@@ -109,11 +191,15 @@ export const conditionDelta = (basis, userCond, ladder = CONDITION_LADDER) => {
 export const calcPrice = (mv, cond, ans = {}, category) => {
   const m = (mv && typeof mv === 'object') ? mv : { mid: mv };
 
-  // Deliberate zero-state: the server found no pricing evidence at all.
-  if (m.pricing_status === 'manual_required') return null;
+  // UI-003 Wave 0: "does a price exist?" is decided in ONE place. The bare
+  // number form carries no band, so it cannot satisfy the object gate and is
+  // checked on mid alone — preserving the documented degrade-to-delta-0 path.
+  const priced = (mv && typeof mv === 'object')
+    ? hasRealPrice(m)
+    : Number.isFinite(Number(m.mid)) && Number(m.mid) > 0;
+  if (!priced) return null;
 
   const base = Number(m.mid);
-  if (!Number.isFinite(base) || base <= 0) return null;
 
   const ladder = resolveLadder(m.condition_ladder);
   const delta = conditionDelta(m.condition_basis, cond, ladder);
@@ -147,7 +233,15 @@ export const calcPrice = (mv, cond, ans = {}, category) => {
   const high = Number(m.high);
   const price2 = (Number.isFinite(high) && high > 0) ? Math.min(price, high) : price;
 
-  return Math.max(0, price2);
+  // UI-003 Wave 0: null, not 0 — the same rule this function already applies to
+  // its INPUT now applies to its OUTPUT. At maximum markdown the factor bottoms
+  // out at 1 - 0.70 (newSealed basis, poor user condition) - 0.07 (scratches +
+  // issues + battery) = 0.23, so a ₪2 mid rounds to 0. Callers branch on
+  // `=== null` alone (SellViews: null renders "set your own price", anything
+  // else renders a celebratory green "Your Price" card and prefills the field),
+  // so a 0 would have shown "₪0" as a suggested price and prefilled a value
+  // publishListing then silently rejects as a missing field.
+  return price2 > 0 ? price2 : null;
 };
 
 // CHAT-002: image messages are stored as `__chat_img__<url>` (see ChatViews).
@@ -268,8 +362,18 @@ export const getSellerBadgeStyle = (badge) => {
 // worthless by being indistinguishable from the free one.
 //
 // מהימן (reliable) is now used for the earned-by-score tier; מאומת (verified)
-// is reserved exclusively for `is_verified` / `serial_verified`.
+// is reserved exclusively for `is_verified` — a flag an operator sets by hand
+// after reviewing a selfie (AdminPanel), which is a real check by a real person.
 // Do not reintroduce מאומת into any formula-derived label.
+//
+// UI-003 Wave 0 CORRECTION: this comment used to bless `serial_verified` too.
+// That was wrong, and because this comment is the rule future readers cite, the
+// error propagated — a buyer-facing 'מספר סידורי אומת' chip shipped on its back.
+// `serial_verified` is NOT operator-checked: it is true when a regex saw "S/N"
+// beside six characters in OCR (extractSerialFromOCR below), or when a seller
+// TYPED eight or more characters (AppContext submitSerialText). It is a
+// self-asserted string. Nothing derived from it may use מאומת / אומת / Verified
+// or a checkmark. The flag itself is unchanged pending a data-model decision.
 export const getSellerBadgeLabel = (badge, lang) => {
   const labels = {
     eliteSeller: lang === 'he' ? '⭐ מוכר עילית' : '⭐ Elite Seller',

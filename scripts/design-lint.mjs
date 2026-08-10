@@ -73,7 +73,7 @@ const BUDGET = {
   // These are the Temu-removal ledger: every one of them is retired by DELETION
   // during UI-003, never by a redesign that keeps the effect and renames it.
   'decorative-gradient': 77,
-  'glassmorphism': 67,
+  'glassmorphism': 63,
   'ad-hoc-shadow': 44,
   'arbitrary-radius': 246,
   'interpolated-class': 0,
@@ -84,6 +84,10 @@ const BUDGET = {
   // regression rather than un-migrated legacy.
   'focus-suppression': 0,
   'input-zoom-floor': 0,
+  // ── UI-003 wave 0. Also a hard zero, and for the same reason: a Card with a
+  // click handler is a control that keyboard and switch users cannot reach at
+  // all. There is no legacy to migrate — there were two, both fixed.
+  'interactive-card': 0,
 };
 
 const RULES = [
@@ -285,6 +289,46 @@ const FILE_RULES = [
         const tag = src.slice(m.index, i + 1);
         if (small.test(tag)) {
           hits.push({ line: src.slice(0, m.index).split('\n').length, text: `<${m[1]} … ${tag.match(small)[0]}` });
+        }
+      }
+      return hits;
+    },
+  },
+  {
+    id: 'interactive-card',
+    why: 'A Card with a click handler renders a non-interactive element carrying one: no tab stop, no role, no Enter/Space, no accessible name. Put a <StretchedTarget> on the card title and pass `interactive` for the affordance.',
+    // Line-based matching cannot see this. The live defect at
+    // ListingCard.jsx:79 happened to fit on one line, but BrowseDetailView's
+    // seller card spread `onClick` across six — and the multi-line form is the
+    // one a real handler takes, because a handler long enough to need braces is
+    // exactly the handler someone formats onto its own lines.
+    //
+    // `Card` itself already refuses the prop at runtime, so this rule is not the
+    // only defence. It is the one that fails the BUILD, before a reviewer has to
+    // notice a console.error in someone else's dev session.
+    test: (src) => {
+      const hits = [];
+      for (const m of src.matchAll(/<Card\b/g)) {
+        // Walk to the end of the opening tag, tracking {…} so a handler body
+        // containing '>' (an arrow function — i.e. every handler) does not
+        // terminate it early.
+        let i = m.index, depth = 0;
+        for (; i < src.length; i++) {
+          const c = src[i];
+          if (c === '{') depth++;
+          else if (c === '}') depth--;
+          else if (c === '>' && depth === 0) break;
+        }
+        const tag = src.slice(m.index, i + 1);
+        // ACTIVATION handlers only. `onAnimationEnd`/`onTransitionEnd` on a card
+        // are ordinary lifecycle plumbing and say nothing about interactivity;
+        // matching every `on[A-Z]` would make the rule read as noise and get
+        // switched off, which is how a hard zero dies.
+        const handler = tag.match(
+          /\bon(?:Click|DoubleClick|KeyDown|KeyUp|KeyPress|MouseDown|MouseUp|PointerDown|PointerUp|TouchStart|TouchEnd)\s*=/
+        );
+        if (handler) {
+          hits.push({ line: src.slice(0, m.index).split('\n').length, text: `<Card … ${handler[0]}` });
         }
       }
       return hits;

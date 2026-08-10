@@ -429,3 +429,30 @@ needs. **Do not promote a deterministic pricer without running this measurement.
   celebratory treatment for a `manual_required` scan — the same class of defect one screen
   later.
 - `scan_daily_usage` has no purge job; its cleanup schedule was never applied.
+
+### Follow-ups recorded by UI-003 Wave 0, deliberately not done here
+
+**Gap A — `scan_events.payload.price_mid` is an ungated zero sink.**
+
+- **Location** — `api/analyze.js`, the `logScanEvent(supa, scanUuid, 'scan_analyzed', 'pipeline', …)`
+  call: `price_mid: result.marketValue?.mid`, written with no priced/unpriced check.
+- **Current behaviour** — `marketValue.mid` is `guardPrices.mid`, a literal `0` whenever the
+  VAL-001 guard returns `action:'degrade'`. So every rejected valuation appends a lifecycle
+  breadcrumb asserting an observed price of ₪0. This is the same defect class as the
+  `observations` sink (fixed in this wave via `observedPriceMid`) and the `new_retail` column
+  (fixed in this wave via `positivePriceOrNull`) — Gap A is the one instance left standing,
+  by explicit decision, to keep the wave's blast radius bounded.
+- **Why it is inert today** — `scan_events` (migration `20260701120000`) is a generic
+  append-only debugging log. RLS is admin-SELECT-only; no RPC, view, materialized view or
+  aggregate reads it; nothing in `src/` or `api/` reads it back. Its stated purpose is
+  reconstructing a single `scan_uuid` for debugging, one row at a time — a read pattern in
+  which a stray 0 misleads a human reader but corrupts no computation.
+- **What would make it relevant** — GW-009 (the Internal Intelligence Dashboard) is the named
+  consumer in the migration header, and any funnel/accuracy metric it computes over
+  `payload->>'price_mid'` would silently average these zeros in. Fix it *before* GW-009 reads
+  the table, not after: unlike `valuations`, this table has no backfill story, because a
+  lifecycle log is not supposed to be rewritten.
+- **Shape of the fix** — one line, mirroring the sinks already fixed:
+  `price_mid: observedPriceMid(result.marketValue)`, or the guard-side
+  `isPricedMarketValue(...) ? result.marketValue.mid : null`. `logScanEvent` already writes
+  jsonb, so a null key is a non-event.

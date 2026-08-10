@@ -3,7 +3,7 @@ import { Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOf
 import { useApp } from '../contexts/AppContext';
 import { camLog } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
-import { formatPrice, isSerialEligible } from '../lib/utils';
+import { formatPrice, isSerialEligible, hasRealPrice } from '../lib/utils';
 import { recordObservation } from '../lib/observations';
 
 // ═══════════════════════════════════════════════════════
@@ -733,7 +733,11 @@ function getPricingEvidence(pricingConfidence, t) {
 // lumped db_fallback and rescue_estimate in with healthy Stage 2 output.
 // Both of those mean the pricing stage FAILED and something rescued it, so
 // they must not read the same as a comp-based price.
-function getPricingSourceLabel({ pricingMode, pricingStatus, priceMethod }, t) {
+function getPricingSourceLabel({ pricingMode, pricingStatus, priceMethod, priced = true }, t) {
+  // UI-003 Wave 0: no provenance caption for a price that does not exist.
+  // Checked BEFORE pricingMode, because "Pending verification" and "Replica
+  // adjusted" are claims ABOUT a price and read as one when there is none.
+  if (!priced || pricingStatus === 'manual_required') return t?.priceSetManually;
   if (pricingMode === 'verification_required') return t?.priceVerificationPending;
   if (pricingMode === 'replica_adjusted') return t?.priceReplicaAdjusted;
   const byStatus = {
@@ -987,6 +991,13 @@ export function ResultsView() {
   const classification = result.classification || {};
   const confidenceReasoning = result.confidence_reasoning || '';
   const priceMethod = result.marketValue?.price_method || '';
+  // UI-003 Wave 0 — ONE predicate decides whether this screen has a price to
+  // show. It is not `pricing_status === 'manual_required'`: a result cached from
+  // a deploy that predates the server fix can carry `ai_estimate` over a 0 mid,
+  // and hasRealPrice checks the number as well as the label. Everything
+  // price-shaped below (hero, band, provenance caption, disclaimer, evidence)
+  // reads this, so no combination can show a price claim without a price.
+  const hasPrice = hasRealPrice(result.marketValue);
   const brandConf = classification.brand_confidence || recognition.brandConfidence || 'unidentified';
   const matchedFromCandidate = !!result.matched_from_candidate;  // true → "Learned catalog"
 
@@ -1085,17 +1096,69 @@ export function ResultsView() {
           <div className="aspect-[4/5]">
             <img src={images[activePhotoIndex] || images[0]} className="w-full h-full object-cover" alt={result?.name || (lang === 'he' ? 'פריט לניתוח' : 'Item for valuation')} />
           </div>
-          {/* Authenticity-aware badge */}
+          {/* ── AI authenticity signal — an assessment, never a credential ──
+              UI-003 Wave 0 / trust fix. Same reasoning as ListingCard.jsx:51-72
+              and BrowseDetailView.jsx:296-306, applied to the scan result.
+
+              Everything this badge can read is AI-derived. `authenticityRisk` is
+              a regex over the brand and category strings, and
+              `authenticityStatus` is a value the vision model picked out of a
+              five-item enum (analyze.js:2384-2389, prompt at analyze.js:850).
+              No human looked at the item, nothing was checked against a
+              manufacturer database, and no third party stands behind any of it.
+
+              It nevertheless shipped a <Shield> + 'אומת ✓' pill and — worse — a
+              <Check> + 'מאומת' / 'Authenticated' pill fired by `tier === 'high'`,
+              the IDENTITY-confidence tier, which says how sure the model is
+              about WHAT the object is and carries no authenticity information at
+              all. <Shield> is this app's operator identity-verification marker
+              (App.jsx:461, ChatViews.jsx:787, OrderViews.jsx:114), and מאומת is
+              the exact word AuthProfileView.jsx:343 uses for a seller who passed
+              operator review. So in Hebrew — the app's DEFAULT language — a
+              model's guess and a real credential rendered as the same pill.
+
+              Three rules hold here now:
+                1. every state names the AI, so it cannot be mistaken for an
+                   operator or third-party finding;
+                2. no <Shield>, no bare <Check>, no trailing checkmark — the
+                   checkmark IS the credential glyph, which is why utils.js:280
+                   dropped it from the trusted-seller label for the same reason;
+                3. affirmative states are NEUTRAL, not accent-teal. Colour makes
+                   a claim of its own: teal here read as "the platform says yes".
+
+              `verified_by_serial` / `verified_by_documents` are treated as
+              INDICATORS, not verifications — at most the model believes it read
+              a serial or a document in a photo, which is a reading, not a check.
+              (Neither is in the enum analyze.js:850 asks for, so both are
+              defensive branches against a model that answers off-menu.) <Eye> is
+              deliberate: it is already this same overlay's "the model read
+              something" marker on the OCR badge a few lines below.
+
+              The old `not_required` / no-status arm is GONE rather than
+              reworded. It fired when authenticityRisk was 'low' — i.e. when
+              analyze.js decided the category needed no authenticity assessment
+              at all and stubbed the status (analyze.js:2389). There was no
+              finding to report, so the badge was manufactured out of an
+              unrelated signal. Every risk-carrying state is still here; only the
+              empty one was removed. Do not restore it as a "clean" or "passed"
+              badge — there is nothing behind it to pass. */}
           {(() => {
             const auth = result.authenticity;
             const status = auth?.authenticityStatus;
             const risk = auth?.authenticityRisk;
-            if (status === 'verified_by_serial' || status === 'verified_by_documents') {
+
+            // Indicator states — the model reports it read something, or that it
+            // counted enough consistent details to call the item likely original.
+            const indicator = status === 'verified_by_serial' ? t?.authSerialSeen
+              : status === 'verified_by_documents' ? t?.authDocsSeen
+              : status === 'likely_original' ? t?.authSignsSeen
+              : null;
+            if (indicator) {
               return (
                 <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: STITCH.GLASS_BG, backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR }}>
-                  <Shield className="w-3.5 h-3.5" style={{ color: STITCH.primary }} strokeWidth={3} />
-                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: STITCH.primary }}>
-                    {lang === 'he' ? 'אומת ✓' : status === 'verified_by_serial' ? 'Serial ✓' : 'Docs ✓'}
+                  <Eye className="w-3.5 h-3.5" style={{ color: STITCH.onSurfaceVariant }} strokeWidth={2.5} />
+                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: STITCH.onSurfaceVariant }}>
+                    {indicator}
                   </span>
                 </div>
               );
@@ -1105,9 +1168,7 @@ export function ResultsView() {
                 <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: 'rgba(239,68,68,0.15)', backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR, border: '1px solid rgba(239,68,68,0.30)' }}>
                   <AlertTriangle className="w-3.5 h-3.5 text-red-400" strokeWidth={2.5} />
                   <span className="text-xs font-medium uppercase tracking-widest text-red-300">
-                    {status === 'suspected_fake'
-                      ? (lang === 'he' ? 'חשד לזיוף' : 'Suspected Fake')
-                      : (lang === 'he' ? '\u05D9\u05D9\u05EA\u05DB\u05DF רפליקה' : 'Possible Replica')}
+                    {status === 'suspected_fake' ? t?.authFakeSigns : t?.authReplicaSigns}
                   </span>
                 </div>
               );
@@ -1117,17 +1178,7 @@ export function ResultsView() {
                 <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: 'rgba(251,191,36,0.12)', backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR, border: '1px solid rgba(251,191,36,0.25)' }}>
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-400" strokeWidth={2.5} />
                   <span className="text-xs font-medium uppercase tracking-widest text-amber-300">
-                    {lang === 'he' ? 'נדרש אימות' : 'Verify'}
-                  </span>
-                </div>
-              );
-            }
-            if (tier === 'high' && (!risk || risk === 'low') && (!status || status === 'not_required' || status === 'likely_original')) {
-              return (
-                <div className="absolute top-4 right-4 px-3 py-1.5 rounded-full flex items-center gap-2" style={{ background: STITCH.GLASS_BG, backdropFilter: STITCH.GLASS_BLUR, WebkitBackdropFilter: STITCH.GLASS_BLUR }}>
-                  <Check className="w-3.5 h-3.5" style={{ color: STITCH.primary }} strokeWidth={3} />
-                  <span className="text-xs font-medium uppercase tracking-widest" style={{ color: STITCH.primary }}>
-                    {lang === 'he' ? 'מאומת' : 'Authenticated'}
+                    {t?.authExpertAdvised}
                   </span>
                 </div>
               );
@@ -1239,7 +1290,7 @@ export function ResultsView() {
               : (lang === 'he' ? 'ערך משוער' : 'Estimated Value')}
           </h2>
           <div className="mt-1 flex items-baseline justify-center gap-1">
-            {result.marketValue?.pricing_status === 'manual_required' ? (
+            {!hasPrice ? (
               <span className="text-xl font-semibold text-amber-400 text-center px-2">
                 {lang === 'he' ? 'קבע מחיר ידנית' : 'Set your own price'}
               </span>
@@ -1284,7 +1335,7 @@ export function ResultsView() {
               {lang === 'he' ? 'דגם' : 'Ref.'} {recognition.modelNumber || identification.model}
             </p>
           )}
-          {result.marketValue?.low > 0 && result.marketValue?.pricing_status !== 'manual_required' && (
+          {hasPrice && result.marketValue?.low > 0 && (
             <p className="text-sm mt-3" style={{ color: STITCH.onSurfaceVariant }}>
               {t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}
             </p>
@@ -1300,15 +1351,14 @@ export function ResultsView() {
                 pricingMode:   result.authenticity?.pricingMode,
                 pricingStatus: result.marketValue?.pricing_status,
                 priceMethod,
+                priced:        hasPrice,
               }, t)}
             </p>
           )}
           {/* VAL-001: every price on this screen is an estimate. Stated once,
               always, so no tier or fallback path can quietly omit it. */}
           <p dir="auto" className="text-[10px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
-            {result.marketValue?.pricing_status === 'manual_required'
-              ? t.enterPricePrompt
-              : t.estimateOnly}
+            {!hasPrice ? t.enterPricePrompt : t.estimateOnly}
           </p>
         </div>
       </FadeIn>
@@ -1355,7 +1405,11 @@ export function ResultsView() {
                   so there is deliberately no percentage and no bar here: both
                   would invent precision the grade does not carry. */}
               {(() => {
-                const evidence = getPricingEvidence(result.marketValue?.pricing_confidence, t);
+                // UI-003 Wave 0: the grade describes evidence behind a PRICE.
+                // With no price there is no evidence, whatever the response's
+                // own grade says (an older cached one can say MEDIUM).
+                const evidence = getPricingEvidence(
+                  hasPrice ? result.marketValue?.pricing_confidence : 'MANUAL_REQUIRED', t);
                 return (
                   <p dir="auto" className={`text-sm font-semibold ${evidence.color}`}>
                     {evidence.label}
@@ -1394,16 +1448,24 @@ export function ResultsView() {
         const auth = result.authenticity;
         const isReplica = auth.authenticityStatus === 'suspected_fake' || auth.authenticityStatus === 'possible_replica'
           || auth.replicaTier === 'low_quality_fake' || auth.replicaTier === 'mid_replica' || auth.replicaTier === 'high_end_replica';
-        const isVerified = auth.authenticityStatus === 'verified_by_serial' || auth.authenticityStatus === 'verified_by_documents';
+        // UI-003 Wave 0: was `isVerified`, and it drove an accent-teal card
+        // headed 'Authenticity Verified' / 'אותנטיות אומתה'. Nothing here is
+        // verified — see the badge comment above the hero image. These two
+        // statuses mean the model believes it READ a serial or a document, so
+        // they are indicators, and this card only renders for medium/high-risk
+        // items in the first place: an indicator does not clear one of those.
+        // Hence the neutral surface below rather than the brand accent, which
+        // was doing the job of a green light.
+        const hasIndicator = auth.authenticityStatus === 'verified_by_serial' || auth.authenticityStatus === 'verified_by_documents';
         const hasConflict = auth.signalConflict?.hasConflict;
         const score = typeof auth.authenticityEvidenceScore === 'number' ? auth.authenticityEvidenceScore : 0;
         const signals = auth.visual_authenticity_signals || [];
         const missing = auth.missingEvidence || [];
         const showReplicaTier = auth.replicaTier && auth.replicaTier !== 'none' && auth.replicaTier !== 'unknown';
 
-        const cardBg = isReplica ? 'rgba(239,68,68,0.06)' : isVerified ? 'rgba(111,238,225,0.06)' : 'rgba(251,191,36,0.06)';
-        const cardBorder = isReplica ? 'rgba(239,68,68,0.20)' : isVerified ? 'rgba(111,238,225,0.20)' : 'rgba(251,191,36,0.20)';
-        const accent = isReplica ? '#ef4444' : isVerified ? STITCH.primary : '#fbbf24';
+        const cardBg = isReplica ? 'rgba(239,68,68,0.06)' : hasIndicator ? 'rgba(255,255,255,0.04)' : 'rgba(251,191,36,0.06)';
+        const cardBorder = isReplica ? 'rgba(239,68,68,0.20)' : hasIndicator ? 'rgba(255,255,255,0.08)' : 'rgba(251,191,36,0.20)';
+        const accent = isReplica ? '#ef4444' : hasIndicator ? STITCH.onSurfaceVariant : '#fbbf24';
         const scoreBarColor = score >= 70 ? '#6feee1' : score >= 40 ? '#fbbf24' : '#ef4444';
 
         const REPLICA_TIER_LABEL = {
@@ -1422,19 +1484,19 @@ export function ResultsView() {
                   <div className="flex items-center gap-2 min-w-0">
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: accent }} strokeWidth={2} />
                     <span className="text-xs font-semibold truncate" style={{ color: accent }}>
+                      {/* The five-way replica ternary that used to live here
+                          restated the tier ("Likely Fake" / "Mid-grade replica"
+                          / …) in a header that carried no attribution, one line
+                          above the tier badge that says the same thing. It now
+                          states WHO is claiming it; the tier itself is still
+                          rendered by the replica-tier badge below. */}
                       {isReplica
-                        ? (auth.replicaTier === 'low_quality_fake'
-                          ? (lang === 'he' ? 'זיוף אפשרי' : 'Likely Fake')
-                          : auth.replicaTier === 'mid_replica'
-                          ? (lang === 'he' ? 'רפליקה אפשרית' : 'Possible Replica')
-                          : auth.replicaTier === 'high_end_replica'
-                          ? (lang === 'he' ? 'רפליקה איכותית' : 'High-End Replica')
-                          : auth.authenticityStatus === 'suspected_fake'
-                          ? (lang === 'he' ? 'חשד לזיוף' : 'Suspected Fake')
-                          : (lang === 'he' ? 'ייתכן רפליקה' : 'Possible Replica'))
-                        : isVerified
-                        ? (lang === 'he' ? 'אותנטיות אומתה' : 'Authenticity Verified')
-                        : (lang === 'he' ? 'אותנטיות לא אומתה' : 'Authenticity Unverified')}
+                        ? (auth.replicaTier === 'low_quality_fake' || auth.authenticityStatus === 'suspected_fake'
+                          ? t?.authFakeSigns
+                          : t?.authReplicaSigns)
+                        : hasIndicator
+                        ? t?.authIndicators
+                        : t?.authUncertain}
                     </span>
                   </div>
                   {/* Evidence score pill */}
@@ -1485,7 +1547,10 @@ export function ResultsView() {
                 {missing.length > 0 && (
                   <div className="mb-2">
                     <p className="text-[9px] font-medium mb-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
-                      {lang === 'he' ? 'ראיות חסרות:' : 'Missing for verification:'}
+                      {/* "Missing for verification" implied a verification the
+                          user could complete and we would then perform. These
+                          are simply the details the model could not see. */}
+                      {t?.authNotInPhotos}
                     </p>
                     <div className="flex flex-wrap gap-1">
                       {missing.slice(0, 5).map((m, i) => (
@@ -1574,31 +1639,63 @@ export function ResultsView() {
                 </button>
               )}
 
-              {/* ─── ADD SERIAL BUTTON (3 states: empty / loading / success) ─── */}
+              {/* ─── ADD SERIAL BUTTON (3 states: empty / loading / success) ───
+                  The three rules stated at the authenticity badge above apply to
+                  this control too — no <Shield>, no bare <Check>, no trailing
+                  checkmark — and they apply HARDER here, because a serial is
+                  weaker evidence than the AI badge, not stronger.
+
+                  `serialData.verified` is not a verification. It is set to true
+                  by a regex that saw the letters S/N next to six characters in
+                  OCR (utils.js extractSerialFromOCR), or — for a serial the user
+                  TYPES — by a length check: eight arbitrary characters is enough
+                  (AppContext submitSerialText). Nothing is checked against a
+                  manufacturer, and no operator ever sees it. This state shipped
+                  an accent-teal <Shield> over 'Serial ✓', which is the app's
+                  institutional identity marker plus the credential glyph, on top
+                  of a string the seller may simply have invented.
+
+                  <Barcode> replaces it: it is the literal, honest picture of
+                  "a serial number", and it is already this control's own icon in
+                  the type-a-serial state below. The copy now says only what
+                  happened — a value was captured. It does not say it was checked,
+                  because it was not.
+
+                  This matters beyond this screen: the flag persists to
+                  listings.serial_verified and reaches BUYERS as a trust chip on
+                  BrowseDetailView. That chip's wording is fixed to match. What is
+                  NOT fixed is the flag itself — see the recommendation filed with
+                  UI-003 Wave 0; changing what `verified` MEANS is a data-model
+                  decision, not a copy fix. */}
               {showSerialButton && (
                 hasSerialData && serialData.serial ? (
-                  /* SUCCESS STATE — masked serial displayed */
+                  /* CAPTURED STATE — masked serial displayed.
+                     Neutral surface, not accent teal. Rule 3 of the authenticity
+                     block above: colour makes a claim of its own, and teal here
+                     read as "the platform says this serial is good". Capturing a
+                     string the seller may have invented is not an achievement to
+                     congratulate — it is a field that now has a value. */
                   <button
                     onClick={clearSerialData}
                     className="flex flex-col items-center justify-center gap-2 py-4 rounded-2xl active:scale-95 transition-all duration-200 relative"
                     style={{
-                      background: 'rgba(111, 238, 225, 0.08)',
-                      border: '1px solid rgba(111, 238, 225, 0.25)',
+                      background: STITCH.surfaceContainerHigh,
+                      border: '1px solid rgba(255, 255, 255, 0.03)',
                     }}
                     title={lang === 'he' ? 'הסר' : 'Remove'}
                   >
                     <div
                       className="w-12 h-12 rounded-full flex items-center justify-center"
-                      style={{ background: STITCH.background, color: STITCH.primary }}
+                      style={{ background: STITCH.background, color: STITCH.onSurfaceVariant }}
                     >
-                      <Shield className="w-6 h-6" strokeWidth={2} fill="currentColor" fillOpacity={0.15} />
+                      <Barcode className="w-6 h-6" strokeWidth={2} />
                     </div>
                     <div className="text-center">
                       <span
                         className="block text-xs font-semibold"
-                        style={{ color: STITCH.primary, fontFamily: STITCH.FONT_BODY }}
+                        style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
                       >
-                        {serialData.type === 'imei' ? 'IMEI ✓' : (lang === 'he' ? 'מספר סידורי ✓' : 'Serial ✓')}
+                        {serialData.type === 'imei' ? t?.imeiCaptured : t?.serialCaptured}
                       </span>
                       <span
                         className="block text-[10px] font-mono mt-0.5"
@@ -1626,7 +1723,7 @@ export function ResultsView() {
                       className="w-12 h-12 rounded-full flex items-center justify-center"
                       style={{ background: STITCH.background, color: STITCH.onSurfaceVariant }}
                     >
-                      <Shield className="w-6 h-6" strokeWidth={2} />
+                      <Barcode className="w-6 h-6" strokeWidth={2} />
                     </div>
                     <div className="text-center">
                       <span

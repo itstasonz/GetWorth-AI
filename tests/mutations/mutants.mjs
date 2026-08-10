@@ -204,6 +204,66 @@ export const MUTANTS = [
     find: '  let mid = Math.round(q.mid);\n  if (mid !== q.mid) repairs.push',
     replace: '  let mid = Math.round(q.mid * (1 - (CONDITION_LADDER[normalizeConditionBasis(q.condition)] ?? 0)));\n  if (mid !== q.mid) repairs.push',
   },
+
+  // ── Presentation boundary (UI-003 Wave 0): MANUAL_REQUIRED is never a price
+  // The shipped defect lived in the CALLER, which read `pricing_source` (a
+  // diagnostic) as permission to publish a price. These mutants attack each
+  // independently-sufficient half of the replacement predicate.
+  {
+    id: 'M24-PRICED-IGNORES-DEGRADED',
+    invariant: 'A degraded verdict is never presented as priced, whatever its pricing_source says.',
+    kills: ['PB-03b'],
+    find: '  if (md.degraded) return false;',
+    replace: '  if (false) return false;',
+  },
+  {
+    id: 'M25-PRICED-IGNORES-ZERO-MID',
+    invariant: 'Zero is not an estimate: a non-positive mid is unpriced even when every flag says fine.',
+    kills: ['PB-02', 'PB-05'],
+    find: '  const { low, mid, high } = v.prices || {};\n  if (!Number.isFinite(mid) || mid <= 0) return false;',
+    replace: '  const { low, mid, high } = v.prices || {};\n  if (false) return false;',
+  },
+  {
+    id: 'M26-CANDIDATE-PROMOTES',
+    invariant: 'The caller\'s candidate label can only narrow — it can never promote an unpriced verdict.',
+    kills: ['PB-01', 'PB-02', 'PB-03'],
+    find: 'export function resolvePricingStatus(v, candidate) {\n  if (!isPricedVerdict(v)) return MANUAL_REQUIRED_STATUS;',
+    replace: 'export function resolvePricingStatus(v, candidate) {\n  if (false) return MANUAL_REQUIRED_STATUS;',
+  },
+  {
+    id: 'M27-GRADE-NOT-GATED',
+    invariant: 'pricing_confidence is gated by the same predicate as pricing_status — they cannot disagree.',
+    kills: ['PB-01', 'PB-05'],
+    find: 'export function resolvePricingGrade(v, candidate) {\n  if (!isPricedVerdict(v)) return \'MANUAL_REQUIRED\';',
+    replace: 'export function resolvePricingGrade(v, candidate) {\n  if (false) return \'MANUAL_REQUIRED\';',
+  },
+  {
+    id: 'M28-WIRE-RULE-LABEL-ONLY',
+    invariant: 'The wire-shape rule checks the NUMBER too — a priced label over a zero mid is rejected.',
+    kills: ['PB-07', 'PB-08'],
+    find: '  const mid = Number(mv.mid), low = Number(mv.low), high = Number(mv.high);\n  if (!Number.isFinite(mid) || mid <= 0) return false;',
+    replace: '  const mid = Number(mv.mid), low = Number(mv.low), high = Number(mv.high);\n  if (false) return false;',
+  },
+
+  // ── UI-003 Wave 0 Gap B — the reference-price rule ────────────────────────
+  // `new_retail` is the one price column outside the valuation band, so none of
+  // the band mutants above touch it. Nothing is sold new for GBP/ILS 0, which is
+  // why zero can only ever have meant "unknown" — stored as a number that every
+  // future AVG/SUM treats as a fact.
+  {
+    id: 'M29-RETAIL-ACCEPTS-ZERO',
+    invariant: 'A reference price of 0 is unknown, not free.',
+    kills: ['PB-12'],
+    find: '  return Number.isFinite(n) && n > 0 ? n : null;',
+    replace: '  return Number.isFinite(n) && n >= 0 ? n : null;',
+  },
+  {
+    id: 'M30-RETAIL-PASSES-THROUGH-GARBAGE',
+    invariant: 'A non-finite or non-numeric reference price is null, never echoed back.',
+    kills: ['PB-12'],
+    find: "  if (v === null || v === undefined || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) && n > 0 ? n : null;",
+    replace: "  if (v === null || v === undefined || v === '') return null;\n  return Number(v);",
+  },
 ];
 
 export default MUTANTS;

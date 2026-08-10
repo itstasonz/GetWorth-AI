@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
-import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, CheckCircle, Loader2, Flag, Car, Gem, BookOpen, Gift, Home as HomeIcon, Wrench } from 'lucide-react';
+import { Search, SlidersHorizontal, RefreshCw, Smartphone, Watch, Shirt, Dumbbell, Grid, Box, Heart, Eye, Clock, MapPin, ChevronRight, ChevronLeft, Package, Shield, Star, ShoppingBag, MessageCircle, Phone, Check, CheckCircle, Loader2, Flag, Car, Gem, BookOpen, Gift, Home as HomeIcon, Wrench, Barcode } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { Card, Btn, Badge, FadeIn, SlideUp, haptic } from '../components/ui';
+import { Card, StretchedTarget, Btn, Badge, FadeIn, SlideUp, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import ImageGallery from '../components/ImageGallery';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, computeSellerTrust, STAT_COLORS } from '../lib/utils';
@@ -354,13 +354,23 @@ export function DetailView() {
         {/* Seller Card */}
         {selected.seller && (
           <FadeIn>
+            {/* UI-003 wave 0: the whole card still navigates to the seller, but
+                the control is now the seller's NAME (see StretchedTarget), not a
+                handler on this div. Keyboard reaches it; the accessible name is
+                the seller the user is about to open.
+
+                `interactive` is what keeps the RENDERED classes identical to
+                before. The old `onClick` branch emitted `state-layer` from
+                inside the primitive, so dropping the handler without passing
+                this prop would have silently removed the M3 press layer — a
+                visual change invisible in the diff, because the className prop
+                itself does not move. The duplicated `cursor-pointer` is
+                harmless and left in place so this line stays a pure deletion of
+                the handler. */}
             <Card
+              interactive
               className="p-4 cursor-pointer active:scale-[0.98] transition-transform"
               gradient="linear-gradient(135deg, rgba(59,130,246,0.1), rgba(139,92,246,0.05))"
-              onClick={() => {
-                const sellerId = selected.seller_id || selected.seller?.id;
-                if (sellerId) viewSellerProfile(sellerId);
-              }}
             >
               <div className="flex items-center gap-4">
                 <div className={`relative w-14 h-14 rounded-2xl flex items-center justify-center text-xl font-bold shadow-lg bg-gradient-to-br ${getSellerBadgeStyle(sellerTrust?.badge).gradient} ${getSellerBadgeStyle(sellerTrust?.badge).shadow}`}>
@@ -373,7 +383,15 @@ export function DetailView() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold">{selected.seller.full_name || 'Seller'}</span>
+                    <StretchedTarget
+                      className="font-bold"
+                      onClick={() => {
+                        const sellerId = selected.seller_id || selected.seller?.id;
+                        if (sellerId) viewSellerProfile(sellerId);
+                      }}
+                    >
+                      {selected.seller.full_name || 'Seller'}
+                    </StretchedTarget>
                   </div>
                   {(sellerTrust?.badge) && (
                     <div className="mt-1">
@@ -404,9 +422,29 @@ export function DetailView() {
                       <Shield className="w-2.5 h-2.5" />{lang === 'he' ? 'זהות מאומתת' : 'Verified ID'}
                     </span>
                   )}
+                  {/* UI-003 Wave 0 — this chip used to read 'Serial verified' /
+                      'מספר סידורי אומת' on a GREEN <Check>, sitting in the same
+                      row as, and visually indistinguishable from, the genuine
+                      operator-backed 'Verified ID' chip directly above it.
+
+                      Nothing verifies it. `listings.serial_verified` comes from
+                      `serialData.verified`, which is true when a regex saw the
+                      letters S/N next to six characters in OCR, or — for a serial
+                      the seller TYPES — when the string is eight characters long
+                      (AppContext submitSerialText). No manufacturer is consulted
+                      and no operator sees it. A buyer reading a green check beside
+                      a real credential cannot tell those two apart.
+
+                      So the chip now attributes the claim to its actual source:
+                      the seller said so. Neutral surface, no check glyph, and
+                      <Barcode> rather than a credential icon — the same treatment
+                      the capture control on the scan screen now uses.
+
+                      The FLAG is deliberately unchanged: what `verified` means is
+                      a data-model decision, filed as a Wave 0 recommendation. */}
                   {serialVerified && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(16,185,129,0.12)', color: '#34d399', border: '1px solid rgba(16,185,129,0.25)' }}>
-                      <Check className="w-2.5 h-2.5" />{lang === 'he' ? 'מספר סידורי אומת' : 'Serial verified'}
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(255,255,255,0.06)', color: '#bbc9c7', border: '1px solid rgba(255,255,255,0.10)' }}>
+                      <Barcode className="w-2.5 h-2.5" />{t.serialProvided}
                     </span>
                   )}
                   {selected.seller.review_count >= 3 && (

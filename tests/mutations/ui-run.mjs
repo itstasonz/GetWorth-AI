@@ -184,10 +184,48 @@ const malformed = [];
 // harness into a report about the test suite.
 const broken = [];
 
+/**
+ * Refuse to judge anything if a target changed on disk since startup.
+ *
+ * This harness is NOT concurrency-safe, by design: mutant copies go to fixed
+ * paths in the working tree (relative imports and Tailwind's content globs have
+ * to resolve from the file's own directory) and the suites share a rolldown
+ * output dir. So a second run — or a person editing a source file — while one is
+ * in flight makes the two stomp each other, and `sweep()` on startup deletes the
+ * in-flight run's mutant out from under it.
+ *
+ * The failure mode is silent and INVERTED: a mutant that should be KILLED gets
+ * reported as SURVIVED, i.e. a phantom test gap. During UI-003 wave 0 that cost
+ * three specialists real time — one chased a focus-restore bug that did not
+ * exist, and three separate "80/80 killed" claims turned out to describe
+ * different trees. A score that varies run to run cannot support the claim this
+ * harness exists to make.
+ *
+ * Fixing the concurrency properly means per-run mutant paths and a PID-keyed
+ * cache dir. Until then this makes the corruption LOUD rather than silent, which
+ * is the same reasoning behind MALFORMED and `broken`: never report a number
+ * that was not actually measured.
+ */
+const assertTreeUnchanged = (why) => {
+  for (const [key, t] of Object.entries(TARGETS)) {
+    if (readFileSync(abs(t.src), 'utf8') !== sources[key]) {
+      console.error(
+        `\nFATAL: ${t.src} changed on disk during the run (${why}).\n` +
+        'Another mutation run or an editor is writing to this tree. Results up to this\n' +
+        'point are unreliable — a killed mutant can be misreported as SURVIVED. Re-run\n' +
+        'with exclusive access to the working tree.'
+      );
+      process.exit(2);
+    }
+  }
+};
+
 for (const m of selected) {
   const target = TARGETS[m.target];
   const source = sources[m.target];
   const edits = m.edits ?? [{ find: m.find, replace: m.replace }];
+
+  assertTreeUnchanged(`before ${m.id}`);
 
   // Each edit must pin exactly one site IN THE ORIGINAL. Zero means the code
   // moved; many means the mutation is ambiguous and we would not know what we
