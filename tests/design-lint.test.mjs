@@ -81,6 +81,10 @@ describe('each rule fires on a real violation', () => {
     'lint-suppression':    `export const a = <div className="rounded-2xl" />; // design-lint` + `-disable`,
     'legacy-token-import': `import { STITCH } from '../lib/tokens';`,
     'input-zoom-floor':    `export const a = <input className="text-sm" />;`,
+    // Written multi-line on purpose: the live defect this rule exists for
+    // (BrowseDetailView's seller card) spread its handler across six lines, and
+    // a line-based rule would have counted zero.
+    'interactive-card':    `export const a = <Card\n  className="p-4"\n  onClick={() => open(x)}\n>y</Card>;`,
   };
 
   for (const [rule, code] of Object.entries(VIOLATIONS)) {
@@ -137,6 +141,36 @@ describe('a clean tree passes', () => {
     const r = run(lintCopy('whole-class'), fixture('whole-class', 'ok.jsx',
       'export const a = ({ animClass, className }) => <div className={`${animClass} ${className}`} />;'));
     assert.equal(r.status, 0, `interpolating a whole class name tripped the rule:\n${r.stdout}`);
+  });
+
+  // ── Negative fixtures ─────────────────────────────────────────────────────
+  // §15 "Found by adversarial review" records that the false-positive side of
+  // every regex was untested: broadening a rule until it matches legitimate code
+  // leaves all the fire tests green and is discovered only when somebody
+  // switches the rule off. `interactive-card` is a hard zero, so it has to be
+  // provably quiet on the ~58 Cards that are just surfaces.
+  test('a non-interactive Card is not an interactive-card violation', () => {
+    const r = run(lintCopy('card-ok'), fixture('card-ok', 'ok.jsx',
+      `export const a = <Card className="p-4" interactive>
+         <Card as="li" style={{ top: 0 }} onAnimationEnd={done}>x</Card>
+       </Card>;`));
+    assert.equal(r.status, 0, `a plain Card tripped interactive-card:\n${r.stdout}`);
+  });
+
+  test('interactive-card sees a handler on a Card even when the tag spans lines', () => {
+    // The whole reason this is a structural rule rather than a line rule. If it
+    // regressed to line matching, this fixture would pass and the rule would be
+    // enforcing only the easy half of the defect.
+    const r = run(lintCopy('card-multiline'), fixture('card-multiline', 'bad.jsx',
+      `export const a = <Card
+         className="p-4"
+         onClick={() => {
+           const id = x.id;
+           if (id) go(id);
+         }}
+       >y</Card>;`));
+    assert.notEqual(r.status, 0, 'a multi-line handler escaped the rule');
+    assert.match(r.stdout, /FAIL\s+interactive-card\s+/);
   });
 
   test('a rule name inside a COMMENT is not itself a violation', () => {
@@ -302,7 +336,7 @@ describe('the budget ledger is complete', () => {
     // These are not migration budgets. Each was fixed completely in UI-002A and
     // a single reintroduction is a real accessibility regression, so they must
     // never be allowed to drift upward even by a legitimate-looking edit.
-    for (const id of ['focus-suppression', 'input-zoom-floor', 'promotional-copy', 'legacy-token-object']) {
+    for (const id of ['focus-suppression', 'input-zoom-floor', 'promotional-copy', 'legacy-token-object', 'interactive-card']) {
       assert.match(source(), new RegExp(`'${id}':\\s*0,`), `${id} is no longer a hard zero`);
     }
   });

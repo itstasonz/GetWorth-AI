@@ -25,6 +25,12 @@ import { buildRecognitionMemoryKey } from './_lib/recognition-memory.js';
 import {
   validateQuote,
   applyTransform,
+  isPricedVerdict,
+  isPricedMarketValue,
+  positivePriceOrNull,
+  resolvePricingStatus,
+  resolvePricingGrade,
+  MANUAL_REQUIRED_STATUS,
   CONDITION_LADDER,
   VALIDATOR_VERSION,
   RULESET_VERSION,
@@ -2683,6 +2689,12 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
   // reader that already handles a rejected quote handles this identically.
   const guardPrices = verdict ? verdict.prices : { low: 0, mid: 0, high: 0 };
 
+  // UI-003 Wave 0 — ONE decision, read by every pricing field below. See the
+  // PRESENTATION BOUNDARY block in valuation-guard.js: `pricing_source` is a
+  // diagnostic and is deliberately not consulted, so no provenance value can
+  // relabel a rejected quote as a priced one.
+  const priced = isPricedVerdict(verdict);
+
   // SCAN-IDENTITY-001: title composed from structured identity fields;
   // category is kept fully separate from the product title.
   const titles = composeTitles(recognition, verification);
@@ -2699,21 +2711,39 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
       mid:  guardPrices.mid,
       high: guardPrices.high,
       currency: 'ILS',
-      newRetailPrice: verification.new_retail_price_ils || 0,
+      // UI-003 Wave 0 (Gap B) — was `|| 0`, which made "no retail signal"
+      // indistinguishable from a fact and, because it always produced a number,
+      // rendered the `?? null` at BOTH persistence sites unreachable. null is
+      // the honest value; the display site already gates on `> 0`.
+      newRetailPrice: positivePriceOrNull(verification.new_retail_price_ils),
       // Retained for backward compatibility with existing readers. NOTHING
       // branches on it any more — provenance comes from validation.pricing_source
       // below, which is derived from what the pipeline actually observed.
-      price_method: verification.price_method || 'ai_estimate',
+      //
+      // UI-003 Wave 0: this is the value persisted to `valuations.price_method`
+      // (record_scan below, and the client backup writer). On an unpriced
+      // verdict the model's claim describes a number that does not exist, so it
+      // carries the explicit manual_required signal instead — a manual-pricing
+      // state must be a POSITIVE marker in the row, not the absence of one.
+      price_method: priced
+        ? (verification.price_method || 'ai_estimate')
+        : MANUAL_REQUIRED_STATUS,
       pricingMode: auth.pricingMode,
-      // Populated when Stage 2 fallback is used; null means Stage 2 ran normally
-      // A guard exception (no verdict) is a manual-pricing state, not a priced
-      // one — see the catch above. Checked first so it cannot be relabelled
-      // db_based/ai_estimate by the model's own claim.
-      pricing_status: !verdict
-        ? 'manual_required'
-        : (verdict.metadata.degraded && verdict.metadata.pricing_source === 'manual_required'
-            ? 'manual_required'
-            : (verification._pricing_meta?.pricing_status || (verification.price_method === 'comp_based' ? 'db_based' : 'ai_estimate'))),
+      // Populated when Stage 2 fallback is used; null means Stage 2 ran normally.
+      //
+      // UI-003 Wave 0 — this WAS the defect. The old form required
+      // `degraded && pricing_source === 'manual_required'`, but degrade() keeps
+      // the ORIGINALLY DERIVED source (stage2_ai / stage2_comp_anchored /
+      // pre_haiku …), so a rejected quote failed the second half and fell
+      // through to `ai_estimate` while carrying a 0/0/0 triple. The candidate
+      // label below can now only NARROW: resolvePricingStatus refuses to emit
+      // any priced status unless the verdict is undegraded AND the triple is
+      // strictly positive and ordered.
+      pricing_status: resolvePricingStatus(
+        verdict,
+        verification._pricing_meta?.pricing_status
+          || (verification.price_method === 'comp_based' ? 'db_based' : 'ai_estimate'),
+      ),
       pricing_warning: verification._pricing_meta?.pricing_warning || null,
       // SCAN-008 grade, now DERIVED by the guard rather than read from the
       // model's self-declared price_method. A model that hallucinates a price
@@ -2723,11 +2753,14 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
       // exists, for the same reason: on the exception path the model's claim
       // would otherwise be the sole input to the grade, which is exactly the
       // trust hole the guard was built to close.
-      pricing_confidence: !verdict
-        ? 'MANUAL_REQUIRED'
-        : (verdict.metadata.pricing_grade
-            || verification._pricing_meta?.pricing_confidence
-            || (verification.price_method === 'comp_based' ? 'HIGH' : 'MEDIUM')),
+      //
+      // UI-003 Wave 0: routed through the SAME predicate as pricing_status, so
+      // the two can never disagree about whether a price exists.
+      pricing_confidence: resolvePricingGrade(
+        verdict,
+        verification._pricing_meta?.pricing_confidence
+          || (verification.price_method === 'comp_based' ? 'HIGH' : 'MEDIUM'),
+      ),
       // SCAN-009: PRE provenance — which rescue source priced this (internal).
       pricing_reason: verification._pricing_meta?.pricing_reason || null,
       pre_source:     verification._pricing_meta?.pre_source || null,
@@ -3636,10 +3669,25 @@ async function handleRequest(req) {
         model_number:      result.recognition?.modelNumber || null,
         identified_by:     result.recognition?.identifiedBy || 'visual',
         alternatives:      result.recognition?.alternatives || [],
-        price_low:         result.marketValue?.low ?? null,
-        price_mid:         result.marketValue?.mid ?? null,
-        price_high:        result.marketValue?.high ?? null,
-        new_retail:        result.marketValue?.newRetailPrice ?? null,
+        // UI-003 Wave 0 — a degraded/manual valuation is persisted AS one.
+        // Zero is not a price: writing 0 into these columns made an unpriced
+        // scan indistinguishable from an item genuinely worth nothing, dragged
+        // every AVG/SUM over price_mid toward zero, and rendered as a ₪0
+        // valuation in history. NULL is the honest value ("we do not know") and
+        // SQL aggregates skip it; price_method carries the explicit
+        // manual_required marker set in normalizeForUI.
+        ...(isPricedMarketValue(result.marketValue)
+          ? {
+              price_low:  result.marketValue.low,
+              price_mid:  result.marketValue.mid,
+              price_high: result.marketValue.high,
+            }
+          : { price_low: null, price_mid: null, price_high: null }),
+        // Gap B: normalized again at the boundary, not merely passed through.
+        // `?? null` only catches null/undefined, so it could never have caught
+        // the 0 the constructor produced — and a result replayed from an older
+        // deploy still carries one. The rule is enforced where the row is built.
+        new_retail:        positivePriceOrNull(result.marketValue?.newRetailPrice),
         price_method:      result.marketValue?.price_method || 'ai_estimate',
         comp_count:        candidates.length,
         lang,
@@ -4244,7 +4292,11 @@ export function preQuoteFromCatalog(ctx) {
     pricing_warning:     `Pricing stage failed (${failReason || 'unknown'}). Using catalog pricing.`,
     fallback_key:        'db_row',
     pre_source:          'catalog',
-    _db_retail:          row.retail_price_ils || 0,
+    // Gap B: the ORIGIN of the fallback branch's zero. Normalized here as well
+    // as at the consumer (new_retail_price_ils below) so the field never CARRIES
+    // "unknown" encoded as 0 — today its only reader normalizes, and a second
+    // reader added later would silently inherit the old meaning.
+    _db_retail:          positivePriceOrNull(row.retail_price_ils),
   };
 }
 
@@ -4403,7 +4455,10 @@ function buildFallback(recognition, lang, failReason = null, candidates = [], re
     price_estimate_low:  fp.price_estimate_low,
     price_estimate_mid:  fp.price_estimate_mid,
     price_estimate_high: fp.price_estimate_high,
-    new_retail_price_ils: fp._db_retail || 0,
+    // Gap B: the SECOND construction path (Stage 2 fallback). `_db_retail` is
+    // absent whenever no catalog row was resolved, which is the common case on
+    // this path — so `|| 0` was the larger of the two zero producers.
+    new_retail_price_ils: positivePriceOrNull(fp._db_retail),
     price_method: 'ai_estimate',
     _pricing_meta: fp,   // consumed by normalizeForUI
     currency: 'ILS',

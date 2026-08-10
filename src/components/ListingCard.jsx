@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Heart, MapPin, Clock, Camera } from 'lucide-react';
-import { Card, haptic } from './ui';
+import { Card, StretchedTarget, haptic } from './ui';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha } from '../lib/utils';
 
 // ─── Lazy Image with skeleton placeholder ───
@@ -73,18 +73,37 @@ LazyImage.displayName = 'LazyImage';
 const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggleSave, viewItem }) => {
   const imageCount = item.images?.length || 0;
   const isSaved = savedIds?.has(item.id) ?? false;
+  const title = (lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title) || '';
+
+  /**
+   * UI-003 wave 0 — the card is TWO controls, not a clickable div.
+   *
+   * The save button's name stays constant across states; `aria-pressed` carries
+   * saved/not-saved. A name that flips to "Remove from saved" would announce the
+   * state twice and contradict itself in the half-second before the toggle
+   * settles. It carries the listing title because a Browse grid renders ~20 of
+   * these, and "Save, button" ×20 in a rotor list identifies nothing.
+   */
+  const saveLabel = lang === 'he'
+    ? `שמירת ${title || 'מודעה'}`
+    : `Save ${title || 'listing'}`;
 
   return (
     <div className="animate-fadeIn" style={{ animationDelay: `${Math.min(index, 8) * 60}ms` }}>
-      <Card className="overflow-hidden group" onClick={() => viewItem(item)}>
+      <Card className="overflow-hidden group" interactive>
         <div className="relative aspect-square overflow-hidden">
           <LazyImage src={item.images?.[0]} alt={item.title || ''} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-80 transition-opacity" />
-          
-          {/* Save button */}
+
+          {/* Save button — `z-raised` puts it ABOVE the title's stretched overlay.
+              Both are absolutely positioned at z-auto, so without it the overlay
+              (later in document order) would swallow every tap on the heart. */}
           <button
+            type="button"
+            aria-label={saveLabel}
+            aria-pressed={isSaved}
             onClick={(e) => { e.stopPropagation(); haptic(isSaved ? 8 : 12); toggleSave(item); }}
-            className={`absolute top-3 ${rtl ? 'left-3' : 'right-3'} w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 backdrop-blur-md active:scale-90 ${isSaved ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'} ${heartAnim === item.id ? 'animate-heartPop' : ''}`}
+            className={`absolute top-3 ${rtl ? 'left-3' : 'right-3'} z-raised w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-300 backdrop-blur-md active:scale-90 ${isSaved ? 'bg-red-500 shadow-lg shadow-red-500/50' : 'bg-black/30 hover:bg-black/50'} ${heartAnim === item.id ? 'animate-heartPop' : ''}`}
           >
             <Heart className={`w-5 h-5 transition-all ${isSaved ? 'fill-current scale-110' : ''}`} />
           </button>
@@ -106,8 +125,18 @@ const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heart
         </div>
         
         <div className="p-4 space-y-2">
-          <h3 className="font-semibold text-sm truncate group-hover:text-[#6FEEE1] transition-colors">
-            {lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title}
+          {/* The title IS the control: it is the only element on the card whose
+              text makes a usable accessible name, so making it the target gives
+              "Camera, button" instead of an unnamed tab stop. `truncate` sits on
+              an inner span because it carries `overflow: hidden`, and the
+              stretched overlay is a child pseudo-element of the button — on the
+              button itself the clipping would erase the full-card hit area. */}
+          <h3 className="font-semibold text-sm">
+            <StretchedTarget onClick={() => viewItem(item)} className="block w-full">
+              <span className="block truncate group-hover:text-[#6FEEE1] transition-colors">
+                {title}
+              </span>
+            </StretchedTarget>
           </h3>
           <p className="text-2xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
             {formatPrice(item.price)}

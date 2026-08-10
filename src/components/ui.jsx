@@ -243,21 +243,106 @@ export const SkeletonCard = () => (
  * @param glow      DEPRECATED and NEUTRALISED. It emitted
  *                  `rgba(59,130,246,0.15)` — a *blue* glow in a teal app,
  *                  left over from a pre-rebrand palette.
+ *
+ * @param interactive  Surface AFFORDANCE only — cursor + state layer. It never
+ *                  attaches a handler, because the thing that gets pressed has
+ *                  to be a real control. See the `onClick` note below.
+ *
+ * ── UI-003 wave 0: Card does NOT accept `onClick` ──
+ * It used to, while still defaulting to `as: 'div'`. That produced a
+ * non-interactive `<div>` carrying a click handler: no tab stop, no `role`, no
+ * Enter/Space activation and no accessible name. The app's primary browse
+ * affordance (`ListingCard`, shared by Browse, Saved and seller-profile grids)
+ * was therefore unreachable by keyboard and by switch control, and the JSX gave
+ * no hint of it — the call site read as if it had made something pressable.
+ *
+ * The obvious patch — bolting `role="button"` + `tabIndex={0}` + a key handler
+ * onto the div — is NOT the fix, and adding it here would have made things
+ * worse: `ListingCard` also contains a save <button>, so the container would
+ * have become an interactive element wrapping another interactive element. That
+ * is invalid, and it costs the user a phantom tab stop whose activation region
+ * overlaps a different control.
+ *
+ * So the affordance is split from the behaviour. The surface may LOOK pressable
+ * (`interactive`); what is actually pressed is a `StretchedTarget` inside it.
+ * `onClick` is destructured only to keep it off the DOM node and to make its
+ * rejection loud — `scripts/design-lint.mjs` rule `interactive-card` (hard zero)
+ * fails the build before a call site like that can land.
  */
-export const Card = ({ children, className = '', onClick, glow, gradient, style, as: As = 'div', ...p }) => (
-  <As
+export const Card = ({
+  children, className = '', interactive, onClick, glow, gradient, style, as: As = 'div', ...p
+}) => {
+  if (process.env.NODE_ENV !== 'production' && onClick) {
+    console.error(
+      '[Card] `onClick` is not supported and was NOT attached — a <div> with a ' +
+      'click handler is unreachable by keyboard and by switch control. Put a ' +
+      '<StretchedTarget> on the card\'s title instead, and pass `interactive` ' +
+      'for the surface affordance. See docs/DESIGN_SYSTEM.md § Interactive cards.'
+    );
+  }
+  return (
+    <As
+      className={`relative rounded-container border border-subtle bg-surface ${
+        interactive ? 'cursor-pointer state-layer transition-colors duration-quick' : ''
+      } ${className}`}
+      // `style` is destructured and merged explicitly rather than arriving via
+      // {...p}: spreading after the style prop would let a call site passing both
+      // `gradient` and `style` silently drop the gradient.
+      style={gradient || style ? { ...(gradient ? { background: gradient } : null), ...style } : undefined}
+      {...p}
+    >
+      {children}
+    </As>
+  );
+};
+
+// ── StretchedTarget ──────────────────────────────────────────────────────────
+/**
+ * ONE real control that claims the whole card as its hit area.
+ *
+ * This is the accessible form of "the whole card is tappable". A real `<button>`
+ * wraps the card's title — so it is a tab stop, it activates on Enter and Space
+ * natively, and its accessible name is the title the user can see — and an
+ * absolutely-positioned `::before` stretches from it across the nearest
+ * positioned ancestor, which is the `Card` (every Card is `relative`). Pointer
+ * and touch therefore keep the full-card target they had; keyboard and switch
+ * control gain one they never had.
+ *
+ * What this buys over `role="button"` on the container: a card routinely holds a
+ * SECOND control — the save heart on `ListingCard` — and an interactive
+ * container would nest one inside the other. Here the container stays inert, so
+ * the card is exactly two tab stops (open, save) with no nesting violation. The
+ * second control only has to sit on a higher layer than the overlay (`z-raised`)
+ * so the pointer still reaches it.
+ *
+ * Two constraints that are easy to get wrong and silently break it:
+ *  · The overlay is a child pseudo-element, so ANY `overflow: hidden` on this
+ *    button clips it away — which is why `truncate` belongs on an inner span,
+ *    never on the target itself.
+ *  · `.state-layer` already owns `::after` (see index.css), so the overlay is
+ *    `::before`. A card wanting both works; a card using `after:` here does not.
+ */
+export const StretchedTarget = ({ children, onClick, className = '', ...p }) => (
+  <button
+    // Not a link. `/listing/:id` is addressable while the app is running, but
+    // src/lib/urlSync.js:92 resolves a COLD visit to that URL with
+    // `_fallback: true` — straight back to /browse. An <a href> would advertise
+    // open-in-new-tab and middle-click, and both would land on the wrong screen.
+    // Button semantics is the honest description of what this does: it changes
+    // in-memory view state. Revisit when urlSync gains cold fetch (Phase 3B).
+    type="button"
     onClick={onClick}
-    className={`relative rounded-container border border-subtle bg-surface ${
-      onClick ? 'cursor-pointer state-layer transition-colors duration-quick' : ''
-    } ${className}`}
-    // `style` is destructured and merged explicitly rather than arriving via
-    // {...p}: spreading after the style prop would let a call site passing both
-    // `gradient` and `style` silently drop the gradient.
-    style={gradient || style ? { ...(gradient ? { background: gradient } : null), ...style } : undefined}
+    className={[
+      // Logical alignment, so the title still reads correctly under dir="rtl"
+      // without a conditional — a <button> otherwise centres its text.
+      'text-start',
+      "before:content-[''] before:absolute before:inset-0",
+      className,
+    ].filter(Boolean).join(' ')}
     {...p}
   >
     {children}
-  </As>
+  </button>
 );
 
 // ── Btn ──────────────────────────────────────────────────────────────────────

@@ -205,7 +205,8 @@ All primitives live in `src/components/ui.jsx`. Each is the only sanctioned way 
 |---|---|---|
 | `Btn` | 4 variants × 3 sizes | Per-screen button treatments; sub-44px targets |
 | `IconButton` | Icon-only control | An unnamed icon; growing the glyph to reach 44px; `aria-pressed` on a non-toggle |
-| `Card` | e1 surface | Stacked depth cues; blur; hover lift |
+| `Card` | e1 surface | Stacked depth cues; blur; hover lift; **`onClick`** — a card is never itself the control |
+| `StretchedTarget` | The ONE control that makes a card pressable | `role="button"` on the container; a second interactive element nested inside it |
 | `Badge` | Platform-asserted state | Solid fills with white text |
 | `Chip` | A control the **user** sets | Looking like a fact |
 | `Credential` | A fact backed by a stored value | `tier`, `color`, `variant`, caller-supplied labels |
@@ -219,6 +220,32 @@ All primitives live in `src/components/ui.jsx`. Each is the only sanctioned way 
 | `EmptyState` / `ErrorState` / `LoadingState` | The three wait/none states | A failed load rendering as "you have nothing" |
 | `AnchoredAction` | Thumb-zone primary action | Use on multi-action screens |
 | `Toast` | Transient feedback | Saturated gradient surfaces |
+
+### Interactive cards
+
+A `Card` is a **surface**, never a control. It does not accept `onClick`; it refuses the prop with a `console.error` in dev, and `scripts/design-lint.mjs` rule `interactive-card` (hard zero) fails the build on any `Card` carrying an activation handler.
+
+It used to accept one while defaulting to `as: 'div'`, which produced a non-interactive element carrying a click handler: no tab stop, no `role`, no Enter/Space, no accessible name. That shipped on `ListingCard` — the shared card of Browse, Saved and every seller-profile grid — so the app's primary browse affordance was unreachable by keyboard and by switch control, and the call site read as though it had made something pressable.
+
+**The pattern:**
+
+```jsx
+<Card interactive>                        {/* surface + affordance only */}
+  <button onClick={save} className="… z-raised">…</button>
+  <h3>
+    <StretchedTarget onClick={open}>      {/* the ONE control */}
+      <span className="block truncate">{title}</span>
+    </StretchedTarget>
+  </h3>
+</Card>
+```
+
+- **Affordance is separated from behaviour.** `interactive` gives the surface its cursor and state layer. What is actually pressed is a real `<button>` inside it.
+- **The title carries the semantics**, because it is the only element on a card whose text makes a usable accessible name. An absolutely-positioned `::before` stretches it across the card, so pointer and touch keep the full-card target.
+- **`role="button"` on the container is not the fix.** A card routinely holds a second control (the save heart), and an interactive container would nest one interactive element inside another — invalid, and a phantom tab stop overlapping a different control. This pattern gives exactly two tab stops, open and save.
+- **Button, not link.** `/listing/:id` is addressable while the app runs, but `urlSync.js` resolves a *cold* visit to it with `_fallback: true` — straight back to `/browse`. An `<a href>` would advertise open-in-new-tab and middle-click, and both would land on the wrong screen. Revisit when cold fetch lands (urlSync Phase 3B).
+
+Two mechanics that silently break it: `truncate`/`overflow-hidden` **on** the target clips away its own overlay (put it on an inner span), and the second control needs `z-raised` — both overlays are `z-auto`, so paint order is document order and the later one swallows the earlier.
 
 ### Layout primitives have no visual opinion
 
@@ -455,6 +482,7 @@ So every rule that can be mechanised is mechanised, in `scripts/design-lint.mjs`
 | `promotional-copy` | **0** | — hard zero |
 | `focus-suppression` | **0** | — hard zero |
 | `input-zoom-floor` | **0** | — hard zero |
+| `interactive-card` | **0** | — hard zero |
 
 A **budget** is a migration debt that may only fall. A **hard zero** is not a budget: each was fixed completely, and one reintroduction is a real regression rather than un-migrated legacy.
 
@@ -551,7 +579,7 @@ Sequenced by *blast radius per unit of proof*, not by screen importance. Each st
 Nine specialists reviewed the implemented UI-002B. These are verified, pre-existing, and out of UI-002B's scope; several are more serious than anything the design work addressed. **Fix these before any screen redesign begins.**
 
 **Keyboard and screen-reader**
-1. **`Card` with `onClick` renders a non-interactive `<div>`** — `ui.jsx` `Card`, live at `ListingCard.jsx:79`. No `role`, no `tabIndex`, no Enter/Space handler, so the app's primary browse affordance is unreachable by keyboard or switch control. **Highest-severity accessibility defect in the codebase.** Fix in the primitive.
+1. ~~**`Card` with `onClick` renders a non-interactive `<div>`**~~ — **FIXED.** Two live call sites (`ListingCard.jsx`, `BrowseDetailView.jsx` seller card), both migrated to `StretchedTarget`; the primitive now refuses `onClick`, and `interactive-card` is a hard-zero lint rule. See § Interactive cards.
 2. **The document language never updates.** `index.html` is `lang="he"`; `App.jsx` sets `dir` on a wrapper div and never writes `lang` to `<html>`. English UI is announced in a Hebrew voice (WCAG 3.1.1), and `:lang(he)` applies the 13px Hebrew floor to English text.
 3. `BackButton` emits a `<button>` with no `type` — it submits any enclosing form.
 4. `Toast` accepts an `rtl` prop and never reads it.

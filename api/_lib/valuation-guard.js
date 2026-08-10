@@ -602,3 +602,126 @@ export function applyTransform(v, { multiplier, reason, ctx = {} } = {}) {
     metadata: { ...v.metadata, needs_review: true },
   };
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PRESENTATION BOUNDARY — the single decision of "is there a real price here?"
+// ═══════════════════════════════════════════════════════════════════════════
+// A verdict carries two INDEPENDENT facts, and conflating them is the UI-003
+// Wave 0 defect:
+//   • WHERE the number was derived from — `pricing_source`. degrade()
+//     deliberately preserves the derived source (`stage2_ai`, `pre_haiku`, …)
+//     so a rejection stays attributable in the ledger. It is a DIAGNOSTIC.
+//   • WHETHER the number survived — `action`, `degraded`, `pricing_grade`, and
+//     the emitted triple. That is the PERMISSION.
+//
+// api/analyze.js gated the manual-pricing status on
+// `degraded && pricing_source === 'manual_required'`, i.e. it read the
+// diagnostic as the permission. Every degrade() verdict — degraded:true, grade
+// MANUAL_REQUIRED, prices 0/0/0 — failed the second half and was published as
+// `pricing_status: 'ai_estimate'` carrying a ₪0 mid: a fabricated provenance
+// claim over a price the guard had just rejected.
+//
+// These helpers make that unrepresentable. NO provenance field is read here, so
+// no value of `pricing_source` — present or future — can defeat the invariant.
+
+export const MANUAL_REQUIRED_STATUS = 'manual_required';
+// The label for a priced result whose caller offered none. Only ever reached
+// AFTER isPricedVerdict has said yes, so it can never manufacture provenance
+// for a non-price.
+export const DEFAULT_PRICED_STATUS = 'ai_estimate';
+
+/**
+ * True only when the verdict authorises presenting a real market price.
+ *
+ * Deliberately over-determined: the flag checks and the numeric check are each
+ * INDEPENDENTLY sufficient to say no. A triple that is not strictly positive
+ * and ordered is unpriced even if every flag claims otherwise, and a degraded
+ * verdict is unpriced even if it somehow carries numbers. Zero is not an
+ * estimate.
+ */
+export function isPricedVerdict(v) {
+  if (!v) return false;                    // no verdict ⇒ the guard vouched for nothing
+  if (v.action === 'degrade') return false;
+  const md = v.metadata || {};
+  if (md.degraded) return false;
+  if (md.pricing_grade === 'MANUAL_REQUIRED') return false;
+  const { low, mid, high } = v.prices || {};
+  if (!Number.isFinite(mid) || mid <= 0) return false;
+  if (!Number.isFinite(low) || low <= 0) return false;
+  if (!Number.isFinite(high) || high < mid) return false;
+  return true;
+}
+
+/**
+ * The same invariant applied to a normalized `marketValue` (the WIRE shape),
+ * for readers holding the response rather than the verdict — the persistence
+ * sinks, and any client. Kept here so the server and the client are testably
+ * asserting one rule; src/lib/utils.js mirrors this body and the contract
+ * suite fails on drift (see also CONDITION_LADDER / C-10).
+ *
+ * The numeric half is NOT redundant with the status half: a response persisted
+ * or cached by an older deploy can carry a priced status over a 0 mid, and this
+ * rejects it without needing that deploy to be fixed first.
+ */
+export function isPricedMarketValue(mv) {
+  if (!mv) return false;
+  if (mv.pricing_status === MANUAL_REQUIRED_STATUS) return false;
+  const mid = Number(mv.mid), low = Number(mv.low), high = Number(mv.high);
+  if (!Number.isFinite(mid) || mid <= 0) return false;
+  if (!Number.isFinite(low) || low <= 0) return false;
+  if (!Number.isFinite(high) || high < mid) return false;
+  return true;
+}
+
+/**
+ * A STANDALONE reference price, normalized to "a real number or unknown".
+ *
+ * UI-003 Wave 0 (Gap B). `new_retail` is the only price column that is not part
+ * of the valuation band, and it was the one column the band's guard never
+ * covered. It was built as `verification.new_retail_price_ils || 0`
+ * (analyze.js), which ALWAYS yields a number — so the `?? null` at both
+ * persistence sites was unreachable code, and every scan without a retail signal
+ * stored `new_retail = 0`. Zero is not a retail price: nothing is sold new for
+ * ₪0, so the value could only ever mean "we don't know", encoded as a number
+ * that averages, sums and sorts like a fact.
+ *
+ * NOT a substitute for isPricedMarketValue. That predicate answers "did the
+ * guard approve a priced BAND?" and reads low/mid/high together; this normalizes
+ * ONE independent number. They are deliberately unlinked: a degraded valuation
+ * can still have a perfectly good known retail price, and suppressing it would
+ * discard a real fact about the product. Use this ONLY for a lone reference
+ * figure, never to decide whether an item is priced.
+ *
+ * Accepts numeric strings for the same reason hasRealPrice does — an upstream
+ * JSON number may arrive quoted — and rejects everything that is not a finite
+ * value strictly greater than zero.
+ */
+export function positivePriceOrNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/**
+ * The user-facing pricing_status. `candidate` is the caller's preferred LABEL
+ * for a priced result: it can only ever narrow. There is no argument to this
+ * function that promotes an unpriced verdict into a priced status.
+ */
+export function resolvePricingStatus(v, candidate) {
+  if (!isPricedVerdict(v)) return MANUAL_REQUIRED_STATUS;
+  const c = typeof candidate === 'string' ? candidate.trim() : '';
+  return c || DEFAULT_PRICED_STATUS;   // a caller that itself says manual_required is honoured
+}
+
+/**
+ * The user-facing pricing_confidence, gated by the SAME predicate so the grade
+ * and the status can never disagree about whether a price exists. (A grade of
+ * MEDIUM beside a status of manual_required is the same lie in a smaller font.)
+ */
+export function resolvePricingGrade(v, candidate) {
+  if (!isPricedVerdict(v)) return 'MANUAL_REQUIRED';
+  const g = v?.metadata?.pricing_grade;
+  if (GRADES.includes(g)) return g;
+  const c = typeof candidate === 'string' ? candidate.trim() : '';
+  return GRADES.includes(c) ? c : 'MEDIUM';
+}

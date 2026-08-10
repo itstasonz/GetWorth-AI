@@ -80,6 +80,94 @@ export const TARGETS = {
     env: 'UI002B_LINT_PATH',
     suite: 'tests/design-lint.test.mjs',
   },
+  // ── UI-003 Wave 0 (trust copy) ──
+  // The app performs no authenticity verification of any kind, so every badge
+  // it shows is a model reading or a seller assertion. These three targets are
+  // where a credential can creep back in: the render sites, the copy table, and
+  // the buyer-facing chip. All three are judged by the same suite, because the
+  // invariant spans them — an honest string under a brand-accent colour, or an
+  // English fix with the Hebrew left claiming 'מאומת', is still the defect.
+  results: {
+    src: 'src/views/CameraResultsView.jsx',
+    mutant: 'src/views/CameraResultsView.__mutant__.jsx',
+    env: 'UI003_RESULTS_PATH',
+    suite: 'tests/trust-copy.test.mjs',
+  },
+  translations: {
+    src: 'src/lib/translations.js',
+    mutant: 'src/lib/translations.__mutant__.js',
+    env: 'UI003_TRANSLATIONS_PATH',
+    suite: 'tests/trust-copy.test.mjs',
+  },
+  detail: {
+    src: 'src/views/BrowseDetailView.jsx',
+    mutant: 'src/views/BrowseDetailView.__mutant__.jsx',
+    env: 'UI003_DETAIL_PATH',
+    suite: 'tests/trust-copy.test.mjs',
+  },
+  // The two writers of `valuations`. They upsert the SAME row id, so a
+  // divergence between them is decided by whichever write lands first. The
+  // suite reads these as TEXT and evaluates the row literal, so a mutant copy
+  // needs no import resolution — see tests/helpers/extract-literal.mjs.
+  analyze: {
+    src: 'api/analyze.js',
+    mutant: 'api/analyze.__mutant__.js',
+    env: 'UI003_ANALYZE_PATH',
+    suite: 'tests/persistence-rows.test.mjs',
+  },
+  context: {
+    src: 'src/contexts/AppContext.jsx',
+    mutant: 'src/contexts/AppContext.__mutant__.jsx',
+    env: 'UI003_CONTEXT_PATH',
+    suite: 'tests/persistence-rows.test.mjs',
+  },
+
+  // UI-003 Wave 0 — the GW-005A observations sink. Same three source files can
+  // be mutated against a DIFFERENT suite, so each needs its own target entry:
+  // the runner resolves the suite from TARGETS[m.target], not from the mutant.
+  // Distinct mutant filenames keep the sweep unambiguous when both a
+  // persistence mutant and an observation mutant name AppContext.jsx.
+  contextObs: {
+    src: 'src/contexts/AppContext.jsx',
+    mutant: 'src/contexts/AppContext.__obsmutant__.jsx',
+    env: 'UI003_CONTEXT_PATH',
+    suite: 'tests/observation-payloads.test.mjs',
+  },
+  // utils is IMPORTED by the suite rather than text-extracted, so this copy must
+  // stay beside the original — `./translations.js` resolves from its directory.
+  utilsObs: {
+    src: 'src/lib/utils.js',
+    mutant: 'src/lib/utils.__obsmutant__.js',
+    env: 'UI003_UTILS_PATH',
+    suite: 'tests/observation-payloads.test.mjs',
+  },
+  camera: {
+    src: 'src/views/CameraResultsView.jsx',
+    mutant: 'src/views/CameraResultsView.__obsmutant__.jsx',
+    env: 'UI003_CAMERA_PATH',
+    suite: 'tests/observation-payloads.test.mjs',
+  },
+  // Gap B. Two more source/suite pairings: the new_retail CONSTRUCTORS live in
+  // api/analyze.js but are judged by the guard suite (PB-13), and the client
+  // mirror of positivePriceOrNull is judged by the persistence-row suite.
+  analyzeGuard: {
+    src: 'api/analyze.js',
+    mutant: 'api/analyze.__gmutant__.js',
+    env: 'UI003_ANALYZE_PATH',
+    suite: 'tests/valuation-guard.test.mjs',
+  },
+  utilsPersist: {
+    src: 'src/lib/utils.js',
+    mutant: 'src/lib/utils.__pmutant__.js',
+    env: 'UI003_UTILS_PATH',
+    suite: 'tests/persistence-rows.test.mjs',
+  },
+  observations: {
+    src: 'src/lib/observations.js',
+    mutant: 'src/lib/observations.__mutant__.js',
+    env: 'UI003_OBS_PATH',
+    suite: 'tests/observation-payloads.test.mjs',
+  },
 };
 
 export const UI_MUTANTS = [
@@ -690,7 +778,16 @@ export const UI_MUTANTS = [
     target: 'lint',
     invariant: 'Every rule has a budget entry — a rule without one compares against undefined and can never fail.',
     kills: ['every rule has a budget and every budget has a rule'],
-    find: "  'glassmorphism': 67,\n",
+    // Pinned to a HARD ZERO, not to a migration budget. It used to name
+    // `'glassmorphism': 67,` and went MALFORMED the first time UI-003 ratcheted
+    // that number down — the mutant then reported a refactor it had no opinion
+    // about, in a file whose whole job is to notice real refactors. Every
+    // decoration budget is a moving target for the duration of UI-003; a hard
+    // zero is not. `interpolated-class` is deliberately one of the two hard
+    // zeros NOT covered by the "hard zeros are still zero" test, so deleting it
+    // fails the completeness assertion this mutant is actually aimed at and
+    // nothing else.
+    find: "  'interpolated-class': 0,\n",
     replace: '',
   },
   {
@@ -714,6 +811,180 @@ export const UI_MUTANTS = [
     find: "  'focus-suppression': 0,",
     replace: "  'focus-suppression': 3,",
   },
+  // ── UI-003 wave 0: interactive cards ──────────────────────────────────────
+  // The defect these protect was the highest-severity accessibility failure in
+  // the codebase: the app's primary browse affordance was a <div> with a click
+  // handler, so Browse, Saved and every seller grid had ZERO tab stops. It is
+  // defended in three places on purpose — the primitive refuses the prop, the
+  // linter fails the build, and the card is asserted to be two real controls —
+  // so each layer gets its own mutant.
+  {
+    id: 'U66-CARD-ACCEPTS-ONCLICK-AGAIN',
+    target: 'ui',
+    invariant: 'Card never attaches a click handler to a non-interactive element.',
+    kills: ['REFUSES onClick — a div with a click handler is not a control'],
+    // Exactly the pre-UI-003 primitive: the handler forwarded onto `as: 'div'`.
+    edits: [
+      {
+        find: '    <As\n      className={`relative rounded-container border border-subtle bg-surface ${',
+        replace: '    <As\n      onClick={onClick}\n      className={`relative rounded-container border border-subtle bg-surface ${',
+      },
+      {
+        find: "  if (process.env.NODE_ENV !== 'production' && onClick) {",
+        replace: '  if (false) {',
+      },
+    ],
+  },
+  {
+    id: 'U67-CARD-DROPS-ONCLICK-SILENTLY',
+    target: 'ui',
+    invariant: 'Refusing the handler is LOUD — a silently dropped onClick ships a call site that believes it works.',
+    // The half of U66 that a "did the handler fire?" assertion cannot see. Both
+    // the correct code and this mutant leave the card inert; what differs is
+    // whether anyone is told.
+    kills: ['REFUSES onClick — a div with a click handler is not a control'],
+    find: "  if (process.env.NODE_ENV !== 'production' && onClick) {",
+    replace: '  if (false) {',
+  },
+  {
+    id: 'U68-CARD-BOLTS-ON-ROLE-BUTTON',
+    target: 'ui',
+    invariant: 'The container never becomes the control — a card holding a save button would nest one control inside another.',
+    // The tempting "fix". It restores keyboard reach on paper and produces an
+    // interactive element wrapping an interactive element in ListingCard.
+    kills: ['REFUSES onClick — a div with a click handler is not a control', 'nests no control inside another control'],
+    find: '    <As\n      className={`relative rounded-container border border-subtle bg-surface ${',
+    replace:
+      '    <As\n      onClick={onClick}\n      role={onClick ? \'button\' : undefined}\n' +
+      '      tabIndex={onClick ? 0 : undefined}\n' +
+      '      className={`relative rounded-container border border-subtle bg-surface ${',
+  },
+  {
+    id: 'U69-STRETCHED-TARGET-IS-NOT-A-BUTTON',
+    target: 'ui',
+    invariant: 'The card target is a real <button>, so Enter and Space come from the platform.',
+    kills: ['is a real button, so Enter and Space activate it natively'],
+    find: '  <button\n    // Not a link.',
+    replace: '  <div\n    // Not a link.',
+  },
+  {
+    id: 'U70-STRETCHED-TARGET-SUBMITS-THE-FORM',
+    target: 'ui',
+    invariant: 'The card target never defaults to type="submit".',
+    kills: ['is a real button, so Enter and Space activate it natively'],
+    // Pinned through `className={[` as well: Chip opens with the identical
+    // type/onClick pair, so the shorter form matches twice and the runner
+    // (correctly) refuses an ambiguous mutation.
+    find: '    type="button"\n    onClick={onClick}\n    className={[',
+    replace: '    onClick={onClick}\n    className={[',
+  },
+  {
+    id: 'U71-OVERLAY-DOES-NOT-STRETCH',
+    target: 'ui',
+    invariant: 'The target claims the whole card as its hit area, not just the title text box.',
+    // Without the overlay the markup is still perfectly accessible — one named,
+    // focusable button — and every keyboard assertion passes. What silently
+    // disappears is the full-card POINTER target the card has always had, which
+    // is the behaviour this refactor promised not to change.
+    kills: ['claims the whole card as its hit area via ::before, not ::after'],
+    find: "      \"before:content-[''] before:absolute before:inset-0\",",
+    replace: "      '',",
+  },
+  {
+    id: 'U72-OVERLAY-COLLIDES-WITH-STATE-LAYER',
+    target: 'ui',
+    invariant: 'The overlay is ::before — .state-layer already owns ::after, and an after: overlay is erased by it.',
+    kills: ['claims the whole card as its hit area via ::before, not ::after'],
+    find: "      \"before:content-[''] before:absolute before:inset-0\",",
+    replace: "      \"after:content-[''] after:absolute after:inset-0\",",
+  },
+  {
+    id: 'U73-TARGET-CENTRES-ITS-TEXT',
+    target: 'ui',
+    invariant: 'The target aligns to the LOGICAL start, so a Hebrew title is not centred and no physical side is pinned.',
+    kills: ['aligns to the logical start so a Hebrew title is not centred'],
+    find: "      'text-start',",
+    replace: "      'text-left',",
+  },
+  {
+    id: 'U74-LISTING-CARD-IS-A-CLICKABLE-DIV',
+    target: 'card',
+    invariant: 'The browse card is two real controls, not a div with a handler.',
+    // The exact live defect, restored: the whole card clickable, the title a
+    // bare heading, and zero tab stops on the app's primary browse surface.
+    kills: [
+      'is exactly two tab stops — open the item, save the item',
+      'the control that opens the item is named by the visible title',
+    ],
+    edits: [
+      {
+        find: '      <Card className="overflow-hidden group" interactive>',
+        replace: '      <Card className="overflow-hidden group" onClick={() => viewItem(item)}>',
+      },
+      {
+        find: '            <StretchedTarget onClick={() => viewItem(item)} className="block w-full">\n              <span className="block truncate group-hover:text-[#6FEEE1] transition-colors">\n                {title}\n              </span>\n            </StretchedTarget>',
+        replace: '            <span className="block truncate group-hover:text-[#6FEEE1] transition-colors">\n              {title}\n            </span>',
+      },
+    ],
+  },
+  {
+    id: 'U75-SAVE-CONTROL-UNNAMED',
+    target: 'card',
+    invariant: 'The save control carries an accessible name that identifies WHICH listing it saves.',
+    // An icon-only control with no name is announced as "button"; twenty of them
+    // in a Browse grid identify nothing at all.
+    kills: ['the save control has a name that distinguishes it in a grid of twenty'],
+    find: '            aria-label={saveLabel}\n            aria-pressed={isSaved}',
+    replace: '            aria-pressed={isSaved}',
+  },
+  {
+    id: 'U76-SAVE-STATE-NOT-ANNOUNCED',
+    target: 'card',
+    invariant: 'Saved / not-saved is announced through aria-pressed rather than a name that flips mid-toggle.',
+    kills: ['the save control announces its state through aria-pressed'],
+    find: '            aria-pressed={isSaved}\n',
+    replace: '',
+  },
+  {
+    id: 'U77-SAVE-CONTROL-BURIED-UNDER-OVERLAY',
+    target: 'card',
+    invariant: 'The save control sits above the title overlay, so the heart is still reachable by pointer.',
+    // Both controls are absolutely positioned at z-auto, so paint order is
+    // document order and the overlay — later in the tree — swallows the heart.
+    // No handler assertion can see this: the onClick is still wired, the element
+    // is still in the DOM, and jsdom does no hit testing at all.
+    kills: ['the save control sits above the stretched overlay'],
+    find: "${rtl ? 'left-3' : 'right-3'} z-raised w-10 h-10",
+    replace: "${rtl ? 'left-3' : 'right-3'} w-10 h-10",
+  },
+  {
+    id: 'U78-INTERACTIVE-CARD-RULE-STOPS-MATCHING',
+    target: 'lint',
+    invariant: 'The interactive-card rule actually matches a Card carrying a handler.',
+    // The build gate for the whole defect. A regex that quietly stops matching
+    // reports a clean build forever, and the hard zero becomes a monument.
+    kills: ['interactive-card is enforced, not merely declared'],
+    find: '        const handler = tag.match(\n',
+    replace: '        const handler = null && tag.match(\n',
+  },
+  {
+    id: 'U79-INTERACTIVE-CARD-RULE-GOES-LINE-BASED',
+    target: 'lint',
+    invariant: 'The rule sees the WHOLE opening tag — a handler formatted across lines is the common form, not the exception.',
+    // Degrades the structural walk to single-line matching. Every one-line
+    // fixture still fails, so only the multi-line negative test can see it.
+    kills: ['interactive-card sees a handler on a Card even when the tag spans lines'],
+    find: '          else if (c === \'>\' && depth === 0) break;\n        }\n        const tag = src.slice(m.index, i + 1);\n        // ACTIVATION handlers only.',
+    replace: '          else if (c === \'\\n\') break;\n        }\n        const tag = src.slice(m.index, i + 1);\n        // ACTIVATION handlers only.',
+  },
+  {
+    id: 'U80-INTERACTIVE-CARD-RULE-OVER-MATCHES',
+    target: 'lint',
+    invariant: 'The rule stays quiet on the ~58 Cards that are plain surfaces — a rule that cries wolf gets switched off.',
+    kills: ['a non-interactive Card is not an interactive-card violation'],
+    find: '        const handler = tag.match(\n          /\\bon(?:Click|DoubleClick|KeyDown|KeyUp|KeyPress|MouseDown|MouseUp|PointerDown|PointerUp|TouchStart|TouchEnd)\\s*=/\n        );',
+    replace: '        const handler = tag.match(/\\bon[A-Z]\\w+\\s*=|\\bclassName\\s*=/);',
+  },
   {
     id: 'U56-DECORATION-RULE-STOPS-MATCHING',
     target: 'lint',
@@ -722,6 +993,350 @@ export const UI_MUTANTS = [
     kills: ['decorative-gradient is enforced, not merely declared'],
     find: '      return (line.match(/linear-gradient|radial-gradient|conic-gradient|\\bbg-gradient-to-[a-z]+/g) || []).length;',
     replace: '      return 0;',
+  },
+
+  // ── UI-003 Wave 0 — AI authenticity must never claim a verification ────────
+  //
+  // The shipped defect: `tier === 'high'` — the IDENTITY-confidence tier, which
+  // says how sure the model is WHAT the object is and carries no authenticity
+  // information — rendered a <Check> + 'מאומת' / 'Authenticated' pill. `מאומת`
+  // is the exact word AuthProfileView uses for a seller who passed operator
+  // review, so in Hebrew (the app's DEFAULT language) a model's guess and a real
+  // credential rendered identically.
+  //
+  // Each mutant below is one plausible way that claim comes back. T05 and T06
+  // are the two most likely: T05 because "the badge disappeared for good items"
+  // reads as a regression someone will helpfully restore, and T06 because it
+  // re-grants the credential through COLOUR ALONE, leaving every string honest —
+  // which is exactly what a DOM or string-only test cannot see.
+  {
+    id: 'T01-HEBREW-CLAIMS-VERIFIED',
+    target: 'translations',
+    invariant: 'No authenticity label claims a verification — in EITHER language.',
+    // Hebrew-only, deliberately. An English-only assertion would pass this.
+    kills: ['T-01 no authenticity or serial label claims a verification, in EITHER language'],
+    find: "    authSignsSeen:     'AI: סימני מקוריות',",
+    replace: "    authSignsSeen:     'מאומת',",
+  },
+  {
+    id: 'T02-HEBREW-KEY-MISSING',
+    target: 'translations',
+    invariant: 'A trust key missing from he renders undefined — an empty badge that fails silently.',
+    kills: ['T-02 the Hebrew trust vocabulary is complete — a missing key renders an EMPTY badge, silently'],
+    find: "    authIndicators:    'AI זיהה סימני מקוריות',\n",
+    replace: '',
+  },
+  {
+    id: 'T03-ATTRIBUTION-STRIPPED',
+    target: 'translations',
+    invariant: 'Every AI-derived badge names the AI — unattributed, it reads as a platform finding.',
+    kills: ['T-03 every AI-derived authenticity badge attributes itself to the AI'],
+    find: "    authIndicators:    'AI found authenticity indicators',",
+    replace: "    authIndicators:    'Authenticity indicators found',",
+  },
+  {
+    id: 'T04-SHIELD-RETURNS',
+    target: 'results',
+    invariant: 'No <Shield> on an AI reading — Shield is the operator identity-verification marker.',
+    kills: ['T-04 the authenticity surfaces use no credential iconography'],
+    find: '                  <Eye className="w-3.5 h-3.5" style={{ color: STITCH.onSurfaceVariant }} strokeWidth={2.5} />',
+    replace: '                  <Shield className="w-3.5 h-3.5" style={{ color: STITCH.onSurfaceVariant }} strokeWidth={2.5} />',
+  },
+  {
+    id: 'T05-IDENTITY-TIER-GRANTS-BADGE',
+    target: 'results',
+    invariant: 'The identity-confidence tier grants no authenticity badge.',
+    // Restores the deleted arm in its minimal form. The state it fires on is the
+    // one where analyze.js decided no authenticity assessment was needed at all,
+    // so there is no finding behind it to report.
+    kills: ['T-05 the identity-confidence tier grants no authenticity badge'],
+    find: "            const indicator = status === 'verified_by_serial' ? t?.authSerialSeen",
+    replace: "            if (tier === 'high') return null;\n            const indicator = status === 'verified_by_serial' ? t?.authSerialSeen",
+  },
+  {
+    id: 'T06-CREDENTIAL-REGRANTED-BY-COLOUR',
+    target: 'results',
+    invariant: 'An indicator is never painted as brand-accent approval — colour makes its own claim.',
+    // Every STRING stays honest under this mutant. That is the point: it is the
+    // one form of the defect a text assertion is blind to.
+    kills: ['T-06 an authenticity INDICATOR is never painted as brand-accent approval'],
+    find: "        const accent = isReplica ? '#ef4444' : hasIndicator ? STITCH.onSurfaceVariant : '#fbbf24';",
+    replace: "        const accent = isReplica ? '#ef4444' : hasIndicator ? STITCH.primary : '#fbbf24';",
+  },
+  {
+    id: 'T07-BUYER-CHIP-CLAIMS-VERIFIED',
+    target: 'detail',
+    invariant: 'The buyer-facing serial chip attributes the claim to the seller, never to the platform.',
+    // The chip sits in the same row as the genuine operator-backed 'Verified ID'
+    // chip, and this one is true when a seller typed eight characters.
+    kills: ['T-07 the buyer-facing serial chip attributes the claim to the seller'],
+    find: '                      <Barcode className="w-2.5 h-2.5" />{t.serialProvided}',
+    replace: '                      <Check className="w-2.5 h-2.5" />{lang === \'he\' ? \'מספר סידורי אומת\' : \'Serial verified\'}',
+  },
+
+  // ── UI-003 Wave 0 — a degraded valuation is PERSISTED as one ──────────────
+  //
+  // These two were the largest untested surface in the wave: the Valuation
+  // Engineer predicted that reverting either would survive, because nothing
+  // covered the rows at all. Both mutants restore the pre-fix write exactly.
+  {
+    id: 'P01-SERVER-ROW-STORES-ZERO',
+    target: 'analyze',
+    invariant: 'record_scan stores NULL for an unpriced valuation, never 0.',
+    // A stored 0 is indistinguishable from an item genuinely worth nothing, and
+    // SQL aggregates average it in rather than skipping it — so it silently
+    // corrupts every metric over the column, not just the row it lands in.
+    kills: ['PR-01 server row: an unpriced valuation (guard degrade, mislabelled ai_estimate) persists NULL, never 0'],
+    find: '          : { price_low: null, price_mid: null, price_high: null }),',
+    replace: '          : { price_low: result.marketValue.low, price_mid: result.marketValue.mid, price_high: result.marketValue.high }),',
+  },
+  {
+    id: 'P02-CLIENT-ROW-STORES-ZERO',
+    target: 'context',
+    invariant: 'The client backup writer agrees with the server: NULL, never 0.',
+    // Same row id as the server write, so a disagreement here is resolved by
+    // whichever upsert lands first — a corruption decided by timing.
+    kills: ['PR-03 client backup row: an unpriced valuation (guard degrade, mislabelled ai_estimate) persists NULL + an explicit marker'],
+    find: '      price_low: priced ? aiResult.marketValue.low : null,',
+    replace: '      price_low: aiResult.marketValue?.low ?? null,',
+  },
+  {
+    id: 'P03-CLIENT-ROW-LOSES-MANUAL-MARKER',
+    target: 'context',
+    invariant: 'Manual pricing is a POSITIVE marker in the row, not the absence of a price.',
+    // Without it, "unpriced" can only be INFERRED from a null — and an
+    // `ai_estimate` label sitting over a null price reads as a bug in the
+    // reader rather than a deliberate state.
+    kills: ['PR-03 client backup row: an unpriced valuation (explicit manual_required) persists NULL + an explicit marker'],
+    find: "      price_method: priced\n        ? (aiResult.marketValue?.price_method || 'ai_estimate')\n        : 'manual_required',",
+    replace: "      price_method: aiResult.marketValue?.price_method || 'ai_estimate',",
+  },
+
+  // ── UI-003 Wave 0 — the GW-005A observations sink ─────────────────────────
+  //
+  // `observations` is the declared substrate for future pricing intelligence and
+  // NOTHING reads it today, so a zero written here has no symptom until the day
+  // someone builds the feature that averages it. That is exactly the shape of
+  // defect a mutation suite exists for: the tests are the only thing that will
+  // ever notice a regression here, so they had better actually catch one.
+  //
+  // O01-O03 restore the pre-fix write at each of the three sites, verbatim.
+  {
+    id: 'O01-VALUATION-COMPLETED-RECORDS-ZERO',
+    target: 'contextObs',
+    invariant: 'A degraded valuation records NO price at VALUATION_COMPLETED.',
+    kills: ['OB-01 VALUATION_COMPLETED: unpriced (guard degrade, mislabelled ai_estimate) records no numeric price'],
+    find: '        price_mid:    observedPriceMid(analysisResult.marketValue),',
+    replace: '        price_mid:    analysisResult.marketValue?.mid,',
+  },
+  {
+    id: 'O02-VALUATION-CONFIRMED-RECORDS-ZERO',
+    target: 'contextObs',
+    invariant: 'A degraded valuation records NO price at VALUATION_CONFIRMED.',
+    // The third sink, absent from the Phase A brief and found while fixing the
+    // other two. A confirmation is the strongest human signal collected, so a ₪0
+    // here would be the most trustworthy-looking bad price in the table.
+    kills: ['OB-01 VALUATION_CONFIRMED: unpriced (guard degrade, mislabelled ai_estimate) records no numeric price'],
+    find: '      price_mid:  observedPriceMid(result.marketValue),',
+    replace: '      price_mid:  result.marketValue?.mid,',
+  },
+  {
+    id: 'O03-LISTING-CREATED-RECORDS-ZERO',
+    target: 'contextObs',
+    invariant: 'A degraded valuation records NO ai_price_mid at LISTING_CREATED.',
+    // Worse than a bad row: ai_price_mid exists to compute the accuracy delta
+    // (real − estimate), so a 0 scores the AI as maximally wrong on an item it
+    // honestly declined to price.
+    kills: ['OB-01 LISTING_CREATED: unpriced (guard degrade, mislabelled ai_estimate) records no numeric price'],
+    find: '        ai_price_mid:   observedPriceMid(result?.marketValue),',
+    replace: '        ai_price_mid:   result?.marketValue?.mid,',
+  },
+
+  // O04-O07 attack the helper itself rather than the call sites — the ways a
+  // future edit could keep every call site looking correct while gutting them.
+  {
+    id: 'O04-HELPER-BYPASSES-HASREALPRICE',
+    target: 'utilsObs',
+    invariant: 'observedPriceMid delegates to the canonical predicate, defining no rule of its own.',
+    // The subtle version: `mid > 0` looks equivalent and is not. It admits a
+    // positive mid sitting on a zero low, and a manual_required status carrying
+    // a stale triple — both shapes hasRealPrice rejects.
+    kills: ['OB-06 observedPriceMid delegates to hasRealPrice and never invents a price'],
+    find: 'export const observedPriceMid = (mv) => (hasRealPrice(mv) ? Number(mv.mid) : null);',
+    replace: 'export const observedPriceMid = (mv) => (Number(mv?.mid) > 0 ? Number(mv.mid) : null);',
+  },
+  {
+    id: 'O05-HELPER-RETURNS-ZERO-NOT-NULL',
+    target: 'utilsObs',
+    invariant: 'The unpriced return is null so cleanPayload OMITS the key — never a numeric 0.',
+    // The whole fix hangs on this one value. `0` is a number, cleanPayload keeps
+    // numbers, and the row is then written with an observed price of ₪0 — the
+    // exact defect, reintroduced by a change that reads like a tidy-up.
+    kills: ['OB-01 VALUATION_COMPLETED: unpriced (explicit manual_required) records no numeric price'],
+    find: 'export const observedPriceMid = (mv) => (hasRealPrice(mv) ? Number(mv.mid) : null);',
+    replace: 'export const observedPriceMid = (mv) => (hasRealPrice(mv) ? Number(mv.mid) : 0);',
+  },
+  {
+    id: 'O06-HELPER-ACCEPTS-NEGATIVE',
+    target: 'utilsObs',
+    invariant: 'A negative price is not a price.',
+    kills: ['OB-07 no marketValue shape can put a non-positive price into any payload'],
+    find: 'export const observedPriceMid = (mv) => (hasRealPrice(mv) ? Number(mv.mid) : null);',
+    replace: 'export const observedPriceMid = (mv) => (Number.isFinite(Number(mv?.mid)) ? Number(mv.mid) : null);',
+  },
+  {
+    id: 'O07-MANUAL-REQUIRED-TREATED-AS-PRICED',
+    target: 'utilsObs',
+    invariant: 'An explicit manual_required status is never priced, whatever numbers ride along.',
+    // Drops only the status check from hasRealPrice, leaving the numeric half —
+    // so a manual_required verdict carrying a stale positive triple is recorded
+    // as a real observed price.
+    kills: ['OB-01 VALUATION_COMPLETED: unpriced (manual_required over a real triple) records no numeric price'],
+    find: "  if (mv.pricing_status === 'manual_required') return false;\n",
+    replace: '',
+  },
+
+  // O08-O09 attack the two POSITIVE markers. Without them "unpriced" can only be
+  // inferred from an absence, which is unreadable at analysis time — the same
+  // rule PR-03 enforces on the valuations row.
+  {
+    id: 'O08-COMPLETED-LOSES-MANUAL-MARKER',
+    target: 'contextObs',
+    invariant: 'VALUATION_COMPLETED marks the manual state positively via price_method.',
+    kills: ['OB-03 the unpriced state is an explicit marker, not merely a missing key'],
+    find: "        price_method: hasRealPrice(analysisResult.marketValue)\n          ? (analysisResult.marketValue?.price_method || 'ai_estimate')\n          : 'manual_required',",
+    replace: '        price_method: analysisResult.marketValue?.price_method,',
+  },
+  {
+    id: 'O09-LISTING-LOSES-PRICED-MARKER',
+    target: 'contextObs',
+    invariant: 'LISTING_CREATED distinguishes "no valuation" from "valuation, no price".',
+    kills: ['OB-03 the unpriced state is an explicit marker, not merely a missing key'],
+    find: '        ai_priced:      hasRealPrice(result?.marketValue),\n',
+    replace: '',
+  },
+
+  // O10 attacks the MECHANISM the omission strategy depends on. cleanPayload
+  // dropping nulls is why returning null is sufficient; if it starts preserving
+  // them, every degraded row gains a `price_mid: null` key and the absence that
+  // OB-01 asserts becomes a silent schema change.
+  //
+  // It needs BOTH edits, and finding that out was worth the detour. cleanPayload
+  // rejects null TWICE, independently: the explicit `v === null` guard, and then
+  // the type allowlist — `typeof null` is 'object', which the allowlist does not
+  // admit. Mutating either line ALONE is an EQUIVALENT mutant: the other layer
+  // still drops the key, behaviour is unchanged, and the harness (which has no
+  // "equivalent" verdict) reports SURVIVED, indistinguishable from a real test
+  // gap. Both were tried and both survived for exactly that reason.
+  //
+  // This is the case the header of this file describes: a layered defence has to
+  // have every layer removed before the behaviour actually changes. Recorded
+  // rather than trimmed, because "cleanPayload has defence in depth against
+  // null" is a property the price fix quietly depends on and nothing else states.
+  {
+    id: 'O10-CLEANPAYLOAD-PRESERVES-NULL',
+    target: 'observations',
+    invariant: 'cleanPayload omits null-valued keys — the asymmetry the price fix relies on.',
+    kills: ['OB-08 cleanPayload drops null/undefined and keeps 0 — the asymmetry the fix relies on'],
+    edits: [
+      { find: '    if (v === null || v === undefined) continue;',
+        replace: '    if (v === undefined) continue;' },
+      { find: "    if (t === 'string' || t === 'number' || t === 'boolean') out[k] = v;",
+        replace: "    if (v === null || t === 'string' || t === 'number' || t === 'boolean') out[k] = v;" },
+    ],
+  },
+
+  // O11 is the regression-proofing test's own mutant: if the source scan that
+  // bans a direct marketValue read stops matching, a FOURTH observation site
+  // could reintroduce the defect with every behavioural test still green.
+  {
+    id: 'O11-DIRECT-READ-SCAN-STOPS-MATCHING',
+    target: 'contextObs',
+    invariant: 'A new observation payload cannot read marketValue.mid directly.',
+    // Simulates the future fourth site by adding one to an existing payload.
+    kills: ['OB-09 no recordObservation payload reads marketValue?.mid directly'],
+    find: '      ai_priced:  hasRealPrice(result.marketValue),',
+    replace: '      ai_priced:  hasRealPrice(result.marketValue),\n      raw_mid:    result.marketValue?.mid,',
+  },
+
+  // O12 covers the two properties O11 does not. The first draft of OB-09 scanned
+  // AppContext ALONE and matched only the `recordObservation(OBS.X, {` shape —
+  // and there is an eighth call site, in CameraResultsView.jsx, that is in
+  // neither set: different file, and it passes its event type as a STRING
+  // LITERAL. It carries no price today, which is exactly why the narrow guard
+  // looked sufficient. This mutant adds a price there, so the widened scan is
+  // proven against the file and the call shape that actually escaped it.
+  {
+    id: 'O12-FOURTH-SITE-IN-ANOTHER-FILE',
+    target: 'camera',
+    invariant: 'The direct-read ban covers EVERY file and BOTH recordObservation call shapes.',
+    kills: ['OB-09 no recordObservation payload reads marketValue?.mid directly'],
+    find: '      confidence: result.confidence,\n      tier,',
+    replace: '      confidence: result.confidence,\n      price_mid:  result.marketValue?.mid,\n      tier,',
+  },
+
+  // ── UI-003 Wave 0 — Gap B: `new_retail` ───────────────────────────────────
+  //
+  // The column outside the valuation band, and so the one the band's guard never
+  // covered. `|| 0` at the constructors meant the value was ALWAYS a number,
+  // which in turn made `?? null` at both persistence sites unreachable code —
+  // the defect had two halves and removing either alone leaves it live. G01/G04
+  // restore the constructors, G02/G03 restore the dead fallbacks.
+  {
+    id: 'G01-RETAIL-CONSTRUCTOR-DEFAULTS-ZERO',
+    target: 'analyzeGuard',
+    invariant: 'The marketValue constructor emits null, not 0, for an absent retail reference.',
+    kills: ['PB-13 no new_retail path can reintroduce `|| 0` / `?? 0` / a literal zero'],
+    find: '      newRetailPrice: positivePriceOrNull(verification.new_retail_price_ils),',
+    replace: '      newRetailPrice: verification.new_retail_price_ils || 0,',
+  },
+  {
+    id: 'G04-FALLBACK-CONSTRUCTOR-DEFAULTS-ZERO',
+    target: 'analyzeGuard',
+    invariant: 'The Stage 2 fallback constructor emits null, not 0, for an absent catalog retail.',
+    // The larger of the two producers in practice: `_db_retail` is absent
+    // whenever no catalog row resolved, which is the common case on this path.
+    kills: ['PB-13 no new_retail path can reintroduce `|| 0` / `?? 0` / a literal zero'],
+    find: '    new_retail_price_ils: positivePriceOrNull(fp._db_retail),',
+    replace: '    new_retail_price_ils: fp._db_retail || 0,',
+  },
+  {
+    id: 'G06-CATALOG-RETAIL-ORIGIN-DEFAULTS-ZERO',
+    target: 'analyzeGuard',
+    invariant: '_db_retail never carries "unknown" encoded as 0, even though its only reader normalizes.',
+    kills: ['PB-13 no new_retail path can reintroduce `|| 0` / `?? 0` / a literal zero'],
+    find: '    _db_retail:          positivePriceOrNull(row.retail_price_ils),',
+    replace: '    _db_retail:          row.retail_price_ils || 0,',
+  },
+  {
+    id: 'G02-SERVER-ROW-RESTORES-DEAD-FALLBACK',
+    target: 'analyze',
+    invariant: 'The server row NORMALIZES new_retail rather than passing it through.',
+    // `?? null` catches only null/undefined, so it never caught the 0 the
+    // constructor produced — and a result replayed from an older deploy still
+    // carries one. This is the exact expression that shipped.
+    kills: ['PR-07 both writers persist NULL new_retail when the reference is zero'],
+    find: '        new_retail:        positivePriceOrNull(result.marketValue?.newRetailPrice),',
+    replace: '        new_retail:        result.marketValue?.newRetailPrice ?? null,',
+  },
+  {
+    id: 'G03-CLIENT-ROW-RESTORES-DEAD-FALLBACK',
+    target: 'context',
+    invariant: 'The client backup row applies the SAME normalization as the server.',
+    kills: ['PR-07 both writers persist NULL new_retail when the reference is zero'],
+    find: '      new_retail: positivePriceOrNull(aiResult.marketValue?.newRetailPrice),',
+    replace: '      new_retail: aiResult.marketValue?.newRetailPrice ?? null,',
+  },
+  {
+    id: 'G05-CLIENT-MIRROR-DRIFTS-ON-ZERO',
+    target: 'utilsPersist',
+    invariant: 'The client mirror of positivePriceOrNull cannot drift from the guard.',
+    // `>= 0` admits exactly the value the whole fix exists to reject, and only
+    // on the client — so the two writers of the same row id would disagree and
+    // the stored value would depend on which upsert landed first.
+    kills: ['PR-10 server and client agree on new_retail for EVERY input shape'],
+    find: '  return Number.isFinite(n) && n > 0 ? n : null;',
+    replace: '  return Number.isFinite(n) && n >= 0 ? n : null;',
   },
 ];
 

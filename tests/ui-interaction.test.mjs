@@ -408,6 +408,136 @@ describe('Sheet', () => {
   });
 });
 
+// ── UI-003 wave 0: interactive surfaces ─────────────────────────────────────
+describe('Card', () => {
+  // console.error is React's own channel too, so it is captured rather than
+  // silenced — a test that swallows it would hide a real React warning.
+  const captureErrors = async (fn) => {
+    const original = console.error;
+    const seen = [];
+    console.error = (...a) => seen.push(a.join(' '));
+    try { await fn(); } finally { console.error = original; }
+    return seen;
+  };
+
+  test('a plain Card is inert — no role, no tab stop, no handler', async () => {
+    const view = await mount(h(UI.Card, { 'data-probe': 'c' }, 'body'));
+    const el = container.querySelector('[data-probe]');
+    assert.equal(el.tagName, 'DIV');
+    assert.equal(el.hasAttribute('role'), false);
+    assert.equal(el.hasAttribute('tabindex'), false);
+    await view.unmount();
+  });
+
+  test('REFUSES onClick — a div with a click handler is not a control', async () => {
+    // The defect this replaces: Card forwarded onClick onto its `as: 'div'`
+    // default, so ListingCard — Browse, Saved and every seller grid — was a
+    // click target with no tab stop, no role, no Enter/Space and no name.
+    // Accepting the prop and quietly bolting on role="button" would be worse:
+    // ListingCard also holds a save <button>, so the container would have become
+    // an interactive element wrapping another one.
+    let clicks = 0;
+    let view;
+    // The refusal must also be LOUD. A handler that is dropped silently is how a
+    // call site ships believing it made something pressable.
+    const errors = await captureErrors(async () => {
+      view = await mount(h(UI.Card, { 'data-probe': 'c', onClick: () => clicks++ }, 'body'));
+    });
+    assert.ok(errors.some((e) => /\[Card\]/.test(e) && /onClick/.test(e)),
+      'Card dropped the handler without saying so');
+
+    const el = container.querySelector('[data-probe]');
+    el.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(clicks, 0, 'Card attached a click handler to a non-interactive element');
+    assert.equal(el.hasAttribute('onclick'), false, 'the prop must not reach the DOM node either');
+    assert.equal(el.hasAttribute('role'), false,
+      'role="button" on a container that may hold a button is not the fix');
+    await view.unmount();
+  });
+
+  test('`interactive` gives the surface its affordance and nothing else', async () => {
+    // Affordance and behaviour are deliberately separate: the card may LOOK
+    // pressable while the thing that is pressed is a real control inside it.
+    const view = await mount(h(UI.Card, { 'data-probe': 'c', interactive: true }, 'body'));
+    const el = container.querySelector('[data-probe]');
+    assert.match(el.className, /\bcursor-pointer\b/);
+    assert.match(el.className, /\bstate-layer\b/);
+    assert.equal(el.hasAttribute('role'), false);
+    assert.equal(el.hasAttribute('tabindex'), false);
+    await view.unmount();
+  });
+
+  test('is always positioned, so a stretched overlay has something to stretch to', async () => {
+    // StretchedTarget's ::before is `inset-0` of the nearest POSITIONED
+    // ancestor. If Card ever stopped being `relative`, the overlay would escape
+    // to the viewport — invisible in jsdom, catastrophic on screen.
+    const view = await mount(h(UI.Card, { 'data-probe': 'c' }, 'body'));
+    assert.match(container.querySelector('[data-probe]').className, /\brelative\b/);
+    await view.unmount();
+  });
+});
+
+describe('StretchedTarget', () => {
+  test('is a real button, so Enter and Space activate it natively', async () => {
+    // The tag is the assertion. A div with role="button" needs a hand-written
+    // key handler that must then be kept correct forever; a <button> gets
+    // Enter/Space, the disabled semantics and the tab stop from the platform.
+    const view = await mount(h(UI.StretchedTarget, { onClick() {} }, 'Camera'));
+    const el = container.querySelector('button');
+    assert.ok(el, 'the target must be a real button');
+    assert.equal(el.getAttribute('type'), 'button', 'an untyped button submits any enclosing form');
+    await view.unmount();
+  });
+
+  test('takes its accessible name from the visible text', async () => {
+    const view = await mount(h(UI.StretchedTarget, { onClick() {} }, 'Canon EOS 700D'));
+    const el = container.querySelector('button');
+    assert.equal(el.textContent, 'Canon EOS 700D');
+    assert.equal(el.hasAttribute('aria-label'), false,
+      'an aria-label here would override the visible text and break voice control');
+    await view.unmount();
+  });
+
+  test('claims the whole card as its hit area via ::before, not ::after', async () => {
+    // Invisible to jsdom (no layout), so the CLASS contract is what is asserted.
+    // `.state-layer` already owns ::after — an `after:` overlay here would be
+    // silently erased by the card's own interaction layer.
+    const view = await mount(h(UI.StretchedTarget, { onClick() {} }, 'x'));
+    const cls = container.querySelector('button').className;
+    assert.match(cls, /\bbefore:absolute\b/, 'the overlay must be positioned');
+    assert.match(cls, /\bbefore:inset-0\b/, 'the overlay must span its positioned ancestor');
+    assert.ok(!/\bafter:(absolute|inset-0)\b/.test(cls), 'the state layer already owns ::after');
+    await view.unmount();
+  });
+
+  test('carries no overflow clipping of its own', async () => {
+    // The overlay is a child pseudo-element, so `truncate`/`overflow-hidden` ON
+    // the target erases the full-card hit area entirely while the markup still
+    // reads correct. Truncation belongs on an inner span.
+    const view = await mount(h(UI.StretchedTarget, { onClick() {}, className: 'block w-full' }, 'x'));
+    const cls = container.querySelector('button').className;
+    assert.ok(!/\b(truncate|overflow-hidden)\b/.test(cls),
+      'overflow on the target clips away the very overlay that makes the card tappable');
+    await view.unmount();
+  });
+
+  test('aligns to the logical start so a Hebrew title is not centred', async () => {
+    const view = await mount(h(UI.StretchedTarget, { onClick() {} }, 'x'));
+    const cls = container.querySelector('button').className;
+    assert.match(cls, /\btext-start\b/);
+    assert.ok(!/\btext-(left|right)\b/.test(cls), 'a physical side breaks under dir="rtl"');
+    await view.unmount();
+  });
+
+  test('fires its handler', async () => {
+    let opened = 0;
+    const view = await mount(h(UI.StretchedTarget, { onClick: () => opened++ }, 'x'));
+    container.querySelector('button').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(opened, 1);
+    await view.unmount();
+  });
+});
+
 // ── UI-002B primitives ──────────────────────────────────────────────────────
 describe('IconButton', () => {
   const Dot = (props) => h('svg', props);
@@ -776,6 +906,91 @@ describe('ListingCard (buyer surface)', () => {
     container.querySelector('button').dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
     assert.equal(saved, 1, 'the save control must reach toggleSave');
     assert.equal(viewed, 0, 'saving must not also open the listing');
+    await view.unmount();
+  });
+
+  // ── UI-003 wave 0 — keyboard reachability ─────────────────────────────────
+  // This card is the app's primary browse affordance, shared by Browse, Saved
+  // and every seller-profile grid. It used to be a <div> with a click handler:
+  // zero tab stops, so the entire marketplace was unreachable by keyboard and
+  // by switch control.
+  test('is exactly two tab stops — open the item, save the item', async () => {
+    const view = await mount(h(ListingCard, { ...props, toggleSave() {}, viewItem() {} }));
+    const stops = container.querySelectorAll(
+      'button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    assert.equal(stops.length, 2,
+      `expected [save, open], got ${[...stops].map((e) => e.tagName + ':' + e.textContent).join(' | ')}`);
+    await view.unmount();
+  });
+
+  test('nests no control inside another control', async () => {
+    // A <button> inside a <button> — which is what "make the container a button"
+    // would have produced here — is invalid, and costs the user a phantom tab
+    // stop whose activation region overlaps a different control.
+    const view = await mount(h(ListingCard, { ...props, toggleSave() {}, viewItem() {} }));
+    for (const el of container.querySelectorAll('button, a[href]')) {
+      assert.equal(el.querySelector('button, a[href]'), null,
+        'an interactive element contains another interactive element');
+    }
+    await view.unmount();
+  });
+
+  test('the control that opens the item is named by the visible title', async () => {
+    const view = await mount(h(ListingCard, { ...props, toggleSave() {}, viewItem() {} }));
+    const open = [...container.querySelectorAll('button')].find((b) => /Camera/.test(b.textContent));
+    assert.ok(open, 'no control carries the listing title — the open action has no accessible name');
+    assert.equal(open.getAttribute('type'), 'button');
+    // Inside the heading, so the card still contributes to the document outline.
+    assert.ok(open.closest('h3'), 'the title control must stay inside its heading');
+    await view.unmount();
+  });
+
+  test('keyboard activation of the title control opens the item and does not save it', async () => {
+    let viewed = 0, saved = 0;
+    const view = await mount(
+      h(ListingCard, { ...props, toggleSave: () => saved++, viewItem: () => viewed++ }));
+    const open = [...container.querySelectorAll('button')].find((b) => /Camera/.test(b.textContent));
+
+    open.focus();
+    assert.equal(document.activeElement, open, 'the open control must be focusable');
+    // jsdom does not synthesise a click from Enter on a button, so the platform
+    // behaviour is asserted structurally (a real <button>, above) and the
+    // resulting activation is exercised directly.
+    open.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(viewed, 1, 'activating the title must open the listing');
+    assert.equal(saved, 0, 'opening must not toggle save');
+    await view.unmount();
+  });
+
+  test('the save control has a name that distinguishes it in a grid of twenty', async () => {
+    const view = await mount(h(ListingCard, { ...props, toggleSave() {}, viewItem() {} }));
+    const save = container.querySelector('button');           // first in document order
+    const label = save.getAttribute('aria-label');
+    assert.ok(label, 'an icon-only control with no name is announced as just "button"');
+    assert.match(label, /Camera/, 'twenty identical "Save" buttons identify nothing');
+    // State is carried by aria-pressed, not by a name that flips mid-toggle.
+    assert.equal(save.getAttribute('aria-pressed'), 'false');
+    await view.unmount();
+  });
+
+  test('the save control announces its state through aria-pressed', async () => {
+    const view = await mount(
+      h(ListingCard, { ...props, savedIds: new Set(['l1']), toggleSave() {}, viewItem() {} }));
+    const save = container.querySelector('button');
+    assert.equal(save.getAttribute('aria-pressed'), 'true');
+    assert.match(save.getAttribute('aria-label'), /Camera/,
+      'the name must stay constant across states — aria-pressed carries the state');
+    await view.unmount();
+  });
+
+  test('the save control sits above the stretched overlay', async () => {
+    // Both are absolutely positioned at z-auto, so paint order is document
+    // order — and the overlay comes later. Without an explicit layer the heart
+    // is unclickable, and no DOM assertion about the handler would notice.
+    const view = await mount(h(ListingCard, { ...props, toggleSave() {}, viewItem() {} }));
+    assert.match(container.querySelector('button').className, /\bz-raised\b/,
+      'the save control would be swallowed by the title overlay');
     await view.unmount();
   });
 });

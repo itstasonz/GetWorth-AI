@@ -27,6 +27,9 @@ const G = await import(GUARD_URL.href);
 const {
   validateQuote, resolveEnvelope, derivePricingSource, normalizeConditionBasis,
   conditionDelta, applyTransform,
+  isPricedVerdict, isPricedMarketValue, resolvePricingStatus, resolvePricingGrade,
+  positivePriceOrNull,
+  MANUAL_REQUIRED_STATUS,
   ENVELOPES, CONDITION_LADDER, VALIDATOR_VERSION, RULESET_VERSION,
 } = G;
 
@@ -643,4 +646,309 @@ test('M-06 (kills M22) the guard applies no condition math via the QUOTE field e
   const v = validateQuote(q({ condition: 'Poor' }), ctx({ anchor: ANCHOR }));
   assert.equal(v.metadata.condition_basis, 'poor');
   assert.equal(v.prices.mid, 1200, 'the emitted mid must be the quote mid, unadjusted');
+});
+
+// ══ I. presentation boundary — MANUAL_REQUIRED never becomes a priced status ══
+// UI-003 Wave 0. The defect: api/analyze.js gated the manual-pricing status on
+// `degraded && pricing_source === 'manual_required'`, but degrade() preserves
+// the ORIGINALLY DERIVED source, so every rejected quote fell through to
+// `ai_estimate` carrying a 0/0/0 triple. These tests pin the invariant that the
+// permission (action/degraded/grade/prices) and the diagnostic (pricing_source)
+// are never conflated again.
+
+// Every source derivePricingSource can produce. If ANY of them can escape the
+// boundary, the defect is back.
+const ALL_SOURCE_CTXS = [
+  ['stage2_ai',            ctx()],
+  ['stage2_comp_anchored', ctx({ anchor: ANCHOR })],
+  ['pre_catalog',          ctx({ stage: 'pre', pre_source: 'catalog' })],
+  ['pre_haiku',            ctx({ stage: 'pre', pre_source: 'ai_haiku' })],
+  ['category_bucket',      ctx({ stage: 'pre', pre_source: 'category_anchor' })],
+  ['manual_required',      ctx({ stage: 'pre', pre_source: 'none' })],
+  ['unknown',              ctx({ stage: 'weird' })],
+];
+
+test('PB-01 a degraded verdict is unpriced for EVERY derived pricing_source', () => {
+  for (const [name, c] of ALL_SOURCE_CTXS) {
+    // a non-finite mid is the exact reproduction case from the defect report
+    const v = validateQuote({ low: 100, mid: 'not-a-number', high: 900, price_method: 'ai_estimate' }, c);
+    assert.equal(v.action, 'degrade', `${name}: expected a degrade`);
+    assert.equal(isPricedVerdict(v), false, `${name}: a degraded verdict claimed to be priced`);
+    for (const candidate of ['ai_estimate', 'db_based', 'db_fallback', 'rescue_estimate', 'category_fallback', '', null, undefined]) {
+      assert.equal(resolvePricingStatus(v, candidate), MANUAL_REQUIRED_STATUS,
+        `${name}: candidate ${JSON.stringify(candidate)} promoted a degraded verdict to a priced status`);
+      assert.equal(resolvePricingGrade(v, 'HIGH'), 'MANUAL_REQUIRED',
+        `${name}: a degraded verdict kept a priced grade`);
+    }
+    // and the diagnostic is deliberately NOT manual_required — that is the whole
+    // point: the boundary must hold without it.
+    if (name !== 'manual_required') {
+      assert.equal(v.metadata.pricing_source, name,
+        `${name}: degrade() must preserve the derived source so the rejection stays attributable`);
+    }
+  }
+});
+
+test('PB-02 zero is never a priced status — no flag combination can override the number', () => {
+  // A hand-built verdict with every flag saying "fine" and a 0 mid. The numeric
+  // half of the predicate must reject it on its own.
+  const clean = (prices) => ({
+    action: 'accept', prices, currency: 'ILS', repairs: [], violations: [],
+    metadata: { pricing_source: 'stage2_comp_anchored', pricing_grade: 'HIGH', degraded: false, needs_review: false },
+  });
+  for (const prices of [
+    { low: 0, mid: 0, high: 0 },
+    { low: 0, mid: 1200, high: 1800 },
+    { low: -5, mid: -5, high: -5 },
+    { low: 800, mid: NaN, high: 1800 },
+    { low: 800, mid: 1200, high: 900 },   // high < mid
+    { low: 800, mid: null, high: 1800 },
+  ]) {
+    const v = clean(prices);
+    assert.equal(isPricedVerdict(v), false, `priced a bad triple ${JSON.stringify(prices)}`);
+    assert.equal(resolvePricingStatus(v, 'db_based'), MANUAL_REQUIRED_STATUS,
+      `emitted db_based over ${JSON.stringify(prices)}`);
+    assert.equal(resolvePricingGrade(v, 'HIGH'), 'MANUAL_REQUIRED');
+  }
+  assert.equal(isPricedVerdict(null), false, 'a missing verdict must be unpriced');
+  assert.equal(resolvePricingStatus(null, 'ai_estimate'), MANUAL_REQUIRED_STATUS);
+});
+
+test('PB-03 the V-ZERO-STATE accept path is unpriced too (accept != priced)', () => {
+  const v = validateQuote(q({ low: 0, mid: 0, high: 0, pricing_status: 'manual_required' }), ctx());
+  assert.equal(v.action, 'accept', 'precondition: the zero state is accepted, not a violation');
+  assert.equal(isPricedVerdict(v), false, 'an ACCEPTED zero state must still be unpriced');
+  assert.equal(resolvePricingStatus(v, 'ai_estimate'), MANUAL_REQUIRED_STATUS);
+});
+
+test('PB-03b `degraded` alone is disqualifying — each half of the predicate stands on its own', () => {
+  // Not redundant with `action === 'degrade'`. `marketValue.validation` persists
+  // the METADATA (api/analyze.js writes {...verdict.metadata, action, …} into
+  // valuations.ai_raw_response and the memory observation ledger), so a verdict
+  // reconstructed from storage — or built by a future caller — can carry
+  // degraded:true with a stale action and a stale triple. Each disqualifying
+  // signal must be independently sufficient, which is what makes the boundary
+  // hold under partial data rather than only under the guard's own output.
+  const reconstructed = {
+    action: 'accept',                                  // stale / absent in storage
+    prices: { low: 800, mid: 1200, high: 1800 },       // the pre-rejection numbers
+    metadata: { pricing_source: 'stage2_ai', pricing_grade: 'HIGH', degraded: true,
+                degraded_reason: 'V-ENVELOPE-HARD: mid 1200 > hard_max' },
+  };
+  assert.equal(isPricedVerdict(reconstructed), false,
+    'degraded:true was ignored because the action and the numbers looked healthy');
+  assert.equal(resolvePricingStatus(reconstructed, 'db_based'), MANUAL_REQUIRED_STATUS);
+  assert.equal(resolvePricingGrade(reconstructed, 'HIGH'), 'MANUAL_REQUIRED');
+
+  // ...and the grade alone is disqualifying too, on the same reasoning.
+  const gradeOnly = {
+    action: 'accept', prices: { low: 800, mid: 1200, high: 1800 },
+    metadata: { pricing_source: 'stage2_comp_anchored', pricing_grade: 'MANUAL_REQUIRED', degraded: false },
+  };
+  assert.equal(isPricedVerdict(gradeOnly), false, 'a MANUAL_REQUIRED grade was ignored');
+  assert.equal(resolvePricingStatus(gradeOnly, 'db_based'), MANUAL_REQUIRED_STATUS);
+
+  // ...and so is a missing action, with everything else clean.
+  const actionOnly = {
+    action: 'degrade', prices: { low: 800, mid: 1200, high: 1800 },
+    metadata: { pricing_source: 'stage2_ai', pricing_grade: 'HIGH', degraded: false },
+  };
+  assert.equal(isPricedVerdict(actionOnly), false, 'action:degrade was ignored');
+});
+
+test('PB-04 a healthy verdict is priced, and the candidate label only ever narrows', () => {
+  const v = validateQuote(q(), ctx({ anchor: ANCHOR }));
+  assert.equal(isPricedVerdict(v), true);
+  assert.equal(resolvePricingStatus(v, 'db_based'), 'db_based');
+  assert.equal(resolvePricingStatus(v, 'rescue_estimate'), 'rescue_estimate');
+  assert.equal(resolvePricingStatus(v, ''), 'ai_estimate', 'a priced verdict with no label defaults to ai_estimate');
+  // a caller that itself knows the price is unusable is honoured, never overridden
+  assert.equal(resolvePricingStatus(v, MANUAL_REQUIRED_STATUS), MANUAL_REQUIRED_STATUS);
+  assert.equal(resolvePricingGrade(v, 'LOW'), 'HIGH', 'the verdict grade wins over the caller candidate');
+});
+
+test('PB-05 status and grade never disagree about whether a price exists, over the whole corpus', () => {
+  for (const { id, quote, c } of CORPUS) {
+    const v = validateQuote(quote, c);
+    const s = resolvePricingStatus(v, 'ai_estimate');
+    const g = resolvePricingGrade(v, 'MEDIUM');
+    assert.equal(s === MANUAL_REQUIRED_STATUS, g === 'MANUAL_REQUIRED',
+      `${id}: status=${s} disagrees with grade=${g}`);
+    if (s !== MANUAL_REQUIRED_STATUS) {
+      assert.ok(v.prices.mid > 0 && v.prices.low > 0 && v.prices.high >= v.prices.mid,
+        `${id}: priced as ${s} with triple ${JSON.stringify(v.prices)}`);
+    }
+  }
+});
+
+test('PB-06 a post-transform degrade is unpriced (the replica path cannot leak a priced status)', () => {
+  const v = validateQuote(q({ low: 800, mid: 1200, high: 1800 }), ctx());
+  assert.equal(isPricedVerdict(v), true, 'precondition');
+  const t = applyTransform(v, { multiplier: 0.07, reason: 'authenticity:low_quality_fake', ctx: ctx() });
+  assert.equal(t.action, 'degrade', 'precondition: 1200 x 0.07 = 84 is below the electronics:laptop floor');
+  assert.equal(isPricedVerdict(t), false);
+  assert.equal(resolvePricingStatus(t, 'ai_estimate'), MANUAL_REQUIRED_STATUS);
+});
+
+test('PB-07 isPricedMarketValue applies the same rule to the WIRE shape', () => {
+  // The persistence sinks and the client hold a normalized marketValue, not a
+  // verdict. The numeric half is what protects them from a response cached by a
+  // deploy that predates this fix: priced label, zero number.
+  assert.equal(isPricedMarketValue({ pricing_status: 'ai_estimate', low: 0, mid: 0, high: 0 }), false,
+    'the exact shipped-defect shape must be rejected');
+  assert.equal(isPricedMarketValue({ pricing_status: 'manual_required', low: 800, mid: 1200, high: 1800 }), false);
+  assert.equal(isPricedMarketValue({ pricing_status: 'db_based', low: 800, mid: 1200, high: 1800 }), true);
+  assert.equal(isPricedMarketValue({ pricing_status: 'ai_estimate', low: 800, mid: '1200', high: 1800 }), true,
+    'a numeric string over the wire is still a number');
+  assert.equal(isPricedMarketValue(null), false);
+  assert.equal(isPricedMarketValue({}), false);
+});
+
+test('PB-08 the client mirror (src/lib/utils.js hasRealPrice) cannot drift from the server rule', async () => {
+  // Duplicated deliberately (the guard is a serverless module carrying the whole
+  // envelope table), so — exactly as with CONDITION_LADDER / C-10 — assert
+  // BEHAVIOUR equality across a corpus rather than banning the duplicate.
+  const { hasRealPrice } = await import('../src/lib/utils.js');
+
+  // The corpus is GENERATED, not hand-listed. A curated list only catches the
+  // divergences its author thought of: an earlier version of this test missed
+  // `mid <= 0` weakened to `mid < 0`, because it happened to contain no case
+  // with mid === 0 and a positive low — the low check masked it and the test
+  // passed vacuously. The cross-product below exercises every field at every
+  // boundary independently, so no single-condition edit can hide behind another.
+  const VALUES = [undefined, null, NaN, -1, 0, 1, 800, 1200, 1800, '1200', '0'];
+  const STATUSES = [undefined, 'manual_required', 'ai_estimate', 'db_based'];
+  const CASES = [null, undefined, {}, { mid: 1200 }, { low: 800, high: 1800 }];
+  for (const pricing_status of STATUSES) {
+    for (const low of VALUES) for (const mid of VALUES) for (const high of VALUES) {
+      CASES.push({ pricing_status, low, mid, high });
+    }
+  }
+
+  let compared = 0;
+  for (const mv of CASES) {
+    assert.equal(hasRealPrice(mv), isPricedMarketValue(mv),
+      `client hasRealPrice has drifted from api/_lib/valuation-guard.js isPricedMarketValue for ${JSON.stringify(mv)}`);
+    compared++;
+  }
+  assert.ok(compared > 5000, `corpus collapsed to ${compared} cases — the drift test is no longer discriminating`);
+  // Both must actually DISCRIMINATE. Two functions that return false for every
+  // input would agree perfectly and prove nothing.
+  assert.ok(CASES.some((mv) => isPricedMarketValue(mv) === true), 'no case is priced — the corpus proves nothing');
+  assert.ok(CASES.some((mv) => isPricedMarketValue(mv) === false), 'no case is unpriced — the corpus proves nothing');
+});
+
+test('PB-09 api/analyze.js reads the boundary — the provenance-gated ternary is gone', async () => {
+  // A source assertion, because the hole was in the CALLER, not the guard: the
+  // guard was already emitting degraded/MANUAL_REQUIRED/0-0-0 correctly and
+  // analyze.js threw that away. Nothing in the module suite can see that.
+  const src = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
+  assert.ok(/pricing_status:\s*resolvePricingStatus\(/.test(src),
+    'analyze.js no longer routes pricing_status through resolvePricingStatus()');
+  assert.ok(/pricing_confidence:\s*resolvePricingGrade\(/.test(src),
+    'analyze.js no longer routes pricing_confidence through resolvePricingGrade()');
+  assert.ok(!/degraded\s*&&\s*\w+\.metadata\.pricing_source\s*===\s*'manual_required'/.test(src),
+    'the provenance-gated manual_required ternary is back — pricing_source is a diagnostic, not a permission');
+});
+
+test('PB-10 formatPrice no longer hides a zero (the accidental safety net is gone)', async () => {
+  // The old `p ? … : ''` made ₪0 invisible, which looked like a fix and was in
+  // fact the reason the shipped defect rendered a BLANK hero instead of ₪0.
+  // Hiding a zero is not fixing a zero: the source of truth is hasRealPrice.
+  const { formatPrice } = await import('../src/lib/utils.js');
+  assert.equal(formatPrice(0), '₪0', 'formatPrice must render a zero it is given');
+  assert.equal(formatPrice(null), '');
+  assert.equal(formatPrice(undefined), '');
+  assert.equal(formatPrice(''), '');
+  assert.equal(formatPrice(NaN), '');
+  assert.equal(formatPrice(1200), '₪1,200');
+});
+
+test('PB-11 calcPrice returns null (never 0) for the degraded shape', async () => {
+  const { calcPrice } = await import('../src/lib/utils.js');
+  assert.equal(calcPrice({ pricing_status: 'ai_estimate', low: 0, mid: 0, high: 0 }, 'used'), null,
+    'a degraded 0/0/0 mislabelled ai_estimate must not become a suggested listing price');
+  assert.equal(calcPrice({ pricing_status: 'manual_required', low: 0, mid: 0, high: 0 }, 'used'), null);
+  assert.equal(calcPrice(null, 'used'), null);
+  // the documented bare-number form still works (no band ⇒ delta 0)
+  assert.equal(calcPrice(1000, 'used'), 1000);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// UI-003 Wave 0 — Gap B: the reference-price rule
+// ══════════════════════════════════════════════════════════════════════════════
+
+test('PB-12 the client mirror (src/lib/utils.js positivePriceOrNull) cannot drift from the server rule', async () => {
+  // Same arrangement as PB-08 / C-10: duplicated deliberately (the guard is a
+  // serverless module carrying the whole envelope table), so assert BEHAVIOUR
+  // equality across a generated corpus rather than banning the duplicate.
+  const { positivePriceOrNull: client } = await import('../src/lib/utils.js');
+
+  const CASES = [
+    undefined, null, NaN, Infinity, -Infinity, '', ' ', '0', '700', '700.5', '-1', 'x', 'n/a',
+    -1, -0.0001, 0, 0.0001, 0.5, 1, 700, 1e9, true, false, {}, [], [700], '1e3', '0x10',
+  ];
+  let compared = 0, kept = 0;
+  for (const v of CASES) {
+    const s = positivePriceOrNull(v);
+    assert.deepEqual(s, client(v),
+      `client positivePriceOrNull has drifted from the guard for ${JSON.stringify(String(v))}: ` +
+      `server=${JSON.stringify(s)} client=${JSON.stringify(client(v))}`);
+    assert.ok(s === null || (typeof s === 'number' && Number.isFinite(s) && s > 0),
+      `positivePriceOrNull(${JSON.stringify(String(v))}) = ${JSON.stringify(s)} — must be null or finite > 0`);
+    if (s !== null) kept++;
+    compared++;
+  }
+  assert.ok(compared > 25, `corpus collapsed to ${compared} cases`);
+  // Both must DISCRIMINATE — two functions returning null for everything would
+  // agree perfectly and prove nothing (the PB-08 lesson).
+  assert.ok(kept > 3, 'no input was accepted — the corpus proves nothing');
+  assert.equal(positivePriceOrNull(0), null, 'zero must never be a reference price');
+  assert.equal(positivePriceOrNull(700), 700, 'a real retail price must survive unchanged');
+});
+
+test('PB-13 no new_retail path can reintroduce `|| 0` / `?? 0` / a literal zero', async () => {
+  // A source assertion for the same reason as PB-09: the defect was in the
+  // CONSTRUCTORS, two of them, and both fed a persistence site whose `?? null`
+  // was then dead code. The behavioural tests (PR-07..PR-10) cover the rows;
+  // this covers the two upstream expressions that produce the value, which no
+  // row test can reach without running the whole handler.
+  // Env-driven so the mutation harness can swap either file for a broken copy.
+  const read = (env, rel) => (process.env[env]
+    ? readFileSync(process.env[env], 'utf8')
+    : readFileSync(new URL(rel, import.meta.url), 'utf8'));
+  const files = {
+    'api/analyze.js': read('UI003_ANALYZE_PATH', '../api/analyze.js'),
+    'src/contexts/AppContext.jsx': read('UI003_CONTEXT_PATH', '../src/contexts/AppContext.jsx'),
+  };
+
+  const offenders = [];
+  for (const [name, src] of Object.entries(files)) {
+    src.split('\n').forEach((raw, i) => {
+      const line = raw.replace(/\/\/.*$/, '');
+      if (!/new_retail|newRetailPrice|_db_retail/i.test(line)) return;
+      //  `|| 0`, `?? 0`, or an outright `new_retail: 0` — every way the old
+      //  semantics could come back while still looking like a defaulting idiom.
+      if (/\|\|\s*0\b/.test(line) || /\?\?\s*0\b/.test(line) || /new_retail\s*:\s*0\b/.test(line)) {
+        offenders.push(`${name}:${i + 1} — ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [],
+    'A new_retail path defaults to 0 again. Zero is not a retail price: nothing is sold new ' +
+    'for ₪0, so a 0 can only mean "unknown" — stored as a number that every future ' +
+    'AVG/SUM treats as a fact. Use positivePriceOrNull().\nOffenders:\n  ' + offenders.join('\n  '));
+
+  // …and the rule must actually be WIRED, not merely un-violated: a file with no
+  // new_retail handling at all would pass the ban above vacuously.
+  assert.match(files['api/analyze.js'],
+    /newRetailPrice:\s*positivePriceOrNull\(/, 'analyze.js no longer normalizes newRetailPrice');
+  assert.match(files['api/analyze.js'],
+    /new_retail:\s*positivePriceOrNull\(/, 'the server row no longer normalizes new_retail');
+  assert.match(files['api/analyze.js'],
+    /new_retail_price_ils:\s*positivePriceOrNull\(/, 'the Stage 2 fallback no longer normalizes new_retail_price_ils');
+  assert.match(files['api/analyze.js'],
+    /_db_retail:\s*positivePriceOrNull\(/, 'the catalog-row reader no longer normalizes _db_retail');
+  assert.match(files['src/contexts/AppContext.jsx'],
+    /new_retail:\s*positivePriceOrNull\(/, 'the client backup row no longer normalizes new_retail');
 });

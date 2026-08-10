@@ -115,11 +115,54 @@ const T = {
     priceQuickEst:     'Quick estimate — verify before listing',
     priceFromCategory: 'Estimated from category data',
     priceSetManually:  'Set your own price',
-    priceVerificationPending: 'Price subject to authenticity verification',
+    // UI-003 Wave 0: this used to read "Price subject to authenticity
+    // verification", which describes a service that does not exist. Nothing
+    // gates the number — `verification_required` is a LABEL, not a hold:
+    // analyze.js:2439 sets it and no pricing step reads it, so the same figure
+    // ships either way. The honest statement is what the price assumed.
+    priceVerificationPending: 'Priced as authentic — authenticity unconfirmed',
     priceReplicaAdjusted:     'Replica-adjusted estimate',
 
     estimateOnly:      'An estimate, not a guaranteed sale price.',
     enterPricePrompt:  'Enter a price to continue',
+
+    // ── Authenticity (UI-003 Wave 0) ──
+    // Every string here describes what a MODEL saw in a photograph. None of
+    // them may read as a credential: no "Verified", no "Authenticated", no
+    // trailing checkmark. See the comment block above the badge in
+    // CameraResultsView for the full reasoning; the short version is that no
+    // third-party verification occurs anywhere in the scan path.
+    authSerialSeen:    'AI read a serial',
+    authDocsSeen:      'AI read a document',
+    authSignsSeen:     'AI: authenticity signs',
+    authIndicators:    'AI found authenticity indicators',
+    authUncertain:     'AI could not confirm authenticity',
+    authExpertAdvised: 'Expert check advised',
+    authFakeSigns:     'AI: counterfeit signs',
+    authReplicaSigns:  'AI: replica signs',
+    authNotInPhotos:   'Not visible in your photos:',
+
+    // ── Serial capture (UI-003 Wave 0) ──
+    // These describe an EVENT — a value was captured — never a check. The
+    // `verified` flag behind them is set by a regex that saw "S/N" next to six
+    // characters, or, for a typed serial, by `length >= 8`. So the seller-facing
+    // copy says "captured" and the BUYER-facing chip says the seller provided
+    // it, with no checkmark and no shield. See serialProvided below.
+    serialCaptured:    'Serial captured',
+    imeiCaptured:      'IMEI captured',
+    // Buyer-facing. Attributes the claim to the SELLER, which is who made it.
+    // It replaced 'Serial verified' / 'מספר סידורי אומת' — `אומת` being the word
+    // this app reserves for operator-checked identity, rendered on a green check
+    // directly beside the genuine 'Verified ID' chip.
+    serialProvided:    'Serial provided by seller',
+
+    // Serial capture. `serialData.verified` is NOT a verification — see the
+    // comment at the serial control in CameraResultsView. These strings state
+    // only what actually happened: a value was captured, or supplied.
+    serialAdded:       'Serial added',
+    serialAddedImei:   'IMEI added',
+    serialAddAction:   'Add',
+    serialProvided:    'Serial provided',
 
     // Time
     today: 'Today',
@@ -348,11 +391,42 @@ const T = {
     priceQuickEst:     'הערכה מהירה — בדוק לפני פרסום',
     priceFromCategory: 'הערכה לפי נתוני קטגוריה',
     priceSetManually:  'קבע מחיר בעצמך',
-    priceVerificationPending: 'מחיר תלוי אימות אותנטיות',
+    // UI-003 Wave 0 — see the English. 'מחיר תלוי אימות אותנטיות' promised an
+    // authenticity check that gates the price; no such check exists.
+    priceVerificationPending: 'מתומחר כמקורי — האותנטיות לא אושרה',
     priceReplicaAdjusted:     'מחיר מותאם לרפליקה',
 
     estimateOnly:      'הערכה בלבד — לא מחיר מכירה מובטח.',
     enterPricePrompt:  'הזן מחיר כדי להמשיך',
+
+    // ── אותנטיות (UI-003 Wave 0) — must carry the SAME claim as the English.
+    // מאומת / אומת are deliberately absent from this entire block. They are
+    // reserved for a fact an operator checked (is_verified — utils.js:271), and
+    // a model reading a photograph is not one. In Hebrew, the app's DEFAULT
+    // language, מאומת was the single word that made an AI guess and a real
+    // credential render identically; do not reintroduce it here.
+    authSerialSeen:    'AI קרא מספר סידורי',
+    authDocsSeen:      'AI קרא מסמך',
+    authSignsSeen:     'AI: סימני מקוריות',
+    authIndicators:    'AI זיהה סימני מקוריות',
+    authUncertain:     'AI לא הצליח לקבוע אותנטיות',
+    authExpertAdvised: 'מומלץ אימות מומחה',
+    authFakeSigns:     'AI: סימני זיוף',
+    authReplicaSigns:  'AI: סימני רפליקה',
+    authNotInPhotos:   'לא נראה בתמונות שלך:',
+
+    // ── קליטת מספר סידורי (UI-003 Wave 0) — see the English.
+    // אומת / מאומת are deliberately absent: nothing here was checked. The buyer
+    // chip names the SELLER as the source of the claim.
+    serialCaptured:    'מספר סידורי נקלט',
+    imeiCaptured:      'IMEI נקלט',
+    serialProvided:    'מספר סידורי שסופק ע״י המוכר',
+
+    // מספר סידורי — ראה את האנגלית. אין כאן אימות, ולכן אין כאן אומת/מאומת.
+    serialAdded:       'מספר סידורי נוסף',
+    serialAddedImei:   'IMEI נוסף',
+    serialAddAction:   'הוסף',
+    serialProvided:    'מספר סידורי סופק',
 
     // Time
     today: 'היום',

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
@@ -2030,6 +2030,11 @@ export function AppProvider({ children }) {
   // row even if the server later succeeds. Retried; failures are reported.
   const backupValuation = useCallback(async (aiResult, maxAttempts = 2) => {
     if (!user || !aiResult?.valuation_id) return null;
+    // UI-003 Wave 0 — mirrors the server's record_scan row (api/analyze.js).
+    // This writer upserts the SAME row id, so it must persist the same
+    // semantics: an unpriced scan is stored as unpriced, never as a ₪0
+    // ai_estimate. See hasRealPrice / isPricedMarketValue.
+    const priced = hasRealPrice(aiResult.marketValue);
     const row = {
       id: aiResult.valuation_id,                 // server-decided → idempotent
       user_id: user.id,
@@ -2044,11 +2049,24 @@ export function AppProvider({ children }) {
       model_number: aiResult.recognition?.modelNumber || null,
       identified_by: aiResult.recognition?.identifiedBy || 'visual',
       alternatives: aiResult.recognition?.alternatives || [],
-      price_low: aiResult.marketValue?.low ?? null,
-      price_mid: aiResult.marketValue?.mid ?? null,
-      price_high: aiResult.marketValue?.high ?? null,
-      new_retail: aiResult.marketValue?.newRetailPrice ?? null,
-      price_method: aiResult.marketValue?.price_method || 'ai_estimate',
+      // NULL, not 0: zero is not a price. A 0 here is indistinguishable from an
+      // item genuinely worth nothing, renders as a ₪0 valuation in history
+      // (AuthProfileView gates on price_mid > 0), and drags every aggregate over
+      // the column toward zero — NULL is skipped by SQL aggregates and is the
+      // honest "we do not know".
+      price_low: priced ? aiResult.marketValue.low : null,
+      price_mid: priced ? aiResult.marketValue.mid : null,
+      price_high: priced ? aiResult.marketValue.high : null,
+      // Gap B: identical normalization to the server row (api/analyze.js). Both
+      // writers upsert the SAME row id, so a disagreement here about whether 0
+      // means "free" or "unknown" would be resolved by whichever lands first.
+      new_retail: positivePriceOrNull(aiResult.marketValue?.newRetailPrice),
+      // The manual-pricing state is an EXPLICIT marker in the row, not the
+      // absence of a price. The server already sets this on marketValue; the
+      // fallback covers a response from an older deploy.
+      price_method: priced
+        ? (aiResult.marketValue?.price_method || 'ai_estimate')
+        : 'manual_required',
       comp_count: aiResult._pipeline?.db_matches ?? null,
       lang,
     };
@@ -2233,11 +2251,21 @@ export function AppProvider({ children }) {
       }
 
       // GW-005A: real user signal — a scan produced a valuation (ids + facts only).
+      //
+      // UI-003 Wave 0: `price_mid` is null (→ key omitted by cleanPayload) unless
+      // the guard actually priced this scan. `price_method` carries the POSITIVE
+      // manual_required marker in that case, exactly as the valuations row does
+      // (backupValuation above, api/analyze.js normalizeForUI) — the unpriced
+      // state is a marker in the payload, never merely the absence of one. It is
+      // derived locally rather than trusted from the response, so a result cached
+      // by a pre-fix deploy cannot reintroduce 'ai_estimate' over a 0 mid.
       recordObservation(OBS.VALUATION_COMPLETED, {
         category:     analysisResult.category,
         confidence:   analysisResult.confidence,
-        price_mid:    analysisResult.marketValue?.mid,
-        price_method: analysisResult.marketValue?.price_method,
+        price_mid:    observedPriceMid(analysisResult.marketValue),
+        price_method: hasRealPrice(analysisResult.marketValue)
+          ? (analysisResult.marketValue?.price_method || 'ai_estimate')
+          : 'manual_required',
         comp_count:   analysisResult._pipeline?.db_matches,
         append:       appendMode,
         duration_ms:  Math.round(performance.now() - pipelineT0),
@@ -2529,10 +2557,17 @@ export function AppProvider({ children }) {
     );
 
     // GW-005A: real feedback signal — user confirmed the identification was right.
+    //
+    // UI-003 Wave 0: this is the THIRD AI-price sink, found while fixing the two
+    // named in the Phase A report. A confirmation is the strongest human signal
+    // the system collects, so a ₪0 recorded here would be the most trustworthy-
+    // looking bad price in the table. The identity confirmation is the point of
+    // the event and survives with no price attached.
     recordObservation(OBS.VALUATION_CONFIRMED, {
       category:   result.category,
       confidence: result.confidence,
-      price_mid:  result.marketValue?.mid,
+      price_mid:  observedPriceMid(result.marketValue),
+      ai_priced:  hasRealPrice(result.marketValue),
     }, { scanUuid: result.scan_uuid, valuationId: result.valuation_id });
 
     if (DEV) console.log('[Confirm] User confirmed:', result.name);
@@ -3145,7 +3180,15 @@ export function AppProvider({ children }) {
         category:       normalizedCategory,
         condition,
         price:          listingRow.price,       // seller's real chosen price
-        ai_price_mid:   result?.marketValue?.mid, // AI estimate → delta = pricing accuracy
+        // UI-003 Wave 0: the seller's `price` above is a REAL observed signal and
+        // is untouched. `ai_price_mid` is the AI's estimate, and its whole purpose
+        // is the accuracy delta (real − estimate) — so a rejected valuation
+        // entering as 0 would not merely add a bad row, it would score the AI as
+        // maximally wrong on an item it honestly declined to price. Omitted
+        // instead, with `ai_priced` as the positive marker so a consumer can tell
+        // "no valuation" (has_valuation:false) from "valuation, no price".
+        ai_price_mid:   observedPriceMid(result?.marketValue),
+        ai_priced:      hasRealPrice(result?.marketValue),
         quality_score:  qualityScore,
         has_valuation:  Boolean(result?.valuation_id),
         ai_confidence:  result?.confidence,
@@ -3662,10 +3705,10 @@ export function AppProvider({ children }) {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     // No condition chosen yet, so this is the server's mid as-is — the delta is
     // applied on the condition step, once, by selectCondition.
+    // UI-003 Wave 0: same predicate as the display and the persistence writer —
+    // a degraded valuation can never prefill a listing price.
     const mv = result?.marketValue;
-    const opening = (mv?.pricing_status === 'manual_required' || !(Number(mv?.mid) > 0))
-      ? ''
-      : Number(mv.mid);
+    const opening = hasRealPrice(mv) ? Number(mv.mid) : '';
     setListingData({ title: result?.name || '', desc: '', price: opening, phone: '', location: '' });
     setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
   };
