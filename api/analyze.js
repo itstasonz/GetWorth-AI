@@ -3344,6 +3344,32 @@ async function handleRequest(req) {
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
 
+  // ── SCAN-019: STAGE TIMING (instrumentation only, changes no decision) ────
+  // The pipeline logs rem=/total= at every boundary, but nothing assembles a
+  // waterfall, and no captured production log exists anywhere in this repo. So
+  // "where do the seconds go" has only ever been answerable by reading the
+  // budget arithmetic — which gives CAPS, not durations. Caps tell you what a
+  // stage is allowed to take; they cannot tell you what it took.
+  //
+  // `timed(name, promise)` records a real duration around any awaited stage and
+  // is otherwise transparent: it returns the same promise result and rethrows
+  // the same error, so a throwing stage is still timed and still throws.
+  // `mark(name, ms)` is for synchronous or externally-measured spans.
+  //
+  // The collected object rides out on the response as `_timings`, so a single
+  // real scan reports its own waterfall without log scraping. Durations only —
+  // no identity, no prices, no keys.
+  const timings = { _order: [] };
+  const mark = (name, ms) => {
+    if (!(name in timings)) timings._order.push(name);
+    timings[name] = (timings[name] || 0) + Math.max(0, Math.round(ms));
+  };
+  const timed = async (name, p) => {
+    const t = Date.now();
+    try { return await p; }
+    finally { mark(name, Date.now() - t); }
+  };
+
   // ── SCAN-008 (B-3): reclaim serial overhead for Stage 2's budget ──────────
   // Production scans showed Stage 2 consistently needs 18–20s (output-token
   // bound), while cold-start overhead ate its cap: auth (JWKS ~1.8–3.1s) ran
@@ -3363,11 +3389,11 @@ async function handleRequest(req) {
   // ── AUTH — local HMAC-SHA256 (fast path) or network fallback ──
   // Local verify: ~1 ms, zero network. Fallback: up to 5 s (only when
   // SUPABASE_JWT_SECRET is not set — configure it in Vercel to eliminate fallback).
-  const authUser = await withTimeout(
+  const authUser = await timed('auth', withTimeout(
     verifyJWT(req.headers.get('authorization')),
     5_000,
     'JWT verification'
-  ).catch(err => { blog(`[Auth] verify timed out: ${err.message}`); return null; });
+  ).catch(err => { blog(`[Auth] verify timed out: ${err.message}`); return null; }));
 
   if (!authUser) return json({ error: 'Unauthorized — valid session required' }, 401, cors);
   if (authUser._expired) return json({ error: 'Session expired — please sign in again', code: 'SESSION_EXPIRED' }, 401, cors);
@@ -3389,7 +3415,7 @@ async function handleRequest(req) {
 
     // SCAN-008 (B-3): body was parsed concurrently with auth (above). A parse
     // failure throws here — same catch path and 500 status as before.
-    const parsedBody = await bodyPromise;
+    const parsedBody = await timed('body_parse', bodyPromise);
     if (parsedBody?.__parse_error) throw new Error(`Body parse failed: ${parsedBody.__parse_error}`);
     const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = parsedBody;
     // TIMING: req.json() blocks until the full request body has uploaded. On Edge
@@ -3410,7 +3436,7 @@ async function handleRequest(req) {
             || 'unknown';
 
     blog('[Timing] rate-limit check start');
-    const rl = await checkRateLimit(supa, ip, authUser.id);
+    const rl = await timed('rate_limit', checkRateLimit(supa, ip, authUser.id));
     blog(`[Timing] rate-limit check done allowed=${rl.allowed}`);
     // Tracks whether THIS request charged the daily quota, so we can refund it if
     // the scan later fails (Stage 1 / fatal). Set false again once refunded.
@@ -3462,11 +3488,11 @@ async function handleRequest(req) {
 
     let recognition;
     try {
-      recognition = await withTimeout(
+      recognition = await timed('stage1_vision', withTimeout(
         recognize(imageList, lang, apiKey, stage1Cap),
         stage1Cap,
         'Stage 1 recognition'
-      );
+      ));
       recognition = calibrateRecognition(recognition);
 
       // ── USER CORRECTION INJECTION — highest-priority signal ──
@@ -3566,8 +3592,8 @@ async function handleRequest(req) {
       // scans are unchanged. The 24h cache keys off this same image.
       const visionImage = imageList[imageList.length - 1];
       plog('Vision start', `conf=${round(recognition.category_confidence * 100)}% img=${imageList.length}/${imageList.length} cap=${visionCap}ms rem=${rem()}ms`);
-      visionData = await withTimeout(fallbackVision(visionImage, supa), visionCap, 'Vision fallback')
-        .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; });
+      visionData = await timed('google_vision', withTimeout(fallbackVision(visionImage, supa), visionCap, 'Vision fallback')
+        .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; }));
       plog('Vision end', visionData ? `labels=${visionData.labels?.length} text=${visionData.text?.length} rem=${rem()}ms` : `no data rem=${rem()}ms`);
     } else if (!needsVision) {
       plog('Vision skip', `identity sufficient (cat=${round(recognition.category_confidence * 100)}% brand=${round(topBrandConf * 100)}% model=${round(topModelConf * 100)}%) rem=${rem()}ms`);
@@ -3600,6 +3626,7 @@ async function handleRequest(req) {
       const embCap  = Math.min(3_500, rem() - 8_000);
       const corrCap = Math.min(2_500, rem() - 8_000);
       plog('Embedding start', `embCap=${embCap}ms corrCap=${corrCap}ms rem=${rem()}ms`);
+      const tEmb = Date.now();
       [queryEmbedding, corrections] = await Promise.all([
         withTimeout(generateQueryEmbedding(embeddingText), embCap, 'query embedding')
           .catch(err => { blog(`[Embedding] SKIPPED — ${err.message}`); return null; }),
@@ -3608,6 +3635,7 @@ async function handleRequest(req) {
           // VAL-001: scoped to the authenticated caller — see fetchCorrections().
           : withTimeout(fetchCorrections(authUser?.id || null), corrCap, 'corrections').catch(() => []),
       ]);
+      mark('embed_corrections', Date.now() - tEmb);
       recognition._embedding_used = !!queryEmbedding;
       plog('Embedding end', `embedding=${!!queryEmbedding} corrections=${corrections.length} rem=${rem()}ms`);
     } else {
@@ -3623,11 +3651,11 @@ async function handleRequest(req) {
     if (rem() >= 9_000) {
       const retrievalCap = Math.min(4_500, rem() - 8_000);
       plog('Retrieval start', `cap=${retrievalCap}ms rem=${rem()}ms`);
-      const retrievalResult = await withTimeout(
+      const retrievalResult = await timed('retrieval', withTimeout(
         retrieveCandidates(recognition, queryEmbedding, visionData),
         retrievalCap,
         'DB retrieval'
-      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return null; });
+      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return null; }));
       if (retrievalResult) {
         candidates = retrievalResult.candidates || [];
         retrievalStrategyLog = retrievalResult.strategyLog || null;
@@ -3659,10 +3687,10 @@ async function handleRequest(req) {
     const runPricingRescue = async (reason) => {
       const capMs = Math.max(0, Math.min(3_500, rem() - 4_000));
       plog('PRE start', `cap=${capMs}ms rem=${rem()}ms`);
-      const quote = await pricingRescueEngine({
+      const quote = await timed('pricing_rescue', pricingRescueEngine({
         recognition, candidates, identity: assessFallbackIdentity(recognition),
         failReason: reason, apiKey, capMs, lang,
-      }).catch(err => { blog(`[PRE] engine error — manual pricing: ${err.message}`); return null; });
+      }).catch(err => { blog(`[PRE] engine error — manual pricing: ${err.message}`); return null; }));
       plog('PRE end', quote ? `source=${quote.pre_source} ₪${quote.price_estimate_mid} grade=${quote.pricing_confidence} rem=${rem()}ms` : `no quote rem=${rem()}ms`);
       return buildFallback(recognition, lang, reason, candidates, quote);
     };
@@ -3680,11 +3708,11 @@ async function handleRequest(req) {
       const stage2Cap = Math.max(8_000, Math.min(24_000, rem() - STAGE2_RESERVE_MS));
       plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
       try {
-        verification = await withTimeout(
+        verification = await timed('stage2_verify', withTimeout(
           verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData, stage2Cap),
           stage2Cap,
           'Stage 2 verification'
-        );
+        ));
       } catch (err) {
         stage2FallbackUsed = true;
         stage2FallbackReason = err.message;
@@ -4127,11 +4155,11 @@ async function handleRequest(req) {
       // with no per-attempt timeout and no statement timeout meant a stalled
       // pool could run past maxDuration and get the function killed, returning
       // a 504 for a valuation that may already have committed.
-      persisted = await withTimeout(
+      persisted = await timed('persist_scan', withTimeout(
         recordScanWithRetry(supa, valuationRow, scanUuid),
         Math.max(1_500, rem() - 1_000),
         'record_scan',
-      ).catch(err => { blog(`[Persist] record_scan bounded-out: ${err.message}`); return false; });
+      ).catch(err => { blog(`[Persist] record_scan bounded-out: ${err.message}`); return false; }));
     }
     result.persisted = persisted;
 
@@ -4142,7 +4170,7 @@ async function handleRequest(req) {
     // is nearly spent, skip it rather than risk the whole function being killed.
     if (persisted) {
       if (rem() >= 3_000) {
-        await updateDerivedWithRetry(supa, recognition, verification, scanUuid).catch(() => {});
+        await timed('persist_derived', updateDerivedWithRetry(supa, recognition, verification, scanUuid).catch(() => {}));
       } else {
         blog(`[WriteBack] SKIPPED — budget (rem=${rem()}ms < 3000ms)`);
       }
@@ -4323,6 +4351,23 @@ async function handleRequest(req) {
       }
     } catch (e) {
       console.warn('[Memory] sample write failed (shadow, scan unaffected):', e.message);
+    }
+
+    // ── SCAN-019: emit the waterfall ────────────────────────────────────────
+    // One line per scan carrying real durations, plus the same numbers on the
+    // response so a tester's scan reports its own profile without log access.
+    // `unaccounted` is deliberate: total minus the sum of measured stages is the
+    // glue — JSON encode, calibration, normalise, guard — and if it ever grows
+    // large it means the cost has moved somewhere nothing measures yet.
+    {
+      const totalWall = Date.now() - TREQ;
+      const measured = timings._order.reduce((a, k) => a + timings[k], 0);
+      timings.total = totalWall;
+      timings.unaccounted = Math.max(0, totalWall - measured);
+      const waterfall = timings._order.map((k) => `${k}=${timings[k]}ms`).join(' ');
+      console.log(`[Waterfall] TOTAL=${totalWall}ms ${waterfall} unaccounted=${timings.unaccounted}ms stage2_ran=${!stage2FallbackUsed} vision=${!!visionData} candidates=${candidates.length}`);
+      const { _order, ...flat } = timings;
+      result._timings = flat;
     }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
