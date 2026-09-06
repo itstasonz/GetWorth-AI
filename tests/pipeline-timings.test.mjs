@@ -174,3 +174,88 @@ test('PT-05 the tail is not fire-and-forget past the response', () => {
   assert.equal(/updateDerivedWithRetry|recordScanWithRetry/.test(afterResponse), false,
     'no persistence may be started after the response is returned');
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SCAN-021 — rate-limit bounding and the retrieval gate.
+//
+// The rate limiter is a security control, so its FAILURE behaviour matters more
+// than its success behaviour: a limiter that allows on error is not a limiter.
+// ══════════════════════════════════════════════════════════════════════════════
+
+test('RL-01 the rate-limit RPC is bounded', () => {
+  // It was the only network call in the pipeline with no timeout. A hung
+  // Supabase connection blocked until maxDuration killed the function — a 504
+  // in which no rate-limit decision was ever made and no scan ever happened.
+  const region = src.slice(idx("blog('[Timing] rate-limit check start')"), idx("blog(`[Timing] rate-limit check done"));
+  assert.match(region, /withTimeout\(/, 'checkRateLimit must be wrapped in withTimeout');
+  assert.match(region, /RATE_LIMIT_TIMEOUT_MS/, 'the cap must be the named constant');
+});
+
+test('RL-02 a rate-limit timeout DENIES — it never opens the door', () => {
+  // Allowing on timeout would turn a Supabase outage into a simultaneous bypass
+  // of the daily quota, the per-IP burst guard and the per-user guard.
+  const region = src.slice(idx("blog('[Timing] rate-limit check start')"), idx("blog(`[Timing] rate-limit check done"));
+  const handler = region.slice(region.indexOf('.catch('));
+  assert.match(handler, /allowed:\s*false/, 'the timeout handler must deny');
+  assert.equal(/allowed:\s*true/.test(handler), false, 'the timeout handler must never allow');
+  assert.match(handler, /charged:\s*false/, 'a denied scan must not consume quota');
+});
+
+test('RL-03 every checkRateLimit exit fails closed', () => {
+  // The function had correct fail-closed semantics before this change; this
+  // pins them so a future refactor cannot quietly invert one branch.
+  const fn = src.slice(idx('async function checkRateLimit'), idx('// Refund a previously-charged daily scan'));
+  const allowTrue = (fn.match(/allowed:\s*true/g) || []).length;
+  assert.equal(allowTrue, 1, 'exactly one path may allow — the one where the DB said so');
+
+  // Each error/empty/exception branch denies.
+  for (const reason of ['rpc_failed', 'empty_result', 'check_failed']) {
+    assert.ok(fn.includes(reason), `the ${reason} branch must still exist`);
+  }
+});
+
+test('RL-04 a timeout is distinguishable in logs but not a new client behaviour', () => {
+  // quota_timeout separates "DB said no" from "DB did not answer". It must not
+  // be 'user_daily', or the response would be marked non-retryable and the user
+  // told to come back tomorrow because of a transient fault.
+  const region = src.slice(idx("blog('[Timing] rate-limit check start')"), idx("blog(`[Timing] rate-limit check done"));
+  assert.match(region, /limitType:\s*'quota_timeout'/);
+  assert.equal(/limitType:\s*'user_daily'/.test(region), false,
+    'a transient timeout must not present as the daily quota being exhausted');
+});
+
+test('RG-01 retrieval is no longer gated behind the embedding', () => {
+  // Both sat at rem() >= 9_000, so a slow Stage 1 dropped BOTH and Stage 2
+  // priced with zero catalog evidence. The embedding powers only 7_vector
+  // (SEMANTIC class, cannot establish identity); retrieval's exact-model and
+  // OCR-model strategies need no embedding at all.
+  const embGate = src.indexOf('if (rem() >= 9_000) {', idx('EMBEDDING + CORRECTIONS'));
+  const retGate = src.indexOf('if (rem() >= 6_000) {', idx('SCAN-021: retrieval no longer shares'));
+  assert.notEqual(embGate, -1, 'the embedding keeps the higher gate');
+  assert.notEqual(retGate, -1, 'retrieval must have its own, lower gate');
+  assert.ok(retGate > embGate, 'retrieval still runs after the embedding');
+});
+
+test('RG-02 the retrieval cap can never go negative', () => {
+  // min(4500, rem() - 8000) is NEGATIVE below rem()=8s, which is precisely why
+  // a shared 9s gate was needed. A floored cap is what makes the lower gate safe.
+  const region = src.slice(idx('SCAN-021: retrieval no longer shares'), idx("plog('Retrieval start'"));
+  assert.match(region, /Math\.max\(1_200,\s*Math\.min\(4_500,\s*rem\(\) - 8_000\)\)/,
+    'the retrieval cap must be floored, not just capped');
+
+  // Model the expression across the newly-admitted budget range.
+  const capFor = (r) => Math.max(1200, Math.min(4500, r - 8000));
+  for (const r of [6000, 6500, 7000, 8000, 9000, 20000]) {
+    assert.ok(capFor(r) > 0, `cap must stay positive at rem()=${r}`);
+  }
+  assert.equal(capFor(20000), 4500, 'a healthy budget still gets the full cap');
+});
+
+test('RG-03 the budget ceiling is unchanged — this is not a timeout increase', () => {
+  // The brief was explicit that latency must not be "solved" by giving the
+  // request more time.
+  assert.match(src, /const BUDGET_MS = 50_000;/, 'BUDGET_MS must remain 50s');
+  assert.match(src, /export const config = \{ maxDuration: 60 \};/, 'maxDuration must remain 60s');
+  assert.match(src, /Math\.max\(Math\.min\(28_000, rem\(\) - 12_000\), 8_000\)/, 'Stage 1 cap unchanged');
+  assert.match(src, /Math\.max\(8_000, Math\.min\(24_000, rem\(\) - STAGE2_RESERVE_MS\)\)/, 'Stage 2 cap unchanged');
+});

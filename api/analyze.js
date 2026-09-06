@@ -332,6 +332,10 @@ const VISION_DAILY_LIMIT = 1500;             // Hard cap per day across all user
 const VISION_RATE_PER_MIN = 5;               // Per-IP scan rate limit
 const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same image
 const VISION_TRIGGER_THRESHOLD = 0.60;       // Vision fires when Stage 1 identity (brand/model) or category confidence is below this
+// SCAN-021: cap for the rate-limit RPC. One round trip; ~2-3s against a cold
+// Supabase pool in production, so this is headroom, not a target. A breach
+// DENIES the scan (fail closed) — see the call site.
+const RATE_LIMIT_TIMEOUT_MS = 6_000;
 
 const USER_RATE_PER_MIN = 5;                 // Per-user per-minute scan limit
 const USER_DAILY_LIMIT   = 50;               // Per-user daily scan quota (beta)
@@ -3426,7 +3430,29 @@ async function handleRequest(req) {
             || 'unknown';
 
     blog('[Timing] rate-limit check start');
-    const rl = await timed('rate_limit', checkRateLimit(supa, ip, authUser.id));
+    // ── SCAN-021: bound the only unbounded network call in the pipeline ──────
+    // checkRateLimit already fails CLOSED on every internal error, but the RPC
+    // itself had no timeout: a hung Supabase connection blocked here until
+    // maxDuration killed the function — a 504 in which no rate-limit decision
+    // was ever made, and no scan ever happened. One round trip against a cold
+    // pool is ~2-3s in production, so 6s is generous while capping the worst
+    // case at 6s instead of ~55s.
+    //
+    // A TIMEOUT DENIES. It must: allowing on timeout would turn a Supabase
+    // outage into an open door on the daily quota, the per-IP burst guard and
+    // the per-user guard simultaneously — the failure mode a rate limiter
+    // exists to prevent. `quota_timeout` is a distinct limitType purely so logs
+    // separate "DB said no" from "DB did not answer"; the caller maps both to
+    // the same generic 429, and because it is not 'user_daily' the response is
+    // marked retryable, which is correct for a transient fault.
+    const rl = await timed('rate_limit', withTimeout(
+      checkRateLimit(supa, ip, authUser.id),
+      RATE_LIMIT_TIMEOUT_MS,
+      'rate limit',
+    ).catch((err) => {
+      console.error(`[RateLimit] denied source=timeout reason=rpc_timeout charged=false: ${err.message}`);
+      return { allowed: false, limitType: 'quota_timeout', retryAfter: 15, charged: false };
+    }));
     blog(`[Timing] rate-limit check done allowed=${rl.allowed}`);
     // Tracks whether THIS request charged the daily quota, so we can refund it if
     // the scan later fails (Stage 1 / fatal). Set false again once refunded.
@@ -3638,8 +3664,27 @@ async function handleRequest(req) {
     // SCAN-016: whether retrieval found real model-level evidence, or only the
     // nearest-looking row. Drives the DB-missing guard below.
     let retrievalEvidence = null;
-    if (rem() >= 9_000) {
-      const retrievalCap = Math.min(4_500, rem() - 8_000);
+    // ── SCAN-021: retrieval no longer shares the embedding's gate ────────────
+    // Both were gated at rem() >= 9_000, so a slow Stage 1 dropped BOTH and
+    // Stage 2 priced with zero catalog evidence — the scans least likely to be
+    // right got the least evidence.
+    //
+    // They are not equally valuable. The query embedding powers exactly one
+    // strategy (7_vector), which SCAN-016 classifies as SEMANTIC — the
+    // second-weakest evidence class, and one that can never establish identity
+    // on its own. Retrieval's high-value strategies (exact brand+model, the OCR
+    // RPC's model_number tier) need no embedding at all and run concurrently in
+    // Group A, typically inside one round trip.
+    //
+    // So when the budget is tight the EMBEDDING is what gets dropped, and
+    // retrieval still runs and can still return EXACT_MODEL / MODEL_TEXT rows.
+    // Strategy 7 self-skips on a null embedding, so nothing needs to know.
+    //
+    // This does not raise BUDGET_MS or any stage cap. The floor keeps the cap
+    // positive — the old expression went NEGATIVE below rem()=8s, which is what
+    // made a shared 9s gate necessary in the first place.
+    if (rem() >= 6_000) {
+      const retrievalCap = Math.max(1_200, Math.min(4_500, rem() - 8_000));
       plog('Retrieval start', `cap=${retrievalCap}ms rem=${rem()}ms`);
       const retrievalResult = await timed('retrieval', withTimeout(
         retrieveCandidates(recognition, queryEmbedding, visionData),
@@ -3653,7 +3698,7 @@ async function handleRequest(req) {
       }
       plog('Retrieval end', `${candidates.length} candidates rem=${rem()}ms`);
     } else {
-      plog('Retrieval SKIPPED — budget', `rem=${rem()}ms < 9000ms`);
+      plog('Retrieval SKIPPED — budget', `rem=${rem()}ms < 6000ms`);
     }
 
     // ── STAGE 2: VERIFY + PRICE — REQUIRED but skippable ──
