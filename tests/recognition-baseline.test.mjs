@@ -38,6 +38,7 @@ const {
   stripBrandPrefix, composeBrandModelName, sanitizeUserCorrection,
   gradeRowEvidence, calibrateRecognition, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
   rankCandidates, classifyRowEvidence, sameModelString, EVIDENCE_CLASS,
+  calibrateVerification,
 } = A;
 const { buildRecognitionMemoryKey, MEMORY_KEY_VERSION } = M;
 
@@ -336,6 +337,134 @@ test('A-24 ranking is pure — input rows are not mutated', () => {
   const snapshot = JSON.stringify(input);
   rankCandidates(input, { queryModel: 'G502 Hero' });
   assert.equal(JSON.stringify(input), snapshot);
+});
+
+// ── Self-declaration cannot manufacture evidence (SCAN-017) ──────────────────
+// `brand_confidence` and `identification_method` are written by Stage 2 ABOUT
+// ITSELF. The rule these tests pin: CAPS may read them (a false claim can only
+// lower a score), FLOORS and BOOSTS may not.
+const verif = (o = {}) => ({
+  match_confidence: 0.55, final_brand: 'Logitech', final_model: 'G502',
+  brand_confidence: 'confirmed_by_text', identification_method: 'ocr_confirmed', ...o,
+});
+const recogFor = (o = {}) => ({
+  ocr_text: { raw_texts: [], labels_detected: [], logos_detected: [] },
+  brand_candidates: [{ brand: 'Logitech', confidence: 0.8, evidence: 'logo' }], ...o,
+});
+const conf = (v, r, db = [], vis = null) => calibrateVerification(v, r, db, vis).match_confidence;
+
+test('A-25 a bare confirmed_by_text claim cannot raise confidence', () => {
+  // THE regression. Stage 2 emitting brand_confidence='confirmed_by_text' used
+  // to floor its own confidence at 0.80 while reading no evidence at all — not
+  // _source, not similarity, not _evidence_grade, not rank. With retrieval
+  // handing it a same-brand sibling, that produced a confident wrong answer.
+  assert.equal(conf(verif(), recogFor(), []), 0.55, 'the claim alone must move nothing');
+});
+
+test('A-26 an uncorroborated claim is capped, not merely ignored', () => {
+  // An inference presented as a reading IS an inference, so it is capped like
+  // the inferred_from_visuals it actually was. Ignoring it would let a
+  // self-reported 0.94 stand.
+  assert.equal(conf(verif({ match_confidence: 0.94 }), recogFor(), []), 0.75);
+});
+
+test('A-27 Stage 1 OCR text corroborates the claim and the floor applies', () => {
+  // The claim is falsifiable: if the brand was genuinely read off the item, it
+  // is in the text Stage 1 extracted. Legitimate scans keep their floor.
+  const r = recogFor({ ocr_text: { raw_texts: ['Logitech G502'], labels_detected: [], logos_detected: [] } });
+  assert.equal(conf(verif(), r, []), 0.80);
+});
+
+test('A-28 Google Vision independently corroborates the claim', () => {
+  // A second, independent OCR/logo pass Stage 2 did not author.
+  const got = conf(verif(), recogFor(), [], { logos: [{ description: 'Logitech' }], text: [] });
+  assert.ok(got >= 0.80, `expected >= 0.80 with Vision logo corroboration, got ${got}`);
+});
+
+test('A-29 retrieval model-text evidence corroborates the claim', () => {
+  const db = [{
+    brand: 'Logitech', model: 'G502', _ocr_model_confirmed: true,
+    _evidence_grade: true, _source: 'ocr_rpc', _evidence_class: EVIDENCE_CLASS.MODEL_TEXT,
+  }];
+  assert.ok(conf(verif(), recogFor(), db) >= 0.80);
+});
+
+test('A-30 a sibling row is not corroboration for an exact-model claim', () => {
+  // Guards the seam between this commit and evidence-class ranking: a
+  // CATALOG_FUZZY row is family evidence, never model evidence, so it must not
+  // unlock the text floor.
+  const db = [{
+    brand: 'Logitech', model: 'G502 X Plus', _ocr_model_confirmed: false,
+    _evidence_grade: false, _source: 'normalized_model',
+    _evidence_class: EVIDENCE_CLASS.CATALOG_FUZZY, _sibling_of: 'G502',
+  }];
+  assert.equal(conf(verif(), recogFor(), db), 0.55);
+});
+
+test('A-31 the packaging floor requires Stage 1 to agree it is packaging', () => {
+  const v = verif({ brand_confidence: 'packaging_recognized', identification_method: 'packaging_recognized', match_confidence: 0.40 });
+
+  // Stage 2 alone claiming packaging: no floor.
+  assert.equal(conf(v, recogFor(), []), 0.40);
+
+  // Stage 1's own evidence tag agrees — independent, so the floor stands.
+  const corroborated = recogFor({ brand_candidates: [{ brand: 'Logitech', confidence: 0.8, evidence: 'packaging_design' }] });
+  assert.equal(conf(v, corroborated, []), 0.60);
+});
+
+test('A-32 caps still read self-declared fields — a claim may only lower', () => {
+  // The asymmetry that makes the rule safe. A model that under-claims is
+  // believed; a model that over-claims is not.
+  assert.ok(conf(verif({ brand_confidence: 'inferred_from_visuals', match_confidence: 0.95 }), recogFor(), []) <= 0.75);
+  assert.ok(conf(verif({ identification_method: 'generic_only', match_confidence: 0.95 }), recogFor(), []) <= 0.50);
+  assert.ok(conf(verif({ final_brand: 'unidentified', match_confidence: 0.95 }), recogFor(), []) <= 0.60);
+});
+
+test('A-33 no self-declared value can reach the old 0.80 floor unaided', () => {
+  // Sweep every brand_confidence x identification_method pair with zero
+  // corroboration. None may exceed the uncorroborated cap.
+  const brandConfs = ['confirmed_by_text', 'inferred_from_visuals', 'packaging_recognized', 'db_matched', 'unidentified'];
+  const methods = ['ocr_confirmed', 'visual_match', 'packaging_recognized', 'db_match', 'generic_only'];
+  for (const bc of brandConfs) {
+    for (const m of methods) {
+      const got = conf(verif({ brand_confidence: bc, identification_method: m, match_confidence: 0.99 }), recogFor(), []);
+      assert.ok(got < 0.80, `brand_confidence="${bc}" method="${m}" reached ${got} with no evidence`);
+    }
+  }
+});
+
+test('A-34 a user correction outranks every other signal and is never capped', () => {
+  // Caught a real over-correction: the first version of the uncorroborated cap
+  // fired BEFORE user-correction was considered, so the one signal that is not
+  // a model's opinion at all was capped at 0.75 like an unsupported guess.
+  // A correction is the user telling us what the item is.
+  const r = recogFor({ _user_correction: 'Logitech G502' });
+  const got = conf(verif({ match_confidence: 0.96 }), r, []);
+  assert.ok(got > 0.75, `a user correction must not be capped as unsupported, got ${got}`);
+  assert.equal(calibrateVerification(verif({ match_confidence: 0.96 }), r, []).confidence_evidence.user_correction, true);
+});
+
+test('A-35 legitimate text-confirmed scans keep their confidence', () => {
+  // The whole point of verifying rather than deleting the floor: real evidence
+  // must still earn a high number, or this trades one wrong answer for another.
+  const readLabel = recogFor({ ocr_text: { raw_texts: ['Logitech G502'], labels_detected: [], logos_detected: [] } });
+  const ocrRow = {
+    brand: 'Logitech', model: 'G502', _ocr_model_confirmed: true,
+    _evidence_grade: true, _source: 'ocr_rpc', _evidence_class: EVIDENCE_CLASS.MODEL_TEXT,
+  };
+  assert.ok(conf(verif({ match_confidence: 0.85 }), readLabel, [ocrRow]) >= 0.85);
+  assert.ok(conf(verif({ match_confidence: 0.85 }), readLabel, [], { logos: [{ description: 'Logitech' }], text: ['G502'] }) >= 0.85);
+});
+
+test('A-36 confidence_evidence records which sources backed the number', () => {
+  // Makes a scan's confidence auditable after the fact rather than inferred.
+  const bare = calibrateVerification(verif(), recogFor(), []);
+  assert.equal(bare.confidence_evidence.corroborated, false);
+
+  const backed = calibrateVerification(
+    verif(), recogFor({ ocr_text: { raw_texts: ['Logitech G502'], labels_detected: [], logos_detected: [] } }), []);
+  assert.equal(backed.confidence_evidence.corroborated, true);
+  assert.equal(backed.confidence_evidence.brand_in_text, true);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

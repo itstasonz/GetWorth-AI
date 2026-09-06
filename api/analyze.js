@@ -2392,7 +2392,7 @@ export function calibrateRecognition(recognition) {
   return { ...recognition, raw_category_confidence: recognition.category_confidence, category_confidence: round(conf), confidence_calibrated: true };
 }
 
-function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
+export function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
   let conf = verification.match_confidence ?? 0.5;
   const brand = verification.final_brand || '';
   const model = verification.final_model || '';
@@ -2400,10 +2400,53 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
   const method = verification.identification_method || 'generic_only';
   const isPackaging = brandConf === 'packaging_recognized' || method === 'packaging_recognized';
 
+  // ── SCAN-017: INDEPENDENT EVIDENCE ───────────────────────────────────────
+  // `brand_confidence` and `identification_method` are fields STAGE 2 WRITES
+  // ABOUT ITSELF. Letting them raise confidence is circular: the model asserts
+  // it had text evidence, and the assertion alone becomes the evidence.
+  //
+  // The rule this file now follows:
+  //   CAPS  may read self-declared fields — they can only ever lower confidence,
+  //         so a false claim cannot inflate a score.
+  //   FLOORS and BOOSTS may NOT — they must be corroborated by something Stage 2
+  //         did not author.
+  //
+  // Corroboration comes from three sources outside Stage 2: the text Stage 1
+  // actually read, Google Vision's independent OCR/logo pass, and retrieval's
+  // per-row evidence flags. `confirmed_by_text` is a CHECKABLE claim — if the
+  // brand really was read off the item, the brand string is in one of these.
+  const corroboratingText = [
+    ...(recognition?.ocr_text?.raw_texts || []),
+    ...(recognition?.ocr_text?.labels_detected || []),
+    ...(recognition?.ocr_text?.logos_detected || []),
+    ...(visionData?.text || []),
+    ...((visionData?.logos || []).map((l) => l?.description || '')),
+  ].join(' ').toLowerCase();
+
+  const brandHeadTok = brand.toLowerCase().split(' ')[0];
+  const brandInText = !!brandHeadTok && brandHeadTok.length >= 2 && corroboratingText.includes(brandHeadTok);
+  const modelInText = !!model && model.toLowerCase() !== 'unidentified'
+    && corroboratingText.includes(model.toLowerCase());
+  // Stage 1's own evidence tag — authored by a DIFFERENT call than Stage 2, so
+  // it is independent corroboration of a packaging claim.
+  const stage1Packaging = ['packaging_design', 'packaging_visual']
+    .includes(recognition?.brand_candidates?.[0]?.evidence);
+  // The user told us what this is. Not a model's opinion at all, so it outranks
+  // every other signal and must never be capped as an unsupported claim.
+  const userCorrected = !!recognition?._user_correction;
+
   if (brand.toLowerCase() === 'unidentified' || brandConf === 'unidentified') conf = Math.min(conf, 0.60);
   if (brandConf === 'inferred_from_visuals') conf = Math.min(conf, 0.75);
   if (isPackaging && brand.toLowerCase() !== 'unidentified') {
-    conf = Math.max(conf, 0.60);
+    // SCAN-017: the 0.60 FLOOR now requires Stage 1 to have independently tagged
+    // the brand evidence as packaging. Previously Stage 2 declaring
+    // identification_method='packaging_recognized' floored its own confidence.
+    // The 0.79 CAP is unconditional — a cap needs no corroboration.
+    if (stage1Packaging) {
+      conf = Math.max(conf, 0.60);
+    } else {
+      console.log('[Calibrate] packaging claim NOT corroborated by Stage 1 evidence tag — floor withheld');
+    }
     conf = Math.min(conf, 0.79);
   }
   if (method === 'generic_only') conf = Math.min(conf, 0.50);
@@ -2420,7 +2463,41 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
   }
   if (hasEvidenceMatch && dbMatches.length > 0 && (method === 'db_match' || brandConf === 'db_matched')) conf = Math.min(conf + 0.10, 0.90);
   if (hasEvidenceMatch && isPackaging && dbMatches.length > 0) conf = Math.min(conf + 0.10, 0.85);
-  if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
+  // ── SCAN-017: the self-declaration floor, replaced by a verified one ──────
+  // WAS:
+  //   if (brandConf === 'confirmed_by_text' && model !== 'unidentified')
+  //     conf = Math.max(conf, 0.80);
+  //
+  // `brand_confidence` is written by Stage 2 about its own reasoning. This rule
+  // read no evidence — not _source, not similarity, not _evidence_grade, not
+  // rank — so Stage 2 could floor its own confidence at 0.80 by emitting one
+  // string. Combined with retrieval handing it a same-brand sibling labelled
+  // "85.0%", that is the mechanism behind a confidently wrong "Logitech G502 —
+  // 80%": every guardrail fired correctly and the answer was still wrong.
+  //
+  // NOW: the claim is CHECKED. "Confirmed by text" is falsifiable — if the brand
+  // was genuinely read off the item, it appears in Stage 1's OCR, in Google
+  // Vision's independent pass, or in a retrieval row carrying model-level
+  // evidence. Corroborated, the floor stands and legitimate text-confirmed scans
+  // are unaffected. Uncorroborated, the claim is not merely ignored: it was an
+  // inference presented as a reading, so it is capped exactly like the
+  // `inferred_from_visuals` it actually was.
+  const modelNamed = model.toLowerCase() !== 'unidentified' && !!model;
+  if (brandConf === 'confirmed_by_text' && modelNamed) {
+    // Retrieval-side corroboration: a row whose model column was hit by real
+    // text, graded independently of anything Stage 2 said.
+    const retrievalTextEvidence = dbMatches.some((m) =>
+      m?._ocr_model_confirmed === true
+      || (m?._evidence_grade === true && (m?._evidence_class ?? 0) >= EVIDENCE_CLASS.MODEL_TEXT));
+
+    if (brandInText || modelInText || retrievalTextEvidence || userCorrected) {
+      conf = Math.max(conf, 0.80);
+      console.log(`[Calibrate] confirmed_by_text CORROBORATED (brand=${brandInText} model=${modelInText} retrieval=${retrievalTextEvidence}) → floor 0.80 applied`);
+    } else {
+      conf = Math.min(conf, 0.75);
+      console.log(`[Calibrate] confirmed_by_text NOT corroborated by OCR, Vision or retrieval — floor withheld, capped 0.75 (self-declaration cannot manufacture evidence)`);
+    }
+  }
 
   // RULE 6 (Phase 2): OCR keyword match boost
   // F1 (SCAN-003): the 0.82 floor fires only for rows whose MODEL column matched
@@ -2500,9 +2577,50 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
     }
   }
 
+  // ── SCAN-017: global uncorroborated ceiling ──────────────────────────────
+  // The targeted fix above closed `confirmed_by_text`, but a sweep of every
+  // brand_confidence x identification_method pair found three more paths to a
+  // high score with zero evidence — all `brand_confidence: 'db_matched'`, which
+  // sailed through at 0.95 even when dbMatches was EMPTY. Stage 2 was asserting
+  // a database match that retrieval never made, and nothing checked.
+  //
+  // Rather than patch each label as it is discovered, the invariant is stated
+  // once here: if NOTHING outside Stage 2 corroborates the identity, Stage 2's
+  // self-reported number cannot exceed the inferred-from-visuals ceiling,
+  // whatever it called itself. Caps above still apply and can go lower; this
+  // only ever lowers.
+  //
+  // A user correction counts as corroboration and outranks everything — it is
+  // the one signal that is neither Stage 2's opinion nor a model's at all.
+  const anyRetrievalEvidence = dbMatches.some((m) =>
+    m?._evidence_grade === true || m?._ocr_model_confirmed === true);
+  const corroborated = brandInText || modelInText || anyRetrievalEvidence
+    || userCorrected || stage1Packaging;
+
+  const UNCORROBORATED_CEILING = 0.75;
+  if (!corroborated && conf > UNCORROBORATED_CEILING) {
+    console.log(`[Calibrate] no independent corroboration (brandConf="${brandConf}" method="${method}" dbRows=${dbMatches.length}) — capping ${round(conf * 100)}% → ${UNCORROBORATED_CEILING * 100}%`);
+    conf = UNCORROBORATED_CEILING;
+  }
+
   conf = Math.min(Math.max(conf, 0.10), 0.95);
 
-  return { ...verification, raw_match_confidence: verification.match_confidence, match_confidence: round(conf), confidence_calibrated: true };
+  return {
+    ...verification,
+    raw_match_confidence: verification.match_confidence,
+    match_confidence: round(conf),
+    confidence_calibrated: true,
+    // Additive provenance: which independent sources backed this number, so a
+    // scan's confidence can be audited after the fact instead of inferred.
+    confidence_evidence: {
+      corroborated,
+      brand_in_text: brandInText,
+      model_in_text: modelInText,
+      retrieval_evidence: anyRetrievalEvidence,
+      stage1_packaging: stage1Packaging,
+      user_correction: userCorrected,
+    },
+  };
 }
 
 function getConfidenceTier(confidence) {
