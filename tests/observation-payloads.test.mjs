@@ -34,8 +34,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { objectLiteralAt, compileRegion } from './helpers/extract-literal.mjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const CONTEXT_SRC = process.env.UI003_CONTEXT_PATH || `${ROOT}src/contexts/AppContext.jsx`;
 const OBS_SRC     = process.env.UI003_OBS_PATH     || `${ROOT}src/lib/observations.js`;
 const UTILS_SRC   = process.env.UI003_UTILS_PATH   || `${ROOT}src/lib/utils.js`;
@@ -45,7 +46,7 @@ const UTILS_SRC   = process.env.UI003_UTILS_PATH   || `${ROOT}src/lib/utils.js`;
 // for the same reason every other target is: the mutation harness swaps in a
 // broken copy, and a hard-coded import would test the pristine original while
 // reporting on the mutant — a harness that always says KILLED proves nothing.
-const { hasRealPrice, observedPriceMid } = await import(UTILS_SRC);
+const { hasRealPrice, observedPriceMid } = await import(pathToFileURL(UTILS_SRC).href);
 
 const ctxSrc = () => readFileSync(CONTEXT_SRC, 'utf8');
 

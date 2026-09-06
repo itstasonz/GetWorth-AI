@@ -34,8 +34,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 // Overridable so tests/mutations/ui-run.mjs can ask the decisive question about
 // this suite too: if a credential crept back, would anything notice?

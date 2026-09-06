@@ -21,8 +21,9 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT_DIR = join(ROOT, 'node_modules/.cache/ui-002a');
 
 // The mutation harness (tests/mutations/ui-run.mjs) redirects these to broken
@@ -62,7 +63,7 @@ before(async () => {
   React = (await import('react')).default;
   act = React.act;
   ({ createRoot } = await import('react-dom/client'));
-  UI = await import(join(OUT_DIR, 'ui.mjs'));
+  UI = await import(pathToFileURL(join(OUT_DIR, 'ui.mjs')).href);
 
   await build({
     input: CARD_SRC,
@@ -70,8 +71,8 @@ before(async () => {
     output: { dir: OUT_DIR, format: 'esm', entryFileNames: 'listing-card.mjs' },
     logLevel: 'silent',
   });
-  ListingCard = (await import(join(OUT_DIR, 'listing-card.mjs'))).default;
-  utils = await import(UTILS_SRC);
+  ListingCard = (await import(pathToFileURL(join(OUT_DIR, 'listing-card.mjs')).href)).default;
+  utils = await import(pathToFileURL(UTILS_SRC).href);
 });
 
 after(() => { mock.timers.reset(); });

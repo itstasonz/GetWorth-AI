@@ -21,8 +21,9 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const OUT = join(ROOT, 'node_modules/.cache/ui-002a/compiled.css');
 
 // The mutation harness (tests/mutations/ui-run.mjs) redirects these to broken
@@ -38,8 +39,8 @@ let css;
 before(() => {
   mkdirSync(join(ROOT, 'node_modules/.cache/ui-002a'), { recursive: true });
   execFileSync(
-    join(ROOT, 'node_modules/.bin/tailwindcss'),
-    ['-i', CSS_IN, '-o', OUT, ...(TW_CONFIG ? ['-c', TW_CONFIG] : [])],
+    process.execPath,
+    [join(ROOT, 'node_modules/tailwindcss/lib/cli.js'), '-i', CSS_IN, '-o', OUT, ...(TW_CONFIG ? ['-c', TW_CONFIG] : [])],
     { cwd: ROOT, stdio: 'pipe' }
   );
   // Comments contain no braces, so the block regex below would otherwise absorb
