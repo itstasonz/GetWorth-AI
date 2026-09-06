@@ -535,6 +535,11 @@ export const RECOGNITION_SCHEMA = {
     category_hebrew:     { type: 'string' },
     category_confidence: { type: 'number', minimum: 0, maximum: 1 },
     subcategory:         { type: 'string' },
+    // SCAN-015: family-level identity. Lets Stage 1 keep the certainty it has
+    // ("a Logitech G-series mouse") without inventing certainty it does not
+    // ("a G903"). Optional — absence means no family was recognised.
+    model_family:          { type: ['string', 'null'] },
+    exact_model_ambiguous: { type: 'boolean' },
     brand_candidates: {
       type: 'array', maxItems: 5,
       items: {
@@ -677,6 +682,29 @@ CONFIDENCE RULES:
 - 0.10-0.29: Uncertain even about category
 - NEVER fabricate brand text
 
+UNCERTAINTY IS A CORRECT ANSWER (SCAN-015):
+You are not required to name a brand or a model. A precise "I cannot tell from
+this photo" is worth more than a confident guess, because a wrong identity is
+priced as if it were right and the seller never finds out.
+- Cannot read or recognise the brand → return brand_candidates: [] (empty), or a
+  single entry with brand "unidentified". Never invent one to fill the field.
+- Cannot pin the exact model → return model_candidates: [] or list EVERY
+  plausible sibling at equal low confidence. Never pick one arbitrarily to look
+  decisive, and never break a tie you cannot actually break.
+- Sure of the family but not the exact variant → set model_family (for example
+  "Logitech G-series gaming mouse", "Samsung Galaxy S-series") and list the
+  siblings you cannot separate. This is the single most useful thing you can
+  return when a shape-only photo shows a product family you recognise: it keeps
+  the brand-level certainty you DO have without inventing model-level certainty
+  you do not.
+- Set exact_model_ambiguous: true whenever two or more models remain plausible.
+
+Worked example — a shape-only photo of a Logitech G-series mouse with no legible
+label. CORRECT: brand Logitech 0.88 (logo visible), model_family "Logitech
+G-series gaming mouse", exact_model_ambiguous true, model_candidates listing
+G502/G903/G703 at 0.30 each. WRONG: model_candidates [{"G903", 0.82}] — that
+number cannot be earned from a silhouette.
+
 Language: ${language === 'he' ? 'Include Hebrew names where relevant' : 'English only'}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
@@ -687,6 +715,8 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   "subcategory": "string",
   "brand_candidates": [{"brand":"string","confidence":0.82,"evidence":"readable_text"}],
   "model_candidates": [{"model":"string","confidence":0.65,"evidence":"string"}],
+  "model_family": "string or null",
+  "exact_model_ambiguous": false,
   "ocr_text": {
     "raw_texts": ["exact text found"],
     "logos_detected": ["logo description"],
@@ -2083,7 +2113,7 @@ async function verifyAndPrice(recognition, candidates, corrections, language, ap
 // §7  CONFIDENCE CALIBRATION
 // ═══════════════════════════════════════════════════════
 
-function calibrateRecognition(recognition) {
+export function calibrateRecognition(recognition) {
   let conf = recognition.category_confidence ?? 0.5;
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
@@ -2101,6 +2131,86 @@ function calibrateRecognition(recognition) {
   }
   if (topBrand?.confidence >= 0.85 && topModel?.confidence >= 0.75) conf = Math.max(conf, 0.80);
   conf = Math.min(Math.max(conf, 0.10), 0.95);
+
+  // ── SCAN-015: ENFORCE the prompt's own model-confidence ceiling ───────────
+  // The Stage 1 prompt has always said "NEVER assign >0.70 model confidence
+  // from silhouette/shape alone. Text or logo OCR confirmation is required to
+  // reach >=0.75." Nothing enforced it: this function clamped category
+  // confidence only, and RECOGNITION_SCHEMA is never applied, so an unearned
+  // 0.90 travelled intact to the Vision trigger, to retrieval's brand_ok /
+  // model_ok gates, and to assessFallbackIdentity.
+  //
+  // The ceiling applies to the MODEL only. Brand is deliberately untouched: a
+  // visible logo is legitimate brand evidence without any readable model text,
+  // and capping brand here would throw away the one thing we usually do know.
+  // That asymmetry is the whole point — keep family-level certainty, drop
+  // invented model-level certainty.
+  //
+  // Ordering note: user corrections are injected AFTER this function runs (see
+  // the refineModel block in handleRequest), so a user-supplied identity at
+  // 0.96 is never clamped by this.
+  const textConfirmed = !!(ocr.has_readable_text || ocr.raw_texts?.length || ocr.labels_detected?.length);
+  const SILHOUETTE_MODEL_CEILING = 0.70;
+  let modelClamped = 0;
+  const models = (recognition.model_candidates || []).map((m) => {
+    // Evidence strings are free-form, so match on what the prompt asks for
+    // rather than an enum: anything naming text/label/OCR/serial/print counts.
+    const ev = String(m?.evidence || '').toLowerCase();
+    const evidenceIsTextual = /text|label|sticker|ocr|serial|print|engrav|model_number|user_correction/.test(ev);
+    if (textConfirmed || evidenceIsTextual) return m;
+    if ((m?.confidence ?? 0) > SILHOUETTE_MODEL_CEILING) {
+      modelClamped++;
+      return { ...m, confidence: SILHOUETTE_MODEL_CEILING, _clamped_from: m.confidence, _clamp_reason: 'no_text_evidence' };
+    }
+    return m;
+  });
+  if (modelClamped > 0) {
+    console.log(`[Calibrate] clamped ${modelClamped} model candidate(s) to ${SILHOUETTE_MODEL_CEILING} — no text evidence (prompt rule enforced)`);
+  }
+
+  // ── SCAN-015: derived identity resolution ────────────────────────────────
+  // Phase 5 in one field. Confidence has been a single scalar that conflated
+  // "what category is this" with "which exact unit is this", so the system
+  // could not say "Logitech certain, G900-vs-G903 unknown" — the honest answer
+  // for most shape-only scans. This states the two separately.
+  //
+  // AMBIGUOUS is decided by the MARGIN between the top two candidates, not by
+  // either one's absolute number: two models at 0.62 and 0.58 are a coin flip
+  // no matter how confident each claims to be. Nothing consumes this yet; it
+  // is additive and safe, and later commits rank and render from it.
+  const AMBIGUITY_MARGIN = 0.15;
+  const m0 = models[0], m1 = models[1];
+  const brandOk = !!topBrand?.brand && topBrand.brand.toLowerCase() !== 'unidentified' && topBrand.confidence >= 0.60;
+  const modelNamed = !!m0?.model && m0.model.toLowerCase() !== 'unidentified';
+  const siblingTie = !!(m0 && m1 && (m0.confidence - m1.confidence) < AMBIGUITY_MARGIN);
+  // Trust an explicit ambiguity flag from Stage 1 over our own inference.
+  const ambiguous = recognition.exact_model_ambiguous === true || siblingTie;
+
+  const level =
+    !brandOk && !modelNamed                       ? 'unknown'
+    : brandOk && modelNamed && !ambiguous && (m0.confidence >= 0.75) ? 'exact'
+    : brandOk && (ambiguous || (m0?.confidence ?? 0) < 0.75)          ? 'family'
+    : brandOk                                     ? 'brand'
+    : 'unknown';
+
+  const identity_resolution = {
+    level,                                    // exact | family | brand | unknown
+    brand: brandOk ? topBrand.brand : null,
+    brand_confidence: brandOk ? round(topBrand.confidence) : 0,
+    model: level === 'exact' ? m0.model : null,
+    model_confidence: modelNamed ? round(m0.confidence) : 0,
+    family: recognition.model_family || null,
+    exact_model_ambiguous: ambiguous,
+    // The siblings we genuinely cannot separate — what the UI should offer the
+    // user to choose between instead of silently picking one.
+    ambiguous_between: ambiguous
+      ? models.slice(0, 5).filter((m) => m?.model && (m0.confidence - m.confidence) < AMBIGUITY_MARGIN).map((m) => m.model)
+      : [],
+    text_confirmed: textConfirmed,
+  };
+  console.log(`[Identity] level=${level} brand=${identity_resolution.brand || 'none'}(${identity_resolution.brand_confidence}) model=${identity_resolution.model || 'none'}(${identity_resolution.model_confidence}) family=${identity_resolution.family || 'none'} ambiguous=${ambiguous}${identity_resolution.ambiguous_between.length ? ` between=[${identity_resolution.ambiguous_between.join('|')}]` : ''}`);
+
+  recognition = { ...recognition, model_candidates: models, identity_resolution };
 
   return { ...recognition, raw_category_confidence: recognition.category_confidence, category_confidence: round(conf), confidence_calibrated: true };
 }
@@ -2862,6 +2972,12 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     // used internally for pricing (retrieval -> Stage 2) but are NOT displayed as
     // external evidence. Only real DB-backed records may populate this later.
     comparable_items: [],
+    // SCAN-015: separate identity certainty from the single scalar `confidence`.
+    // `confidence` answers "how sure is the pipeline overall"; this answers "how
+    // far down the identity can we actually commit" — brand may be certain while
+    // the exact model is a coin flip. Additive: no existing reader is affected,
+    // and it degrades to level 'unknown' on a pre-SCAN-015 recognition object.
+    identity: recognition.identity_resolution || null,
     _pipeline: {
       version: 'v2',
       stage1_confidence: recognition.category_confidence,

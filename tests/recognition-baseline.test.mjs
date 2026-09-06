@@ -36,7 +36,7 @@ const M = await import(MEMORY_URL.href);
 
 const {
   stripBrandPrefix, composeBrandModelName, sanitizeUserCorrection,
-  gradeRowEvidence, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
+  gradeRowEvidence, calibrateRecognition, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
 } = A;
 const { buildRecognitionMemoryKey, MEMORY_KEY_VERSION } = M;
 
@@ -117,6 +117,103 @@ test('A-08 the recognition schema still requires the identity-bearing fields', (
   }
 });
 
+// ── Stage 1 uncertainty (SCAN-015) ───────────────────────────────────────────
+// A minimal recognition object. Defaults describe the hard case: a shape-only
+// photo with a visible logo and no legible text.
+const recog = (over = {}) => calibrateRecognition({
+  category: 'Electronics',
+  category_confidence: 0.8,
+  ocr_text: { has_readable_text: false, raw_texts: [] },
+  brand_candidates: [{ brand: 'Logitech', confidence: 0.88, evidence: 'logo_visible' }],
+  model_candidates: [],
+  ...over,
+});
+
+test('A-09 an unearned model confidence is clamped to the prompt ceiling', () => {
+  // The prompt has always said "NEVER assign >0.70 model confidence from
+  // silhouette/shape alone". Nothing enforced it. A silhouette claiming 0.90
+  // reached the Vision trigger and retrieval's model_ok gate intact.
+  const r = recog({ model_candidates: [{ model: 'G903', confidence: 0.90, evidence: 'shape_match' }] });
+  assert.equal(r.model_candidates[0].confidence, 0.70);
+  assert.equal(r.model_candidates[0]._clamp_reason, 'no_text_evidence');
+});
+
+test('A-10 text-confirmed model confidence is NOT clamped', () => {
+  // The clamp must not punish the case it exists to protect. Reading "G900" off
+  // a label is exactly the evidence that earns a high number.
+  const r = recog({
+    ocr_text: { has_readable_text: true, raw_texts: ['G900'] },
+    model_candidates: [{ model: 'G900', confidence: 0.90, evidence: 'readable_text' }],
+  });
+  assert.equal(r.model_candidates[0].confidence, 0.90);
+  assert.equal(r.identity_resolution.level, 'exact');
+});
+
+test('A-11 brand confidence survives model uncertainty', () => {
+  // The asymmetry that makes family-level identity possible: a visible logo is
+  // real brand evidence even when no model text is legible. Capping brand here
+  // would discard the one thing we actually know.
+  const r = recog({ model_candidates: [{ model: 'G903', confidence: 0.90, evidence: 'shape_match' }] });
+  assert.equal(r.identity_resolution.brand, 'Logitech');
+  assert.equal(r.identity_resolution.brand_confidence, 0.88);
+  assert.equal(r.identity_resolution.level, 'family');
+  assert.equal(r.identity_resolution.model, null, 'no exact model may be claimed without text evidence');
+});
+
+test('A-12 a sibling tie resolves to family, not to an arbitrary winner', () => {
+  // Decided by the MARGIN between the top two, not either absolute number:
+  // 0.62 vs 0.58 is a coin flip however confident each claims to be. This is
+  // the "Logitech G900 vs G903 — uncertain" case stated honestly.
+  const r = recog({
+    model_candidates: [
+      { model: 'G502', confidence: 0.62, evidence: 'shape' },
+      { model: 'G903', confidence: 0.58, evidence: 'shape' },
+    ],
+  });
+  assert.equal(r.identity_resolution.level, 'family');
+  assert.equal(r.identity_resolution.exact_model_ambiguous, true);
+  assert.deepEqual(r.identity_resolution.ambiguous_between, ['G502', 'G903']);
+});
+
+test('A-13 Stage 1 may report a family it recognises', () => {
+  const r = recog({
+    model_family: 'Logitech G-series gaming mouse',
+    exact_model_ambiguous: true,
+    model_candidates: [
+      { model: 'G502', confidence: 0.30, evidence: 'shape' },
+      { model: 'G903', confidence: 0.30, evidence: 'shape' },
+    ],
+  });
+  assert.equal(r.identity_resolution.family, 'Logitech G-series gaming mouse');
+  assert.equal(r.identity_resolution.level, 'family');
+});
+
+test('A-14 no identity at all resolves to unknown, never to a guess', () => {
+  // Uncertainty is a valid terminal result. The pipeline must be able to say so
+  // rather than emit a low-confidence invention.
+  const r = calibrateRecognition({
+    category: 'Other', category_confidence: 0.3,
+    ocr_text: {}, brand_candidates: [], model_candidates: [],
+  });
+  assert.equal(r.identity_resolution.level, 'unknown');
+  assert.equal(r.identity_resolution.brand, null);
+  assert.equal(r.identity_resolution.model, null);
+});
+
+test('A-15 calibration is pure — the caller\'s object is not mutated', () => {
+  // handleRequest injects user corrections into `recognition` AFTER this runs;
+  // in-place mutation here would make that ordering fragile.
+  const input = {
+    category: 'Electronics', category_confidence: 0.8,
+    ocr_text: { has_readable_text: false, raw_texts: [] },
+    brand_candidates: [{ brand: 'Logitech', confidence: 0.88, evidence: 'logo' }],
+    model_candidates: [{ model: 'G903', confidence: 0.90, evidence: 'shape' }],
+  };
+  const before = JSON.stringify(input);
+  calibrateRecognition(input);
+  assert.equal(JSON.stringify(input), before, 'calibrateRecognition must not mutate its argument');
+});
+
 // ══════════════════════════════════════════════════════════════════════════════
 // §B BASELINE — current behaviour, defects included. Expected to change.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -156,46 +253,61 @@ test('B-03 [DEFECT-3] there is no brand normalization anywhere', () => {
   assert.notEqual(key('ASUS', 'ROG Strix'), key('ASUS ROG', 'Strix'));
 });
 
-test('B-04 [DEFECT-4] Stage 1 is never told it may return "unidentified"', () => {
-  // Downstream code gates on brand/model !== 'unidentified' in many places, but
-  // the Stage 1 prompt never offers that vocabulary, so Stage 1 is compelled to
-  // name a brand and model on every scan. Expected fix: Stage 1 gains an
-  // explicit "I cannot tell" path and this assertion inverts.
-  const promptStart = ANALYZE_SRC.indexOf('function buildRecognitionPrompt');
-  const promptEnd = ANALYZE_SRC.indexOf('export function buildVerificationPrompt');
-  assert.ok(promptStart > -1 && promptEnd > promptStart, 'prompt bounds not found');
-  const recognitionPrompt = ANALYZE_SRC.slice(promptStart, promptEnd);
+test('B-04 [DEFECT-4 RETIRED] Stage 1 now has a sanctioned way to say "I cannot tell"', () => {
+  // WAS: the Stage 1 prompt never offered "unidentified" while downstream code
+  // gated on it everywhere, so Stage 1 was compelled to name a brand and model
+  // on every scan. Fixed in "fix(recognition): improve Stage 1 uncertainty
+  // handling" — this assertion is the inverse of its original form.
+  const recognitionPrompt = ANALYZE_SRC.slice(
+    ANALYZE_SRC.indexOf('function buildRecognitionPrompt'),
+    ANALYZE_SRC.indexOf('export function buildVerificationPrompt'),
+  );
 
-  assert.equal(/unidentified/i.test(recognitionPrompt), false,
-    'Stage 1 prompt currently offers no "unidentified" vocabulary');
-
-  // Stage 2's prompt, by contrast, does offer it — proving the omission is
-  // specific to Stage 1 rather than a project-wide convention.
-  const verificationPrompt = ANALYZE_SRC.slice(promptEnd);
-  assert.equal(/unidentified/i.test(verificationPrompt), true);
+  assert.match(recognitionPrompt, /unidentified/i,
+    'Stage 1 must offer the "unidentified" vocabulary its consumers gate on');
+  assert.match(recognitionPrompt, /empty|\[\]/i,
+    'Stage 1 must be allowed to return an empty candidate list');
+  assert.match(recognitionPrompt, /model_family/,
+    'Stage 1 must be able to report family-level identity');
+  assert.match(recognitionPrompt, /exact_model_ambiguous/,
+    'Stage 1 must be able to flag an unresolvable sibling tie');
 });
 
-test('B-05 [DEFECT-5] Stage 1 pays output tokens for fields nothing reads', () => {
-  // Every one of these appears exactly twice in the module: once in
-  // RECOGNITION_SCHEMA, once in the prompt template. They are generated on the
-  // critical path of every scan and never read. Stage 1 latency is output-token
-  // bound, so these cost wall-clock time on each scan.
+test('B-05 [DEFECT-5] Stage 1 still pays output tokens for fields nothing reads', () => {
+  // Each appears exactly twice: once in RECOGNITION_SCHEMA, once in the prompt
+  // template. Generated on the critical path of every scan and never read.
+  // Stage 1 is output-token bound, so these cost wall-clock time per scan.
+  // Retiring this is latency work, not accuracy work — it belongs to the
+  // perf commit, so the defect stands here deliberately.
   const writeOnly = ['size_estimate', 'distinctive_elements', 'wear_level',
-                     'needs_more_info', 'labels_detected', 'serial_numbers'];
+                     'needs_more_info', 'serial_numbers'];
   for (const f of writeOnly) {
     const hits = ANALYZE_SRC.split(f).length - 1;
     assert.equal(hits, 2, `${f} should appear exactly twice (schema + prompt) while unread; found ${hits}`);
   }
+
+  // labels_detected LEFT this list: the Stage 1 confidence clamp now reads it
+  // as text evidence, so it earns its tokens. Listed separately rather than
+  // silently dropped, so the change is visible in review.
+  assert.ok(ANALYZE_SRC.split('labels_detected').length - 1 > 2,
+    'labels_detected is now consumed by the model-confidence clamp');
 });
 
 test('B-06 [DEFECT-6] the JSON schemas are declared but never applied', () => {
-  // Both schemas are exported and then referenced by nothing — no validator, no
-  // structured-output request. Model confidences are therefore unclamped: the
-  // prompt's "NEVER >0.70 from silhouette alone" rule is unenforced.
-  // Expected fix: the schemas become load-bearing.
-  const uses = ANALYZE_SRC.split('RECOGNITION_SCHEMA').length - 1;
-  assert.equal(uses, 1, 'RECOGNITION_SCHEMA is declared once and never referenced again');
+  // Both schemas are exported and referenced by no executable code — no
+  // validator, no structured-output request. Expected fix: they become
+  // load-bearing (structured outputs would also remove the JSON-parse failure
+  // class that currently routes to 503s and rescue pricing).
+  //
+  // Comments are stripped before counting: an earlier version of this test
+  // counted raw substrings and flipped the moment a code comment MENTIONED a
+  // schema by name, which is not the fact under test.
+  const code = ANALYZE_SRC
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
-  const verificationUses = ANALYZE_SRC.split('VERIFICATION_SCHEMA').length - 1;
-  assert.equal(verificationUses, 1, 'VERIFICATION_SCHEMA is declared once and never referenced again');
+  for (const name of ['RECOGNITION_SCHEMA', 'VERIFICATION_SCHEMA']) {
+    const uses = code.split(name).length - 1;
+    assert.equal(uses, 1, `${name} is declared once and never referenced by executable code; found ${uses}`);
+  }
 });
