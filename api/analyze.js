@@ -1536,6 +1536,47 @@ const OCR_GENERIC_TOKENS = new Set([
 const isModelShapedToken = (w) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/i.test(w);
 const isUsefulOcrToken   = (w) => isModelShapedToken(w) || (w.length >= 3 && !OCR_GENERIC_TOKENS.has(w));
 
+// ── SCAN-018: token SPECIFICITY ───────────────────────────────────────────
+// A token appearing somewhere in a row's text is a match; it is not
+// automatically EVIDENCE. `match_products_by_ocr` tier 1 fires on
+// `p.model ILIKE '%' || kw || '%'` for any token of 3+ characters, so the OCR
+// word "duo" hits SodaStream Duo, SodaStream Duo White and Instant Pot Duo 6Qt
+// at match_type='model_number' — indistinguishable, in the returned columns,
+// from a genuine model_numbers equality hit (the RPC does not return
+// model_numbers). Production showed that path promoting a SodaStream row to
+// model-text evidence for a scan whose recognised brand was Ninja.
+//
+// Specificity has two independent sources:
+//   (a) the token is model-shaped (G502, WH-1000XM5, A2251). An alphanumeric
+//       code identifies a product on its own, so it stands even when Stage 1
+//       got the brand wrong — Production has shown correct label reads paired
+//       with a wrong brand/category, and those must not be thrown away.
+//   (b) the token is a plain dictionary word AND the row's brand corroborates
+//       it. "duo" inside SodaStream's own catalog is a real sibling signal;
+//       "duo" inside SodaStream's catalog when the item read as NINJA is a
+//       word collision, not a reading of this product.
+// Category is deliberately NOT used: Stage 1 miscategorises otherwise
+// correctly identified items, so a category test would create false negatives
+// where the brand test does not.
+//
+// Returns true / false / null(unknown) so callers can pick their own fallback.
+export function brandCompatible(rowBrand, brandHead) {
+  const rb = String(rowBrand || '').toLowerCase().trim();
+  if (!brandHead || !rb) return null;
+  return rb.includes(brandHead) || brandHead.includes(rb.split(/\s+/)[0]);
+}
+
+// Is THIS token specific enough to attribute evidence to THIS row?
+// With no usable recognised brand, neither (a) nor (b) is available, so a
+// plain word must BE the model rather than a fragment of it.
+export function isSpecificTokenMatch(row, tok, brandHead = null) {
+  if (!tok) return false;
+  if (isModelShapedToken(tok)) return true;
+  const compat = brandCompatible(row?.brand, brandHead);
+  if (compat !== null) return compat;
+  return sameModelString(row?.model, tok);
+}
+
 // A row is independently corroborated only when an evidence-origin token
 // matches its visible identity fields (model/name/keywords/aliases — brand
 // deliberately excluded: a brand hit is not model-level corroboration).
@@ -1547,7 +1588,7 @@ const isUsefulOcrToken   = (w) => isModelShapedToken(w) || (w.length >= 3 && !OC
 // A token that is the row's own brand — or a fragment of it — is brand-level
 // signal and is skipped here; only tokens carrying model information can
 // grade a row. Pure function (exported for the test harness).
-export function gradeRowEvidence(r, evidenceTokens, uniqueKw) {
+export function gradeRowEvidence(r, evidenceTokens, uniqueKw, brandHead = null) {
   if (evidenceTokens.length === 0) return false;
   const rowBrand = String(r.brand || '').toLowerCase();
   const modelTokens = rowBrand
@@ -1555,7 +1596,9 @@ export function gradeRowEvidence(r, evidenceTokens, uniqueKw) {
     : evidenceTokens;
   const fields = [r.model, r.name, ...(r.keywords || []), ...(r.aliases || [])]
     .filter(Boolean).map(f => String(f).toLowerCase());
-  if (modelTokens.some(tok => fields.some(f => f.includes(tok)))) return true;
+  // SCAN-018: a substring hit is evidence only when the token is specific.
+  if (modelTokens.some(tok => fields.some(f => f.includes(tok))
+                              && isSpecificTokenMatch(r, tok, brandHead))) return true;
   if (r.match_type === 'model_number') {
     // Tier-1 hit not explained by visible fields ⇒ it came from the
     // model_numbers equality (column not returned by the RPC). Attribute it
@@ -1565,6 +1608,11 @@ export function gradeRowEvidence(r, evidenceTokens, uniqueKw) {
     const evShaped = evidenceTokens.some(isModelShapedToken);
     const guessShapedUnexplained = uniqueKw.some(t =>
       !evidenceTokens.includes(t) && isModelShapedToken(t) && !fields.some(f => f.includes(t)));
+    // SCAN-018: which column matched is invisible here, so this branch is an
+    // INFERENCE. An inferred equality that contradicts the recognised brand is
+    // not evidence — a tier-1 hit explained by a plain-word substring on the
+    // model column lands here once the branch above refuses it.
+    if (brandCompatible(r.brand, brandHead) === false) return false;
     return evShaped && !guessShapedUnexplained;
   }
   return false;
@@ -1808,13 +1856,16 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
 
   const uniqueKw = [...tokenOrigins.keys()].slice(0, 25);
   const evidenceTokens = uniqueKw.filter(t => [...tokenOrigins.get(t)].some(o => EVIDENCE_ORIGINS.has(o)));
+  // SCAN-018: brand head of the RECOGNISED item — the second constraint that
+  // separates a specific token match from a dictionary-word collision.
+  const evidenceBrandHead = brand_ok ? topBrand.toLowerCase().trim().split(/\s+/)[0] : null;
 
   // SCAN-013 (B-22): grading logic lives in gradeRowEvidence (module level,
   // exported for the test harness) — semantics + the brand-token fix are
   // documented there. Parity vs the old inline closure was verified on replay
   // fixtures before the swap (only diff: brand-only tokens no longer grade
   // same-brand rows as evidence through name/keywords).
-  const rowEvidenceGrade = (r) => gradeRowEvidence(r, evidenceTokens, uniqueKw);
+  const rowEvidenceGrade = (r) => gradeRowEvidence(r, evidenceTokens, uniqueKw, evidenceBrandHead);
 
   // ── Dedup accumulator ────────────────────────────────────────────────────
   const seen    = new Set();
@@ -1916,14 +1967,34 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
           keyword:      0.72,  // keywords / ocr_keywords array token
           brand:        0.55,  // brand-only — weakest evidence class
         };
-        const mapped = rpcD.map(r => ({
-          ...r,
+        const mapped = rpcD.map((r) => {
           // F1 (SCAN-003): expose the RPC's model-column match as a flag that
           // survives addRows() — calibrateVerification keys its OCR-confirmed
           // boost off this.
-          _ocr_model_confirmed: r.match_type === 'model_number',
-          similarity: OCR_MATCH_SIM[r.match_type] ?? 0.55,
-        }));
+          // SCAN-018: the RPC's tier 1 conflates a `model ILIKE '%kw%'`
+          // substring with a model_numbers equality and returns both as
+          // match_type='model_number' (model_numbers is not in its RETURNS
+          // TABLE, so the two are indistinguishable here). The tier alone is
+          // therefore no longer sufficient: the match must also be specific.
+          // This flag is consumed by calibrateVerification, preQuoteFromCatalog
+          // and classifyRowEvidence, so correcting it at the source corrects
+          // every one of them.
+          const modelTier = r.match_type === 'model_number';
+          const textConfirmed = modelTier
+            && gradeRowEvidence(r, evidenceTokens, uniqueKw, evidenceBrandHead);
+          if (modelTier && !textConfirmed) {
+            console.log(`[Retrieve] SCAN-018 tier-1 demoted: "${r.brand} ${r.model}" — token matched as a substring, not as model text (brandHead=${evidenceBrandHead})`);
+          }
+          return {
+            ...r,
+            _ocr_model_confirmed: textConfirmed,
+            // A tier-1 hit that is only a substring is materially a text-column
+            // hit, so it carries the ocr_keyword weight rather than 0.92.
+            similarity: modelTier && !textConfirmed
+              ? OCR_MATCH_SIM.ocr_keyword
+              : (OCR_MATCH_SIM[r.match_type] ?? 0.55),
+          };
+        });
         rec.batches.push({ rows: mapped, source: 'ocr_rpc', baseSim: null });
       } else {
         // Direct ILIKE on model-like tokens

@@ -38,7 +38,7 @@ const {
   stripBrandPrefix, composeBrandModelName, sanitizeUserCorrection,
   gradeRowEvidence, calibrateRecognition, buildRecognitionPrompt, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
   rankCandidates, classifyRowEvidence, sameModelString, EVIDENCE_CLASS,
-  calibrateVerification,
+  calibrateVerification, isSpecificTokenMatch, brandCompatible,
 } = A;
 const { buildRecognitionMemoryKey, MEMORY_KEY_VERSION } = M;
 
@@ -598,4 +598,115 @@ test('B-06 [DEFECT-6] the JSON schemas are declared but never applied', () => {
     const uses = code.split(name).length - 1;
     assert.equal(uses, 1, `${name} is declared once and never referenced by executable code; found ${uses}`);
   }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// §C  SCAN-018 — weak OCR substrings must not become exact model evidence
+//
+// Production (GW-RC-PERF-003, scan "Ninja blender") proved the chain:
+//   OCR token "duo"
+//     -> match_products_by_ocr tier 1 (`p.model ILIKE '%duo%'`, 3+ chars, no
+//        brand or category filter)
+//     -> match_type = 'model_number'      (the SAME value a genuine
+//        model_numbers equality produces; model_numbers is not in the RPC's
+//        RETURNS TABLE, so the two are indistinguishable in JS)
+//     -> _ocr_model_confirmed = true, similarity = 0.92
+//     -> EVIDENCE_CLASS.MODEL_TEXT -> exact_match -> db_match_found
+//     -> UI "DB MATCH - 6 found" for SodaStream rows on a NINJA scan.
+//
+// The defect had TWO entrances into MODEL_TEXT, and a fix that closed only the
+// _ocr_model_confirmed one would not have worked: gradeRowEvidence graded the
+// same row on ANY 3+ char token that was a substring of model/name/keywords/
+// aliases, and classifyRowEvidence promotes `_evidence_grade && _source=ocr_*`
+// to MODEL_TEXT independently. Both now route through the same specificity
+// predicate.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// The exact Production shapes.
+const SODASTREAM_DUO = { brand: 'SodaStream', model: 'Duo', name: 'SodaStream Duo',
+  keywords: [], aliases: [], match_type: 'model_number', _source: 'ocr_rpc' };
+const SODASTREAM_DUO_WHITE = { brand: 'SodaStream', model: 'Duo White', name: 'SodaStream Duo White',
+  keywords: [], aliases: [], match_type: 'model_number', _source: 'ocr_rpc' };
+const LOGITECH_G502 = { brand: 'Logitech', model: 'G502', name: 'Logitech G502 Hero',
+  keywords: [], aliases: [], match_type: 'model_number', _source: 'ocr_rpc' };
+
+test('C-01 CASE 1: a plain OCR word matching a DIFFERENT brand is not evidence', () => {
+  // Recognition said Ninja. "duo" hitting SodaStream's catalog is a dictionary
+  // collision, not a reading of this product.
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO, ['duo'], ['duo'], 'ninja'), false);
+  assert.equal(isSpecificTokenMatch(SODASTREAM_DUO, 'duo', 'ninja'), false);
+
+  // ...and it therefore cannot reach MODEL_TEXT by EITHER entrance.
+  const row = { ...SODASTREAM_DUO, _ocr_model_confirmed: false, _evidence_grade: false };
+  assert.equal(classifyRowEvidence(row), EVIDENCE_CLASS.WEAK);
+
+  // ...so retrieval reports NO model evidence, which is what db_match_found and
+  // the fast path's `exact_match` gate both read.
+  const ranked = rankCandidates([row]);
+  assert.equal(ranked.exactMatch, false);
+  assert.ok(ranked.topClass < EVIDENCE_CLASS.MODEL_TEXT);
+});
+
+test('C-02 CASE 2: an exact model-number read stays strong evidence', () => {
+  // The whole point of the tier. This must survive the fix untouched.
+  assert.equal(gradeRowEvidence(LOGITECH_G502, ['g502'], ['g502'], 'logitech'), true);
+
+  const row = { ...LOGITECH_G502, _ocr_model_confirmed: true, _evidence_grade: true };
+  assert.equal(classifyRowEvidence(row), EVIDENCE_CLASS.MODEL_TEXT);
+  assert.equal(rankCandidates([row]).exactMatch, true);
+});
+
+test('C-03 CASE 2b: a model-shaped token outranks a WRONG Stage 1 brand', () => {
+  // Production shows Stage 1 can read a label correctly and still name the
+  // wrong brand/category. An alphanumeric code identifies a product on its
+  // own, so it must NOT be discarded because the brand guess disagrees --
+  // this is why the guard is brand-gated only for plain words.
+  assert.equal(gradeRowEvidence(LOGITECH_G502, ['g502'], ['g502'], 'razer'), true);
+  assert.equal(isSpecificTokenMatch(LOGITECH_G502, 'g502', 'razer'), true);
+});
+
+test('C-04 CASE 3: a plain word within the RIGHT brand stays evidence', () => {
+  // No false negatives for genuine siblings: "duo" in SodaStream's own catalog
+  // when the item WAS recognised as a SodaStream is real signal.
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO, ['duo'], ['duo'], 'sodastream'), true);
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO_WHITE, ['duo'], ['duo'], 'sodastream'), true);
+});
+
+test('C-05 CASE 4: with no recognised brand, a plain word must BE the model', () => {
+  // Neither constraint is available, so the conservative fallback applies:
+  // the token has to be the whole model string, not a fragment of it.
+  assert.equal(isSpecificTokenMatch(SODASTREAM_DUO, 'duo', null), true);
+  assert.equal(isSpecificTokenMatch(SODASTREAM_DUO_WHITE, 'duo', null), false);
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO_WHITE, ['duo'], ['duo'], null), false);
+
+  assert.equal(brandCompatible('SodaStream', null), null, 'unknown brand must report unknown, not false');
+  assert.equal(brandCompatible('', 'ninja'), null);
+});
+
+test('C-06 CASE 5: the model_numbers-equality INFERENCE is brand-gated', () => {
+  // This branch fires when a tier-1 hit is not explained by any visible field,
+  // and attributes it to the model_numbers array -- a column the RPC does not
+  // return. It is an inference, so a brand contradiction refuses it.
+  const ev = ['sf301'], kw = ['sf301'];   // model-shaped, matches no field here
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO, ev, kw, null), true,
+    'legacy behaviour with no brand known is preserved');
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO, ev, kw, 'ninja'), false,
+    'a brand-contradicting inferred equality is not evidence');
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO, ev, kw, 'sodastream'), true);
+});
+
+test('C-07 CASE 6: _ocr_model_confirmed is no longer the raw RPC tier', () => {
+  // Source-level pin. `match_type === 'model_number'` alone must never again be
+  // assigned straight to the flag: every downstream consumer
+  // (calibrateVerification RULE 6 + corroboration, preQuoteFromCatalog's MEDIUM
+  // grade, classifyRowEvidence) trusts it as "model text was READ".
+  const code = ANALYZE_SRC
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.ok(!/_ocr_model_confirmed:\s*r\.match_type === 'model_number'\s*,/.test(code),
+    'the raw-tier assignment is back; the substring/equality conflation is unguarded again');
+  assert.ok(/_ocr_model_confirmed:\s*textConfirmed/.test(code));
+  // ...and the demoted tier-1 row must not keep the 0.92 model-number weight.
+  assert.ok(/OCR_MATCH_SIM\.ocr_keyword/.test(code));
 });
