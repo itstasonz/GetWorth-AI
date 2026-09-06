@@ -4267,7 +4267,14 @@ async function handleRequest(req) {
                   guard_error:       result.marketValue.validation.guard_error ?? null,
                 }
               : null,
-            pre_source: preSource,
+            // SCAN-018: was `preSource`, an identifier that exists nowhere in
+            // this module. Every other site spells it pre_source. The reference
+            // threw a ReferenceError here, which the catch at the end of this
+            // block swallowed as "shadow, scan unaffected" — true of the scan,
+            // but it meant the ai_observation ledger recorded NOTHING from the
+            // moment it shipped. Resolved post-guard value, matching the debug
+            // payload's `result.marketValue.pre_source`.
+            pre_source: result.marketValue?.pre_source ?? null,
             pricing_mode: result.authenticity?.pricingMode ?? 'normal',
             authenticity_status: result.authenticity?.status ?? null,
             stage2_completed: !stage2FallbackUsed,

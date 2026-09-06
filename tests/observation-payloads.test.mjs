@@ -359,3 +359,59 @@ test('OB-10 all three AI-price observation sites call observedPriceMid', () => {
       'the canonical predicate has been bypassed.');
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SCAN-018 — the SERVER-side ai_observation ledger payload.
+//
+// The tests above cover the CLIENT observation sites. This one covers the
+// server's zero-trust ledger payload in api/analyze.js, which had a defect no
+// client-side test could have seen: it referenced `preSource`, an identifier
+// that exists nowhere in the module. Every other site spells it `pre_source`.
+//
+// The reference threw a ReferenceError, and the enclosing catch swallowed it as
+// "[Memory] sample write failed (shadow, scan unaffected)". That is true of the
+// SCAN — the shadow layer is correctly isolated — but it meant the ledger
+// recorded nothing at all from the moment it shipped, while logging a message
+// that reads like a transient DB hiccup.
+//
+// Executing the literal with every free identifier bound is what catches this
+// class: compileRegion binds each name as a parameter, so ANY unbound
+// identifier throws at call time instead of silently becoming undefined.
+// ══════════════════════════════════════════════════════════════════════════════
+const ANALYZE_PATH = process.env.SCAN018_ANALYZE_PATH || `${ROOT}api/analyze.js`;
+
+test('OB-11 the ai_observation payload references no undefined identifier', () => {
+  const body = objectLiteralAt(readFileSync(ANALYZE_PATH, 'utf8'), 'const obsPayload = {', 'analyze.js');
+
+  // Every free identifier the literal reads. An unbound one is the bug.
+  const params = [
+    'verification', 'result', 'recognition', 'memoryDebug', 'candidates',
+    'candidateSourceTable', 'dbMatchFound', 'stage2FallbackUsed',
+    'stage2FallbackReason', 'visionData', 'oceContext', 'totalMs',
+  ];
+  const build = compileRegion(params, `return ${body};`, 'obsPayload');
+
+  // Shapes only need to be navigable — the assertion is that evaluation
+  // completes without a ReferenceError.
+  const payload = build(
+    { raw_match_confidence: 0.8, match_confidence: 0.8, price_method: 'comp_based' },
+    { confidence: 0.8, marketValue: { low: 1, mid: 2, high: 3, pre_source: 'catalog', validation: null } },
+    {}, { key: 'v2|x|y|z', evidence_gate_passed: true }, [], 'products',
+    true, false, null, null, null, 1234,
+  );
+
+  assert.equal(typeof payload, 'object');
+  assert.equal(payload.v, 1);
+  // The field that was broken, now carrying the resolved post-guard value.
+  assert.equal(payload.pre_source, 'catalog');
+});
+
+test('OB-12 the ledger payload spells pre_source the same way every other site does', () => {
+  // A camelCase spelling here cannot be caught by the parser and is swallowed at
+  // runtime, so it is worth asserting directly.
+  const body = objectLiteralAt(readFileSync(ANALYZE_PATH, 'utf8'), 'const obsPayload = {', 'analyze.js');
+  const code = body.replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+  assert.equal(/\bpreSource\b/.test(code), false,
+    'the ledger payload must not reference `preSource` — the module spells it pre_source');
+});
