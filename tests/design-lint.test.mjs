@@ -18,8 +18,9 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 // Overridable so tests/mutations/ui-run.mjs can ask the decisive question about
 // this suite too: if the ratchet were quietly reverted, would anything notice?
 const REAL_LINT = process.env.UI002B_LINT_PATH || join(ROOT, 'scripts/design-lint.mjs');

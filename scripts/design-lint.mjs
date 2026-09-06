@@ -33,13 +33,14 @@
  */
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // Assembled rather than written literally, so this file's own use of the marker
 // in comments and rule text does not register as a suppression when the linter
 // is ever pointed at a tree containing it.
 const DISABLE_MARKER = 'design-lint' + '-disable';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 // ── Fixture mode ────────────────────────────────────────────────────────────
 // The linter must be testable against a fixture tree — a linter nobody tests
@@ -58,7 +59,7 @@ const ROOT = new URL('..', import.meta.url).pathname;
 // review as exactly what it is.
 const FIXTURE = process.argv.includes('--fixture');
 const SRC = (FIXTURE && process.env.DESIGN_LINT_SRC) || join(ROOT, 'src');
-const SELF = (FIXTURE && process.env.DESIGN_LINT_SELF) || new URL(import.meta.url).pathname;
+const SELF = (FIXTURE && process.env.DESIGN_LINT_SELF) || fileURLToPath(new URL(import.meta.url));
 
 // ── Budget ledger ───────────────────────────────────────────────────────────
 const BUDGET = {

@@ -393,7 +393,7 @@ function AppShell() {
                 <User className="w-10 h-10" style={{ color: '#6FEEE1' }} />
               </div>
               <h3 className="text-2xl font-bold">{t.signInReq}</h3>
-              <p className="text-slate-400">{signInAction === 'save' ? t.signInSave : signInAction === 'contact' ? t.signInContact : signInAction === 'buy' ? t.signInBuy : t.signInList}</p>
+              <p className="text-slate-400">{signInAction === 'save' ? t.signInSave : signInAction === 'contact' ? t.signInContact : signInAction === 'buy' ? t.signInBuy : signInAction === 'scan' ? t.signInScan : t.signInList}</p>
               <div className="flex gap-3 pt-2">
                 {/* MKT-3: cancel clears the pending buy intent, not just the modal */}
                 <Btn className="flex-1" onClick={dismissSignInModal}>{t.cancel}</Btn>

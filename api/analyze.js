@@ -332,6 +332,10 @@ const VISION_DAILY_LIMIT = 1500;             // Hard cap per day across all user
 const VISION_RATE_PER_MIN = 5;               // Per-IP scan rate limit
 const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same image
 const VISION_TRIGGER_THRESHOLD = 0.60;       // Vision fires when Stage 1 identity (brand/model) or category confidence is below this
+// SCAN-021: cap for the rate-limit RPC. One round trip; ~2-3s against a cold
+// Supabase pool in production, so this is headroom, not a target. A breach
+// DENIES the scan (fail closed) — see the call site.
+const RATE_LIMIT_TIMEOUT_MS = 6_000;
 
 const USER_RATE_PER_MIN = 5;                 // Per-user per-minute scan limit
 const USER_DAILY_LIMIT   = 50;               // Per-user daily scan quota (beta)
@@ -535,6 +539,11 @@ export const RECOGNITION_SCHEMA = {
     category_hebrew:     { type: 'string' },
     category_confidence: { type: 'number', minimum: 0, maximum: 1 },
     subcategory:         { type: 'string' },
+    // SCAN-015: family-level identity. Lets Stage 1 keep the certainty it has
+    // ("a Logitech G-series mouse") without inventing certainty it does not
+    // ("a G903"). Optional — absence means no family was recognised.
+    model_family:          { type: ['string', 'null'] },
+    exact_model_ambiguous: { type: 'boolean' },
     brand_candidates: {
       type: 'array', maxItems: 5,
       items: {
@@ -566,7 +575,6 @@ export const RECOGNITION_SCHEMA = {
         raw_texts:         { type: 'array', items: { type: 'string' } },
         logos_detected:    { type: 'array', items: { type: 'string' } },
         labels_detected:   { type: 'array', items: { type: 'string' } },
-        serial_numbers:    { type: 'array', items: { type: 'string' } },
         has_readable_text: { type: 'boolean' },
       },
     },
@@ -578,14 +586,10 @@ export const RECOGNITION_SCHEMA = {
         colors:               { type: 'array', items: { type: 'string' } },
         finish:               { type: 'string' },
         shape:                { type: 'string' },
-        distinctive_elements: { type: 'array', items: { type: 'string' } },
-        wear_level:           { type: 'string' },
         condition:            { type: 'string', enum: ['New', 'Like New', 'Good', 'Fair', 'Poor'] },
-        size_estimate:        { type: 'string' },
       },
     },
     embedding_text: { type: 'string' },
-    needs_more_info: { type: 'boolean' },
     suggested_followup: { type: ['string', 'null'] },
   },
 };
@@ -627,7 +631,7 @@ export const VERIFICATION_SCHEMA = {
 // §2  PROMPTS
 // ═══════════════════════════════════════════════════════
 
-function buildRecognitionPrompt(language = 'he') {
+export function buildRecognitionPrompt(language = 'he') {
   return `You are an image understanding model that extracts visual attributes with forensic precision.
 You are part of a product identification pipeline for an Israeli marketplace app.
 
@@ -677,6 +681,29 @@ CONFIDENCE RULES:
 - 0.10-0.29: Uncertain even about category
 - NEVER fabricate brand text
 
+UNCERTAINTY IS A CORRECT ANSWER (SCAN-015):
+You are not required to name a brand or a model. A precise "I cannot tell from
+this photo" is worth more than a confident guess, because a wrong identity is
+priced as if it were right and the seller never finds out.
+- Cannot read or recognise the brand → return brand_candidates: [] (empty), or a
+  single entry with brand "unidentified". Never invent one to fill the field.
+- Cannot pin the exact model → return model_candidates: [] or list EVERY
+  plausible sibling at equal low confidence. Never pick one arbitrarily to look
+  decisive, and never break a tie you cannot actually break.
+- Sure of the family but not the exact variant → set model_family (for example
+  "Logitech G-series gaming mouse", "Samsung Galaxy S-series") and list the
+  siblings you cannot separate. This is the single most useful thing you can
+  return when a shape-only photo shows a product family you recognise: it keeps
+  the brand-level certainty you DO have without inventing model-level certainty
+  you do not.
+- Set exact_model_ambiguous: true whenever two or more models remain plausible.
+
+Worked example — a shape-only photo of a Logitech G-series mouse with no legible
+label. CORRECT: brand Logitech 0.88 (logo visible), model_family "Logitech
+G-series gaming mouse", exact_model_ambiguous true, model_candidates listing
+G502/G903/G703 at 0.30 each. WRONG: model_candidates [{"G903", 0.82}] — that
+number cannot be earned from a silhouette.
+
 Language: ${language === 'he' ? 'Include Hebrew names where relevant' : 'English only'}
 
 Respond ONLY with valid JSON (no markdown, no backticks):
@@ -687,11 +714,12 @@ Respond ONLY with valid JSON (no markdown, no backticks):
   "subcategory": "string",
   "brand_candidates": [{"brand":"string","confidence":0.82,"evidence":"readable_text"}],
   "model_candidates": [{"model":"string","confidence":0.65,"evidence":"string"}],
+  "model_family": "string or null",
+  "exact_model_ambiguous": false,
   "ocr_text": {
     "raw_texts": ["exact text found"],
     "logos_detected": ["logo description"],
     "labels_detected": ["label text"],
-    "serial_numbers": [],
     "has_readable_text": true
   },
   "visual_features": {
@@ -699,13 +727,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     "colors": ["silver"],
     "finish": "brushed",
     "shape": "cylindrical",
-    "distinctive_elements": ["ornate engravings"],
-    "wear_level": "minimal",
-    "condition": "Good",
-    "size_estimate": "60cm tall"
+    "condition": "Good"
   },
   "embedding_text": "brand model category features...",
-  "needs_more_info": false,
   "suggested_followup": null
 }`;
 }
@@ -718,7 +742,8 @@ export function buildVerificationPrompt(recognition, candidates, corrections, la
     ? `\nMATCHED PRODUCTS FROM DATABASE (${candidates.length} results):
 ${candidates.map((c, i) => `${i + 1}. [ID:${c.id}] ${c.brand} ${c.model || ''} — Category: ${c.category}
      Retail: ₪${c.retail_price_ils ?? '?'} | Used avg: ₪${c.avg_used_price_ils ?? '?'} | Range: ₪${c.price_low_ils ?? '?'}-${c.price_high_ils ?? '?'}
-     Similarity: ${(c.similarity * 100).toFixed(1)}% | Scans: ${c.popularity_score || 0}
+     Evidence: ${CLASS_LABEL[c._evidence_class] || 'unclassified'}${c._sibling_of ? ` — DIFFERENT MODEL from "${c._sibling_of}". Same family, NOT the scanned item unless text confirms it.` : ''}
+     Rank score: ${(c.similarity * 100).toFixed(1)}/100 (internal ranking weight, NOT a measured similarity) | Scans: ${c.popularity_score || 0}
      Aliases: ${(c.aliases || []).join(', ') || 'none'}
      Keywords: ${(c.keywords || []).join(', ') || 'none'}`).join('\n')}`
     : '\nNo matching products found in database. Use your own knowledge of Israeli market prices.';
@@ -778,8 +803,11 @@ ${correctionBlock}
 ${userCorrectionBlock}
 
 VERIFICATION RULES:
-- If a DB candidate matches with >70% similarity AND brand/model aligns with Stage 1 → use its pricing → price_method = "comp_based"
-- If DB candidates exist but weak match → use as loose anchor, widen range → price_method = "ai_estimate"
+- Adopt a DB candidate's IDENTITY only when its Evidence line reads EXACT or MODEL TEXT. Then use its pricing → price_method = "comp_based".
+- A candidate marked "SAME BRAND, model not confirmed" is a SIBLING. It is evidence of the FAMILY, never of the exact model. You may use it as a pricing anchor with a widened range → price_method = "ai_estimate" — but you MUST NOT copy its model into final_model. Doing so renames the user's item to a product they do not own.
+- A candidate marked SEMANTIC or WEAK is resemblance, not evidence. Loose anchor only, wide range.
+- The rank score is an internal ordering weight, not a measured similarity. Never treat it as a match percentage or quote it as one.
+- If the scanned item is genuinely not in the candidate list, say so: keep the identity you actually read and set final_model to "unidentified" rather than adopting the nearest row.
 - If no DB match → pure AI estimate → flag clearly → price_method = "ai_estimate"
 - If Stage 1 and DB disagree on brand → prefer OCR text evidence over everything
 - If brand evidence is "packaging_design" or "packaging_visual" → identify the product inside the box, set identification_method = "packaging_recognized"
@@ -1542,6 +1570,152 @@ export function gradeRowEvidence(r, evidenceTokens, uniqueKw) {
   return false;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// SCAN-016 — EVIDENCE-CLASS RANKING
+// ══════════════════════════════════════════════════════════════════════════
+// Retrieval used to finish with one flat numeric sort:
+//
+//     results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+//
+// which erased WHY each row was found. `similarity` is not a measurement — for
+// nine of the ten strategies it is a hardcoded constant standing for "strategy
+// N found this". Sorting those constants against strategy 7's REAL cosine put
+// catalog evidence and semantic resemblance on one axis, and gave the semantic
+// side the higher ceiling: vector similarity is bounded only by 1.0, so a 0.93
+// cosine outranked an exact brand+model hit pinned at 0.92.
+//
+// Worse, strategy 3a queries `model ILIKE %<suffix-stripped model>%` — it finds
+// SIBLINGS by construction ("G502 Hero" -> matches "G502 X Plus") and stamped
+// them 0.85, above the prompt's ">70% similarity => use its pricing" adoption
+// rule. A wrong-model sibling was adopted as the identity with a number that
+// was never measured.
+//
+// The fix separates RECALL from PRECISION. Strategy 3a keeps finding siblings —
+// that is useful, they are often the right family and sometimes the right item.
+// What changes is that ranking no longer mistakes a fuzzy hit for an exact one.
+// Rows are bucketed by the KIND of evidence that produced them, buckets are
+// ordered, and `similarity` only breaks ties WITHIN a bucket. A semantic hit can
+// now never outrank catalog evidence no matter how high its cosine climbs.
+//
+// Deliberately NOT changed here: normalizeModelKey, and the frozen v1/v2 copies
+// in api/_lib/recognition-memory.js. Stored memory keys are only reproducible
+// while that code is byte-stable (see that file's VERSION FREEZE header), so
+// identity-key normalization is a separate, migration-bearing change. This
+// commit is ranking only.
+
+// Ordered best-first. Numeric so rows sort on it directly; the names are what
+// appear in logs and in the debug payload.
+export const EVIDENCE_CLASS = {
+  EXACT_MODEL:   5, // row.model IS the queried model (normalized string compare)
+  MODEL_TEXT:    4, // OCR/label text matched the model column
+  CATALOG_FUZZY: 3, // structural brand+model hit, model string NOT identical => sibling
+  SEMANTIC:      2, // vector / full-text — resemblance, not evidence
+  WEAK:          1, // brand-only, category-only, last-resort fallbacks
+};
+
+// Human-readable class names for the Stage 2 prompt and the debug payload.
+// Stage 2 was previously handed a bare percentage with no way to tell a read
+// label from a shape resemblance; this is the vocabulary that distinction needs.
+export const CLASS_LABEL = {
+  [EVIDENCE_CLASS.EXACT_MODEL]:   'EXACT catalog match (model string identical)',
+  [EVIDENCE_CLASS.MODEL_TEXT]:    'MODEL TEXT confirmed (OCR/label matched the model)',
+  [EVIDENCE_CLASS.CATALOG_FUZZY]: 'SAME BRAND, model not confirmed (sibling candidate)',
+  [EVIDENCE_CLASS.SEMANTIC]:      'SEMANTIC resemblance only (no text evidence)',
+  [EVIDENCE_CLASS.WEAK]:          'WEAK (brand or category level only)',
+};
+
+// Loose model comparison for "is this row actually the thing we asked for".
+// Case, spacing and separators only — deliberately NOT normalizeModelKey, which
+// strips variant suffixes and would call a G502 X Plus a G502, the exact
+// conflation this ranking exists to undo.
+export function sameModelString(a, b) {
+  const fold = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const fa = fold(a), fb = fold(b);
+  return !!fa && fa === fb;
+}
+
+// Which evidence class produced this row. Pure; exported for the benchmark and
+// the test harness.
+export function classifyRowEvidence(row, ctx = {}) {
+  const { queryModel = null } = ctx;
+  const source = row?._source || '';
+  const exactModel = queryModel ? sameModelString(row?.model, queryModel) : false;
+
+  // A row whose model column IS the queried model is the top class regardless of
+  // which strategy happened to surface it first.
+  if (exactModel) return EVIDENCE_CLASS.EXACT_MODEL;
+
+  // The RPC's model_number tier means an OCR token hit the model column or the
+  // model_numbers array — read text, not resemblance.
+  if (row?._ocr_model_confirmed === true) return EVIDENCE_CLASS.MODEL_TEXT;
+
+  // gradeRowEvidence already refuses brand-only tokens, so a true here means a
+  // model-bearing token matched this row's model/name/keywords/aliases.
+  if (row?._evidence_grade === true && /^(ocr_rpc|ocr_ilike|exact_brand_model|normalized_model|name_col)$/.test(source)) {
+    return EVIDENCE_CLASS.MODEL_TEXT;
+  }
+
+  // Structural brand+model strategies that did NOT produce an identical model
+  // string. These are the siblings. They stay as candidates — they are usually
+  // the right family — but they may not outrank real model evidence.
+  if (/^(exact_brand_model|normalized_model|name_col|model_candidates)$/.test(source)) {
+    return EVIDENCE_CLASS.CATALOG_FUZZY;
+  }
+
+  if (/^(vector|fts)$/.test(source)) return EVIDENCE_CLASS.SEMANTIC;
+
+  return EVIDENCE_CLASS.WEAK;
+}
+
+// Rank rows by evidence class first, similarity second. Returns a NEW array;
+// each row gains _evidence_class and, when demoted, _sibling_of.
+//
+// `ambiguous` is set when the top rows are the same class, score within
+// SIBLING_MARGIN of each other, and name DIFFERENT models — i.e. retrieval
+// genuinely cannot separate them. Callers must preserve that rather than
+// letting position 0 win by accident.
+export function rankCandidates(rows, ctx = {}) {
+  const { queryModel = null, siblingMargin = 0.08 } = ctx;
+
+  const graded = (rows || []).map((r) => {
+    const klass = classifyRowEvidence(r, ctx);
+    const out = { ...r, _evidence_class: klass };
+    // A fuzzy catalog hit carries a constant (0.85 / 0.82 / 0.72) that reads as
+    // a measured similarity in the Stage 2 prompt. Record what it is really a
+    // sibling OF, so the prompt and the debug payload can say so.
+    if (klass === EVIDENCE_CLASS.CATALOG_FUZZY && queryModel && r?.model && !sameModelString(r.model, queryModel)) {
+      out._sibling_of = queryModel;
+    }
+    return out;
+  });
+
+  graded.sort((a, b) =>
+    (b._evidence_class - a._evidence_class) ||
+    ((b.similarity || 0) - (a.similarity || 0)));
+
+  const [t0, t1] = graded;
+  const ambiguous = !!(t0 && t1
+    && t0._evidence_class === t1._evidence_class
+    && Math.abs((t0.similarity || 0) - (t1.similarity || 0)) < siblingMargin
+    && t0.model && t1.model && !sameModelString(t0.model, t1.model));
+
+  return {
+    rows: graded,
+    // True only when a row genuinely carries model-level evidence. Everything
+    // below MODEL_TEXT is resemblance, and an item absent from the catalog must
+    // not be reported as found just because something similar exists.
+    exactMatch: (t0?._evidence_class ?? 0) >= EVIDENCE_CLASS.MODEL_TEXT,
+    topClass: t0?._evidence_class ?? 0,
+    ambiguous,
+    ambiguousBetween: ambiguous
+      ? graded.filter((r) => r._evidence_class === t0._evidence_class
+          && Math.abs((r.similarity || 0) - (t0.similarity || 0)) < siblingMargin
+          && r.model)
+        .slice(0, 5).map((r) => `${r.brand || ''} ${r.model}`.trim())
+      : [],
+  };
+}
+
 // ── Strategy execution order ──────────────────────────────────────────────
 // 1  Exact brand + exact model         (most specific, highest confidence)
 // 2  OCR exact tokens                  (brand/model/name from OCR + Vision)
@@ -1960,19 +2134,46 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     }
   }
 
-  // ── Finalise: sort → take top 10 ────────────────────────────────────────
-  results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
-  const top = results.slice(0, 10);
+  // ── Finalise: evidence-class ranking → take top 10 ──────────────────────
+  // SCAN-016: was a flat `similarity` sort, which let a 0.93 vector cosine
+  // outrank an exact brand+model hit pinned at 0.92, and let a suffix-stripped
+  // sibling at 0.85 present as a measured match. Class first, similarity only
+  // as a within-class tiebreak.
+  const ranked = rankCandidates(results, { queryModel: model_ok ? queryModel : null });
+  const top = ranked.rows.slice(0, 10);
   strategyLog.final_candidates = top.length;
+  strategyLog.ranking = {
+    top_class: ranked.topClass,
+    exact_match: ranked.exactMatch,
+    ambiguous: ranked.ambiguous,
+    ambiguous_between: ranked.ambiguousBetween,
+    siblings_demoted: ranked.rows.filter((r) => r._sibling_of).length,
+  };
+  if (ranked.ambiguous) {
+    console.log(`[Retrieve] AMBIGUOUS — cannot separate: ${ranked.ambiguousBetween.join(' | ')}`);
+  }
+  const demoted = ranked.rows.filter((r) => r._sibling_of);
+  if (demoted.length) {
+    console.log(`[Retrieve] ${demoted.length} sibling row(s) demoted below model evidence: ${demoted.slice(0, 3).map((r) => `${r.brand} ${r.model}`).join(', ')}`);
+  }
 
   const summary = strategyLog.strategies.map(s => `${s.strategy_name}:${s.candidate_count}r/${s.elapsed_ms}ms/${s.success ? 'ok' : 'fail'}`).join(' ');
   console.log(`[Retrieve] Summary: ${summary}`);
   if (top.length > 0) {
-    console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} sim=${top[0].similarity?.toFixed(2)} ev=${top[0]._evidence_grade ? 'evidence' : 'guess'}`);
+    const className = Object.keys(EVIDENCE_CLASS).find(k => EVIDENCE_CLASS[k] === top[0]._evidence_class) || '?';
+    console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} class=${className} sim=${top[0].similarity?.toFixed(2)} ev=${top[0]._evidence_grade ? 'evidence' : 'guess'}${top[0]._sibling_of ? ` SIBLING_OF="${top[0]._sibling_of}"` : ''}`);
   } else {
     console.log('[Retrieve] 0 candidates');
   }
-  return { candidates: top, strategyLog };
+  // SCAN-016: `evidence` is additive. It carries the one fact the flat sort
+  // destroyed — whether anything here is actually model-level evidence, or just
+  // the nearest-looking row. The DB-missing guard downstream reads it.
+  return { candidates: top, strategyLog, evidence: {
+    exact_match: ranked.exactMatch,
+    top_class: ranked.topClass,
+    ambiguous: ranked.ambiguous,
+    ambiguous_between: ranked.ambiguousBetween,
+  } };
 }
 
 // VAL-001 — SCOPED to the requesting user.
@@ -2083,7 +2284,7 @@ async function verifyAndPrice(recognition, candidates, corrections, language, ap
 // §7  CONFIDENCE CALIBRATION
 // ═══════════════════════════════════════════════════════
 
-function calibrateRecognition(recognition) {
+export function calibrateRecognition(recognition) {
   let conf = recognition.category_confidence ?? 0.5;
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
@@ -2102,10 +2303,90 @@ function calibrateRecognition(recognition) {
   if (topBrand?.confidence >= 0.85 && topModel?.confidence >= 0.75) conf = Math.max(conf, 0.80);
   conf = Math.min(Math.max(conf, 0.10), 0.95);
 
+  // ── SCAN-015: ENFORCE the prompt's own model-confidence ceiling ───────────
+  // The Stage 1 prompt has always said "NEVER assign >0.70 model confidence
+  // from silhouette/shape alone. Text or logo OCR confirmation is required to
+  // reach >=0.75." Nothing enforced it: this function clamped category
+  // confidence only, and RECOGNITION_SCHEMA is never applied, so an unearned
+  // 0.90 travelled intact to the Vision trigger, to retrieval's brand_ok /
+  // model_ok gates, and to assessFallbackIdentity.
+  //
+  // The ceiling applies to the MODEL only. Brand is deliberately untouched: a
+  // visible logo is legitimate brand evidence without any readable model text,
+  // and capping brand here would throw away the one thing we usually do know.
+  // That asymmetry is the whole point — keep family-level certainty, drop
+  // invented model-level certainty.
+  //
+  // Ordering note: user corrections are injected AFTER this function runs (see
+  // the refineModel block in handleRequest), so a user-supplied identity at
+  // 0.96 is never clamped by this.
+  const textConfirmed = !!(ocr.has_readable_text || ocr.raw_texts?.length || ocr.labels_detected?.length);
+  const SILHOUETTE_MODEL_CEILING = 0.70;
+  let modelClamped = 0;
+  const models = (recognition.model_candidates || []).map((m) => {
+    // Evidence strings are free-form, so match on what the prompt asks for
+    // rather than an enum: anything naming text/label/OCR/serial/print counts.
+    const ev = String(m?.evidence || '').toLowerCase();
+    const evidenceIsTextual = /text|label|sticker|ocr|serial|print|engrav|model_number|user_correction/.test(ev);
+    if (textConfirmed || evidenceIsTextual) return m;
+    if ((m?.confidence ?? 0) > SILHOUETTE_MODEL_CEILING) {
+      modelClamped++;
+      return { ...m, confidence: SILHOUETTE_MODEL_CEILING, _clamped_from: m.confidence, _clamp_reason: 'no_text_evidence' };
+    }
+    return m;
+  });
+  if (modelClamped > 0) {
+    console.log(`[Calibrate] clamped ${modelClamped} model candidate(s) to ${SILHOUETTE_MODEL_CEILING} — no text evidence (prompt rule enforced)`);
+  }
+
+  // ── SCAN-015: derived identity resolution ────────────────────────────────
+  // Phase 5 in one field. Confidence has been a single scalar that conflated
+  // "what category is this" with "which exact unit is this", so the system
+  // could not say "Logitech certain, G900-vs-G903 unknown" — the honest answer
+  // for most shape-only scans. This states the two separately.
+  //
+  // AMBIGUOUS is decided by the MARGIN between the top two candidates, not by
+  // either one's absolute number: two models at 0.62 and 0.58 are a coin flip
+  // no matter how confident each claims to be. Nothing consumes this yet; it
+  // is additive and safe, and later commits rank and render from it.
+  const AMBIGUITY_MARGIN = 0.15;
+  const m0 = models[0], m1 = models[1];
+  const brandOk = !!topBrand?.brand && topBrand.brand.toLowerCase() !== 'unidentified' && topBrand.confidence >= 0.60;
+  const modelNamed = !!m0?.model && m0.model.toLowerCase() !== 'unidentified';
+  const siblingTie = !!(m0 && m1 && (m0.confidence - m1.confidence) < AMBIGUITY_MARGIN);
+  // Trust an explicit ambiguity flag from Stage 1 over our own inference.
+  const ambiguous = recognition.exact_model_ambiguous === true || siblingTie;
+
+  const level =
+    !brandOk && !modelNamed                       ? 'unknown'
+    : brandOk && modelNamed && !ambiguous && (m0.confidence >= 0.75) ? 'exact'
+    : brandOk && (ambiguous || (m0?.confidence ?? 0) < 0.75)          ? 'family'
+    : brandOk                                     ? 'brand'
+    : 'unknown';
+
+  const identity_resolution = {
+    level,                                    // exact | family | brand | unknown
+    brand: brandOk ? topBrand.brand : null,
+    brand_confidence: brandOk ? round(topBrand.confidence) : 0,
+    model: level === 'exact' ? m0.model : null,
+    model_confidence: modelNamed ? round(m0.confidence) : 0,
+    family: recognition.model_family || null,
+    exact_model_ambiguous: ambiguous,
+    // The siblings we genuinely cannot separate — what the UI should offer the
+    // user to choose between instead of silently picking one.
+    ambiguous_between: ambiguous
+      ? models.slice(0, 5).filter((m) => m?.model && (m0.confidence - m.confidence) < AMBIGUITY_MARGIN).map((m) => m.model)
+      : [],
+    text_confirmed: textConfirmed,
+  };
+  console.log(`[Identity] level=${level} brand=${identity_resolution.brand || 'none'}(${identity_resolution.brand_confidence}) model=${identity_resolution.model || 'none'}(${identity_resolution.model_confidence}) family=${identity_resolution.family || 'none'} ambiguous=${ambiguous}${identity_resolution.ambiguous_between.length ? ` between=[${identity_resolution.ambiguous_between.join('|')}]` : ''}`);
+
+  recognition = { ...recognition, model_candidates: models, identity_resolution };
+
   return { ...recognition, raw_category_confidence: recognition.category_confidence, category_confidence: round(conf), confidence_calibrated: true };
 }
 
-function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
+export function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
   let conf = verification.match_confidence ?? 0.5;
   const brand = verification.final_brand || '';
   const model = verification.final_model || '';
@@ -2113,10 +2394,53 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
   const method = verification.identification_method || 'generic_only';
   const isPackaging = brandConf === 'packaging_recognized' || method === 'packaging_recognized';
 
+  // ── SCAN-017: INDEPENDENT EVIDENCE ───────────────────────────────────────
+  // `brand_confidence` and `identification_method` are fields STAGE 2 WRITES
+  // ABOUT ITSELF. Letting them raise confidence is circular: the model asserts
+  // it had text evidence, and the assertion alone becomes the evidence.
+  //
+  // The rule this file now follows:
+  //   CAPS  may read self-declared fields — they can only ever lower confidence,
+  //         so a false claim cannot inflate a score.
+  //   FLOORS and BOOSTS may NOT — they must be corroborated by something Stage 2
+  //         did not author.
+  //
+  // Corroboration comes from three sources outside Stage 2: the text Stage 1
+  // actually read, Google Vision's independent OCR/logo pass, and retrieval's
+  // per-row evidence flags. `confirmed_by_text` is a CHECKABLE claim — if the
+  // brand really was read off the item, the brand string is in one of these.
+  const corroboratingText = [
+    ...(recognition?.ocr_text?.raw_texts || []),
+    ...(recognition?.ocr_text?.labels_detected || []),
+    ...(recognition?.ocr_text?.logos_detected || []),
+    ...(visionData?.text || []),
+    ...((visionData?.logos || []).map((l) => l?.description || '')),
+  ].join(' ').toLowerCase();
+
+  const brandHeadTok = brand.toLowerCase().split(' ')[0];
+  const brandInText = !!brandHeadTok && brandHeadTok.length >= 2 && corroboratingText.includes(brandHeadTok);
+  const modelInText = !!model && model.toLowerCase() !== 'unidentified'
+    && corroboratingText.includes(model.toLowerCase());
+  // Stage 1's own evidence tag — authored by a DIFFERENT call than Stage 2, so
+  // it is independent corroboration of a packaging claim.
+  const stage1Packaging = ['packaging_design', 'packaging_visual']
+    .includes(recognition?.brand_candidates?.[0]?.evidence);
+  // The user told us what this is. Not a model's opinion at all, so it outranks
+  // every other signal and must never be capped as an unsupported claim.
+  const userCorrected = !!recognition?._user_correction;
+
   if (brand.toLowerCase() === 'unidentified' || brandConf === 'unidentified') conf = Math.min(conf, 0.60);
   if (brandConf === 'inferred_from_visuals') conf = Math.min(conf, 0.75);
   if (isPackaging && brand.toLowerCase() !== 'unidentified') {
-    conf = Math.max(conf, 0.60);
+    // SCAN-017: the 0.60 FLOOR now requires Stage 1 to have independently tagged
+    // the brand evidence as packaging. Previously Stage 2 declaring
+    // identification_method='packaging_recognized' floored its own confidence.
+    // The 0.79 CAP is unconditional — a cap needs no corroboration.
+    if (stage1Packaging) {
+      conf = Math.max(conf, 0.60);
+    } else {
+      console.log('[Calibrate] packaging claim NOT corroborated by Stage 1 evidence tag — floor withheld');
+    }
     conf = Math.min(conf, 0.79);
   }
   if (method === 'generic_only') conf = Math.min(conf, 0.50);
@@ -2133,7 +2457,41 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
   }
   if (hasEvidenceMatch && dbMatches.length > 0 && (method === 'db_match' || brandConf === 'db_matched')) conf = Math.min(conf + 0.10, 0.90);
   if (hasEvidenceMatch && isPackaging && dbMatches.length > 0) conf = Math.min(conf + 0.10, 0.85);
-  if (brandConf === 'confirmed_by_text' && model.toLowerCase() !== 'unidentified') conf = Math.max(conf, 0.80);
+  // ── SCAN-017: the self-declaration floor, replaced by a verified one ──────
+  // WAS:
+  //   if (brandConf === 'confirmed_by_text' && model !== 'unidentified')
+  //     conf = Math.max(conf, 0.80);
+  //
+  // `brand_confidence` is written by Stage 2 about its own reasoning. This rule
+  // read no evidence — not _source, not similarity, not _evidence_grade, not
+  // rank — so Stage 2 could floor its own confidence at 0.80 by emitting one
+  // string. Combined with retrieval handing it a same-brand sibling labelled
+  // "85.0%", that is the mechanism behind a confidently wrong "Logitech G502 —
+  // 80%": every guardrail fired correctly and the answer was still wrong.
+  //
+  // NOW: the claim is CHECKED. "Confirmed by text" is falsifiable — if the brand
+  // was genuinely read off the item, it appears in Stage 1's OCR, in Google
+  // Vision's independent pass, or in a retrieval row carrying model-level
+  // evidence. Corroborated, the floor stands and legitimate text-confirmed scans
+  // are unaffected. Uncorroborated, the claim is not merely ignored: it was an
+  // inference presented as a reading, so it is capped exactly like the
+  // `inferred_from_visuals` it actually was.
+  const modelNamed = model.toLowerCase() !== 'unidentified' && !!model;
+  if (brandConf === 'confirmed_by_text' && modelNamed) {
+    // Retrieval-side corroboration: a row whose model column was hit by real
+    // text, graded independently of anything Stage 2 said.
+    const retrievalTextEvidence = dbMatches.some((m) =>
+      m?._ocr_model_confirmed === true
+      || (m?._evidence_grade === true && (m?._evidence_class ?? 0) >= EVIDENCE_CLASS.MODEL_TEXT));
+
+    if (brandInText || modelInText || retrievalTextEvidence || userCorrected) {
+      conf = Math.max(conf, 0.80);
+      console.log(`[Calibrate] confirmed_by_text CORROBORATED (brand=${brandInText} model=${modelInText} retrieval=${retrievalTextEvidence}) → floor 0.80 applied`);
+    } else {
+      conf = Math.min(conf, 0.75);
+      console.log(`[Calibrate] confirmed_by_text NOT corroborated by OCR, Vision or retrieval — floor withheld, capped 0.75 (self-declaration cannot manufacture evidence)`);
+    }
+  }
 
   // RULE 6 (Phase 2): OCR keyword match boost
   // F1 (SCAN-003): the 0.82 floor fires only for rows whose MODEL column matched
@@ -2213,9 +2571,50 @@ function calibrateVerification(verification, recognition, dbMatches, visionData 
     }
   }
 
+  // ── SCAN-017: global uncorroborated ceiling ──────────────────────────────
+  // The targeted fix above closed `confirmed_by_text`, but a sweep of every
+  // brand_confidence x identification_method pair found three more paths to a
+  // high score with zero evidence — all `brand_confidence: 'db_matched'`, which
+  // sailed through at 0.95 even when dbMatches was EMPTY. Stage 2 was asserting
+  // a database match that retrieval never made, and nothing checked.
+  //
+  // Rather than patch each label as it is discovered, the invariant is stated
+  // once here: if NOTHING outside Stage 2 corroborates the identity, Stage 2's
+  // self-reported number cannot exceed the inferred-from-visuals ceiling,
+  // whatever it called itself. Caps above still apply and can go lower; this
+  // only ever lowers.
+  //
+  // A user correction counts as corroboration and outranks everything — it is
+  // the one signal that is neither Stage 2's opinion nor a model's at all.
+  const anyRetrievalEvidence = dbMatches.some((m) =>
+    m?._evidence_grade === true || m?._ocr_model_confirmed === true);
+  const corroborated = brandInText || modelInText || anyRetrievalEvidence
+    || userCorrected || stage1Packaging;
+
+  const UNCORROBORATED_CEILING = 0.75;
+  if (!corroborated && conf > UNCORROBORATED_CEILING) {
+    console.log(`[Calibrate] no independent corroboration (brandConf="${brandConf}" method="${method}" dbRows=${dbMatches.length}) — capping ${round(conf * 100)}% → ${UNCORROBORATED_CEILING * 100}%`);
+    conf = UNCORROBORATED_CEILING;
+  }
+
   conf = Math.min(Math.max(conf, 0.10), 0.95);
 
-  return { ...verification, raw_match_confidence: verification.match_confidence, match_confidence: round(conf), confidence_calibrated: true };
+  return {
+    ...verification,
+    raw_match_confidence: verification.match_confidence,
+    match_confidence: round(conf),
+    confidence_calibrated: true,
+    // Additive provenance: which independent sources backed this number, so a
+    // scan's confidence can be audited after the fact instead of inferred.
+    confidence_evidence: {
+      corroborated,
+      brand_in_text: brandInText,
+      model_in_text: modelInText,
+      retrieval_evidence: anyRetrievalEvidence,
+      stage1_packaging: stage1Packaging,
+      user_correction: userCorrected,
+    },
+  };
 }
 
 function getConfidenceTier(confidence) {
@@ -2862,6 +3261,12 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     // used internally for pricing (retrieval -> Stage 2) but are NOT displayed as
     // external evidence. Only real DB-backed records may populate this later.
     comparable_items: [],
+    // SCAN-015: separate identity certainty from the single scalar `confidence`.
+    // `confidence` answers "how sure is the pipeline overall"; this answers "how
+    // far down the identity can we actually commit" — brand may be certain while
+    // the exact model is a coin flip. Additive: no existing reader is affected,
+    // and it degrades to level 'unknown' on a pre-SCAN-015 recognition object.
+    identity: recognition.identity_resolution || null,
     _pipeline: {
       version: 'v2',
       stage1_confidence: recognition.category_confidence,
@@ -2933,6 +3338,32 @@ async function handleRequest(req) {
   const rem  = () => BUDGET_MS - (Date.now() - TREQ);
   const blog = (msg) => console.log(`[rem=${rem()}ms total=${Date.now() - TREQ}ms] ${msg}`);
 
+  // ── SCAN-019: STAGE TIMING (instrumentation only, changes no decision) ────
+  // The pipeline logs rem=/total= at every boundary, but nothing assembles a
+  // waterfall, and no captured production log exists anywhere in this repo. So
+  // "where do the seconds go" has only ever been answerable by reading the
+  // budget arithmetic — which gives CAPS, not durations. Caps tell you what a
+  // stage is allowed to take; they cannot tell you what it took.
+  //
+  // `timed(name, promise)` records a real duration around any awaited stage and
+  // is otherwise transparent: it returns the same promise result and rethrows
+  // the same error, so a throwing stage is still timed and still throws.
+  // `mark(name, ms)` is for synchronous or externally-measured spans.
+  //
+  // The collected object rides out on the response as `_timings`, so a single
+  // real scan reports its own waterfall without log scraping. Durations only —
+  // no identity, no prices, no keys.
+  const timings = { _order: [] };
+  const mark = (name, ms) => {
+    if (!(name in timings)) timings._order.push(name);
+    timings[name] = (timings[name] || 0) + Math.max(0, Math.round(ms));
+  };
+  const timed = async (name, p) => {
+    const t = Date.now();
+    try { return await p; }
+    finally { mark(name, Date.now() - t); }
+  };
+
   // ── SCAN-008 (B-3): reclaim serial overhead for Stage 2's budget ──────────
   // Production scans showed Stage 2 consistently needs 18–20s (output-token
   // bound), while cold-start overhead ate its cap: auth (JWKS ~1.8–3.1s) ran
@@ -2952,11 +3383,11 @@ async function handleRequest(req) {
   // ── AUTH — local HMAC-SHA256 (fast path) or network fallback ──
   // Local verify: ~1 ms, zero network. Fallback: up to 5 s (only when
   // SUPABASE_JWT_SECRET is not set — configure it in Vercel to eliminate fallback).
-  const authUser = await withTimeout(
+  const authUser = await timed('auth', withTimeout(
     verifyJWT(req.headers.get('authorization')),
     5_000,
     'JWT verification'
-  ).catch(err => { blog(`[Auth] verify timed out: ${err.message}`); return null; });
+  ).catch(err => { blog(`[Auth] verify timed out: ${err.message}`); return null; }));
 
   if (!authUser) return json({ error: 'Unauthorized — valid session required' }, 401, cors);
   if (authUser._expired) return json({ error: 'Session expired — please sign in again', code: 'SESSION_EXPIRED' }, 401, cors);
@@ -2978,7 +3409,7 @@ async function handleRequest(req) {
 
     // SCAN-008 (B-3): body was parsed concurrently with auth (above). A parse
     // failure throws here — same catch path and 500 status as before.
-    const parsedBody = await bodyPromise;
+    const parsedBody = await timed('body_parse', bodyPromise);
     if (parsedBody?.__parse_error) throw new Error(`Body parse failed: ${parsedBody.__parse_error}`);
     const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = parsedBody;
     // TIMING: req.json() blocks until the full request body has uploaded. On Edge
@@ -2999,7 +3430,29 @@ async function handleRequest(req) {
             || 'unknown';
 
     blog('[Timing] rate-limit check start');
-    const rl = await checkRateLimit(supa, ip, authUser.id);
+    // ── SCAN-021: bound the only unbounded network call in the pipeline ──────
+    // checkRateLimit already fails CLOSED on every internal error, but the RPC
+    // itself had no timeout: a hung Supabase connection blocked here until
+    // maxDuration killed the function — a 504 in which no rate-limit decision
+    // was ever made, and no scan ever happened. One round trip against a cold
+    // pool is ~2-3s in production, so 6s is generous while capping the worst
+    // case at 6s instead of ~55s.
+    //
+    // A TIMEOUT DENIES. It must: allowing on timeout would turn a Supabase
+    // outage into an open door on the daily quota, the per-IP burst guard and
+    // the per-user guard simultaneously — the failure mode a rate limiter
+    // exists to prevent. `quota_timeout` is a distinct limitType purely so logs
+    // separate "DB said no" from "DB did not answer"; the caller maps both to
+    // the same generic 429, and because it is not 'user_daily' the response is
+    // marked retryable, which is correct for a transient fault.
+    const rl = await timed('rate_limit', withTimeout(
+      checkRateLimit(supa, ip, authUser.id),
+      RATE_LIMIT_TIMEOUT_MS,
+      'rate limit',
+    ).catch((err) => {
+      console.error(`[RateLimit] denied source=timeout reason=rpc_timeout charged=false: ${err.message}`);
+      return { allowed: false, limitType: 'quota_timeout', retryAfter: 15, charged: false };
+    }));
     blog(`[Timing] rate-limit check done allowed=${rl.allowed}`);
     // Tracks whether THIS request charged the daily quota, so we can refund it if
     // the scan later fails (Stage 1 / fatal). Set false again once refunded.
@@ -3051,11 +3504,11 @@ async function handleRequest(req) {
 
     let recognition;
     try {
-      recognition = await withTimeout(
+      recognition = await timed('stage1_vision', withTimeout(
         recognize(imageList, lang, apiKey, stage1Cap),
         stage1Cap,
         'Stage 1 recognition'
-      );
+      ));
       recognition = calibrateRecognition(recognition);
 
       // ── USER CORRECTION INJECTION — highest-priority signal ──
@@ -3155,8 +3608,8 @@ async function handleRequest(req) {
       // scans are unchanged. The 24h cache keys off this same image.
       const visionImage = imageList[imageList.length - 1];
       plog('Vision start', `conf=${round(recognition.category_confidence * 100)}% img=${imageList.length}/${imageList.length} cap=${visionCap}ms rem=${rem()}ms`);
-      visionData = await withTimeout(fallbackVision(visionImage, supa), visionCap, 'Vision fallback')
-        .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; });
+      visionData = await timed('google_vision', withTimeout(fallbackVision(visionImage, supa), visionCap, 'Vision fallback')
+        .catch(err => { blog(`[Vision] SKIPPED — ${err.message}`); return null; }));
       plog('Vision end', visionData ? `labels=${visionData.labels?.length} text=${visionData.text?.length} rem=${rem()}ms` : `no data rem=${rem()}ms`);
     } else if (!needsVision) {
       plog('Vision skip', `identity sufficient (cat=${round(recognition.category_confidence * 100)}% brand=${round(topBrandConf * 100)}% model=${round(topModelConf * 100)}%) rem=${rem()}ms`);
@@ -3189,6 +3642,7 @@ async function handleRequest(req) {
       const embCap  = Math.min(3_500, rem() - 8_000);
       const corrCap = Math.min(2_500, rem() - 8_000);
       plog('Embedding start', `embCap=${embCap}ms corrCap=${corrCap}ms rem=${rem()}ms`);
+      const tEmb = Date.now();
       [queryEmbedding, corrections] = await Promise.all([
         withTimeout(generateQueryEmbedding(embeddingText), embCap, 'query embedding')
           .catch(err => { blog(`[Embedding] SKIPPED — ${err.message}`); return null; }),
@@ -3197,6 +3651,7 @@ async function handleRequest(req) {
           // VAL-001: scoped to the authenticated caller — see fetchCorrections().
           : withTimeout(fetchCorrections(authUser?.id || null), corrCap, 'corrections').catch(() => []),
       ]);
+      mark('embed_corrections', Date.now() - tEmb);
       recognition._embedding_used = !!queryEmbedding;
       plog('Embedding end', `embedding=${!!queryEmbedding} corrections=${corrections.length} rem=${rem()}ms`);
     } else {
@@ -3206,21 +3661,44 @@ async function handleRequest(req) {
     // ── RETRIEVAL — OPTIONAL, requires >= 9 s remaining (same gate as embedding) ──
     let candidates = [];
     let retrievalStrategyLog = null;
-    if (rem() >= 9_000) {
-      const retrievalCap = Math.min(4_500, rem() - 8_000);
+    // SCAN-016: whether retrieval found real model-level evidence, or only the
+    // nearest-looking row. Drives the DB-missing guard below.
+    let retrievalEvidence = null;
+    // ── SCAN-021: retrieval no longer shares the embedding's gate ────────────
+    // Both were gated at rem() >= 9_000, so a slow Stage 1 dropped BOTH and
+    // Stage 2 priced with zero catalog evidence — the scans least likely to be
+    // right got the least evidence.
+    //
+    // They are not equally valuable. The query embedding powers exactly one
+    // strategy (7_vector), which SCAN-016 classifies as SEMANTIC — the
+    // second-weakest evidence class, and one that can never establish identity
+    // on its own. Retrieval's high-value strategies (exact brand+model, the OCR
+    // RPC's model_number tier) need no embedding at all and run concurrently in
+    // Group A, typically inside one round trip.
+    //
+    // So when the budget is tight the EMBEDDING is what gets dropped, and
+    // retrieval still runs and can still return EXACT_MODEL / MODEL_TEXT rows.
+    // Strategy 7 self-skips on a null embedding, so nothing needs to know.
+    //
+    // This does not raise BUDGET_MS or any stage cap. The floor keeps the cap
+    // positive — the old expression went NEGATIVE below rem()=8s, which is what
+    // made a shared 9s gate necessary in the first place.
+    if (rem() >= 6_000) {
+      const retrievalCap = Math.max(1_200, Math.min(4_500, rem() - 8_000));
       plog('Retrieval start', `cap=${retrievalCap}ms rem=${rem()}ms`);
-      const retrievalResult = await withTimeout(
+      const retrievalResult = await timed('retrieval', withTimeout(
         retrieveCandidates(recognition, queryEmbedding, visionData),
         retrievalCap,
         'DB retrieval'
-      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return null; });
+      ).catch(err => { blog(`[Retrieval] SKIPPED — ${err.message}`); return null; }));
       if (retrievalResult) {
         candidates = retrievalResult.candidates || [];
         retrievalStrategyLog = retrievalResult.strategyLog || null;
+        retrievalEvidence = retrievalResult.evidence || null;
       }
       plog('Retrieval end', `${candidates.length} candidates rem=${rem()}ms`);
     } else {
-      plog('Retrieval SKIPPED — budget', `rem=${rem()}ms < 9000ms`);
+      plog('Retrieval SKIPPED — budget', `rem=${rem()}ms < 6000ms`);
     }
 
     // ── STAGE 2: VERIFY + PRICE — REQUIRED but skippable ──
@@ -3237,6 +3715,12 @@ async function handleRequest(req) {
     let stage2FallbackUsed = false;
     let stage2FallbackReason = null;
     let verification;
+    // SCAN-022: explicit provenance for HOW the verification was produced.
+    // 'stage2' = the full call ran; 'fast_path' = skipped on decisive evidence;
+    // 'pre' = it failed or was skipped for budget and pricing was rescued.
+    // Distinct from stage2FallbackUsed so a SUCCESSFUL skip is never conflated
+    // with a failure — that conflation is what would render it as degraded.
+    let stage2Status = 'stage2';
 
     // SCAN-009: Stage 2 failure → Pricing Rescue Engine (catalog → Haiku →
     // category anchor → manual). AI slice funded by STAGE2_RESERVE_MS; 4s is
@@ -3244,20 +3728,41 @@ async function handleRequest(req) {
     const runPricingRescue = async (reason) => {
       const capMs = Math.max(0, Math.min(3_500, rem() - 4_000));
       plog('PRE start', `cap=${capMs}ms rem=${rem()}ms`);
-      const quote = await pricingRescueEngine({
+      const quote = await timed('pricing_rescue', pricingRescueEngine({
         recognition, candidates, identity: assessFallbackIdentity(recognition),
         failReason: reason, apiKey, capMs, lang,
-      }).catch(err => { blog(`[PRE] engine error — manual pricing: ${err.message}`); return null; });
+      }).catch(err => { blog(`[PRE] engine error — manual pricing: ${err.message}`); return null; }));
       plog('PRE end', quote ? `source=${quote.pre_source} ₪${quote.price_estimate_mid} grade=${quote.pricing_confidence} rem=${rem()}ms` : `no quote rem=${rem()}ms`);
       return buildFallback(recognition, lang, reason, candidates, quote);
     };
 
-    if (rem() - STAGE2_RESERVE_MS < 8_000) {
+    // ── SCAN-022: EVIDENCE-GATED FAST PATH ──────────────────────────────────
+    // Evaluated BEFORE Stage 2 runs, which is what makes "no self-declared
+    // evidence" structural rather than a rule to remember: `verification` does
+    // not exist yet, so brand_confidence / identification_method /
+    // match_confidence are literally unreachable from the gate.
+    //
+    // This is a SUCCESS state, not a fallback. stage2FallbackUsed stays false,
+    // stage2_timeout stays false, and the guard sees stage:'stage2' WITH a
+    // compatible anchor — the condition that branch grades stage2_comp_anchored
+    // / HIGH. That grade is earned here rather than claimed: the price comes
+    // from a catalog row that passed isCompatibleAnchor with real model
+    // overlap, which is stronger provenance than the model asserting
+    // "comp_based" about itself.
+    const fastPath = evaluateFastPath({ recognition, candidates, retrievalEvidence, visionData });
+    if (fastPath.eligible) {
+      stage2Status = 'fast_path';
+      verification = buildFastPathVerification(recognition, fastPath, lang);
+      plog('Stage 2 FAST PATH', `skipped — ${fastPath.corroboration} corroboration + anchor ${fastPath.anchor.brand} ${fastPath.anchor.model || fastPath.anchor.name} ₪${fastPath.quote.price_estimate_mid} rem=${rem()}ms`);
+    } else if (rem() - STAGE2_RESERVE_MS < 8_000) {
+      blog(`[FastPath] not eligible — ${fastPath.reason}${fastPath.detail ? ` (${JSON.stringify(fastPath.detail)})` : ''}`);
       stage2FallbackUsed = true;
+      stage2Status = 'pre';
       stage2FallbackReason = `budget_too_low rem=${rem()}ms`;
       blog(`[Pipeline] Stage 2 SKIPPED — rescue pricing (rem=${rem()}ms, need >= ${8_000 + STAGE2_RESERVE_MS}ms)`);
       verification = await runPricingRescue(stage2FallbackReason);
     } else {
+      blog(`[FastPath] not eligible — ${fastPath.reason}${fastPath.detail ? ` (${JSON.stringify(fastPath.detail)})` : ''}`);
       // SCAN-008 (B-3): ceiling raised 20s → 24s. Stage 2 empirically needs
       // 18–20s (4/4 production scans); a 20s ceiling left zero headroom even
       // when the budget clock had 24s+ genuinely available. Still bounded by
@@ -3265,13 +3770,14 @@ async function handleRequest(req) {
       const stage2Cap = Math.max(8_000, Math.min(24_000, rem() - STAGE2_RESERVE_MS));
       plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
       try {
-        verification = await withTimeout(
+        verification = await timed('stage2_verify', withTimeout(
           verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData, stage2Cap),
           stage2Cap,
           'Stage 2 verification'
-        );
+        ));
       } catch (err) {
         stage2FallbackUsed = true;
+        stage2Status = 'pre';
         stage2FallbackReason = err.message;
         blog(`[Pipeline] Stage 2 FAILED — rescue pricing: ${err.message}`);
         verification = await runPricingRescue(stage2FallbackReason);
@@ -3301,7 +3807,10 @@ async function handleRequest(req) {
       anchor: guardAnchor,
       anchorModelEvidence: !!guardAnchor?.model,
       identity: assessFallbackIdentity(recognition),
-      model: stage2FallbackUsed ? MODEL_PRICING : MODEL_VISION,
+      // SCAN-022: the fast path called NO model. Recording MODEL_VISION would
+      // claim a Sonnet call that never happened, and this value is persisted
+      // with the valuation, so a future audit would be reading a fiction.
+      model: stage2Status === 'fast_path' ? null : (stage2FallbackUsed ? MODEL_PRICING : MODEL_VISION),
     };
 
     // ── NORMALIZE + RESPOND ──
@@ -3334,6 +3843,7 @@ async function handleRequest(req) {
       const canRescue = !stage2FallbackUsed;
       if (canRescue) {
         stage2FallbackUsed = true;
+        stage2Status = 'pre';
         stage2FallbackReason = `guard:${rule}`;
         blog(`[Guard] Stage 2 price REJECTED (${rule}) — routing to rescue pricing`);
         verification = await runPricingRescue(stage2FallbackReason);
@@ -3375,7 +3885,22 @@ async function handleRequest(req) {
     // db_match_found: were any product rows retrieved?
     // product_candidate_needed: no DB match but Stage 1 has useful recognition data
     // stage2_timeout: Stage 2 was skipped/timed out — pricing came from category fallback
-    const dbMatchFound = candidates.length > 0;
+    // SCAN-016: "did the catalog contain this item", not "did any row come
+    // back". Previously ANY candidate counted — including an 0.28 category
+    // fallback or a suffix-stripped sibling — so a product absent from the
+    // catalog was reported as matched and never became a candidate submission.
+    // A row now has to carry model-level evidence (EXACT_MODEL or MODEL_TEXT).
+    // Falls back to the old predicate when ranking metadata is absent, e.g. a
+    // retrieval timeout, so behaviour degrades rather than inverting.
+    const dbMatchFound = retrievalEvidence
+      ? retrievalEvidence.exact_match === true
+      : candidates.length > 0;
+    // Kept separate: rows WERE returned, they are just not proof of identity.
+    // Pricing may still anchor on them; identity may not.
+    const dbRowsReturned = candidates.length > 0;
+    if (dbRowsReturned && !dbMatchFound) {
+      blog(`[Retrieve] ${candidates.length} row(s) returned but NONE carry model evidence — treating as DB-MISSING (top="${candidates[0]?.brand} ${candidates[0]?.model}" class=${retrievalEvidence?.top_class})`);
+    }
     const _brand = recognition.brand_candidates?.[0]?.brand;
     const _model = recognition.model_candidates?.[0]?.model;
     const hasUsefulRecognition = !!(
@@ -3398,6 +3923,18 @@ async function handleRequest(req) {
     result.candidate_source_table  = candidateSourceTable;  // 'products' | 'product_candidates' | 'none'
     result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
     result.stage2_timeout = stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded');
+    // SCAN-022: explicit, non-degraded provenance for the client and analytics.
+    // 'fast_path' is a SUCCESS — stage2_timeout above stays false for it, and
+    // it must never be presented as a fallback or a degraded result.
+    result.stage2_status = stage2Status;
+    if (stage2Status === 'fast_path') {
+      result.fast_path = {
+        corroboration: verification._fast_path?.corroboration ?? null,
+        anchor_id:     verification._fast_path?.anchor_id ?? null,
+        reason:        verification._fast_path?.reason ?? null,
+        stage2_skipped: true,
+      };
+    }
 
     // User correction passthrough — frontend uses these for display + debug
     if (recognition._user_correction) {
@@ -3697,11 +4234,11 @@ async function handleRequest(req) {
       // with no per-attempt timeout and no statement timeout meant a stalled
       // pool could run past maxDuration and get the function killed, returning
       // a 504 for a valuation that may already have committed.
-      persisted = await withTimeout(
+      persisted = await timed('persist_scan', withTimeout(
         recordScanWithRetry(supa, valuationRow, scanUuid),
         Math.max(1_500, rem() - 1_000),
         'record_scan',
-      ).catch(err => { blog(`[Persist] record_scan bounded-out: ${err.message}`); return false; });
+      ).catch(err => { blog(`[Persist] record_scan bounded-out: ${err.message}`); return false; }));
     }
     result.persisted = persisted;
 
@@ -3710,9 +4247,34 @@ async function handleRequest(req) {
     // VAL-001: this path can burn up to 16.2s (2 x 8s + backoff) against a
     // STAGE2_RESERVE_MS of 7.5s. It is explicitly non-fatal, so when the budget
     // is nearly spent, skip it rather than risk the whole function being killed.
+    // ── SCAN-020: bound the best-effort tail, and overlap it with the memory
+    // writes instead of running the two back to back.
+    //
+    // NOT deferred past the response, deliberately. True deferral needs
+    // waitUntil() from @vercel/functions, which this project does not depend on;
+    // without it, work left running after `return json(...)` may be frozen with
+    // the instance and is not guaranteed to complete. Silently dropping the
+    // derived write would be a worse outcome than the latency it saves — the
+    // same failure shape as the ai_observation ledger that logged success while
+    // writing nothing. So the tail still completes before the response.
+    //
+    // What DOES change:
+    //   1. The gate checked `rem() >= 3_000` but the operation it guards can run
+    //      for 16.2s (2 attempts x 8s + backoff), so a scan entering with 3,001ms
+    //      of budget could overrun by ~13s and be killed at maxDuration — a 504
+    //      for a valuation that had ALREADY COMMITTED. record_scan was bounded by
+    //      the budget clock in VAL-001; this sibling write never was. It is now.
+    //   2. The derived write is started here but awaited AFTER the memory block,
+    //      so two independent best-effort Supabase writes overlap rather than
+    //      running back to back.
+    let derivedTail = null;
     if (persisted) {
       if (rem() >= 3_000) {
-        await updateDerivedWithRetry(supa, recognition, verification, scanUuid).catch(() => {});
+        derivedTail = timed('persist_derived', withTimeout(
+          updateDerivedWithRetry(supa, recognition, verification, scanUuid),
+          Math.max(1_000, rem() - 1_500),
+          'derived_writeback',
+        ).catch((err) => { blog(`[WriteBack] bounded-out: ${err.message}`); }));
       } else {
         blog(`[WriteBack] SKIPPED — budget (rem=${rem()}ms < 3000ms)`);
       }
@@ -3837,10 +4399,18 @@ async function handleRequest(req) {
                   guard_error:       result.marketValue.validation.guard_error ?? null,
                 }
               : null,
-            pre_source: preSource,
+            // SCAN-018: was `preSource`, an identifier that exists nowhere in
+            // this module. Every other site spells it pre_source. The reference
+            // threw a ReferenceError here, which the catch at the end of this
+            // block swallowed as "shadow, scan unaffected" — true of the scan,
+            // but it meant the ai_observation ledger recorded NOTHING from the
+            // moment it shipped. Resolved post-guard value, matching the debug
+            // payload's `result.marketValue.pre_source`.
+            pre_source: result.marketValue?.pre_source ?? null,
             pricing_mode: result.authenticity?.pricingMode ?? 'normal',
             authenticity_status: result.authenticity?.status ?? null,
             stage2_completed: !stage2FallbackUsed,
+            stage2_status: stage2Status,
             stage2_fallback_reason: stage2FallbackUsed ? (stage2FallbackReason || 'unknown') : null,
             vision_used: !!visionData,
             oce: oceContext
@@ -3886,6 +4456,29 @@ async function handleRequest(req) {
       }
     } catch (e) {
       console.warn('[Memory] sample write failed (shadow, scan unaffected):', e.message);
+    }
+
+    // SCAN-020: join the derived write. It has been running concurrently with
+    // the memory writes above. Awaited here — never skipped — so durability is
+    // unchanged; only the overlap is new. Its own catch already swallowed any
+    // failure, so this can neither throw nor alter the result.
+    if (derivedTail) await derivedTail;
+
+    // ── SCAN-019: emit the waterfall ────────────────────────────────────────
+    // One line per scan carrying real durations, plus the same numbers on the
+    // response so a tester's scan reports its own profile without log access.
+    // `unaccounted` is deliberate: total minus the sum of measured stages is the
+    // glue — JSON encode, calibration, normalise, guard — and if it ever grows
+    // large it means the cost has moved somewhere nothing measures yet.
+    {
+      const totalWall = Date.now() - TREQ;
+      const measured = timings._order.reduce((a, k) => a + timings[k], 0);
+      timings.total = totalWall;
+      timings.unaccounted = Math.max(0, totalWall - measured);
+      const waterfall = timings._order.map((k) => `${k}=${timings[k]}ms`).join(' ');
+      console.log(`[Waterfall] TOTAL=${totalWall}ms ${waterfall} unaccounted=${timings.unaccounted}ms stage2_ran=${!stage2FallbackUsed} vision=${!!visionData} candidates=${candidates.length}`);
+      const { _order, ...flat } = timings;
+      result._timings = flat;
     }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
@@ -4297,6 +4890,169 @@ export function preQuoteFromCatalog(ctx) {
     // "unknown" encoded as 0 — today its only reader normalizes, and a second
     // reader added later would silently inherit the old meaning.
     _db_retail:          positivePriceOrNull(row.retail_price_ils),
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SCAN-022 — EVIDENCE-GATED STAGE 2 FAST PATH
+// ══════════════════════════════════════════════════════════════════════════
+// Stage 2 costs ~19.7s in production (commit 0250e80) and had exactly one skip
+// condition: budget exhaustion. A scan where OCR read the model off the label,
+// retrieval returned that exact catalog row, and the user had already corrected
+// the identity still paid the full call to be told what three independent
+// sources already agreed on.
+//
+// This gate skips it — but ONLY on evidence Stage 2 did not author. That
+// constraint is enforced structurally, not by discipline: this function runs
+// BEFORE verifyAndPrice, so `verification` does not exist yet and no
+// self-declared field (brand_confidence, identification_method,
+// match_confidence) is reachable from here even by mistake.
+//
+// It is deliberately hard to satisfy. Every rejection is named and logged,
+// because a fast path that fires when it should not is indistinguishable from
+// the confident-wrong-answer bug the previous commits removed. When in doubt it
+// returns ineligible and the normal pipeline runs — the cost of a false
+// negative is 19.7s, the cost of a false positive is a wrong identity.
+//
+// NOT accepted as evidence, however high: visual/model confidence on its own, a
+// CATALOG_FUZZY sibling, a SEMANTIC/vector hit, or anything the model says
+// about its own certainty.
+export function evaluateFastPath(ctx = {}) {
+  const { recognition, candidates = [], retrievalEvidence = null, visionData = null } = ctx;
+  const reject = (reason, detail = null) => ({ eligible: false, reason, detail, anchor: null, quote: null });
+
+  const ir = recognition?.identity_resolution;
+  if (!ir) return reject('no_identity_resolution');
+
+  // A user correction is external evidence — not a model's opinion at all — so
+  // it qualifies as corroboration. It must NAME A MODEL: a brand-only
+  // correction leaves the exact identity unresolved. The marker is the sentinel
+  // the handler injects, so a model cannot forge it.
+  const userCorrected = !!recognition._user_correction
+    && recognition.model_candidates?.[0]?.evidence === 'user_correction';
+
+  // (1)(8) Only an exact identity qualifies. family / brand / unknown never do,
+  // because each of those means "we could not pin the model" — precisely when
+  // Stage 2's reasoning is worth 19.7s.
+  if (ir.level !== 'exact' && !userCorrected) return reject('identity_level_not_exact', ir.level);
+
+  // (5) Ambiguity disqualifies from either side — the recognition's own sibling
+  // tie, or retrieval being unable to separate two catalog rows.
+  if (ir.exact_model_ambiguous === true) return reject('identity_ambiguous');
+  if ((ir.ambiguous_between || []).length > 0) return reject('identity_ambiguous', ir.ambiguous_between);
+  if (retrievalEvidence?.ambiguous === true) return reject('retrieval_ambiguous', retrievalEvidence.ambiguous_between);
+
+  // (2)(7) Retrieval must carry genuine model-level evidence. `exact_match` is
+  // false whenever the best row is CATALOG_FUZZY / SEMANTIC / WEAK, which is
+  // also exactly how a DB-missing product presents — so this one test covers
+  // both the sibling and the not-in-catalog cases.
+  if (!retrievalEvidence) return reject('no_retrieval_evidence');
+  if (retrievalEvidence.exact_match !== true) return reject('retrieval_lacks_model_evidence');
+  if ((retrievalEvidence.top_class ?? 0) < EVIDENCE_CLASS.MODEL_TEXT) {
+    return reject('retrieval_top_class_too_weak', retrievalEvidence.top_class);
+  }
+
+  // Identity must actually resolve to a brand AND a model.
+  const identity = assessFallbackIdentity(recognition);
+  if (!identity.brandOk || !identity.modelOk) return reject('identity_not_brand_and_model');
+
+  // (3)(6) Independent corroboration. Three admissible sources, none of them
+  // Stage 2: text Stage 1 actually read, Google Vision's separate OCR/logo
+  // pass, or the user. Visual similarity is not on this list at any confidence.
+  const visionHay = [
+    ...((visionData?.text) || []),
+    ...(((visionData?.logos) || []).map((l) => l?.description || '')),
+  ].join(' ').toLowerCase();
+  const brandHead = (identity.brand || '').toLowerCase().split(' ')[0];
+  const modelLower = (identity.model || '').toLowerCase();
+  const visionCorroborates = !!visionHay && (
+    (brandHead.length >= 2 && visionHay.includes(brandHead)) || (!!modelLower && visionHay.includes(modelLower)));
+
+  const corroboration = ir.text_confirmed === true ? 'stage1_ocr'
+    : visionCorroborates ? 'google_vision'
+    : userCorrected ? 'user_correction'
+    : null;
+  if (!corroboration) return reject('no_independent_corroboration');
+
+  // (4) A compatible catalog anchor with a usable price AND real model overlap.
+  //
+  // `modelMatched` is load-bearing. isCompatibleAnchor returns ok:true with
+  // reason 'brand_category_sibling' for a same-brand, same-category row whose
+  // MODEL never matched — the nearest-looking row. Accepting `ok` alone would
+  // reintroduce sibling substitution through the pricing door, so the fast path
+  // requires the stronger verdict.
+  const anchors = [];
+  for (const c of candidates) {
+    if (!(c.avg_used_price_ils > 0)) continue;
+    const verdict = isCompatibleAnchor(c, identity, recognition);
+    if (verdict.ok && verdict.modelMatched === true) anchors.push(c);
+  }
+  if (!anchors.length) return reject('no_compatible_priced_anchor');
+
+  // Deterministic catalog pricing — the same function the rescue engine uses,
+  // fed ONLY the model-matched anchors. No new pricing arithmetic is invented
+  // here; if it declines (its own similarity floor), so does the fast path.
+  const quote = preQuoteFromCatalog({ candidates: anchors, identity, recognition, failReason: null });
+  if (!quote) return reject('catalog_pricing_declined');
+  if (!(quote.price_estimate_mid > 0)) return reject('anchor_price_unusable');
+
+  return {
+    eligible: true,
+    reason: 'exact_identity_corroborated_and_anchored',
+    corroboration,
+    anchor: anchors[0],
+    quote,
+    identity,
+  };
+}
+
+// Build the verification object the fast path returns in place of Stage 2's.
+// Deliberately NOT buildFallback(): that path exists for FAILURE and stamps
+// "Pricing stage failed" into confidence_reasoning and pricing_warning. Nothing
+// failed here, and a successful scan must not describe itself as degraded.
+export function buildFastPathVerification(recognition, fp, lang = 'he') {
+  const isHe = lang === 'he';
+  const { identity, quote, anchor, corroboration } = fp;
+  const { brand, model } = identity;
+
+  return {
+    final_category: recognition.category,
+    final_category_hebrew: recognition.category_hebrew || '',
+    // The identity is carried through UNCHANGED from the evidence that
+    // qualified it. The fast path may not rename the item — that is the whole
+    // point of gating on exact evidence rather than on similarity.
+    final_brand: brand,
+    final_model: model,
+    full_name: composeBrandModelName(brand, model),
+    full_name_hebrew: recognition.category_hebrew || '',
+    match_confidence: Math.min(recognition.identity_resolution?.brand_confidence ?? 0.8, 0.92),
+    confidence_reasoning: isHe
+      ? 'זהות מאומתת מול הקטלוג — אימות נוסף לא נדרש'
+      : 'Identity confirmed against the catalog by independent evidence; further verification was unnecessary.',
+    matched_product_ids: anchor?.id ? [anchor.id] : [],
+    // DERIVED from what actually corroborated, never self-declared.
+    identification_method: corroboration === 'user_correction' ? 'db_match' : 'ocr_confirmed',
+    brand_confidence: corroboration === 'user_correction' ? 'db_matched' : 'confirmed_by_text',
+    price_estimate_low:  quote.price_estimate_low,
+    price_estimate_mid:  quote.price_estimate_mid,
+    price_estimate_high: quote.price_estimate_high,
+    new_retail_price_ils: positivePriceOrNull(quote._db_retail),
+    // The price came from a catalog comparable, not from a model's estimate.
+    price_method: 'comp_based',
+    _pricing_meta: {
+      ...quote,
+      // Overwrite the rescue engine's failure wording — nothing failed.
+      pricing_reason: `Catalog pricing for ${anchor.brand} ${anchor.model || anchor.name}.`,
+      pricing_warning: null,
+      pre_source: 'catalog',
+    },
+    _fast_path: { corroboration, anchor_id: anchor?.id ?? null, reason: fp.reason },
+    currency: 'ILS',
+    condition: recognition.visual_features?.condition || 'unknown',
+    is_sellable: true,
+    market_demand: 'moderate',
+    selling_tips: '', israeli_market_notes: '',
+    price_factors: [], comparable_items: [],
   };
 }
 

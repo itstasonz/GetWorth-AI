@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "description": "Recognition benchmark corpus. Covers the 22 product types the tester release must handle. Each case is data only - scripts/recognition-benchmark.mjs is the runner, so adding a case never requires a code change.",
+  "fields": {
+    "id": "stable slug, also the fixture image basename when one exists",
+    "category": "one of the 14 Stage 1 categories",
+    "product_type": "target taxonomy leaf (does not exist on the wire yet - see SCAN-015 findings)",
+    "brand_variants": "spellings that MUST resolve to one identity (sub-brands, legal suffixes)",
+    "model_variants": "spellings of the SAME product that MUST converge to one key",
+    "distinct_from": "genuinely different products that MUST NOT share this identity",
+    "db_present": "true/false/null - null means unverified against the live catalog",
+    "image": "fixture filename, or null when no photo exists yet"
+  },
+  "cases": [
+    {
+      "id": "gaming_mouse_logitech_g502",
+      "category": "Electronics", "product_type": "gaming_mouse",
+      "brand": "Logitech", "model": "G502 Hero",
+      "brand_variants": ["Logitech", "Logitech G"],
+      "model_variants": ["G502 Hero", "G502 HERO", "G-502 Hero", "G502Hero"],
+      "distinct_from": [
+        { "brand": "Logitech", "model": "G502 X Plus" },
+        { "brand": "Logitech", "model": "G903" }
+      ],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "gaming_mouse_logitech_g900",
+      "category": "Electronics", "product_type": "gaming_mouse",
+      "brand": "Logitech", "model": "G900",
+      "brand_variants": ["Logitech", "Logitech G"],
+      "model_variants": ["G900", "G 900", "M-G900", "G900 Chaos Spectrum"],
+      "distinct_from": [{ "brand": "Logitech", "model": "G903" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "keyboard_keychron_k2",
+      "category": "Electronics", "product_type": "keyboard",
+      "brand": "Keychron", "model": "K2",
+      "brand_variants": ["Keychron"],
+      "model_variants": ["K2", "K-2", "K2 V2"],
+      "distinct_from": [{ "brand": "Keychron", "model": "K8" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "laptop_asus_rog_strix_g15",
+      "category": "Electronics", "product_type": "laptop",
+      "brand": "ASUS", "model": "ROG Strix G15",
+      "brand_variants": ["ASUS", "ASUS ROG", "Asus"],
+      "model_variants": ["ROG Strix G15", "Strix G15", "ROG Strix G-15"],
+      "distinct_from": [{ "brand": "ASUS", "model": "ROG Zephyrus G14" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "phone_samsung_galaxy_s24_ultra",
+      "category": "Electronics", "product_type": "smartphone",
+      "brand": "Samsung", "model": "Galaxy S24 Ultra",
+      "brand_variants": ["Samsung", "Samsung Electronics"],
+      "model_variants": ["Galaxy S24 Ultra", "SM-S928B", "S24 Ultra", "Galaxy S-24 Ultra"],
+      "distinct_from": [
+        { "brand": "Samsung", "model": "Galaxy S24" },
+        { "brand": "Samsung", "model": "Galaxy S23 Ultra" }
+      ],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "phone_apple_iphone_15_pro",
+      "category": "Electronics", "product_type": "smartphone",
+      "brand": "Apple", "model": "iPhone 15 Pro",
+      "brand_variants": ["Apple", "Apple Inc"],
+      "model_variants": ["iPhone 15 Pro", "iPhone15 Pro", "A2848"],
+      "distinct_from": [
+        { "brand": "Apple", "model": "iPhone 15 Pro Max" },
+        { "brand": "Apple", "model": "iPhone 14 Pro" }
+      ],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "headphones_sony_wh1000xm5",
+      "category": "Electronics", "product_type": "headphones",
+      "brand": "Sony", "model": "WH-1000XM5",
+      "brand_variants": ["Sony"],
+      "model_variants": ["WH-1000XM5", "WH1000XM5", "WH 1000 XM5"],
+      "distinct_from": [{ "brand": "Sony", "model": "WH-1000XM4" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "speaker_jbl_flip_6",
+      "category": "Electronics", "product_type": "speaker",
+      "brand": "JBL", "model": "Flip 6",
+      "brand_variants": ["JBL"],
+      "model_variants": ["Flip 6", "Flip6", "Flip-6"],
+      "distinct_from": [{ "brand": "JBL", "model": "Flip 5" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "charger_anker_nano_ii_65w",
+      "category": "Electronics", "product_type": "charger",
+      "brand": "Anker", "model": "Nano II 65W",
+      "brand_variants": ["Anker"],
+      "model_variants": ["Nano II 65W", "Nano 2 65W", "A2663"],
+      "distinct_from": [{ "brand": "Anker", "model": "Nano II 45W" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "power_bank_anker_powercore_10000",
+      "category": "Electronics", "product_type": "power_bank",
+      "brand": "Anker", "model": "PowerCore 10000",
+      "brand_variants": ["Anker"],
+      "model_variants": ["PowerCore 10000", "PowerCore10000", "Power Core 10000"],
+      "distinct_from": [{ "brand": "Anker", "model": "PowerCore 20000" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "smartwatch_apple_watch_series_9",
+      "category": "Electronics", "product_type": "smartwatch",
+      "brand": "Apple", "model": "Watch Series 9",
+      "brand_variants": ["Apple"],
+      "model_variants": ["Watch Series 9", "Apple Watch Series 9", "Series 9"],
+      "distinct_from": [{ "brand": "Apple", "model": "Watch Series 8" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "tv_lg_oled55c3",
+      "category": "Electronics", "product_type": "television",
+      "brand": "LG", "model": "OLED55C3",
+      "brand_variants": ["LG", "LG Electronics"],
+      "model_variants": ["OLED55C3", "OLED 55 C3", "55C3"],
+      "distinct_from": [{ "brand": "LG", "model": "OLED65C3" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "microwave_samsung_ms23k3513",
+      "category": "Home", "product_type": "microwave",
+      "brand": "Samsung", "model": "MS23K3513",
+      "brand_variants": ["Samsung", "Samsung Electronics"],
+      "model_variants": ["MS23K3513", "MS-23K3513", "MS23 K3513"],
+      "distinct_from": [{ "brand": "Samsung", "model": "MS28J5255" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "coffee_machine_delonghi_magnifica_s",
+      "category": "Home", "product_type": "coffee_machine",
+      "brand": "De'Longhi", "model": "Magnifica S",
+      "brand_variants": ["De'Longhi", "DeLonghi", "Delonghi"],
+      "model_variants": ["Magnifica S", "Magnifica-S", "ECAM22.110"],
+      "distinct_from": [{ "brand": "De'Longhi", "model": "Dedica EC685" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "vacuum_dyson_v11",
+      "category": "Home", "product_type": "vacuum",
+      "brand": "Dyson", "model": "V11",
+      "brand_variants": ["Dyson"],
+      "model_variants": ["V11", "V-11", "V11 Absolute"],
+      "distinct_from": [{ "brand": "Dyson", "model": "V15" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "sofa_ikea_kivik_3seat",
+      "category": "Furniture", "product_type": "sofa",
+      "brand": "IKEA", "model": "KIVIK",
+      "brand_variants": ["IKEA", "Ikea"],
+      "model_variants": ["KIVIK", "Kivik"],
+      "distinct_from": [{ "brand": "IKEA", "model": "EKTORP" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "chair_herman_miller_aeron",
+      "category": "Furniture", "product_type": "office_chair",
+      "brand": "Herman Miller", "model": "Aeron",
+      "brand_variants": ["Herman Miller"],
+      "model_variants": ["Aeron", "Aeron Remastered", "Aeron Size B"],
+      "distinct_from": [{ "brand": "Herman Miller", "model": "Embody" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "table_ikea_lack",
+      "category": "Furniture", "product_type": "table",
+      "brand": "IKEA", "model": "LACK",
+      "brand_variants": ["IKEA", "Ikea"],
+      "model_variants": ["LACK", "Lack"],
+      "distinct_from": [{ "brand": "IKEA", "model": "LISABO" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "watch_casio_g_shock_ga2100",
+      "category": "Watches", "product_type": "wristwatch",
+      "brand": "Casio", "model": "GA-2100",
+      "brand_variants": ["Casio", "Casio G-Shock", "G-Shock"],
+      "model_variants": ["GA-2100", "GA2100", "GA 2100"],
+      "distinct_from": [{ "brand": "Casio", "model": "GA-2200" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "shoes_nike_air_force_1",
+      "category": "Clothing", "product_type": "shoes",
+      "brand": "Nike", "model": "Air Force 1",
+      "brand_variants": ["Nike"],
+      "model_variants": ["Air Force 1", "AF1", "Air Force One"],
+      "distinct_from": [{ "brand": "Nike", "model": "Air Max 90" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "perfume_dior_sauvage_edp",
+      "category": "Beauty", "product_type": "perfume",
+      "brand": "Dior", "model": "Sauvage",
+      "brand_variants": ["Dior", "Christian Dior"],
+      "model_variants": ["Sauvage", "Sauvage EDP", "Sauvage Eau de Parfum"],
+      "distinct_from": [{ "brand": "Dior", "model": "Sauvage Elixir" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "tool_bosch_gsr_12v",
+      "category": "Tools", "product_type": "power_tool",
+      "brand": "Bosch", "model": "GSR 12V-15",
+      "brand_variants": ["Bosch"],
+      "model_variants": ["GSR 12V-15", "GSR12V15", "GSR 12V 15"],
+      "distinct_from": [{ "brand": "Bosch", "model": "GSB 18V-55" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "toy_lego_millennium_falcon_75257",
+      "category": "Toys", "product_type": "toy",
+      "brand": "LEGO", "model": "75257",
+      "brand_variants": ["LEGO", "Lego"],
+      "model_variants": ["75257", "Millennium Falcon 75257"],
+      "distinct_from": [{ "brand": "LEGO", "model": "75192" }],
+      "db_present": null, "image": null
+    },
+    {
+      "id": "unknown_unlisted_product",
+      "category": "Other", "product_type": "unknown",
+      "brand": null, "model": null,
+      "brand_variants": [], "model_variants": [],
+      "distinct_from": [],
+      "db_present": false, "image": null,
+      "note": "Control case. The correct outcome is an explicit unknown with database_match=false and candidate_needed=true - never a nearest-looking catalog substitution."
+    }
+  ]
+}

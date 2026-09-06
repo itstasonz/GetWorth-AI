@@ -35,8 +35,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { objectLiteralAt, compileRegion } from './helpers/extract-literal.mjs';
 import { isPricedMarketValue, positivePriceOrNull } from '../api/_lib/valuation-guard.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
 const ANALYZE_SRC = process.env.UI003_ANALYZE_PATH || `${ROOT}api/analyze.js`;
 const UTILS_SRC   = process.env.UI003_UTILS_PATH   || `${ROOT}src/lib/utils.js`;
@@ -45,7 +46,7 @@ const UTILS_SRC   = process.env.UI003_UTILS_PATH   || `${ROOT}src/lib/utils.js`;
 // other target is: a hard-coded import would test the pristine original while
 // the harness reported on a mutant, and a harness that always says KILLED
 // proves nothing.
-const { hasRealPrice, positivePriceOrNull: clientPositivePriceOrNull } = await import(UTILS_SRC);
+const { hasRealPrice, positivePriceOrNull: clientPositivePriceOrNull } = await import(pathToFileURL(UTILS_SRC).href);
 const CONTEXT_SRC = process.env.UI003_CONTEXT_PATH || `${ROOT}src/contexts/AppContext.jsx`;
 
 /** The shipped server row literal, callable with its free identifiers bound. */
