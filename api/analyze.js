@@ -4168,9 +4168,34 @@ async function handleRequest(req) {
     // VAL-001: this path can burn up to 16.2s (2 x 8s + backoff) against a
     // STAGE2_RESERVE_MS of 7.5s. It is explicitly non-fatal, so when the budget
     // is nearly spent, skip it rather than risk the whole function being killed.
+    // ── SCAN-020: bound the best-effort tail, and overlap it with the memory
+    // writes instead of running the two back to back.
+    //
+    // NOT deferred past the response, deliberately. True deferral needs
+    // waitUntil() from @vercel/functions, which this project does not depend on;
+    // without it, work left running after `return json(...)` may be frozen with
+    // the instance and is not guaranteed to complete. Silently dropping the
+    // derived write would be a worse outcome than the latency it saves — the
+    // same failure shape as the ai_observation ledger that logged success while
+    // writing nothing. So the tail still completes before the response.
+    //
+    // What DOES change:
+    //   1. The gate checked `rem() >= 3_000` but the operation it guards can run
+    //      for 16.2s (2 attempts x 8s + backoff), so a scan entering with 3,001ms
+    //      of budget could overrun by ~13s and be killed at maxDuration — a 504
+    //      for a valuation that had ALREADY COMMITTED. record_scan was bounded by
+    //      the budget clock in VAL-001; this sibling write never was. It is now.
+    //   2. The derived write is started here but awaited AFTER the memory block,
+    //      so two independent best-effort Supabase writes overlap rather than
+    //      running back to back.
+    let derivedTail = null;
     if (persisted) {
       if (rem() >= 3_000) {
-        await timed('persist_derived', updateDerivedWithRetry(supa, recognition, verification, scanUuid).catch(() => {}));
+        derivedTail = timed('persist_derived', withTimeout(
+          updateDerivedWithRetry(supa, recognition, verification, scanUuid),
+          Math.max(1_000, rem() - 1_500),
+          'derived_writeback',
+        ).catch((err) => { blog(`[WriteBack] bounded-out: ${err.message}`); }));
       } else {
         blog(`[WriteBack] SKIPPED — budget (rem=${rem()}ms < 3000ms)`);
       }
@@ -4352,6 +4377,12 @@ async function handleRequest(req) {
     } catch (e) {
       console.warn('[Memory] sample write failed (shadow, scan unaffected):', e.message);
     }
+
+    // SCAN-020: join the derived write. It has been running concurrently with
+    // the memory writes above. Awaited here — never skipped — so durability is
+    // unchanged; only the overlap is new. Its own catch already swallowed any
+    // failure, so this can neither throw nor alter the result.
+    if (derivedTail) await derivedTail;
 
     // ── SCAN-019: emit the waterfall ────────────────────────────────────────
     // One line per scan carrying real durations, plus the same numbers on the
