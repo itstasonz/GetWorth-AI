@@ -748,7 +748,8 @@ export function buildVerificationPrompt(recognition, candidates, corrections, la
     ? `\nMATCHED PRODUCTS FROM DATABASE (${candidates.length} results):
 ${candidates.map((c, i) => `${i + 1}. [ID:${c.id}] ${c.brand} ${c.model || ''} — Category: ${c.category}
      Retail: ₪${c.retail_price_ils ?? '?'} | Used avg: ₪${c.avg_used_price_ils ?? '?'} | Range: ₪${c.price_low_ils ?? '?'}-${c.price_high_ils ?? '?'}
-     Similarity: ${(c.similarity * 100).toFixed(1)}% | Scans: ${c.popularity_score || 0}
+     Evidence: ${CLASS_LABEL[c._evidence_class] || 'unclassified'}${c._sibling_of ? ` — DIFFERENT MODEL from "${c._sibling_of}". Same family, NOT the scanned item unless text confirms it.` : ''}
+     Rank score: ${(c.similarity * 100).toFixed(1)}/100 (internal ranking weight, NOT a measured similarity) | Scans: ${c.popularity_score || 0}
      Aliases: ${(c.aliases || []).join(', ') || 'none'}
      Keywords: ${(c.keywords || []).join(', ') || 'none'}`).join('\n')}`
     : '\nNo matching products found in database. Use your own knowledge of Israeli market prices.';
@@ -808,8 +809,11 @@ ${correctionBlock}
 ${userCorrectionBlock}
 
 VERIFICATION RULES:
-- If a DB candidate matches with >70% similarity AND brand/model aligns with Stage 1 → use its pricing → price_method = "comp_based"
-- If DB candidates exist but weak match → use as loose anchor, widen range → price_method = "ai_estimate"
+- Adopt a DB candidate's IDENTITY only when its Evidence line reads EXACT or MODEL TEXT. Then use its pricing → price_method = "comp_based".
+- A candidate marked "SAME BRAND, model not confirmed" is a SIBLING. It is evidence of the FAMILY, never of the exact model. You may use it as a pricing anchor with a widened range → price_method = "ai_estimate" — but you MUST NOT copy its model into final_model. Doing so renames the user's item to a product they do not own.
+- A candidate marked SEMANTIC or WEAK is resemblance, not evidence. Loose anchor only, wide range.
+- The rank score is an internal ordering weight, not a measured similarity. Never treat it as a match percentage or quote it as one.
+- If the scanned item is genuinely not in the candidate list, say so: keep the identity you actually read and set final_model to "unidentified" rather than adopting the nearest row.
 - If no DB match → pure AI estimate → flag clearly → price_method = "ai_estimate"
 - If Stage 1 and DB disagree on brand → prefer OCR text evidence over everything
 - If brand evidence is "packaging_design" or "packaging_visual" → identify the product inside the box, set identification_method = "packaging_recognized"
@@ -1572,6 +1576,152 @@ export function gradeRowEvidence(r, evidenceTokens, uniqueKw) {
   return false;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// SCAN-016 — EVIDENCE-CLASS RANKING
+// ══════════════════════════════════════════════════════════════════════════
+// Retrieval used to finish with one flat numeric sort:
+//
+//     results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
+//
+// which erased WHY each row was found. `similarity` is not a measurement — for
+// nine of the ten strategies it is a hardcoded constant standing for "strategy
+// N found this". Sorting those constants against strategy 7's REAL cosine put
+// catalog evidence and semantic resemblance on one axis, and gave the semantic
+// side the higher ceiling: vector similarity is bounded only by 1.0, so a 0.93
+// cosine outranked an exact brand+model hit pinned at 0.92.
+//
+// Worse, strategy 3a queries `model ILIKE %<suffix-stripped model>%` — it finds
+// SIBLINGS by construction ("G502 Hero" -> matches "G502 X Plus") and stamped
+// them 0.85, above the prompt's ">70% similarity => use its pricing" adoption
+// rule. A wrong-model sibling was adopted as the identity with a number that
+// was never measured.
+//
+// The fix separates RECALL from PRECISION. Strategy 3a keeps finding siblings —
+// that is useful, they are often the right family and sometimes the right item.
+// What changes is that ranking no longer mistakes a fuzzy hit for an exact one.
+// Rows are bucketed by the KIND of evidence that produced them, buckets are
+// ordered, and `similarity` only breaks ties WITHIN a bucket. A semantic hit can
+// now never outrank catalog evidence no matter how high its cosine climbs.
+//
+// Deliberately NOT changed here: normalizeModelKey, and the frozen v1/v2 copies
+// in api/_lib/recognition-memory.js. Stored memory keys are only reproducible
+// while that code is byte-stable (see that file's VERSION FREEZE header), so
+// identity-key normalization is a separate, migration-bearing change. This
+// commit is ranking only.
+
+// Ordered best-first. Numeric so rows sort on it directly; the names are what
+// appear in logs and in the debug payload.
+export const EVIDENCE_CLASS = {
+  EXACT_MODEL:   5, // row.model IS the queried model (normalized string compare)
+  MODEL_TEXT:    4, // OCR/label text matched the model column
+  CATALOG_FUZZY: 3, // structural brand+model hit, model string NOT identical => sibling
+  SEMANTIC:      2, // vector / full-text — resemblance, not evidence
+  WEAK:          1, // brand-only, category-only, last-resort fallbacks
+};
+
+// Human-readable class names for the Stage 2 prompt and the debug payload.
+// Stage 2 was previously handed a bare percentage with no way to tell a read
+// label from a shape resemblance; this is the vocabulary that distinction needs.
+export const CLASS_LABEL = {
+  [EVIDENCE_CLASS.EXACT_MODEL]:   'EXACT catalog match (model string identical)',
+  [EVIDENCE_CLASS.MODEL_TEXT]:    'MODEL TEXT confirmed (OCR/label matched the model)',
+  [EVIDENCE_CLASS.CATALOG_FUZZY]: 'SAME BRAND, model not confirmed (sibling candidate)',
+  [EVIDENCE_CLASS.SEMANTIC]:      'SEMANTIC resemblance only (no text evidence)',
+  [EVIDENCE_CLASS.WEAK]:          'WEAK (brand or category level only)',
+};
+
+// Loose model comparison for "is this row actually the thing we asked for".
+// Case, spacing and separators only — deliberately NOT normalizeModelKey, which
+// strips variant suffixes and would call a G502 X Plus a G502, the exact
+// conflation this ranking exists to undo.
+export function sameModelString(a, b) {
+  const fold = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const fa = fold(a), fb = fold(b);
+  return !!fa && fa === fb;
+}
+
+// Which evidence class produced this row. Pure; exported for the benchmark and
+// the test harness.
+export function classifyRowEvidence(row, ctx = {}) {
+  const { queryModel = null } = ctx;
+  const source = row?._source || '';
+  const exactModel = queryModel ? sameModelString(row?.model, queryModel) : false;
+
+  // A row whose model column IS the queried model is the top class regardless of
+  // which strategy happened to surface it first.
+  if (exactModel) return EVIDENCE_CLASS.EXACT_MODEL;
+
+  // The RPC's model_number tier means an OCR token hit the model column or the
+  // model_numbers array — read text, not resemblance.
+  if (row?._ocr_model_confirmed === true) return EVIDENCE_CLASS.MODEL_TEXT;
+
+  // gradeRowEvidence already refuses brand-only tokens, so a true here means a
+  // model-bearing token matched this row's model/name/keywords/aliases.
+  if (row?._evidence_grade === true && /^(ocr_rpc|ocr_ilike|exact_brand_model|normalized_model|name_col)$/.test(source)) {
+    return EVIDENCE_CLASS.MODEL_TEXT;
+  }
+
+  // Structural brand+model strategies that did NOT produce an identical model
+  // string. These are the siblings. They stay as candidates — they are usually
+  // the right family — but they may not outrank real model evidence.
+  if (/^(exact_brand_model|normalized_model|name_col|model_candidates)$/.test(source)) {
+    return EVIDENCE_CLASS.CATALOG_FUZZY;
+  }
+
+  if (/^(vector|fts)$/.test(source)) return EVIDENCE_CLASS.SEMANTIC;
+
+  return EVIDENCE_CLASS.WEAK;
+}
+
+// Rank rows by evidence class first, similarity second. Returns a NEW array;
+// each row gains _evidence_class and, when demoted, _sibling_of.
+//
+// `ambiguous` is set when the top rows are the same class, score within
+// SIBLING_MARGIN of each other, and name DIFFERENT models — i.e. retrieval
+// genuinely cannot separate them. Callers must preserve that rather than
+// letting position 0 win by accident.
+export function rankCandidates(rows, ctx = {}) {
+  const { queryModel = null, siblingMargin = 0.08 } = ctx;
+
+  const graded = (rows || []).map((r) => {
+    const klass = classifyRowEvidence(r, ctx);
+    const out = { ...r, _evidence_class: klass };
+    // A fuzzy catalog hit carries a constant (0.85 / 0.82 / 0.72) that reads as
+    // a measured similarity in the Stage 2 prompt. Record what it is really a
+    // sibling OF, so the prompt and the debug payload can say so.
+    if (klass === EVIDENCE_CLASS.CATALOG_FUZZY && queryModel && r?.model && !sameModelString(r.model, queryModel)) {
+      out._sibling_of = queryModel;
+    }
+    return out;
+  });
+
+  graded.sort((a, b) =>
+    (b._evidence_class - a._evidence_class) ||
+    ((b.similarity || 0) - (a.similarity || 0)));
+
+  const [t0, t1] = graded;
+  const ambiguous = !!(t0 && t1
+    && t0._evidence_class === t1._evidence_class
+    && Math.abs((t0.similarity || 0) - (t1.similarity || 0)) < siblingMargin
+    && t0.model && t1.model && !sameModelString(t0.model, t1.model));
+
+  return {
+    rows: graded,
+    // True only when a row genuinely carries model-level evidence. Everything
+    // below MODEL_TEXT is resemblance, and an item absent from the catalog must
+    // not be reported as found just because something similar exists.
+    exactMatch: (t0?._evidence_class ?? 0) >= EVIDENCE_CLASS.MODEL_TEXT,
+    topClass: t0?._evidence_class ?? 0,
+    ambiguous,
+    ambiguousBetween: ambiguous
+      ? graded.filter((r) => r._evidence_class === t0._evidence_class
+          && Math.abs((r.similarity || 0) - (t0.similarity || 0)) < siblingMargin
+          && r.model)
+        .slice(0, 5).map((r) => `${r.brand || ''} ${r.model}`.trim())
+      : [],
+  };
+}
+
 // ── Strategy execution order ──────────────────────────────────────────────
 // 1  Exact brand + exact model         (most specific, highest confidence)
 // 2  OCR exact tokens                  (brand/model/name from OCR + Vision)
@@ -1990,19 +2140,46 @@ async function retrieveCandidates(recognition, queryEmbedding, visionData = null
     }
   }
 
-  // ── Finalise: sort → take top 10 ────────────────────────────────────────
-  results.sort((a, b) => (b.similarity || 0) - (a.similarity || 0));
-  const top = results.slice(0, 10);
+  // ── Finalise: evidence-class ranking → take top 10 ──────────────────────
+  // SCAN-016: was a flat `similarity` sort, which let a 0.93 vector cosine
+  // outrank an exact brand+model hit pinned at 0.92, and let a suffix-stripped
+  // sibling at 0.85 present as a measured match. Class first, similarity only
+  // as a within-class tiebreak.
+  const ranked = rankCandidates(results, { queryModel: model_ok ? queryModel : null });
+  const top = ranked.rows.slice(0, 10);
   strategyLog.final_candidates = top.length;
+  strategyLog.ranking = {
+    top_class: ranked.topClass,
+    exact_match: ranked.exactMatch,
+    ambiguous: ranked.ambiguous,
+    ambiguous_between: ranked.ambiguousBetween,
+    siblings_demoted: ranked.rows.filter((r) => r._sibling_of).length,
+  };
+  if (ranked.ambiguous) {
+    console.log(`[Retrieve] AMBIGUOUS — cannot separate: ${ranked.ambiguousBetween.join(' | ')}`);
+  }
+  const demoted = ranked.rows.filter((r) => r._sibling_of);
+  if (demoted.length) {
+    console.log(`[Retrieve] ${demoted.length} sibling row(s) demoted below model evidence: ${demoted.slice(0, 3).map((r) => `${r.brand} ${r.model}`).join(', ')}`);
+  }
 
   const summary = strategyLog.strategies.map(s => `${s.strategy_name}:${s.candidate_count}r/${s.elapsed_ms}ms/${s.success ? 'ok' : 'fail'}`).join(' ');
   console.log(`[Retrieve] Summary: ${summary}`);
   if (top.length > 0) {
-    console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} sim=${top[0].similarity?.toFixed(2)} ev=${top[0]._evidence_grade ? 'evidence' : 'guess'}`);
+    const className = Object.keys(EVIDENCE_CLASS).find(k => EVIDENCE_CLASS[k] === top[0]._evidence_class) || '?';
+    console.log(`[Retrieve] Top: ${top[0].brand} ${top[0].model} src=${top[0]._source} class=${className} sim=${top[0].similarity?.toFixed(2)} ev=${top[0]._evidence_grade ? 'evidence' : 'guess'}${top[0]._sibling_of ? ` SIBLING_OF="${top[0]._sibling_of}"` : ''}`);
   } else {
     console.log('[Retrieve] 0 candidates');
   }
-  return { candidates: top, strategyLog };
+  // SCAN-016: `evidence` is additive. It carries the one fact the flat sort
+  // destroyed — whether anything here is actually model-level evidence, or just
+  // the nearest-looking row. The DB-missing guard downstream reads it.
+  return { candidates: top, strategyLog, evidence: {
+    exact_match: ranked.exactMatch,
+    top_class: ranked.topClass,
+    ambiguous: ranked.ambiguous,
+    ambiguous_between: ranked.ambiguousBetween,
+  } };
 }
 
 // VAL-001 — SCOPED to the requesting user.
@@ -3322,6 +3499,9 @@ async function handleRequest(req) {
     // ── RETRIEVAL — OPTIONAL, requires >= 9 s remaining (same gate as embedding) ──
     let candidates = [];
     let retrievalStrategyLog = null;
+    // SCAN-016: whether retrieval found real model-level evidence, or only the
+    // nearest-looking row. Drives the DB-missing guard below.
+    let retrievalEvidence = null;
     if (rem() >= 9_000) {
       const retrievalCap = Math.min(4_500, rem() - 8_000);
       plog('Retrieval start', `cap=${retrievalCap}ms rem=${rem()}ms`);
@@ -3333,6 +3513,7 @@ async function handleRequest(req) {
       if (retrievalResult) {
         candidates = retrievalResult.candidates || [];
         retrievalStrategyLog = retrievalResult.strategyLog || null;
+        retrievalEvidence = retrievalResult.evidence || null;
       }
       plog('Retrieval end', `${candidates.length} candidates rem=${rem()}ms`);
     } else {
@@ -3491,7 +3672,22 @@ async function handleRequest(req) {
     // db_match_found: were any product rows retrieved?
     // product_candidate_needed: no DB match but Stage 1 has useful recognition data
     // stage2_timeout: Stage 2 was skipped/timed out — pricing came from category fallback
-    const dbMatchFound = candidates.length > 0;
+    // SCAN-016: "did the catalog contain this item", not "did any row come
+    // back". Previously ANY candidate counted — including an 0.28 category
+    // fallback or a suffix-stripped sibling — so a product absent from the
+    // catalog was reported as matched and never became a candidate submission.
+    // A row now has to carry model-level evidence (EXACT_MODEL or MODEL_TEXT).
+    // Falls back to the old predicate when ranking metadata is absent, e.g. a
+    // retrieval timeout, so behaviour degrades rather than inverting.
+    const dbMatchFound = retrievalEvidence
+      ? retrievalEvidence.exact_match === true
+      : candidates.length > 0;
+    // Kept separate: rows WERE returned, they are just not proof of identity.
+    // Pricing may still anchor on them; identity may not.
+    const dbRowsReturned = candidates.length > 0;
+    if (dbRowsReturned && !dbMatchFound) {
+      blog(`[Retrieve] ${candidates.length} row(s) returned but NONE carry model evidence — treating as DB-MISSING (top="${candidates[0]?.brand} ${candidates[0]?.model}" class=${retrievalEvidence?.top_class})`);
+    }
     const _brand = recognition.brand_candidates?.[0]?.brand;
     const _model = recognition.model_candidates?.[0]?.model;
     const hasUsefulRecognition = !!(

@@ -110,6 +110,64 @@ const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : nu
 const convergenceMean = mean(scored.map((r) => r.convergence));
 const separationMean = mean(scored.filter((r) => r.separation !== null).map((r) => r.separation));
 
+// ── TIER 1b — RANKING (offline) ───────────────────────────────────────────────
+// Measures top-1 retrieval accuracy under the two pressures that actually cause
+// wrong identities in production:
+//
+//   1. a SIBLING found by strategy 3a, which strips a variant suffix and so
+//      matches "G502 X Plus" for a "G502 Hero" query, carrying a 0.85 constant;
+//   2. a SEMANTIC decoy whose real cosine (unbounded above 0.60) can exceed
+//      every catalog constant.
+//
+// Both scored on ONE flat axis before SCAN-016, so the decoys outranked the
+// truth. The OLD column below recomputes that flat sort on the same synthetic
+// rows, so before/after is reproduced on every run rather than remembered.
+const { rankCandidates } = await import(new URL('../api/analyze.js', import.meta.url).href);
+
+const rankingResults = [];
+for (const c of selected) {
+  if (!c.brand || !c.model) continue;
+
+  // The true row is deliberately given the WEAKEST plausible provenance
+  // (found only as a secondary model candidate, 0.72) while the decoys get the
+  // strongest constants. If ranking is correct, evidence beats score anyway.
+  const truth = { id: 'truth', brand: c.brand, model: c.model, similarity: 0.72,
+                  _source: 'model_candidates', _evidence_grade: false };
+  const siblings = (c.distinct_from || []).map((d, i) => ({
+    id: `sibling${i}`, brand: d.brand ?? c.brand, model: d.model, similarity: 0.85,
+    _source: 'normalized_model', _evidence_grade: false,
+  }));
+  const decoy = { id: 'semantic', brand: c.brand, model: `${c.model} LOOKALIKE`,
+                  similarity: 0.95, _source: 'vector', _evidence_grade: false };
+
+  const pool = [...siblings, decoy, truth];
+
+  const oldTop = [...pool].sort((a, b) => (b.similarity || 0) - (a.similarity || 0))[0];
+  const neu = rankCandidates(pool, { queryModel: c.model });
+
+  rankingResults.push({
+    id: c.id,
+    old_top: oldTop.id, old_correct: oldTop.id === 'truth',
+    new_top: neu.rows[0].id, new_correct: neu.rows[0].id === 'truth',
+    exact_match_flag: neu.exactMatch,
+    siblings_demoted: neu.rows.filter((r) => r._sibling_of).length,
+  });
+}
+
+// DB-MISSING control: the scanned item is absent from the catalog entirely.
+// The only rows are a sibling and a semantic decoy. Correct behaviour is
+// exact_match=false, so the item becomes a candidate submission instead of
+// being silently renamed to the nearest catalog product.
+const dbMissing = rankCandidates([
+  { id: 'sibling', brand: 'Logitech', model: 'G502 X Plus', similarity: 0.85, _source: 'normalized_model' },
+  { id: 'semantic', brand: 'Logitech', model: 'G903', similarity: 0.96, _source: 'vector' },
+], { queryModel: 'G900 Chaos Spectrum' });
+
+const oldRankAcc = rankingResults.length
+  ? rankingResults.filter((r) => r.old_correct).length / rankingResults.length : null;
+const newRankAcc = rankingResults.length
+  ? rankingResults.filter((r) => r.new_correct).length / rankingResults.length : null;
+
 // ── TIER 2 preflight ──────────────────────────────────────────────────────────
 const withImages = selected.filter((c) => c.image && existsSync(join(FIXTURE_DIR, c.image)));
 const tier2 = {
@@ -139,6 +197,16 @@ const report = {
     fully_separated: scored.filter((r) => r.separation === 1).length,
     results,
   },
+  tier1b_ranking: {
+    cases: rankingResults.length,
+    top1_flat_sort: oldRankAcc === null ? null : Number(oldRankAcc.toFixed(3)),
+    top1_evidence_class: newRankAcc === null ? null : Number(newRankAcc.toFixed(3)),
+    db_missing_control: {
+      exact_match: dbMissing.exactMatch,
+      correct: dbMissing.exactMatch === false,
+    },
+    results: rankingResults,
+  },
   tier2,
 };
 
@@ -167,6 +235,18 @@ console.log('  ' + '─'.repeat(76));
 console.log('  ' + 'MEAN'.padEnd(38) + pct(convergenceMean).padStart(7) + pct(separationMean).padStart(8));
 console.log(`\n  convergence  ${report.tier1.fully_converged}/${scored.length} products have a single identity across their spellings`);
 console.log(`  separation   ${report.tier1.fully_separated}/${scored.filter((r) => r.separation !== null).length} products stay distinct from their siblings`);
+
+console.log('\nRECOGNITION BENCHMARK — tier 1b (ranking, offline)\n');
+console.log('  Top-1 accuracy with a 0.85 sibling and a 0.95 semantic decoy in the pool,');
+console.log('  where the true row is deliberately the weakest-scoring candidate (0.72).\n');
+const failing = rankingResults.filter((r) => !r.new_correct);
+console.log(`  flat similarity sort (before)  ${pct(oldRankAcc)}   ${rankingResults.filter((r) => r.old_correct).length}/${rankingResults.length} correct`);
+console.log(`  evidence-class ranking (after) ${pct(newRankAcc)}   ${rankingResults.filter((r) => r.new_correct).length}/${rankingResults.length} correct`);
+if (failing.length) {
+  console.log(`\n  still wrong: ${failing.map((r) => `${r.id} -> ${r.new_top}`).join(', ')}`);
+}
+console.log(`\n  DB-missing control: exact_match=${dbMissing.exactMatch} ` +
+  `${dbMissing.exactMatch === false ? 'PASS — item stays unmatched, becomes a candidate' : 'FAIL — nearest row adopted as identity'}`);
 
 console.log('\nRECOGNITION BENCHMARK — tier 2 (live pipeline)\n');
 if (tier2.runnable) {

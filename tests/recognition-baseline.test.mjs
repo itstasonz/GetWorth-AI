@@ -37,6 +37,7 @@ const M = await import(MEMORY_URL.href);
 const {
   stripBrandPrefix, composeBrandModelName, sanitizeUserCorrection,
   gradeRowEvidence, calibrateRecognition, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
+  rankCandidates, classifyRowEvidence, sameModelString, EVIDENCE_CLASS,
 } = A;
 const { buildRecognitionMemoryKey, MEMORY_KEY_VERSION } = M;
 
@@ -212,6 +213,129 @@ test('A-15 calibration is pure — the caller\'s object is not mutated', () => {
   const before = JSON.stringify(input);
   calibrateRecognition(input);
   assert.equal(JSON.stringify(input), before, 'calibrateRecognition must not mutate its argument');
+});
+
+// ── Evidence-class ranking (SCAN-016) ────────────────────────────────────────
+// Retrieval row shorthand. `sim` is the strategy's constant, NOT a measurement.
+const row = (o) => ({
+  id: o.id, brand: o.brand ?? 'Logitech', model: o.model,
+  similarity: o.sim, _source: o.src,
+  _evidence_grade: !!o.ev, _ocr_model_confirmed: !!o.otc,
+});
+
+test('A-16 exact catalog evidence outranks a higher-scoring semantic hit', () => {
+  // The flat sort's core failure: vector similarity is real cosine, bounded
+  // only by 1.0, so it could exceed strategy 1's fixed 0.92 and take top-1 from
+  // an exact brand+model match. Class first means it no longer can, at any cosine.
+  const r = rankCandidates([
+    row({ id: 'vec', model: 'G903', sim: 0.97, src: 'vector' }),
+    row({ id: 'exact', model: 'G502 Hero', sim: 0.92, src: 'exact_brand_model' }),
+  ], { queryModel: 'G502 Hero' });
+
+  assert.equal(r.rows[0].id, 'exact');
+  assert.equal(r.rows[0]._evidence_class, EVIDENCE_CLASS.EXACT_MODEL);
+  assert.equal(r.exactMatch, true);
+});
+
+test('A-17 a G502-family sibling does not outrank the scanned model', () => {
+  // THE sibling-confusion regression. Strategy 3a strips the trailing variant
+  // suffix, so a "G502 Hero" query matches "G502 X Plus" and stamped it 0.85 —
+  // above the true row and above the old >70% adoption rule. Different products
+  // at different prices.
+  const r = rankCandidates([
+    row({ id: 'sibling', model: 'G502 X Plus', sim: 0.85, src: 'normalized_model' }),
+    row({ id: 'true', model: 'G502 Hero', sim: 0.72, src: 'model_candidates' }),
+  ], { queryModel: 'G502 Hero' });
+
+  assert.equal(r.rows[0].id, 'true', 'the scanned model must win despite the lower score');
+  assert.equal(r.rows[0]._evidence_class, EVIDENCE_CLASS.EXACT_MODEL);
+
+  const sib = r.rows.find((x) => x.id === 'sibling');
+  assert.equal(sib._evidence_class, EVIDENCE_CLASS.CATALOG_FUZZY);
+  assert.equal(sib._sibling_of, 'G502 Hero', 'a demoted sibling must record what it is a sibling of');
+});
+
+test('A-18 plain G502, G502 Hero and G502 X Plus are three different products', () => {
+  // Complements B-01: identity-key normalization still merges these (frozen v1
+  // contract, changed separately), but RANKING must not. A G502 X Plus priced
+  // as a G502 is the failure mode users actually see.
+  for (const [query, wrong] of [
+    ['G502', 'G502 X Plus'],
+    ['G502 Hero', 'G502'],
+    ['G502 X Plus', 'G502 Hero'],
+  ]) {
+    const r = rankCandidates([
+      row({ id: 'wrong', model: wrong, sim: 0.85, src: 'normalized_model' }),
+      row({ id: 'right', model: query, sim: 0.72, src: 'model_candidates' }),
+    ], { queryModel: query });
+    assert.equal(r.rows[0].id, 'right', `querying "${query}" must not return "${wrong}" first`);
+  }
+});
+
+test('A-19 read model text beats a higher-scoring structural sibling', () => {
+  // OCR that matched the model column is evidence; a suffix-stripped ILIKE is not.
+  const r = rankCandidates([
+    row({ id: 'sib', model: 'G502 X Plus', sim: 0.85, src: 'normalized_model' }),
+    row({ id: 'ocr', model: 'G502 Hero SE', sim: 0.80, src: 'ocr_rpc', otc: true }),
+  ], { queryModel: 'G502 Hero' });
+
+  assert.equal(r.rows[0].id, 'ocr');
+  assert.equal(r.rows[0]._evidence_class, EVIDENCE_CLASS.MODEL_TEXT);
+});
+
+test('A-20 a DB-missing item is not silently replaced by the nearest row', () => {
+  // Nothing in the pool is the scanned item. exactMatch must be false so the
+  // caller reports database_match=false / candidate_needed=true instead of
+  // renaming the user's item to a product they do not own.
+  const r = rankCandidates([
+    row({ id: 'sib', model: 'G502 X Plus', sim: 0.85, src: 'normalized_model' }),
+    row({ id: 'vec', model: 'G903', sim: 0.96, src: 'vector' }),
+  ], { queryModel: 'G900 Chaos Spectrum' });
+
+  assert.equal(r.exactMatch, false, 'resemblance is not a catalog match');
+  assert.ok(r.topClass < EVIDENCE_CLASS.MODEL_TEXT);
+});
+
+test('A-21 ambiguity is preserved rather than resolved by list position', () => {
+  // Two same-class rows, equal scores, different models: retrieval genuinely
+  // cannot separate them. Position 0 must not be treated as a decision.
+  const r = rankCandidates([
+    row({ id: 'a', model: 'G502', sim: 0.85, src: 'normalized_model' }),
+    row({ id: 'b', model: 'G502 X Plus', sim: 0.85, src: 'normalized_model' }),
+  ], { queryModel: 'G502 Hero' });
+
+  assert.equal(r.ambiguous, true);
+  assert.equal(r.ambiguousBetween.length, 2);
+});
+
+test('A-22 an exact match is unambiguous even with a close-scoring neighbour', () => {
+  // The ambiguity flag must not fire when one row is genuinely the item —
+  // otherwise every confident scan would be reported as uncertain.
+  const r = rankCandidates([
+    row({ id: 'exact', model: 'G502 Hero', sim: 0.92, src: 'exact_brand_model' }),
+    row({ id: 'near', model: 'G502 X Plus', sim: 0.90, src: 'normalized_model' }),
+  ], { queryModel: 'G502 Hero' });
+
+  assert.equal(r.ambiguous, false, 'different classes are not a tie');
+  assert.equal(r.rows[0].id, 'exact');
+});
+
+test('A-23 sameModelString compares loosely but never across variants', () => {
+  // Case/spacing/separator insensitive...
+  assert.equal(sameModelString('G502 Hero', 'g502-hero'), true);
+  assert.equal(sameModelString('WH-1000XM5', 'wh1000xm5'), true);
+  // ...but a variant suffix is a DIFFERENT product. This is the line that
+  // normalizeModelKey crosses and this function must not.
+  assert.equal(sameModelString('G502', 'G502 X Plus'), false);
+  assert.equal(sameModelString('G502 Hero', 'G502'), false);
+  assert.equal(sameModelString('', ''), false, 'empty is never a match');
+});
+
+test('A-24 ranking is pure — input rows are not mutated', () => {
+  const input = [row({ id: 'a', model: 'G502', sim: 0.85, src: 'normalized_model' })];
+  const snapshot = JSON.stringify(input);
+  rankCandidates(input, { queryModel: 'G502 Hero' });
+  assert.equal(JSON.stringify(input), snapshot);
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

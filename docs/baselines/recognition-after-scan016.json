@@ -1,0 +1,1084 @@
+{
+  "generated_at": "2026-09-06T10:56:36.156Z",
+  "memory_key_version": 2,
+  "tier1": {
+    "cases_scored": 23,
+    "cases_skipped": 1,
+    "convergence_mean": 0.31,
+    "separation_mean": 0.978,
+    "fully_converged": 2,
+    "fully_separated": 22,
+    "results": [
+      {
+        "id": "gaming_mouse_logitech_g502",
+        "product_type": "gaming_mouse",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|logitech|g502",
+        "convergence": 0.286,
+        "distinct_keys": 6,
+        "spellings": 8,
+        "fragments": [
+          {
+            "key": "v2|electronics|logitech|g502",
+            "from": [
+              "Logitech / G502 Hero",
+              "Logitech / G502 HERO"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech|g 502",
+            "from": [
+              "Logitech / G-502 Hero"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech|g502hero",
+            "from": [
+              "Logitech / G502Hero"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|g502",
+            "from": [
+              "Logitech G / G502 Hero",
+              "Logitech G / G502 HERO"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|g 502",
+            "from": [
+              "Logitech G / G-502 Hero"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|g502hero",
+            "from": [
+              "Logitech G / G502Hero"
+            ]
+          }
+        ],
+        "separation": 0.5,
+        "collisions": [
+          "Logitech G502 X Plus"
+        ]
+      },
+      {
+        "id": "gaming_mouse_logitech_g900",
+        "product_type": "gaming_mouse",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|logitech|g900",
+        "convergence": 0,
+        "distinct_keys": 8,
+        "spellings": 8,
+        "fragments": [
+          {
+            "key": "v2|electronics|logitech|g900",
+            "from": [
+              "Logitech / G900"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech|g 900",
+            "from": [
+              "Logitech / G 900"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech|m g900",
+            "from": [
+              "Logitech / M-G900"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech|g900 chaos spectrum",
+            "from": [
+              "Logitech / G900 Chaos Spectrum"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|g900",
+            "from": [
+              "Logitech G / G900"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|g 900",
+            "from": [
+              "Logitech G / G 900"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|m g900",
+            "from": [
+              "Logitech G / M-G900"
+            ]
+          },
+          {
+            "key": "v2|electronics|logitech g|g900 chaos spectrum",
+            "from": [
+              "Logitech G / G900 Chaos Spectrum"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "keyboard_keychron_k2",
+        "product_type": "keyboard",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|keychron|k2",
+        "convergence": 0.5,
+        "distinct_keys": 2,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|electronics|keychron|k2",
+            "from": [
+              "Keychron / K2",
+              "Keychron / K2 V2"
+            ]
+          },
+          {
+            "key": "v2|electronics|keychron|k 2",
+            "from": [
+              "Keychron / K-2"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "laptop_asus_rog_strix_g15",
+        "product_type": "laptop",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|asus|rog strix g15",
+        "convergence": 0.375,
+        "distinct_keys": 6,
+        "spellings": 9,
+        "fragments": [
+          {
+            "key": "v2|electronics|asus|rog strix g15",
+            "from": [
+              "ASUS / ROG Strix G15",
+              "Asus / ROG Strix G15"
+            ]
+          },
+          {
+            "key": "v2|electronics|asus|strix g15",
+            "from": [
+              "ASUS / Strix G15",
+              "Asus / Strix G15"
+            ]
+          },
+          {
+            "key": "v2|electronics|asus|rog strix g 15",
+            "from": [
+              "ASUS / ROG Strix G-15",
+              "Asus / ROG Strix G-15"
+            ]
+          },
+          {
+            "key": "v2|electronics|asus rog|rog strix g15",
+            "from": [
+              "ASUS ROG / ROG Strix G15"
+            ]
+          },
+          {
+            "key": "v2|electronics|asus rog|strix g15",
+            "from": [
+              "ASUS ROG / Strix G15"
+            ]
+          },
+          {
+            "key": "v2|electronics|asus rog|rog strix g 15",
+            "from": [
+              "ASUS ROG / ROG Strix G-15"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "phone_samsung_galaxy_s24_ultra",
+        "product_type": "smartphone",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|samsung|galaxy s24 ultra",
+        "convergence": 0,
+        "distinct_keys": 8,
+        "spellings": 8,
+        "fragments": [
+          {
+            "key": "v2|electronics|samsung|galaxy s24 ultra",
+            "from": [
+              "Samsung / Galaxy S24 Ultra"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung|sm s928b",
+            "from": [
+              "Samsung / SM-S928B"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung|s24 ultra",
+            "from": [
+              "Samsung / S24 Ultra"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung|galaxy s 24 ultra",
+            "from": [
+              "Samsung / Galaxy S-24 Ultra"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung electronics|galaxy s24 ultra",
+            "from": [
+              "Samsung Electronics / Galaxy S24 Ultra"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung electronics|sm s928b",
+            "from": [
+              "Samsung Electronics / SM-S928B"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung electronics|s24 ultra",
+            "from": [
+              "Samsung Electronics / S24 Ultra"
+            ]
+          },
+          {
+            "key": "v2|electronics|samsung electronics|galaxy s 24 ultra",
+            "from": [
+              "Samsung Electronics / Galaxy S-24 Ultra"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "phone_apple_iphone_15_pro",
+        "product_type": "smartphone",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|apple|iphone 15",
+        "convergence": 0,
+        "distinct_keys": 6,
+        "spellings": 6,
+        "fragments": [
+          {
+            "key": "v2|electronics|apple|iphone 15",
+            "from": [
+              "Apple / iPhone 15 Pro"
+            ]
+          },
+          {
+            "key": "v2|electronics|apple|iphone15",
+            "from": [
+              "Apple / iPhone15 Pro"
+            ]
+          },
+          {
+            "key": "v2|electronics|apple|a2848",
+            "from": [
+              "Apple / A2848"
+            ]
+          },
+          {
+            "key": "v2|electronics|apple inc|iphone 15",
+            "from": [
+              "Apple Inc / iPhone 15 Pro"
+            ]
+          },
+          {
+            "key": "v2|electronics|apple inc|iphone15",
+            "from": [
+              "Apple Inc / iPhone15 Pro"
+            ]
+          },
+          {
+            "key": "v2|electronics|apple inc|a2848",
+            "from": [
+              "Apple Inc / A2848"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "headphones_sony_wh1000xm5",
+        "product_type": "headphones",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|sony|wh 1000xm5",
+        "convergence": 0,
+        "distinct_keys": 3,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|electronics|sony|wh 1000xm5",
+            "from": [
+              "Sony / WH-1000XM5"
+            ]
+          },
+          {
+            "key": "v2|electronics|sony|wh1000xm5",
+            "from": [
+              "Sony / WH1000XM5"
+            ]
+          },
+          {
+            "key": "v2|electronics|sony|wh 1000 xm5",
+            "from": [
+              "Sony / WH 1000 XM5"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "speaker_jbl_flip_6",
+        "product_type": "speaker",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|jbl|flip 6",
+        "convergence": 0.5,
+        "distinct_keys": 2,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|electronics|jbl|flip 6",
+            "from": [
+              "JBL / Flip 6",
+              "JBL / Flip-6"
+            ]
+          },
+          {
+            "key": "v2|electronics|jbl|flip6",
+            "from": [
+              "JBL / Flip6"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "charger_anker_nano_ii_65w",
+        "product_type": "charger",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|anker|nano ii 65w",
+        "convergence": 0,
+        "distinct_keys": 3,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|electronics|anker|nano ii 65w",
+            "from": [
+              "Anker / Nano II 65W"
+            ]
+          },
+          {
+            "key": "v2|electronics|anker|nano 2 65w",
+            "from": [
+              "Anker / Nano 2 65W"
+            ]
+          },
+          {
+            "key": "v2|electronics|anker|a2663",
+            "from": [
+              "Anker / A2663"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "power_bank_anker_powercore_10000",
+        "product_type": "power_bank",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|anker|powercore 10000",
+        "convergence": 0,
+        "distinct_keys": 3,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|electronics|anker|powercore 10000",
+            "from": [
+              "Anker / PowerCore 10000"
+            ]
+          },
+          {
+            "key": "v2|electronics|anker|powercore10000",
+            "from": [
+              "Anker / PowerCore10000"
+            ]
+          },
+          {
+            "key": "v2|electronics|anker|power core 10000",
+            "from": [
+              "Anker / Power Core 10000"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "smartwatch_apple_watch_series_9",
+        "product_type": "smartwatch",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|apple|watch series 9",
+        "convergence": 0.5,
+        "distinct_keys": 2,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|electronics|apple|watch series 9",
+            "from": [
+              "Apple / Watch Series 9",
+              "Apple / Apple Watch Series 9"
+            ]
+          },
+          {
+            "key": "v2|electronics|apple|series 9",
+            "from": [
+              "Apple / Series 9"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "tv_lg_oled55c3",
+        "product_type": "television",
+        "category": "Electronics",
+        "canonical_key": "v2|electronics|lg|oled55c3",
+        "convergence": 0,
+        "distinct_keys": 6,
+        "spellings": 6,
+        "fragments": [
+          {
+            "key": "v2|electronics|lg|oled55c3",
+            "from": [
+              "LG / OLED55C3"
+            ]
+          },
+          {
+            "key": "v2|electronics|lg|oled 55 c3",
+            "from": [
+              "LG / OLED 55 C3"
+            ]
+          },
+          {
+            "key": "v2|electronics|lg|55c3",
+            "from": [
+              "LG / 55C3"
+            ]
+          },
+          {
+            "key": "v2|electronics|lg electronics|oled55c3",
+            "from": [
+              "LG Electronics / OLED55C3"
+            ]
+          },
+          {
+            "key": "v2|electronics|lg electronics|oled 55 c3",
+            "from": [
+              "LG Electronics / OLED 55 C3"
+            ]
+          },
+          {
+            "key": "v2|electronics|lg electronics|55c3",
+            "from": [
+              "LG Electronics / 55C3"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "microwave_samsung_ms23k3513",
+        "product_type": "microwave",
+        "category": "Home",
+        "canonical_key": "v2|home|samsung|ms23k3513",
+        "convergence": 0,
+        "distinct_keys": 6,
+        "spellings": 6,
+        "fragments": [
+          {
+            "key": "v2|home|samsung|ms23k3513",
+            "from": [
+              "Samsung / MS23K3513"
+            ]
+          },
+          {
+            "key": "v2|home|samsung|ms 23k3513",
+            "from": [
+              "Samsung / MS-23K3513"
+            ]
+          },
+          {
+            "key": "v2|home|samsung|ms23 k3513",
+            "from": [
+              "Samsung / MS23 K3513"
+            ]
+          },
+          {
+            "key": "v2|home|samsung electronics|ms23k3513",
+            "from": [
+              "Samsung Electronics / MS23K3513"
+            ]
+          },
+          {
+            "key": "v2|home|samsung electronics|ms 23k3513",
+            "from": [
+              "Samsung Electronics / MS-23K3513"
+            ]
+          },
+          {
+            "key": "v2|home|samsung electronics|ms23 k3513",
+            "from": [
+              "Samsung Electronics / MS23 K3513"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "coffee_machine_delonghi_magnifica_s",
+        "product_type": "coffee_machine",
+        "category": "Home",
+        "canonical_key": "v2|home|de longhi|magnifica s",
+        "convergence": 0.625,
+        "distinct_keys": 4,
+        "spellings": 9,
+        "fragments": [
+          {
+            "key": "v2|home|de longhi|magnifica s",
+            "from": [
+              "De'Longhi / Magnifica S",
+              "De'Longhi / Magnifica-S"
+            ]
+          },
+          {
+            "key": "v2|home|de longhi|ecam22 110",
+            "from": [
+              "De'Longhi / ECAM22.110"
+            ]
+          },
+          {
+            "key": "v2|home|delonghi|magnifica s",
+            "from": [
+              "DeLonghi / Magnifica S",
+              "DeLonghi / Magnifica-S",
+              "Delonghi / Magnifica S",
+              "Delonghi / Magnifica-S"
+            ]
+          },
+          {
+            "key": "v2|home|delonghi|ecam22 110",
+            "from": [
+              "DeLonghi / ECAM22.110",
+              "Delonghi / ECAM22.110"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "vacuum_dyson_v11",
+        "product_type": "vacuum",
+        "category": "Home",
+        "canonical_key": "v2|home|dyson|v11",
+        "convergence": 0,
+        "distinct_keys": 3,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|home|dyson|v11",
+            "from": [
+              "Dyson / V11"
+            ]
+          },
+          {
+            "key": "v2|home|dyson|v 11",
+            "from": [
+              "Dyson / V-11"
+            ]
+          },
+          {
+            "key": "v2|home|dyson|v11 absolute",
+            "from": [
+              "Dyson / V11 Absolute"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "sofa_ikea_kivik_3seat",
+        "product_type": "sofa",
+        "category": "Furniture",
+        "canonical_key": "v2|furniture|ikea|kivik",
+        "convergence": 1,
+        "distinct_keys": 1,
+        "spellings": 4,
+        "fragments": [],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "chair_herman_miller_aeron",
+        "product_type": "office_chair",
+        "category": "Furniture",
+        "canonical_key": "v2|furniture|herman miller|aeron",
+        "convergence": 0,
+        "distinct_keys": 3,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|furniture|herman miller|aeron",
+            "from": [
+              "Herman Miller / Aeron"
+            ]
+          },
+          {
+            "key": "v2|furniture|herman miller|aeron remastered",
+            "from": [
+              "Herman Miller / Aeron Remastered"
+            ]
+          },
+          {
+            "key": "v2|furniture|herman miller|aeron size b",
+            "from": [
+              "Herman Miller / Aeron Size B"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "table_ikea_lack",
+        "product_type": "table",
+        "category": "Furniture",
+        "canonical_key": "v2|furniture|ikea|lack",
+        "convergence": 1,
+        "distinct_keys": 1,
+        "spellings": 4,
+        "fragments": [],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "watch_casio_g_shock_ga2100",
+        "product_type": "wristwatch",
+        "category": "Watches",
+        "canonical_key": "v2|watches|casio|ga 2100",
+        "convergence": 0.375,
+        "distinct_keys": 6,
+        "spellings": 9,
+        "fragments": [
+          {
+            "key": "v2|watches|casio|ga 2100",
+            "from": [
+              "Casio / GA-2100",
+              "Casio / GA 2100"
+            ]
+          },
+          {
+            "key": "v2|watches|casio|ga2100",
+            "from": [
+              "Casio / GA2100"
+            ]
+          },
+          {
+            "key": "v2|watches|casio g shock|ga 2100",
+            "from": [
+              "Casio G-Shock / GA-2100",
+              "Casio G-Shock / GA 2100"
+            ]
+          },
+          {
+            "key": "v2|watches|casio g shock|ga2100",
+            "from": [
+              "Casio G-Shock / GA2100"
+            ]
+          },
+          {
+            "key": "v2|watches|g shock|ga 2100",
+            "from": [
+              "G-Shock / GA-2100",
+              "G-Shock / GA 2100"
+            ]
+          },
+          {
+            "key": "v2|watches|g shock|ga2100",
+            "from": [
+              "G-Shock / GA2100"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "shoes_nike_air_force_1",
+        "product_type": "shoes",
+        "category": "Clothing",
+        "canonical_key": "v2|clothing|nike|air force 1",
+        "convergence": 0,
+        "distinct_keys": 3,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|clothing|nike|air force 1",
+            "from": [
+              "Nike / Air Force 1"
+            ]
+          },
+          {
+            "key": "v2|clothing|nike|af1",
+            "from": [
+              "Nike / AF1"
+            ]
+          },
+          {
+            "key": "v2|clothing|nike|air force one",
+            "from": [
+              "Nike / Air Force One"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "perfume_dior_sauvage_edp",
+        "product_type": "perfume",
+        "category": "Beauty",
+        "canonical_key": "v2|beauty|dior|sauvage",
+        "convergence": 0.8,
+        "distinct_keys": 2,
+        "spellings": 6,
+        "fragments": [
+          {
+            "key": "v2|beauty|dior|sauvage",
+            "from": [
+              "Dior / Sauvage",
+              "Dior / Sauvage EDP",
+              "Dior / Sauvage Eau de Parfum"
+            ]
+          },
+          {
+            "key": "v2|beauty|christian dior|sauvage",
+            "from": [
+              "Christian Dior / Sauvage",
+              "Christian Dior / Sauvage EDP",
+              "Christian Dior / Sauvage Eau de Parfum"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "tool_bosch_gsr_12v",
+        "product_type": "power_tool",
+        "category": "Tools",
+        "canonical_key": "v2|tools|bosch|gsr 12v 15",
+        "convergence": 0.5,
+        "distinct_keys": 2,
+        "spellings": 3,
+        "fragments": [
+          {
+            "key": "v2|tools|bosch|gsr 12v 15",
+            "from": [
+              "Bosch / GSR 12V-15",
+              "Bosch / GSR 12V 15"
+            ]
+          },
+          {
+            "key": "v2|tools|bosch|gsr12v15",
+            "from": [
+              "Bosch / GSR12V15"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "toy_lego_millennium_falcon_75257",
+        "product_type": "toy",
+        "category": "Toys",
+        "canonical_key": "v2|toys|lego|75257",
+        "convergence": 0.667,
+        "distinct_keys": 2,
+        "spellings": 4,
+        "fragments": [
+          {
+            "key": "v2|toys|lego|75257",
+            "from": [
+              "LEGO / 75257",
+              "Lego / 75257"
+            ]
+          },
+          {
+            "key": "v2|toys|lego|millennium falcon 75257",
+            "from": [
+              "LEGO / Millennium Falcon 75257",
+              "Lego / Millennium Falcon 75257"
+            ]
+          }
+        ],
+        "separation": 1,
+        "collisions": []
+      },
+      {
+        "id": "unknown_unlisted_product",
+        "product_type": "unknown",
+        "skipped": "no identity (control case)"
+      }
+    ]
+  },
+  "tier1b_ranking": {
+    "cases": 23,
+    "top1_flat_sort": 0,
+    "top1_evidence_class": 1,
+    "db_missing_control": {
+      "exact_match": false,
+      "correct": true
+    },
+    "results": [
+      {
+        "id": "gaming_mouse_logitech_g502",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 2
+      },
+      {
+        "id": "gaming_mouse_logitech_g900",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "keyboard_keychron_k2",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "laptop_asus_rog_strix_g15",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "phone_samsung_galaxy_s24_ultra",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 2
+      },
+      {
+        "id": "phone_apple_iphone_15_pro",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 2
+      },
+      {
+        "id": "headphones_sony_wh1000xm5",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "speaker_jbl_flip_6",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "charger_anker_nano_ii_65w",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "power_bank_anker_powercore_10000",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "smartwatch_apple_watch_series_9",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "tv_lg_oled55c3",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "microwave_samsung_ms23k3513",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "coffee_machine_delonghi_magnifica_s",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "vacuum_dyson_v11",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "sofa_ikea_kivik_3seat",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "chair_herman_miller_aeron",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "table_ikea_lack",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "watch_casio_g_shock_ga2100",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "shoes_nike_air_force_1",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "perfume_dior_sauvage_edp",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "tool_bosch_gsr_12v",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      },
+      {
+        "id": "toy_lego_millennium_falcon_75257",
+        "old_top": "semantic",
+        "old_correct": false,
+        "new_top": "truth",
+        "new_correct": true,
+        "exact_match_flag": true,
+        "siblings_demoted": 1
+      }
+    ]
+  },
+  "tier2": {
+    "runnable": false,
+    "anthropic_key": false,
+    "google_vision_key": false,
+    "voyage_key": false,
+    "fixtures_present": 0,
+    "fixtures_expected": 24,
+    "skipped_reason": "ANTHROPIC_API_KEY not set"
+  }
+}
