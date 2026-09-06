@@ -259,3 +259,123 @@ test('RG-03 the budget ceiling is unchanged — this is not a timeout increase',
   assert.match(src, /Math\.max\(Math\.min\(28_000, rem\(\) - 12_000\), 8_000\)/, 'Stage 1 cap unchanged');
   assert.match(src, /Math\.max\(8_000, Math\.min\(24_000, rem\(\) - STAGE2_RESERVE_MS\)\)/, 'Stage 2 cap unchanged');
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GW-RC-PERF-002 — the timing snapshot must reach the database.
+//
+// Production evidence: 5 current-engine scans, `timings_anywhere = 0`. The
+// instrumentation ran, the response carried it, and NOTHING was stored.
+//
+// Cause: `ai_raw_response: result` stores a reference, but supabase.rpc()
+// SERIALISES the object at call time. `result._timings` was assigned ~244 lines
+// AFTER the write, so the serialised copy could never contain it — while
+// stage2_status, fast_path and _debug (all assigned earlier) were persisted
+// normally. That asymmetry is the signature of an ordering defect, not a
+// serialisation or schema problem.
+//
+// These tests pin the ORDERING and the SEMANTICS. They deliberately avoid line
+// numbers: positions are derived from unique code anchors, so the tests survive
+// edits elsewhere in a 4,500-line handler and fail only if the actual ordering
+// of these operations changes.
+// ══════════════════════════════════════════════════════════════════════════════
+
+test('PF-01 the timing snapshot is attached BEFORE the valuation is serialised', () => {
+  // THE regression. If this ordering inverts again, timings silently stop
+  // persisting and no test other than this one would notice.
+  const preSnapshot = idx("result._timings = snapshotTimings('pre_persist')");
+  const rowBuilt    = idx('const valuationRow = {');
+  const rowCapture  = idx('ai_raw_response:   result,');
+  const persistCall = idx("timed('persist_scan'");
+
+  assert.ok(preSnapshot < rowBuilt,
+    'the snapshot must be attached before valuationRow is constructed');
+  assert.ok(preSnapshot < rowCapture,
+    'the snapshot must exist before `result` is referenced as ai_raw_response');
+  assert.ok(preSnapshot < persistCall,
+    'the snapshot must exist before supabase.rpc serialises the row');
+});
+
+test('PF-02 the response still receives the COMPLETE object, after persistence', () => {
+  // The fix must not degrade the API response to the partial snapshot.
+  const preSnapshot   = idx("result._timings = snapshotTimings('pre_persist')");
+  const persistCall   = idx("timed('persist_scan'");
+  const finalSnapshot = idx("result._timings = snapshotTimings('complete')");
+  const respond       = idx('return json({ content:');
+
+  assert.ok(persistCall < finalSnapshot, 'the complete snapshot is taken after persistence');
+  assert.ok(finalSnapshot < respond, 'and before the response is sent');
+  assert.ok(preSnapshot < finalSnapshot, 'the complete snapshot overwrites the partial one');
+});
+
+test('PF-03 one shared source — no second timing implementation', () => {
+  // A duplicated `const { _order, ...flat } = timings` in two places is how the
+  // two objects would silently diverge.
+  const helper = (src.match(/const snapshotTimings = \(phase\) =>/g) || []).length;
+  assert.equal(helper, 1, 'snapshotTimings must be defined exactly once');
+
+  const inlineDestructure = (src.match(/const \{ _order, \.\.\.flat \} = timings;/g) || []).length;
+  assert.equal(inlineDestructure, 1,
+    'the _order strip must live only inside snapshotTimings — no inline duplicate');
+
+  assert.equal((src.match(/result\._timings = /g) || []).length, 2,
+    'exactly two assignments: the pre-persist snapshot and the complete one');
+});
+
+test('PF-04 the persisted snapshot does not fabricate a final duration', () => {
+  // total/unaccounted are measured just before the response and INCLUDE
+  // persistence. Computing them at snapshot time would report a duration for
+  // work that had not happened. Their absence from the persisted copy is
+  // correct telemetry, not a missing field.
+  const region = src.slice(
+    idx("result._timings = snapshotTimings('pre_persist')") - 900,
+    idx('const valuationRow = {'),
+  );
+  assert.equal(/timings\.total\s*=/.test(region), false,
+    'total must not be computed before the request has finished');
+  assert.equal(/timings\.unaccounted\s*=/.test(region), false,
+    'unaccounted derives from total and must not be computed early');
+
+  // And they ARE still computed for the response.
+  assert.match(src, /timings\.total = totalWall;/);
+  assert.match(src, /timings\.unaccounted = Math\.max\(0, totalWall - measured\);/);
+});
+
+test('PF-05 snapshotTimings strips bookkeeping, tags the phase, and preserves stages', () => {
+  // Behavioural: run the real extracted helper rather than a reimplementation.
+  const body = expressionAt(src, 'const snapshotTimings =', 'analyze.js');
+  const timings = { _order: ['stage1_vision', 'stage2_verify'], stage1_vision: 1200, stage2_verify: 9000 };
+  const snapshotTimings = compileRegion(['timings'], `return ${body};`, 'snapshotTimings')(timings);
+
+  const pre = snapshotTimings('pre_persist');
+  assert.equal('_order' in pre, false, '_order is bookkeeping and must never ship');
+  assert.equal(pre.snapshot, 'pre_persist', 'the object must say which snapshot it is');
+  assert.equal(pre.stage1_vision, 1200);
+  assert.equal(pre.stage2_verify, 9000);
+
+  // Independent copies — mutating one must not affect the other.
+  const complete = snapshotTimings('complete');
+  assert.equal(complete.snapshot, 'complete');
+  pre.stage1_vision = 0;
+  assert.equal(complete.stage1_vision, 1200);
+});
+
+test('PF-06 both dominant stages are captured by the persisted snapshot', () => {
+  // The snapshot is only useful if the two costs that dominate the waterfall
+  // are already measured when it is taken. Both must be timed upstream of it.
+  const preSnapshot = idx("result._timings = snapshotTimings('pre_persist')");
+  for (const stage of ['stage1_vision', 'stage2_verify', 'retrieval', 'google_vision', 'rate_limit', 'auth']) {
+    assert.ok(idx(`timed('${stage}'`) < preSnapshot,
+      `${stage} must be measured before the persisted snapshot is taken`);
+  }
+  // The two persistence timers legitimately come after — documented, not a bug.
+  assert.ok(idx("timed('persist_scan'") > preSnapshot);
+});
+
+test('PF-07 the snapshot carries timing telemetry only — no PII', () => {
+  // _timings ships to the DB now, so the no-PII rule matters more, not less.
+  const helper = expressionAt(src, 'const snapshotTimings =', 'analyze.js');
+  for (const leak of ['user', 'email', 'brand', 'model', 'ocr', 'price', 'token', 'apiKey', 'image']) {
+    assert.equal(new RegExp(leak, 'i').test(helper), false,
+      `snapshotTimings must not reference ${leak}`);
+  }
+});

@@ -3363,6 +3363,20 @@ async function handleRequest(req) {
     try { return await p; }
     finally { mark(name, Date.now() - t); }
   };
+  // GW-RC-PERF-002: ONE source for both the persisted snapshot and the response
+  // copy. `_order` is bookkeeping and never ships. `snapshot` records WHICH of
+  // the two this object is, so an analyst reading a row can tell a deliberately
+  // partial snapshot from a truncated one:
+  //   'pre_persist' — taken before the valuation write. Carries every stage
+  //                   completed by then, which is all of them except the two
+  //                   persistence timers. total/unaccounted are ABSENT because
+  //                   the request has not finished; inventing them here would
+  //                   be reporting a duration for work not yet done.
+  //   'complete'    — taken just before the response, with total + unaccounted.
+  const snapshotTimings = (phase) => {
+    const { _order, ...flat } = timings;
+    return { ...flat, snapshot: phase };
+  };
 
   // ── SCAN-008 (B-3): reclaim serial overhead for Stage 2's budget ──────────
   // Production scans showed Stage 2 consistently needs 18–20s (output-token
@@ -4188,6 +4202,20 @@ async function handleRequest(req) {
       total_ms: totalMs,
     });
 
+    // GW-RC-PERF-002: attach the timing snapshot BEFORE the valuation write.
+    //
+    // `ai_raw_response: result` stores a reference, but supabase.rpc()
+    // SERIALISES the object at call time — so any property added to `result`
+    // after that call cannot reach the database. `result._timings` was assigned
+    // ~244 lines further down, immediately before the response, which is why
+    // Production shows stage2_status, fast_path and _debug (all assigned
+    // earlier) but zero timings across every scan.
+    //
+    // This line is the whole fix. The assignment below the waterfall still runs
+    // and overwrites this with the complete object, so the RESPONSE is
+    // unchanged; only the persisted copy gains data it never had.
+    result._timings = snapshotTimings('pre_persist');
+
     // 1) CRITICAL transaction — persist the valuation and commit.
     let persisted = false;
     if (authUser?.id) {
@@ -4477,8 +4505,10 @@ async function handleRequest(req) {
       timings.unaccounted = Math.max(0, totalWall - measured);
       const waterfall = timings._order.map((k) => `${k}=${timings[k]}ms`).join(' ');
       console.log(`[Waterfall] TOTAL=${totalWall}ms ${waterfall} unaccounted=${timings.unaccounted}ms stage2_ran=${!stage2FallbackUsed} vision=${!!visionData} candidates=${candidates.length}`);
-      const { _order, ...flat } = timings;
-      result._timings = flat;
+      // Overwrites the 'pre_persist' snapshot taken before the valuation write.
+      // The response therefore carries the COMPLETE object, exactly as before
+      // this change; the persisted copy keeps the earlier, honestly-partial one.
+      result._timings = snapshotTimings('complete');
     }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
