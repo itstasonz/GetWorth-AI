@@ -40,6 +40,9 @@ const T = {
     signInAccess: 'Sign in to access all features',
     signInSave: 'Sign in to save items',
     signInList: 'Sign in to list items',
+    // AUTH-001: /api/analyze requires a session — scanning is gated like
+    // save/contact/list, and this is the copy for that prompt.
+    signInScan: 'Sign in to scan an item',
     signInBuy: 'Sign in to buy — we\'ll bring you right back to this listing',
     google: 'Continue with Google',
     or: 'or',
@@ -318,6 +321,7 @@ const T = {
     signInAccess: 'התחברו כדי לגשת לכל התכונות',
     signInSave: 'התחברו כדי לשמור פריטים',
     signInList: 'התחברו כדי לפרסם פריטים',
+    signInScan: 'התחברו כדי לסרוק פריט',
     signInBuy: 'התחברו כדי לקנות — נחזיר אתכם ישר למודעה',
     google: 'המשך עם Google',
     or: 'או',

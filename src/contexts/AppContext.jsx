@@ -494,6 +494,26 @@ export function AppProvider({ children }) {
           console.log('[Auth] session user=', sessionResult.data?.session?.user?.email ?? null);
         }
 
+        // AUTH-001: Preview-safe boot diagnostic. Every other auth log in this
+        // file is behind import.meta.env.DEV or the hostname-based DEV flag,
+        // both FALSE on a Vercel Preview production build — which is why the
+        // 401 investigation had server evidence and no client evidence at all.
+        //
+        // Booleans and a timestamp only: no token, no email, no user id. One
+        // line per page load, so it is safe to leave on in production too, and
+        // it is the line that distinguishes "session never restored" (an
+        // infrastructure/redirect problem) from "session restored but the token
+        // was not attached" (a client problem). Do not gate this behind DEV.
+        console.log('[Auth] boot', JSON.stringify({
+          sessionPresent: !!sessionResult.data?.session,
+          userIdPresent: !!sessionResult.data?.session?.user?.id,
+          accessTokenPresent: !!sessionResult.data?.session?.access_token,
+          expiresInSec: sessionResult.data?.session?.expires_at
+            ? sessionResult.data.session.expires_at - Math.floor(Date.now() / 1000)
+            : null,
+          at: new Date().toISOString(),
+        }));
+
         if (mounted && sessionResult.data?.session?.user) {
           currentUserIdRef.current = sessionResult.data.session.user.id;
           setUser(sessionResult.data.session.user);
@@ -1478,7 +1498,13 @@ export function AppProvider({ children }) {
 
   // Returns a fresh access_token, proactively refreshing if within 60s of expiry.
   // Avoids sending a stale token that the server will reject with SESSION_EXPIRED.
-  const getFreshToken = async () => {
+  // AUTH-001: wrapped in useCallback with EMPTY deps and kept that way
+  // deliberately. It closes over nothing but the module-level `supabase`
+  // client — no component state, no props — so the reference is stable and a
+  // stale closure is structurally impossible. runPipeline lists it in its deps
+  // on that basis; adding component state here would silently reintroduce the
+  // stale-token class of bug this fix exists to remove.
+  const getFreshToken = useCallback(async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return null;
@@ -1490,7 +1516,7 @@ export function AppProvider({ children }) {
       }
       return session.access_token;
     } catch { return null; }
-  };
+  }, []);
 
   // ─── AVATAR UPLOAD ─────────────────────────────────
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -1921,9 +1947,27 @@ export function AppProvider({ children }) {
           console.log(`[Analyze correction] Sending refineModel="${refineModel}" to backend`);
         }
 
+        // AUTH-001: never send an unauthenticated scan.
+        //
+        // This used to attach the header only `if (_accessToken)` and send the
+        // request regardless — so a null token produced a POST with NO
+        // Authorization header, a guaranteed 401 that burned a round trip and
+        // surfaced as a generic failure. /api/analyze requires auth by design;
+        // a request we already know cannot succeed should never leave the
+        // client. Throwing here converts a silent 401 into a typed, recoverable
+        // auth error that the pipeline's catch turns into a sign-in prompt.
         const _accessToken = await getFreshToken();
-        const analyzeHeaders = { 'Content-Type': 'application/json' };
-        if (_accessToken) analyzeHeaders['Authorization'] = `Bearer ${_accessToken}`;
+        if (!_accessToken) {
+          // Booleans only — never the token, never the user id.
+          console.warn('[Analyze] blocked: no access token at request time (session absent or refresh failed)');
+          const authErr = new Error(lang === 'he' ? 'יש להתחבר כדי לסרוק' : 'Sign in required to scan');
+          authErr.authRequired = true;
+          throw authErr;
+        }
+        const analyzeHeaders = {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${_accessToken}`,
+        };
 
         const res = await fetch('/api/analyze', {
           method: 'POST',
@@ -1960,7 +2004,14 @@ export function AppProvider({ children }) {
             const msg = errBody.code === 'SESSION_EXPIRED'
               ? (lang === 'he' ? 'פג תוקף החיבור — התחבר מחדש' : 'Session expired — please sign in again')
               : (lang === 'he' ? 'יש להתחבר כדי לסרוק' : 'Sign in required to scan');
-            throw new Error(msg);
+            // AUTH-001: tagged so runPipeline can leave the scanning state AND
+            // offer sign-in, rather than showing a dead-end error. A 401 the
+            // client could not predict (token accepted locally, rejected by the
+            // server) lands here; the pre-flight check above catches the rest.
+            const authErr = new Error(msg);
+            authErr.authRequired = true;
+            authErr.sessionExpired = errBody.code === 'SESSION_EXPIRED';
+            throw authErr;
           }
           // Parse error body for retryable server errors
           if (res.status >= 500) {
@@ -2021,7 +2072,7 @@ export function AppProvider({ children }) {
       }
     }
     throw lastError;
-  }, [lang]);
+  }, [lang, getFreshToken]);
 
   // ── GW-000: BACKUP valuation writer (recovery path, NOT primary) ──
   // The server (record_scan) is authoritative and persists every scan. This runs
@@ -2157,6 +2208,43 @@ export function AppProvider({ children }) {
       setPipelineError(lang === 'he' ? `המתן ${secs} שניות לפני סריקה נוספת` : `Please wait ${secs}s before scanning again`);
       return;
     }
+
+    // ── AUTH GUARD — /api/analyze requires a session; prove we have one ──────
+    // Scanning was the ONLY user action without this check. Contact (:1229),
+    // save (:1663) and list all gate on `if (!user)`; runPipeline did not, so a
+    // tap while signed out — or before the session finished restoring — entered
+    // the scanning state, compressed the image, and POSTed with no
+    // Authorization header. The server answered 401 before Stage 1, which is
+    // why no [Waterfall] line was ever emitted.
+    //
+    // The check is `await getFreshToken()`, NOT `if (!user)`, on purpose:
+    //   - `user` is React state populated asynchronously by the auth bootstrap,
+    //     so it is null during the window this bug lives in. Gating on it would
+    //     still let a scan through a moment later with no token, and would
+    //     reject a scan whose session is valid but whose state has not landed.
+    //   - supabase.auth.getSession() resolves only AFTER the client has
+    //     restored the persisted session, so awaiting it IS the
+    //     "auth initialization complete" signal. No new global state needed.
+    //   - It returns the very token the request will carry, so a pass here
+    //     means the request cannot be headerless.
+    //
+    // Deliberately placed BEFORE pipelineActiveRef / any setPipelineState, so a
+    // blocked scan never enters a loading state it has to be rescued from.
+    const preflightToken = await getFreshToken();
+    if (!preflightToken) {
+      // Booleans only — no token, no user id.
+      console.warn('[Pipeline] scan blocked: no valid session at scan time', {
+        userStatePresent: !!currentUserIdRef.current,
+        tokenPresent: false,
+        at: new Date().toISOString(),
+      });
+      setPipelineState('idle');          // never a permanent "Scanning..."
+      setPipelineError(null);
+      setSignInAction('scan');
+      setShowSignInModal(true);
+      return;
+    }
+
     pipelineActiveRef.current = true;
 
     // SCAN-2: snapshot BEFORE any state mutation — imagesBefore is what the
@@ -2276,6 +2364,31 @@ export function AppProvider({ children }) {
     } catch (e) {
       if (e.name === 'AbortError' || abortCtrl.signal.aborted) {
         if (DEV) console.log('[Pipeline] Cancelled');
+        // AUTH-001: this early return left pipelineState wherever it was —
+        // typically 'identifying' — so an abort that was NOT followed by a new
+        // scan stranded the UI on "Scanning..." forever. clearUserState()
+        // aborts the pipeline on every sign-in / sign-out / account switch, so
+        // signing in mid-scan produced exactly the reported symptom.
+        //
+        // Only reset when THIS controller is still the active one. If a newer
+        // scan replaced it, that run owns the state and has already set its
+        // own — resetting here would race it back to idle.
+        if (pipelineAbortRef.current === abortCtrl) {
+          setPipelineState('idle');
+          setPipelineError(null);
+        }
+        return;
+      }
+
+      // AUTH-001: an auth failure is recoverable — leave the scanning state and
+      // offer sign-in instead of a dead-end error the user can only stare at.
+      if (e.authRequired) {
+        console.warn(`[Pipeline] scan failed auth (sessionExpired=${!!e.sessionExpired}) — prompting sign-in`);
+        setPipelineState('idle');
+        setPipelineError(null);
+        setSignInAction('scan');
+        setShowSignInModal(true);
+        playSound('error');
         return;
       }
 
@@ -2296,7 +2409,7 @@ export function AppProvider({ children }) {
       // Always release the in-flight guard so legitimate retries can proceed.
       pipelineActiveRef.current = false;
     }
-  }, [analyzeWithRetry, fetchRecognitionHints, backupValuation, playSound, lang]);
+  }, [analyzeWithRetry, fetchRecognitionHints, backupValuation, playSound, lang, getFreshToken]);
 
   // ── Retry from the failed step — replays the EXACT last attempt (SCAN-2) ──
   const retryPipeline = useCallback(() => {
