@@ -36,7 +36,7 @@ const M = await import(MEMORY_URL.href);
 
 const {
   stripBrandPrefix, composeBrandModelName, sanitizeUserCorrection,
-  gradeRowEvidence, calibrateRecognition, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
+  gradeRowEvidence, calibrateRecognition, buildRecognitionPrompt, RECOGNITION_SCHEMA, VERIFICATION_SCHEMA,
   rankCandidates, classifyRowEvidence, sameModelString, EVIDENCE_CLASS,
   calibrateVerification,
 } = A;
@@ -526,24 +526,59 @@ test('B-04 [DEFECT-4 RETIRED] Stage 1 now has a sanctioned way to say "I cannot 
     'Stage 1 must be able to flag an unresolvable sibling tie');
 });
 
-test('B-05 [DEFECT-5] Stage 1 still pays output tokens for fields nothing reads', () => {
-  // Each appears exactly twice: once in RECOGNITION_SCHEMA, once in the prompt
-  // template. Generated on the critical path of every scan and never read.
-  // Stage 1 is output-token bound, so these cost wall-clock time per scan.
-  // Retiring this is latency work, not accuracy work — it belongs to the
-  // perf commit, so the defect stands here deliberately.
+test('A-37 the Stage 1 response template is parseable JSON', () => {
+  // Removing the LAST key of an object leaves a trailing comma, which is
+  // invalid JSON. The template is a prompt string, so nothing in the build or
+  // the type checker would catch it — but the model copies the shape it is
+  // shown, and JSON.parse rejects a trailing comma, so the failure surfaces as
+  // a Stage 1 parse error and a 503 with the quota refunded. Caught exactly this
+  // way while trimming the write-only fields.
+  const prompt = buildRecognitionPrompt('he');
+  const block = prompt.slice(prompt.indexOf('{', prompt.indexOf('Respond ONLY with valid JSON')));
+  const parsed = assert.doesNotThrow(() => JSON.parse(block)) ?? JSON.parse(block);
+
+  // The identity-bearing keys must survive any future trim.
+  for (const k of ['category', 'category_confidence', 'brand_candidates', 'model_candidates',
+                   'ocr_text', 'visual_features', 'embedding_text', 'model_family', 'exact_model_ambiguous']) {
+    assert.ok(k in parsed, `the Stage 1 template must still request "${k}"`);
+  }
+});
+
+test('A-38 fields consumed downstream survive the output trim', () => {
+  // The trim removes only PROVEN write-only fields. These are read — by the
+  // embedding text, the confidence clamp, retrieval tokens, or the response —
+  // so removing one would break a consumer silently rather than loudly.
+  const prompt = buildRecognitionPrompt('he');
+  const block = prompt.slice(prompt.indexOf('{', prompt.indexOf('Respond ONLY with valid JSON')));
+  const parsed = JSON.parse(block);
+
+  // visual_features feeds embedding_text construction; ocr_text feeds the
+  // clamp, retrieval evidence tokens and result.ocr.
+  for (const k of ['materials', 'colors', 'condition']) {
+    assert.ok(k in parsed.visual_features, `visual_features.${k} is consumed and must remain`);
+  }
+  for (const k of ['raw_texts', 'logos_detected', 'labels_detected', 'has_readable_text']) {
+    assert.ok(k in parsed.ocr_text, `ocr_text.${k} is consumed and must remain`);
+  }
+});
+
+test('B-05 [DEFECT-5 RETIRED] the write-only Stage 1 output fields are gone', () => {
+  // WAS: each appeared exactly twice — once in RECOGNITION_SCHEMA, once in the
+  // prompt template — generated on the critical path of every scan and never
+  // read. Stage 1 is output-token bound, so they cost wall-clock time per scan.
+  // Removed in "perf(scan): trim unread Stage 1 output fields"; this assertion
+  // is the inverse of its original form and now guards against reintroduction.
   const writeOnly = ['size_estimate', 'distinctive_elements', 'wear_level',
                      'needs_more_info', 'serial_numbers'];
   for (const f of writeOnly) {
     const hits = ANALYZE_SRC.split(f).length - 1;
-    assert.equal(hits, 2, `${f} should appear exactly twice (schema + prompt) while unread; found ${hits}`);
+    assert.equal(hits, 0, `${f} was removed as write-only; ${hits} occurrence(s) reintroduced`);
   }
 
-  // labels_detected LEFT this list: the Stage 1 confidence clamp now reads it
-  // as text evidence, so it earns its tokens. Listed separately rather than
-  // silently dropped, so the change is visible in review.
+  // labels_detected was on this list and LEFT it: the Stage 1 confidence clamp
+  // now reads it as text evidence, so it earns its tokens and stays.
   assert.ok(ANALYZE_SRC.split('labels_detected').length - 1 > 2,
-    'labels_detected is now consumed by the model-confidence clamp');
+    'labels_detected is consumed by the model-confidence clamp and must remain');
 });
 
 test('B-06 [DEFECT-6] the JSON schemas are declared but never applied', () => {

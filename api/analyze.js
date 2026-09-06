@@ -571,7 +571,6 @@ export const RECOGNITION_SCHEMA = {
         raw_texts:         { type: 'array', items: { type: 'string' } },
         logos_detected:    { type: 'array', items: { type: 'string' } },
         labels_detected:   { type: 'array', items: { type: 'string' } },
-        serial_numbers:    { type: 'array', items: { type: 'string' } },
         has_readable_text: { type: 'boolean' },
       },
     },
@@ -583,14 +582,10 @@ export const RECOGNITION_SCHEMA = {
         colors:               { type: 'array', items: { type: 'string' } },
         finish:               { type: 'string' },
         shape:                { type: 'string' },
-        distinctive_elements: { type: 'array', items: { type: 'string' } },
-        wear_level:           { type: 'string' },
         condition:            { type: 'string', enum: ['New', 'Like New', 'Good', 'Fair', 'Poor'] },
-        size_estimate:        { type: 'string' },
       },
     },
     embedding_text: { type: 'string' },
-    needs_more_info: { type: 'boolean' },
     suggested_followup: { type: ['string', 'null'] },
   },
 };
@@ -632,7 +627,7 @@ export const VERIFICATION_SCHEMA = {
 // §2  PROMPTS
 // ═══════════════════════════════════════════════════════
 
-function buildRecognitionPrompt(language = 'he') {
+export function buildRecognitionPrompt(language = 'he') {
   return `You are an image understanding model that extracts visual attributes with forensic precision.
 You are part of a product identification pipeline for an Israeli marketplace app.
 
@@ -721,7 +716,6 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     "raw_texts": ["exact text found"],
     "logos_detected": ["logo description"],
     "labels_detected": ["label text"],
-    "serial_numbers": [],
     "has_readable_text": true
   },
   "visual_features": {
@@ -729,13 +723,9 @@ Respond ONLY with valid JSON (no markdown, no backticks):
     "colors": ["silver"],
     "finish": "brushed",
     "shape": "cylindrical",
-    "distinctive_elements": ["ornate engravings"],
-    "wear_level": "minimal",
-    "condition": "Good",
-    "size_estimate": "60cm tall"
+    "condition": "Good"
   },
   "embedding_text": "brand model category features...",
-  "needs_more_info": false,
   "suggested_followup": null
 }`;
 }
