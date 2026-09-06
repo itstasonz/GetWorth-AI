@@ -3715,6 +3715,12 @@ async function handleRequest(req) {
     let stage2FallbackUsed = false;
     let stage2FallbackReason = null;
     let verification;
+    // SCAN-022: explicit provenance for HOW the verification was produced.
+    // 'stage2' = the full call ran; 'fast_path' = skipped on decisive evidence;
+    // 'pre' = it failed or was skipped for budget and pricing was rescued.
+    // Distinct from stage2FallbackUsed so a SUCCESSFUL skip is never conflated
+    // with a failure — that conflation is what would render it as degraded.
+    let stage2Status = 'stage2';
 
     // SCAN-009: Stage 2 failure → Pricing Rescue Engine (catalog → Haiku →
     // category anchor → manual). AI slice funded by STAGE2_RESERVE_MS; 4s is
@@ -3730,12 +3736,33 @@ async function handleRequest(req) {
       return buildFallback(recognition, lang, reason, candidates, quote);
     };
 
-    if (rem() - STAGE2_RESERVE_MS < 8_000) {
+    // ── SCAN-022: EVIDENCE-GATED FAST PATH ──────────────────────────────────
+    // Evaluated BEFORE Stage 2 runs, which is what makes "no self-declared
+    // evidence" structural rather than a rule to remember: `verification` does
+    // not exist yet, so brand_confidence / identification_method /
+    // match_confidence are literally unreachable from the gate.
+    //
+    // This is a SUCCESS state, not a fallback. stage2FallbackUsed stays false,
+    // stage2_timeout stays false, and the guard sees stage:'stage2' WITH a
+    // compatible anchor — the condition that branch grades stage2_comp_anchored
+    // / HIGH. That grade is earned here rather than claimed: the price comes
+    // from a catalog row that passed isCompatibleAnchor with real model
+    // overlap, which is stronger provenance than the model asserting
+    // "comp_based" about itself.
+    const fastPath = evaluateFastPath({ recognition, candidates, retrievalEvidence, visionData });
+    if (fastPath.eligible) {
+      stage2Status = 'fast_path';
+      verification = buildFastPathVerification(recognition, fastPath, lang);
+      plog('Stage 2 FAST PATH', `skipped — ${fastPath.corroboration} corroboration + anchor ${fastPath.anchor.brand} ${fastPath.anchor.model || fastPath.anchor.name} ₪${fastPath.quote.price_estimate_mid} rem=${rem()}ms`);
+    } else if (rem() - STAGE2_RESERVE_MS < 8_000) {
+      blog(`[FastPath] not eligible — ${fastPath.reason}${fastPath.detail ? ` (${JSON.stringify(fastPath.detail)})` : ''}`);
       stage2FallbackUsed = true;
+      stage2Status = 'pre';
       stage2FallbackReason = `budget_too_low rem=${rem()}ms`;
       blog(`[Pipeline] Stage 2 SKIPPED — rescue pricing (rem=${rem()}ms, need >= ${8_000 + STAGE2_RESERVE_MS}ms)`);
       verification = await runPricingRescue(stage2FallbackReason);
     } else {
+      blog(`[FastPath] not eligible — ${fastPath.reason}${fastPath.detail ? ` (${JSON.stringify(fastPath.detail)})` : ''}`);
       // SCAN-008 (B-3): ceiling raised 20s → 24s. Stage 2 empirically needs
       // 18–20s (4/4 production scans); a 20s ceiling left zero headroom even
       // when the budget clock had 24s+ genuinely available. Still bounded by
@@ -3750,6 +3777,7 @@ async function handleRequest(req) {
         ));
       } catch (err) {
         stage2FallbackUsed = true;
+        stage2Status = 'pre';
         stage2FallbackReason = err.message;
         blog(`[Pipeline] Stage 2 FAILED — rescue pricing: ${err.message}`);
         verification = await runPricingRescue(stage2FallbackReason);
@@ -3779,7 +3807,10 @@ async function handleRequest(req) {
       anchor: guardAnchor,
       anchorModelEvidence: !!guardAnchor?.model,
       identity: assessFallbackIdentity(recognition),
-      model: stage2FallbackUsed ? MODEL_PRICING : MODEL_VISION,
+      // SCAN-022: the fast path called NO model. Recording MODEL_VISION would
+      // claim a Sonnet call that never happened, and this value is persisted
+      // with the valuation, so a future audit would be reading a fiction.
+      model: stage2Status === 'fast_path' ? null : (stage2FallbackUsed ? MODEL_PRICING : MODEL_VISION),
     };
 
     // ── NORMALIZE + RESPOND ──
@@ -3812,6 +3843,7 @@ async function handleRequest(req) {
       const canRescue = !stage2FallbackUsed;
       if (canRescue) {
         stage2FallbackUsed = true;
+        stage2Status = 'pre';
         stage2FallbackReason = `guard:${rule}`;
         blog(`[Guard] Stage 2 price REJECTED (${rule}) — routing to rescue pricing`);
         verification = await runPricingRescue(stage2FallbackReason);
@@ -3891,6 +3923,18 @@ async function handleRequest(req) {
     result.candidate_source_table  = candidateSourceTable;  // 'products' | 'product_candidates' | 'none'
     result.product_candidate_needed = !dbMatchFound && hasUsefulRecognition;
     result.stage2_timeout = stage2FallbackUsed && (stage2FallbackReason || '').includes('exceeded');
+    // SCAN-022: explicit, non-degraded provenance for the client and analytics.
+    // 'fast_path' is a SUCCESS — stage2_timeout above stays false for it, and
+    // it must never be presented as a fallback or a degraded result.
+    result.stage2_status = stage2Status;
+    if (stage2Status === 'fast_path') {
+      result.fast_path = {
+        corroboration: verification._fast_path?.corroboration ?? null,
+        anchor_id:     verification._fast_path?.anchor_id ?? null,
+        reason:        verification._fast_path?.reason ?? null,
+        stage2_skipped: true,
+      };
+    }
 
     // User correction passthrough — frontend uses these for display + debug
     if (recognition._user_correction) {
@@ -4366,6 +4410,7 @@ async function handleRequest(req) {
             pricing_mode: result.authenticity?.pricingMode ?? 'normal',
             authenticity_status: result.authenticity?.status ?? null,
             stage2_completed: !stage2FallbackUsed,
+            stage2_status: stage2Status,
             stage2_fallback_reason: stage2FallbackUsed ? (stage2FallbackReason || 'unknown') : null,
             vision_used: !!visionData,
             oce: oceContext
@@ -4845,6 +4890,169 @@ export function preQuoteFromCatalog(ctx) {
     // "unknown" encoded as 0 — today its only reader normalizes, and a second
     // reader added later would silently inherit the old meaning.
     _db_retail:          positivePriceOrNull(row.retail_price_ils),
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// SCAN-022 — EVIDENCE-GATED STAGE 2 FAST PATH
+// ══════════════════════════════════════════════════════════════════════════
+// Stage 2 costs ~19.7s in production (commit 0250e80) and had exactly one skip
+// condition: budget exhaustion. A scan where OCR read the model off the label,
+// retrieval returned that exact catalog row, and the user had already corrected
+// the identity still paid the full call to be told what three independent
+// sources already agreed on.
+//
+// This gate skips it — but ONLY on evidence Stage 2 did not author. That
+// constraint is enforced structurally, not by discipline: this function runs
+// BEFORE verifyAndPrice, so `verification` does not exist yet and no
+// self-declared field (brand_confidence, identification_method,
+// match_confidence) is reachable from here even by mistake.
+//
+// It is deliberately hard to satisfy. Every rejection is named and logged,
+// because a fast path that fires when it should not is indistinguishable from
+// the confident-wrong-answer bug the previous commits removed. When in doubt it
+// returns ineligible and the normal pipeline runs — the cost of a false
+// negative is 19.7s, the cost of a false positive is a wrong identity.
+//
+// NOT accepted as evidence, however high: visual/model confidence on its own, a
+// CATALOG_FUZZY sibling, a SEMANTIC/vector hit, or anything the model says
+// about its own certainty.
+export function evaluateFastPath(ctx = {}) {
+  const { recognition, candidates = [], retrievalEvidence = null, visionData = null } = ctx;
+  const reject = (reason, detail = null) => ({ eligible: false, reason, detail, anchor: null, quote: null });
+
+  const ir = recognition?.identity_resolution;
+  if (!ir) return reject('no_identity_resolution');
+
+  // A user correction is external evidence — not a model's opinion at all — so
+  // it qualifies as corroboration. It must NAME A MODEL: a brand-only
+  // correction leaves the exact identity unresolved. The marker is the sentinel
+  // the handler injects, so a model cannot forge it.
+  const userCorrected = !!recognition._user_correction
+    && recognition.model_candidates?.[0]?.evidence === 'user_correction';
+
+  // (1)(8) Only an exact identity qualifies. family / brand / unknown never do,
+  // because each of those means "we could not pin the model" — precisely when
+  // Stage 2's reasoning is worth 19.7s.
+  if (ir.level !== 'exact' && !userCorrected) return reject('identity_level_not_exact', ir.level);
+
+  // (5) Ambiguity disqualifies from either side — the recognition's own sibling
+  // tie, or retrieval being unable to separate two catalog rows.
+  if (ir.exact_model_ambiguous === true) return reject('identity_ambiguous');
+  if ((ir.ambiguous_between || []).length > 0) return reject('identity_ambiguous', ir.ambiguous_between);
+  if (retrievalEvidence?.ambiguous === true) return reject('retrieval_ambiguous', retrievalEvidence.ambiguous_between);
+
+  // (2)(7) Retrieval must carry genuine model-level evidence. `exact_match` is
+  // false whenever the best row is CATALOG_FUZZY / SEMANTIC / WEAK, which is
+  // also exactly how a DB-missing product presents — so this one test covers
+  // both the sibling and the not-in-catalog cases.
+  if (!retrievalEvidence) return reject('no_retrieval_evidence');
+  if (retrievalEvidence.exact_match !== true) return reject('retrieval_lacks_model_evidence');
+  if ((retrievalEvidence.top_class ?? 0) < EVIDENCE_CLASS.MODEL_TEXT) {
+    return reject('retrieval_top_class_too_weak', retrievalEvidence.top_class);
+  }
+
+  // Identity must actually resolve to a brand AND a model.
+  const identity = assessFallbackIdentity(recognition);
+  if (!identity.brandOk || !identity.modelOk) return reject('identity_not_brand_and_model');
+
+  // (3)(6) Independent corroboration. Three admissible sources, none of them
+  // Stage 2: text Stage 1 actually read, Google Vision's separate OCR/logo
+  // pass, or the user. Visual similarity is not on this list at any confidence.
+  const visionHay = [
+    ...((visionData?.text) || []),
+    ...(((visionData?.logos) || []).map((l) => l?.description || '')),
+  ].join(' ').toLowerCase();
+  const brandHead = (identity.brand || '').toLowerCase().split(' ')[0];
+  const modelLower = (identity.model || '').toLowerCase();
+  const visionCorroborates = !!visionHay && (
+    (brandHead.length >= 2 && visionHay.includes(brandHead)) || (!!modelLower && visionHay.includes(modelLower)));
+
+  const corroboration = ir.text_confirmed === true ? 'stage1_ocr'
+    : visionCorroborates ? 'google_vision'
+    : userCorrected ? 'user_correction'
+    : null;
+  if (!corroboration) return reject('no_independent_corroboration');
+
+  // (4) A compatible catalog anchor with a usable price AND real model overlap.
+  //
+  // `modelMatched` is load-bearing. isCompatibleAnchor returns ok:true with
+  // reason 'brand_category_sibling' for a same-brand, same-category row whose
+  // MODEL never matched — the nearest-looking row. Accepting `ok` alone would
+  // reintroduce sibling substitution through the pricing door, so the fast path
+  // requires the stronger verdict.
+  const anchors = [];
+  for (const c of candidates) {
+    if (!(c.avg_used_price_ils > 0)) continue;
+    const verdict = isCompatibleAnchor(c, identity, recognition);
+    if (verdict.ok && verdict.modelMatched === true) anchors.push(c);
+  }
+  if (!anchors.length) return reject('no_compatible_priced_anchor');
+
+  // Deterministic catalog pricing — the same function the rescue engine uses,
+  // fed ONLY the model-matched anchors. No new pricing arithmetic is invented
+  // here; if it declines (its own similarity floor), so does the fast path.
+  const quote = preQuoteFromCatalog({ candidates: anchors, identity, recognition, failReason: null });
+  if (!quote) return reject('catalog_pricing_declined');
+  if (!(quote.price_estimate_mid > 0)) return reject('anchor_price_unusable');
+
+  return {
+    eligible: true,
+    reason: 'exact_identity_corroborated_and_anchored',
+    corroboration,
+    anchor: anchors[0],
+    quote,
+    identity,
+  };
+}
+
+// Build the verification object the fast path returns in place of Stage 2's.
+// Deliberately NOT buildFallback(): that path exists for FAILURE and stamps
+// "Pricing stage failed" into confidence_reasoning and pricing_warning. Nothing
+// failed here, and a successful scan must not describe itself as degraded.
+export function buildFastPathVerification(recognition, fp, lang = 'he') {
+  const isHe = lang === 'he';
+  const { identity, quote, anchor, corroboration } = fp;
+  const { brand, model } = identity;
+
+  return {
+    final_category: recognition.category,
+    final_category_hebrew: recognition.category_hebrew || '',
+    // The identity is carried through UNCHANGED from the evidence that
+    // qualified it. The fast path may not rename the item — that is the whole
+    // point of gating on exact evidence rather than on similarity.
+    final_brand: brand,
+    final_model: model,
+    full_name: composeBrandModelName(brand, model),
+    full_name_hebrew: recognition.category_hebrew || '',
+    match_confidence: Math.min(recognition.identity_resolution?.brand_confidence ?? 0.8, 0.92),
+    confidence_reasoning: isHe
+      ? 'זהות מאומתת מול הקטלוג — אימות נוסף לא נדרש'
+      : 'Identity confirmed against the catalog by independent evidence; further verification was unnecessary.',
+    matched_product_ids: anchor?.id ? [anchor.id] : [],
+    // DERIVED from what actually corroborated, never self-declared.
+    identification_method: corroboration === 'user_correction' ? 'db_match' : 'ocr_confirmed',
+    brand_confidence: corroboration === 'user_correction' ? 'db_matched' : 'confirmed_by_text',
+    price_estimate_low:  quote.price_estimate_low,
+    price_estimate_mid:  quote.price_estimate_mid,
+    price_estimate_high: quote.price_estimate_high,
+    new_retail_price_ils: positivePriceOrNull(quote._db_retail),
+    // The price came from a catalog comparable, not from a model's estimate.
+    price_method: 'comp_based',
+    _pricing_meta: {
+      ...quote,
+      // Overwrite the rescue engine's failure wording — nothing failed.
+      pricing_reason: `Catalog pricing for ${anchor.brand} ${anchor.model || anchor.name}.`,
+      pricing_warning: null,
+      pre_source: 'catalog',
+    },
+    _fast_path: { corroboration, anchor_id: anchor?.id ?? null, reason: fp.reason },
+    currency: 'ILS',
+    condition: recognition.visual_features?.condition || 'unknown',
+    is_sellable: true,
+    market_demand: 'moderate',
+    selling_tips: '', israeli_market_notes: '',
+    price_factors: [], comparable_items: [],
   };
 }
 

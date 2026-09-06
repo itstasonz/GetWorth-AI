@@ -388,6 +388,8 @@ test('OB-11 the ai_observation payload references no undefined identifier', () =
     'verification', 'result', 'recognition', 'memoryDebug', 'candidates',
     'candidateSourceTable', 'dbMatchFound', 'stage2FallbackUsed',
     'stage2FallbackReason', 'visionData', 'oceContext', 'totalMs',
+    // SCAN-022 added fast-path provenance to the ledger.
+    'stage2Status',
   ];
   const build = compileRegion(params, `return ${body};`, 'obsPayload');
 
@@ -397,13 +399,16 @@ test('OB-11 the ai_observation payload references no undefined identifier', () =
     { raw_match_confidence: 0.8, match_confidence: 0.8, price_method: 'comp_based' },
     { confidence: 0.8, marketValue: { low: 1, mid: 2, high: 3, pre_source: 'catalog', validation: null } },
     {}, { key: 'v2|x|y|z', evidence_gate_passed: true }, [], 'products',
-    true, false, null, null, null, 1234,
+    true, false, null, null, null, 1234, 'fast_path',
   );
 
   assert.equal(typeof payload, 'object');
   assert.equal(payload.v, 1);
   // The field that was broken, now carrying the resolved post-guard value.
   assert.equal(payload.pre_source, 'catalog');
+  // SCAN-022: the ledger records HOW the verification was produced, so a
+  // fast-path scan is distinguishable from a full Stage 2 call in analytics.
+  assert.equal(payload.stage2_status, 'fast_path');
 });
 
 test('OB-12 the ledger payload spells pre_source the same way every other site does', () => {
