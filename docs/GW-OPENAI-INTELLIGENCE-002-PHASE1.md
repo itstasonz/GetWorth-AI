@@ -318,20 +318,97 @@ failure path regresses.
 
 ---
 
-## 7c. OpenAI API research — PENDING
+## 7c. OpenAI API research — verified against current docs
 
-An independent researcher (§48) is verifying, against current official
-OpenAI documentation only: available vision model IDs and prices, whether
-`reasoning.effort:'none'` is still right once the same call must also do
-condition and pricing reasoning, one-call-vs-two, strict-schema size limits,
-retention/`store` behaviour, documented prompt-injection guidance, and the
-exact usage fields needed to compute per-scan cost from the response.
+Independent research (§48, §21), verified against
+`developers.openai.com` only. No live API call was made.
 
-**Not yet returned. Nothing in this document assumes its outcome**, and the
-model choice inherited from the 001 prototype (`gpt-5.6-luna`,
-`reasoning.effort:'none'`) is explicitly *unconfirmed for the larger job* —
-perception and pricing reasoning are different tasks, and the cheap tier with
-reasoning disabled was chosen for the former.
+### Current vision models
+
+| Model | in $/Mtok | cached | out $/Mtok | `reasoning.effort` |
+|---|---|---|---|---|
+| `gpt-6-astra` | 10.00 | 1.00 | 50.00 | low…max — **no `none`** |
+| `gpt-5.6-sol` | 4.00 | 0.40 | 20.00 | none, low, medium, high, xhigh, max |
+| `gpt-5.6-terra` | 2.00 | 0.20 | 12.00 | none … max |
+| `gpt-5.6-luna` | 0.20 | 0.02 | 1.20 | none … max |
+
+All share a 1,050,000 context / 128,000 max output. Requests over 272K input
+tokens are billed 2× input / 1.5× output for the whole request — far above our
+sizes, but worth a guard rail.
+
+**No official latency figures exist for any of these models.** Third-party
+TTFT numbers that surfaced in research were measured at max reasoning effort
+and are not evidence about `effort:'none'`; they are deliberately not cited.
+
+**Luna Tier-1 = 500 RPM / 500,000 TPM ≈ 34 scans/minute** at current token
+sizes. A real ceiling to know before rollout.
+
+### The `detail` finding — correcting a live prototype defect
+
+The 001 prototype sends `detail: 'auto'`, which for this family
+**uses `original` sizing — no downscaling**.
+
+The first read of this was that a 12 MP photo costs ~14,400 image tokens and
+"changes every number". **That is not true of this pipeline**, because the
+client compresses to 1280 px before upload (`AppContext.jsx:2284`, *"single-pass
+compress preserves label text"*). Measured with the documented patch formula:
+
+| Scenario | image tokens | $/scan (Luna) |
+|---|---|---|
+| **Scan path today** (1280×960, `auto`) | 1,440 | $0.00067 |
+| Same image, `detail:'high'` | 1,440 (identical) | $0.00067 |
+| 4000×3000 via `auto`/`original` | ~12,000–14,100 † | ~$0.0028–0.0032 |
+| 4000×3000 via `high` | 3,000 | $0.00098 |
+
+† The two sources consulted disagree on whether this family caps at 10,000
+patches or rejects at 30,000; both yield the same conclusion, so the
+discrepancy is recorded rather than resolved.
+
+So the 001 cost estimate (~$0.0006/scan) was **correct for the real path**.
+
+**The change to make is still worth making, for a different reason.** With
+`detail:'auto'` the image token count is **client-controlled and unbounded**:
+`IMAGE_MAX_DECODED_BYTES` caps *bytes*, not pixels, so a 5 MB JPEG can be
+~24 MP, and `validateImages` allows five images.
+
+| | per image | ×5 images |
+|---|---|---|
+| `auto`/`original` worst case | 36,000 tok | 180,000 tok — **$0.036 Luna / $0.36 Terra** |
+| `high` worst case | 3,000 tok | 15,000 tok — $0.003 / $0.03 |
+| honest path today | 1,440 tok | unchanged |
+
+`high`'s 2,500-patch budget is a **hard cap enforced by downscaling, not
+rejection** (*"scale the image down proportionally if it exceeds that budget"*
+… *"stays within that budget"*), so it cannot fail a request.
+
+**Recommendation: set `detail: 'high'`.** It converts a ~12× client-controlled
+cost amplification into a fixed ceiling, costs nothing on the honest path, and
+at 1280 px is byte-identical to `original` — so the cap sacrifices no OCR
+fidelity the pipeline actually has.
+
+**Do NOT use `detail:'low'`.** The docs describe it as *"coarse image
+understanding"* and steer OCR the other way: *"For tasks that require fine
+visual detail… such as optical character recognition (OCR), small-object
+detection… use `detail: 'original'`"*, and under Limitations, *"Small text:
+enlarge text within the image"*. `low` would force a further 2.5× downscale of
+an already-compressed image, degrading exactly the input that
+`carriesIdentifyingText` and the silhouette clamp are gated on — to save
+$0.0002 per scan. The magnitude of the OCR loss is UNVERIFIED (OpenAI
+publishes no accuracy figures); the direction is not.
+
+**Note on latency:** an earlier claim that `high` would improve TTFT was
+retracted on review. At 1,440 tokens we are nowhere near the "massive context"
+case; the docs note *"cutting 50% of your prompt may only result in a 1–5%
+latency improvement"*. `high` buys a **cost ceiling, not speed.**
+
+### Still open at the close of Phase 1
+
+`none`-vs-`low` effort for a call that must also reason about condition and
+price (the docs recommend *starting* at `low` for latency-sensitive work and
+moving to `none` only if required — the opposite of what the prototype does),
+one-call-vs-two, strict-schema limits for a ~40–50 field schema, and the exact
+usage field names for per-scan cost. These are **Phase 2 design inputs**, not
+Phase 1 blockers.
 
 ---
 
