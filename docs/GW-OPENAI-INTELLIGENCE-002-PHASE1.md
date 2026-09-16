@@ -401,14 +401,97 @@ retracted on review. At 1,440 tokens we are nowhere near the "massive context"
 case; the docs note *"cutting 50% of your prompt may only result in a 1–5%
 latency improvement"*. `high` buys a **cost ceiling, not speed.**
 
-### Still open at the close of Phase 1
+### Resolved: one call or two — **TWO**, and the reason is architectural
 
-`none`-vs-`low` effort for a call that must also reason about condition and
-price (the docs recommend *starting* at `low` for latency-sensitive work and
-moving to `none` only if required — the opposite of what the prototype does),
-one-call-vs-two, strict-schema limits for a ~40–50 field schema, and the exact
-usage field names for per-scan cost. These are **Phase 2 design inputs**, not
-Phase 1 blockers.
+This is the most consequential research finding, and it settles a question
+Phase 2 would otherwise have had to guess at.
+
+**A single call cannot see the catalog.** It necessarily runs *before*
+retrieval, so any price it produces is drawn from model priors with a
+Feb 16 2026 knowledge cutoff. That is exactly "confidence is not evidence"
+relocated from an identity string into a dollar figure — the failure this
+project spent four review rounds eliminating, reintroduced in a
+higher-stakes field. No API option changes that; it is a sequencing fact.
+
+**Second-order, and it directly attacks a defence 001 already built.**
+Reasoning tokens are emitted *before* any visible token. So at
+`effort: 'low'` or above, a combined call prices the item **before** it emits
+`brand` — which defeats the schema key-ordering defence (text fields before
+identity fields) that 001 added specifically to stop conclusions
+contaminating perception. A combined call is therefore not merely weaker
+evidence; it actively dismantles an existing safeguard.
+
+**Recommended shape:**
+
+| | Call 1 | Call 2 |
+|---|---|---|
+| model | `gpt-5.6-luna` | `gpt-5.6-terra` |
+| effort | `none` | `low` |
+| input | image, `detail:'high'` | **text only** |
+| produces | identity + condition, **no price** | pricing hypothesis |
+| runs | before retrieval | **after** retrieval |
+| sees | the photograph | extracted facts **+ corroborated catalog rows** |
+
+≈ **$0.0153/scan** (vs $0.0013 for one call). Twelve times more, and still
+negligible — roughly ₪0.06 per scan.
+
+Why `none` for call 1 and `low` for call 2: the docs scope `none` to *"voice,
+fast information retrieval, and classification"* and `low` to *"multi-step
+decision making"*. Condition grading is classification and survives `none`;
+a defensible price range is deduction (depreciation, condition adjustment,
+comp reconciliation) and is not. Luna is documented as the *nano* tier, so
+nano-with-reasoning-off producing the number a consumer sees is the weakest
+available cell. Escalating call 1 to `terra` is **not** the fix — at 1,440
+image tokens the spread is almost entirely output tokens × output rate, where
+terra is 10× for capability this task is not short of.
+
+**This shape also fits the latency target better than a single call.** Call 2
+is text-only and replaces Stage 2 outright, so the projected path is
+call 1 (~3–4 s) + retrieval (~1–2 s) + call 2 (~2–3 s) ≈ **8 s**, against
+today's 21–36 s. Projection, not measurement.
+
+### Strict-schema limits — nothing bites
+
+**5,000 object properties, 10 levels of nesting**; ≤120,000 chars across all
+property/definition/enum/const names; ≤1,000 enum values. A 40–50 field
+schema sits at ~1% of budget.
+
+Unsupported under `strict:true` and worth knowing before designing:
+`allOf`, `not`, `if`/`then`/`else`, `dependentRequired`, `dependentSchemas`;
+root must be an object and not `anyOf`; every field must be `required`
+(optional expressed as `["string","null"]`); every object needs
+`additionalProperties:false`.
+
+**Schema size does not cost per-scan latency** — *"the first request you make
+with any schema will have additional latency as our API processes the schema,
+but subsequent requests with the same schema will not"*. One-time cold-schema
+cost, so **keep the schema byte-stable across deploys**. The real per-scan
+cost of many mandatory fields is output tokens, which *is* the dominant
+latency term: *"cutting 50% of your output tokens may cut ~50% of your
+latency"*. That argues for a compact schema for its output size, not its
+field count.
+
+### Cost telemetry — exact fields
+
+```
+usage.input_tokens
+usage.input_tokens_details.cached_tokens
+usage.input_tokens_details.cache_write_tokens
+usage.output_tokens
+usage.output_tokens_details.reasoning_tokens
+usage.total_tokens
+```
+
+GPT-5.6+ cache read 0.1×, cache write 1.25× the uncached input rate.
+**Trap: reasoning tokens are already inside `output_tokens`** — counting them
+again double-bills the estimate. Compute cost from these fields per scan
+rather than from hardcoded rates (§41).
+
+### Patch-limit conflict — resolved
+
+30,000 is correct for this family. The 10,000-patch figure belongs to the
+adjacent `gpt-5.5`/`gpt-5.4` table row. So 4000×3000 = 14,100 tokens and the
+36,000-tokens-per-image worst case stands.
 
 ---
 
