@@ -306,6 +306,25 @@ Accepted residual: box copy (`"Logitech G502 HERO Gaming Mouse"`) still
 under-corroborates, because category nouns are not filtered either —
 "Magic Mouse" is a model name. Conservative direction, documented in place.
 
+**The prompt's anti-echo instruction was unfalsifiable, and asked for too
+little text.** It told the model not to add a string "because it matches the
+identity you have in mind" — an instruction about its own *motive*, the least
+reliably followed class and impossible to check from the output. Replaced with
+a per-entry property that can be checked: *"visible_text is a TRANSCRIPTION.
+Every entry must be text you can point at in the image."* And it now asks for
+**everything, including boilerplate** (CE, 5V 1.5A, MADE IN CHINA, serials):
+a `visible_text` containing only the identity string is indistinguishable from
+an echo, whereas a genuine label read drags boilerplate along with it — so a
+full transcription is weak self-verification as well as better retrieval
+input. That only became free once `LABEL_NOISE` existed; the same instruction
+a round earlier would have turned every honest full transcription into a
+corroboration miss.
+
+> The prompt reduces the echo rate; the mutual corroboration rule bounds the
+> damage when it happens anyway. **A prompt improvement is never a reason to
+> relax normalization** — some models will ignore it some of the time, which
+> is exactly why none of this is load-bearing on the prompt.
+
 **The schema was ordering generation against us.** Structured output emits keys
 in schema order, so `visible_text` sitting *after* `brand`/`model` meant the
 model committed to an identity and then generated the text it had "read" — the

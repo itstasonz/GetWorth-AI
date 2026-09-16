@@ -1156,6 +1156,26 @@ test('OAI-36 the prompt asks for data and forbids invention', () => {
   // review). It is worth its ~300 characters. Still bounded — this is input
   // tokens on every scan.
   assert.match(p, /ORDER OF WORK/, 'the anti-echo ordering instruction must be present');
+  // Recognition review, final pass. The earlier wording asked the model not to
+  // add text "because it matches the identity you have in mind" — an
+  // instruction about its own MOTIVE, which is the least reliably followed
+  // class and is unfalsifiable from the output. Replaced with a per-entry
+  // property that can actually be checked: can you point at it?
+  assert.match(p, /point at it/, 'the transcription rule must be a checkable property, not an appeal to motive');
+  assert.equal(/because it matches the identity you have in mind/.test(p), false,
+    'the unfalsifiable motive-based instruction must be gone');
+  // And transcribe boilerplate too: visible_text containing ONLY the identity
+  // string is indistinguishable from an echo, whereas a genuine label read
+  // drags CE/ratings/serials along with it. That makes a full transcription
+  // weak self-verification as well as better retrieval input. This only became
+  // free once LABEL_NOISE existed — the same instruction a round earlier would
+  // have turned every honest full transcription into a corroboration miss.
+  assert.match(p, /including boilerplate/, 'full transcription is weak self-verification');
+  for (const shape of [['MODEL G502 HERO CE FCC'], ['MODEL WH-1000XM5 5V 1.5A MADE IN CHINA']]) {
+    assert.equal(normalizeOpenAIRecognition(payload({ model: shape[0].includes('WH') ? 'WH-1000XM5' : 'G502 Hero',
+      visible_text: shape, logos: [] }))._openai.model_appears_in_returned_text, true,
+      `asking for boilerplate must not cost corroboration: ${shape[0]}`);
+  }
   assert.ok(p.length < 2000, `the prompt is input tokens on every scan; keep it tight (${p.length} chars)`);
 });
 

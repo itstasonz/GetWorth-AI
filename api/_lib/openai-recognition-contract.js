@@ -217,9 +217,10 @@ export function buildOpenAIRecognitionPrompt(language = 'he') {
   return `Identify the product in the image. Output data only — no prose, no explanation.
 
 ORDER OF WORK — do these in this sequence, not in parallel:
-FIRST transcribe every string you can actually see into visible_text and name the logos.
+FIRST transcribe into visible_text every string you can see, and name the logos.
 THEN, and only then, decide brand / model from what you transcribed plus the shape.
-Never add a string to visible_text because it matches the identity you have in mind. visible_text is what the camera saw, not what the answer implies. If you cannot read it, it does not go in.
+visible_text is a TRANSCRIPTION. Every entry must be text you can point at in the image. If you cannot point at it, omit it.
+Transcribe EVERYTHING you can see, including boilerplate: CE, FCC, 5V 1.5A, MADE IN CHINA, warranty lines, serials. Do not tidy the label down to the part that looks useful — a partial transcription is worse than a full one.
 
 RULES
 1. Read text off the item exactly as printed into visible_text. Do not translate, correct or complete it.
