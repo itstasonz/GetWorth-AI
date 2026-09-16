@@ -90,6 +90,28 @@ Enumerated from `buildVerificationPrompt`'s interpolations. **All raw.**
 **Catalog-controlled (admin-curated — lower risk, not zero):**
 `c.brand`, `c.model`, `c.category`, `c.aliases`, `c.keywords`, `c._sibling_of`.
 
+### SECOND SINK — `buildRescuePricingPrompt` (`analyze.js:5381`)
+
+Missed in the first draft of this ticket and **more directly dangerous than
+Stage 2**, because this prompt's entire output *is a price*.
+
+Raw interpolations: `identity.brand`, `identity.model`,
+`recognition.category`, and catalog `c.brand` / `c.model` / `c.name`.
+`assessFallbackIdentity:5061` reads `identity.brand` / `.model` from
+`recognition.brand_candidates[0]` / `model_candidates[0]` — **precisely the
+arrays the `refineModel` block unshifts attacker values onto**
+(`:3757-3765`).
+
+And it is less guarded than Stage 2: `preQuoteFromAI:5416` has **no
+`identityHigh` gate** — contrast `preQuoteFromCategory:5459`, which does.
+Its only guard is `mid > 500_000 → null` (`:5440`).
+
+**The attack is self-triggering.** `refineModel` has no length cap, so an
+oversized payload inflates the Stage 2 prompt past `stage2Cap`, Stage 2 times
+out, the rescue engine runs, and Haiku prices the item from an
+attacker-authored prompt. The same field carries the payload and induces the
+fallback that makes it authoritative.
+
 Note the image-controlled set is *doubly* reachable: the Stage 1 prompt now
 instructs the model to transcribe **everything including boilerplate**
 (a GW-OPENAI-RECOGNITION-001 change made for good reasons — a full
@@ -129,16 +151,34 @@ connected**, and the module header documents it as though it were live.
 
 Four changes, no prompt rewrite, no behaviour change for honest input.
 
-1. **Validate `corrections[]` at the boundary.** Call the existing
-   `sanitizeClientCorrections` on `parsedBody.corrections` at `:3558`. It
-   already caps count, caps string length and applies `promptSafe`.
-2. **`promptSafe` the user correction.** Apply it to `corrText` before it
-   becomes `recognition._user_correction`. Keep `sanitizeUserCorrection`'s
-   brand logic — the two are orthogonal and both are wanted.
-3. **`promptSafe` / `promptSafeList` every untrusted interpolation** in
-   `buildVerificationPrompt` from the §2 table. Mechanical, value-only.
+1. **Validate the merged correction input — not `parsedBody.corrections`.**
+   The first draft got this wrong. `:3562` is
+   `clientHints = clientCorrections.length > 0 ? clientCorrections : hints`,
+   and `hints` reaches the same `:768` interpolation, so sanitizing
+   `parsedBody.corrections` alone **leaves `hints` completely live**.
+   Sanitize `clientHints` after the merge, or both fields before it.
+
+   Same line, second defect: `clientCorrections.length` is read **before any
+   type check**, so `{"corrections":"xx"}` yields a truthy `.length`,
+   `corrections` becomes a string, and `corrections.map` throws — a 500
+   *after* the quota was charged and a paid Stage 1 call was made.
+   `sanitizeClientCorrections` returns `[]` for non-arrays and fixes this,
+   but only if it runs **before** that read.
+
+2. **`promptSafe` all three correction outputs, not just the composed text.**
+   The first draft sanitized `corrText` only. `sanitizeUserCorrection` also
+   returns `corrBrand` and `corrModel`, which are unshifted into
+   `recognition.brand_candidates[0].brand` and `model_candidates[0].model`
+   (`:3757-3765`) and interpolated **separately** — at the `Top brand:` and
+   `Model candidates:` lines of the Stage 2 prompt, and again into the rescue
+   prompt via `assessFallbackIdentity`. Sanitizing `corrText` alone protects
+   neither. Also add a length cap: its absence is what makes the rescue-path
+   attack self-triggering.
+3. **`promptSafe` / `promptSafeList` every untrusted interpolation in BOTH
+   prompts** — `buildVerificationPrompt` *and* `buildRescuePricingPrompt`.
+   Mechanical, value-only.
 4. **Wrap the untrusted spans in `fence()` and emit `FENCE_RULE` once** in
-   the prompt preamble. This is the layer that makes the neutralised text
+   each prompt's preamble. This is the layer that makes the neutralised text
    unmistakably data. Both functions already exist and are tested-shaped.
 
 **Fail-closed property:** `promptSafe` returns `''` for null/undefined and
@@ -188,6 +228,15 @@ collapse does not change how the model reads a genuine multi-line candidate
 block.
 
 ---
+
+## Revision note
+
+Independent security review found this writeup **accurate but insufficient**:
+every factual claim verified, including all five call-site counts, but the
+scope missed `buildRescuePricingPrompt` entirely, sanitized the wrong
+variable in fix 1 (`hints` alias), and sanitized only the composed text in
+fix 2 (leaving `corrBrand`/`corrModel` live). All three are corrected above
+and re-verified against the code. The approach was right; the scope was not.
 
 ## Status
 
