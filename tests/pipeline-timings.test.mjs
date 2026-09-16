@@ -344,7 +344,13 @@ test('PF-05 snapshotTimings strips bookkeeping, tags the phase, and preserves st
   // Behavioural: run the real extracted helper rather than a reimplementation.
   const body = expressionAt(src, 'const snapshotTimings =', 'analyze.js');
   const timings = { _order: ['stage1_vision', 'stage2_verify'], stage1_vision: 1200, stage2_verify: 9000 };
-  const snapshotTimings = compileRegion(['timings'], `return ${body};`, 'snapshotTimings')(timings);
+  // GW-OPENAI-RECOGNITION-001: the helper closes over the engine-provenance
+  // state too, so the harness must bind it. compileRegion throws a loud
+  // ReferenceError on an unbound identifier by design — see its docblock.
+  const snapshotTimings = compileRegion(
+    ['timings', 'recognitionEngineUsed', 'openaiMeta'],
+    `return ${body};`, 'snapshotTimings',
+  )(timings, 'current', null);
 
   const pre = snapshotTimings('pre_persist');
   assert.equal('_order' in pre, false, '_order is bookkeeping and must never ship');
@@ -357,6 +363,67 @@ test('PF-05 snapshotTimings strips bookkeeping, tags the phase, and preserves st
   assert.equal(complete.snapshot, 'complete');
   pre.stage1_vision = 0;
   assert.equal(complete.stage1_vision, 1200);
+});
+
+test('PF-05b GW-OPENAI-RECOGNITION-001 roll-ups derive from the measured spans', () => {
+  // The ticket names five timing fields. They must be DERIVED from the same
+  // waterfall the rest of the pipeline reports, never measured independently —
+  // two clocks for one span eventually disagree, and the disagreement would
+  // land in the benchmark that decides whether the prototype ships.
+  const body = expressionAt(src, 'const snapshotTimings =', 'analyze.js');
+  const make = (timings, engine, meta) => compileRegion(
+    ['timings', 'recognitionEngineUsed', 'openaiMeta'],
+    `return ${body};`, 'snapshotTimings',
+  )(timings, engine, meta);
+
+  const timings = {
+    _order: ['stage1_openai', 'retrieval', 'stage2_verify', 'persist_scan', 'persist_derived'],
+    stage1_openai: 3400, retrieval: 700, stage2_verify: 9000,
+    persist_scan: 400, persist_derived: 250, total: 14200,
+  };
+  const snap = make(timings, 'openai', { openai_recognition_ms: 3210 });
+
+  const pre = snap('pre_persist');
+  assert.equal(pre.recognition_engine, 'openai', 'the persisted copy must say which engine produced the identity');
+  assert.equal(pre.openai_recognition_ms, 3210, 'the external-call latency is the number the experiment turns on');
+  assert.equal(pre.retrieval_ms, 700);
+  assert.equal(pre.pricing_ms, 9000);
+  // Persistence has not happened yet at pre_persist. Reporting a duration for
+  // work not yet done is the one thing this snapshot must not do.
+  assert.equal('persistence_ms' in pre, false);
+  assert.equal('total_ms' in pre, false);
+
+  const complete = snap('complete');
+  assert.equal(complete.persistence_ms, 650, 'both persistence writes roll up');
+  assert.equal(complete.total_ms, 14200);
+
+  // Current engine: the OpenAI field must be null, never 0 — a zero would read
+  // as "the call took no time" rather than "no call was made".
+  const currentSnap = make({ _order: [], retrieval: 500, total: 9000 }, 'current', null)('complete');
+  assert.equal(currentSnap.recognition_engine, 'current');
+  assert.equal(currentSnap.openai_recognition_ms, null);
+
+  // null and 0 are DIFFERENT facts and must stay distinguishable. The fast path
+  // runs no pricing call at all (null); a pricing call that returned instantly
+  // is 0. Collapsing them would hide fast-path scans inside the pricing stats.
+  const fastPath = make({ _order: [], retrieval: 500, total: 4000 }, 'current', null)('complete');
+  assert.equal(fastPath.pricing_ms, null, 'no pricing span ran — that is unknown, not zero');
+  const instant = make({ _order: [], stage2_verify: 0, retrieval: 0, total: 4000 }, 'current', null)('complete');
+  assert.equal(instant.pricing_ms, 0, 'a measured zero must survive as zero');
+  assert.equal(instant.retrieval_ms, 0);
+});
+
+test('PF-05c the fallback path records BOTH Stage 1 spans without double counting', () => {
+  // When OpenAI fails and the current engine takes over, two recognition spans
+  // exist. `unaccounted` derives from the sum of _order, so a mis-registered
+  // span would silently distort every waterfall on the fallback path.
+  const { timings, mark } = harness();
+  mark('stage1_openai', 8000);
+  mark('stage1_vision', 12000);
+  mark('retrieval', 700);
+  const measured = timings._order.reduce((a, k) => a + timings[k], 0);
+  assert.deepEqual(timings._order, ['stage1_openai', 'stage1_vision', 'retrieval']);
+  assert.equal(measured, 20700, 'each span counted exactly once');
 });
 
 test('PF-06 both dominant stages are captured by the persisted snapshot', () => {

@@ -22,6 +22,21 @@ export const config = { maxDuration: 60 };
 
 import { createClient } from '@supabase/supabase-js';
 import { buildRecognitionMemoryKey } from './_lib/recognition-memory.js';
+// GW-OPENAI-RECOGNITION-001 — experimental recognition engine, OFF by default.
+// The adapter is self-contained (see api/_lib/openai-recognition.js); this
+// module's only knowledge of OpenAI is the engine branch at the Stage 1 call
+// site. Nothing about the current engine, retrieval, evidence classification,
+// the valuation guard or persistence is altered by this import.
+import {
+  resolveRecognitionEngine,
+  recognizeWithOpenAI,
+  scrubKey,
+  classifyOpenAIFailure,
+  buildOpenAITelemetry,
+  RECOGNITION_ENGINE_CURRENT,
+  RECOGNITION_ENGINE_OPENAI,
+  OPENAI_DEFAULT_TIMEOUT_MS,
+} from './_lib/openai-recognition.js';
 import {
   validateQuote,
   applyTransform,
@@ -3444,9 +3459,53 @@ async function handleRequest(req) {
   //                   the request has not finished; inventing them here would
   //                   be reporting a duration for work not yet done.
   //   'complete'    — taken just before the response, with total + unaccounted.
+  //
+  // GW-OPENAI-RECOGNITION-001 adds the ticket-named roll-ups to BOTH snapshots
+  // so the persisted copy answers "how long did recognition take, and which
+  // engine produced it" without log scraping. They are DERIVED from the same
+  // measured spans rather than measured separately, so they cannot disagree
+  // with the waterfall. `persistence_ms` / `total_ms` appear only in
+  // 'complete' for the reason above: at pre_persist the persistence write has
+  // not happened, and emitting a number for it would be fiction. The complete
+  // set is persisted separately by the `scan_timings` event at the very end.
+  // Why vision_ms is a roll-up (performance review): it is the largest
+  // unrepresented span (up to 5s) and the only one whose presence is
+  // ENGINE-DEPENDENT — Google Vision fires on low brand confidence, and the
+  // OpenAI prompt asks for a null brand when unsure, so honest uncertainty
+  // systematically buys the call. auth / body_parse / rate_limit /
+  // embed_corrections are engine-neutral infrastructure and legitimately stay
+  // inside `unaccounted`. The benchmark is a one-off; these scan_events rows
+  // are permanent, and without this nobody can answer "why did that OpenAI
+  // scan take 30s" without log scraping.
+  //
+  // This note lives OUTSIDE snapshotTimings on purpose: PF-07 greps the
+  // helper's own text for PII-shaped words, and that test should stay strict.
+  let recognitionEngineUsed = RECOGNITION_ENGINE_CURRENT;
+  let openaiMeta = null;
+  let openaiFallbackReason = null;
   const snapshotTimings = (phase) => {
     const { _order, ...flat } = timings;
-    return { ...flat, snapshot: phase };
+    // Sum the spans that were actually MEASURED. null means "no such span ran",
+    // which is a different fact from 0 ("it ran and was instant") — the fast
+    // path legitimately produces no pricing span at all, and a `|| null` here
+    // would collapse a real 0 into "unknown" and make the two indistinguishable
+    // in the benchmark.
+    const sumMeasured = (...keys) => {
+      const present = keys.filter((k) => Number.isFinite(flat[k]));
+      return present.length ? present.reduce((a, k) => a + flat[k], 0) : null;
+    };
+    const rollups = {
+      recognition_engine: recognitionEngineUsed,
+      openai_recognition_ms: openaiMeta?.openai_recognition_ms ?? null,
+      vision_ms: sumMeasured('google_vision'),
+      retrieval_ms: sumMeasured('retrieval'),
+      pricing_ms: sumMeasured('stage2_verify', 'pricing_rescue'),
+    };
+    if (phase === 'complete') {
+      rollups.persistence_ms = sumMeasured('persist_scan', 'persist_derived');
+      rollups.total_ms = flat.total ?? null;
+    }
+    return { ...flat, ...rollups, snapshot: phase };
   };
 
   // ── SCAN-008 (B-3): reclaim serial overhead for Stage 2's budget ──────────
@@ -3587,13 +3646,92 @@ async function handleRequest(req) {
     const imgByteEst = imageList.reduce((sum, b64) => sum + Math.round(b64.length * 0.75), 0);
     plog('Stage 1 start', `images=${imageList.length} ~bytes=${imgByteEst} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
 
+    // ── GW-OPENAI-RECOGNITION-001: STAGE 1 ENGINE SELECTION ─────────────────
+    // The only place this ticket changes pipeline BEHAVIOUR. (It is not the
+    // only place it touches this file — the import, the timing rollups in
+    // snapshotTimings, the `_debug.recognition_engine` payload and the
+    // scan_timings event are the other four regions, all telemetry. An
+    // earlier version of this comment claimed otherwise and was wrong.)
+    // Everything after this block — calibrateRecognition, the user-correction injection,
+    // Vision, embedding, retrieval, evidence classification, Stage 2, the
+    // valuation guard, persistence — is byte-identical for both engines,
+    // because both produce the same recognition SHAPE and neither is trusted
+    // any further than the other.
+    //
+    // Default is the current engine (resolveRecognitionEngine returns
+    // 'current' unless RECOGNITION_ENGINE is exactly 'openai' AND a key is
+    // configured), so an unset environment behaves exactly as it does today.
+    //
+    // FAILURE BEHAVIOUR (Phase 9 decision — see docs/OPENAI_RECOGNITION_PROTOTYPE.md):
+    // OpenAI failure falls back to the EXISTING ENGINE, not to a user prompt,
+    // and never to a fabricated identity. Rationale: the failure modes here are
+    // transient upstream ones (timeout, 429, 5xx), the prototype's own cap is
+    // short (8s) so the fallback still fits the budget, and asking the user for
+    // another photo would charge a real person for an infrastructure fault
+    // while destroying the A/B comparability this ticket exists to produce.
+    //
+    // The fallback is BUDGET-GATED. If the OpenAI attempt consumed enough of
+    // the clock that a real Stage 1 no longer fits, we do NOT run a starved
+    // one — we throw, and the existing Stage 1 catch returns its 503 +
+    // retryable + quota refund, unchanged. A controlled failure beats a
+    // truncated recognition.
+    const recognitionEngine = resolveRecognitionEngine();
+    const runStage1 = async () => {
+      if (recognitionEngine !== RECOGNITION_ENGINE_OPENAI) {
+        recognitionEngineUsed = RECOGNITION_ENGINE_CURRENT;
+        return timed('stage1_vision', withTimeout(
+          recognize(imageList, lang, apiKey, stage1Cap),
+          stage1Cap,
+          'Stage 1 recognition'
+        ));
+      }
+
+      // stage1Cap has a hard floor of 8_000 and OPENAI_DEFAULT_TIMEOUT_MS is
+      // 8_000, so an earlier Math.max(2_000, Math.min(...)) was arithmetic
+      // that could only ever return 8_000 (architecture review). Say what is
+      // actually meant: the prototype gets its own cap, never more than what
+      // Stage 1 has available.
+      const openaiCap = Math.min(OPENAI_DEFAULT_TIMEOUT_MS, stage1Cap);
+      plog('Stage 1 OpenAI start', `cap=${openaiCap}ms rem=${rem()}ms`);
+      try {
+        const out = await timed('stage1_openai', withTimeout(
+          recognizeWithOpenAI(imageList, { timeoutMs: openaiCap, language: lang }),
+          openaiCap + 500,
+          'Stage 1 OpenAI recognition'
+        ));
+        recognitionEngineUsed = RECOGNITION_ENGINE_OPENAI;
+        openaiMeta = out.meta;
+        plog('Stage 1 OpenAI end', `api=${out.meta.openai_recognition_ms}ms model=${out.meta.model} in=${out.meta.input_tokens} out=${out.meta.output_tokens} rem=${rem()}ms`);
+        return out.recognition;
+      } catch (err) {
+        // Two different things, deliberately kept apart (security review, M2).
+        // The FULL scrubbed message goes to the server log, where it is needed
+        // for debugging and is not user-facing. Only a stable classification
+        // is persisted or returned: upstream 4xx bodies have been observed to
+        // echo back a fragment of the user's own base64 image, and
+        // `openaiFallbackReason` lands in the client response,
+        // valuations.ai_raw_response AND scan_events.payload — none of which
+        // should carry third-party content about a user's photograph.
+        const detail = scrubKey(err?.message || String(err));
+        openaiFallbackReason = classifyOpenAIFailure(detail);
+        const fallbackCap = Math.min(stage1Cap, rem() - 12_000);
+        if (fallbackCap < 8_000) {
+          blog(`[OpenAI] failed (${openaiFallbackReason}) and NO budget for the current engine (rem=${rem()}ms) — failing the scan: ${detail}`);
+          throw new Error(`OpenAI recognition failed with no fallback budget (${openaiFallbackReason})`);
+        }
+        blog(`[OpenAI] failed (${openaiFallbackReason}) — falling back to the current engine (cap=${fallbackCap}ms): ${detail}`);
+        recognitionEngineUsed = RECOGNITION_ENGINE_CURRENT;
+        return timed('stage1_vision', withTimeout(
+          recognize(imageList, lang, apiKey, fallbackCap),
+          fallbackCap,
+          'Stage 1 recognition'
+        ));
+      }
+    };
+
     let recognition;
     try {
-      recognition = await timed('stage1_vision', withTimeout(
-        recognize(imageList, lang, apiKey, stage1Cap),
-        stage1Cap,
-        'Stage 1 recognition'
-      ));
+      recognition = await runStage1();
       recognition = calibrateRecognition(recognition);
 
       // ── USER CORRECTION INJECTION — highest-priority signal ──
@@ -3646,6 +3784,12 @@ async function handleRequest(req) {
         : /Recognition API 429/.test(msg)                 ? 'anthropic_rate_limited'
         : /Recognition API (500|502|503|529)/.test(msg)   ? 'anthropic_upstream_error'
         : /Recognition API \d+/.test(msg)                 ? 'anthropic_api_error'
+        // The OpenAI path throws `[OpenAI] API 429: …`, which matches none of
+        // the Anthropic patterns above and so landed in 'other_failure' —
+        // blinding exactly the telemetry this prototype exists to produce
+        // (architecture review). openaiFallbackReason is already the stable
+        // classification, so reuse it rather than adding a second taxonomy.
+        : openaiFallbackReason                            ? `openai_${openaiFallbackReason}`
         : 'other_failure';
       // Refund the daily quota — a failed scan must not consume the user's allowance.
       if (quotaCharged) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
@@ -4012,6 +4156,10 @@ async function handleRequest(req) {
     // 'fast_path' is a SUCCESS — stage2_timeout above stays false for it, and
     // it must never be presented as a fallback or a degraded result.
     result.stage2_status = stage2Status;
+    // GW-OPENAI-RECOGNITION-001: which engine ACTUALLY produced this identity.
+    // Reports the engine used, not the one requested, so a scan that fell back
+    // is never counted as an OpenAI result in the benchmark.
+    result.recognition_engine = recognitionEngineUsed;
     if (stage2Status === 'fast_path') {
       result.fast_path = {
         corroboration: verification._fast_path?.corroboration ?? null,
@@ -4229,6 +4377,18 @@ async function handleRequest(req) {
         total_ms: totalMs,
         budget_ms: BUDGET_MS,
       },
+      // GW-OPENAI-RECOGNITION-001: prototype provenance. Diagnostic only — no
+      // pipeline consumer, and deliberately carries NO identity claim of its
+      // own. `identity_confidence` is shown so a reviewer can SEE how often the
+      // model was confident while the trust layer disagreed; it is what the
+      // ticket calls a hypothesis, and nothing downstream reads it.
+      recognition_engine: buildOpenAITelemetry({
+        requested: recognitionEngine,
+        used: recognitionEngineUsed,
+        recognition,
+        meta: openaiMeta,
+        failureCode: openaiFallbackReason,
+      }),
       // SPRINT-1 M1.1 (OCE capture): spatial OCR metadata — debug-only, no
       // pipeline consumer. Vision fields are null/empty when Vision was
       // skipped OR the result came from a pre-M1.1 vision_cache entry (24h
@@ -4580,6 +4740,60 @@ async function handleRequest(req) {
       // The response therefore carries the COMPLETE object, exactly as before
       // this change; the persisted copy keeps the earlier, honestly-partial one.
       result._timings = snapshotTimings('complete');
+
+      // ── GW-OPENAI-RECOGNITION-001: persist the COMPLETE waterfall ─────────
+      // `ai_raw_response` can only ever hold the pre-persist snapshot, because
+      // record_scan serialises before persistence_ms and total_ms exist. The
+      // experiment needs those two, so the finished set goes to scan_events —
+      // an existing generic ledger with a JSONB payload, keyed by the same
+      // scan_uuid as the valuation. No migration, no schema change, no new
+      // table; a join on scan_uuid reconstructs the full picture.
+      //
+      // Best-effort and budget-gated, like every other tail write: durability
+      // of the valuation must never be traded for telemetry, and logScanEvent
+      // already swallows its own failures.
+      // REVIEW FINDING (performance + architecture reviewers, HIGH). This was
+      // an unbounded `await`. logScanEvent does a bare supabase insert, and
+      // supabase-js has no default timeout — its try/catch swallows
+      // REJECTIONS, not STALLS. The `rem() > 800` gate checks the budget
+      // before the write, never its duration, so a stalled pool could run past
+      // maxDuration and kill the function: a 504 for a valuation that had
+      // already committed. Both sibling tail writes are bounded and carry
+      // comments warning about precisely this; this one was the last
+      // unbounded await in the tail, added by this ticket.
+      // Gated on the experiment actually being involved (security review L3).
+      // Unconditionally, this added a blocking insert to EVERY scan on both
+      // engines — new tail latency paid by traffic that has nothing to do with
+      // this prototype. With the flag off in production, nothing extra runs.
+      // The A/B harness is unaffected: it reads timings from `result._timings`
+      // on the response, not from this table.
+      const timingsRelevant = recognitionEngine === RECOGNITION_ENGINE_OPENAI
+        || recognitionEngineUsed === RECOGNITION_ENGINE_OPENAI
+        || !!openaiFallbackReason;
+      if (timingsRelevant && rem() > 800) {
+        await withTimeout(
+          // Named for the cohort it actually covers (security review). The
+          // gate above means this event exists ONLY for experiment traffic,
+          // and `persistence_ms`/`total_ms` are persisted nowhere else — so a
+          // generic name invites a future analyst to SELECT it, compute a p95,
+          // and believe they are looking at the fleet when they are looking at
+          // the OpenAI cohort. The `cohort` field says so in the row itself,
+          // not only in this comment.
+          logScanEvent(supa, scanUuid, 'openai_experiment_timings', 'pipeline', {
+            cohort: 'openai_experiment',
+            ...result._timings,
+            openai_fallback_reason: openaiFallbackReason,
+            openai_model: openaiMeta?.model ?? null,
+            openai_input_tokens: openaiMeta?.input_tokens ?? null,
+            openai_output_tokens: openaiMeta?.output_tokens ?? null,
+            stage2_status: stage2Status,
+            vision_used: !!visionData,
+            candidates: candidates.length,
+          }),
+          Math.max(500, Math.min(2_000, rem() - 300)),
+          'scan_timings',
+        ).catch((err) => { blog(`[Timings] scan_timings bounded-out: ${err.message}`); });
+      }
     }
 
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
@@ -4840,7 +5054,11 @@ function getCategoryFallbackPricing(recognition, failReason) {
 // only emitted when the model side is ALSO strong (Stage 1's hard rule means
 // modelC ≥ 0.75 requires text/OCR confirmation). Used by both buildFallback
 // and the Pricing Rescue Engine — identity is assessed once, priced separately.
-function assessFallbackIdentity(recognition) {
+// GW-OPENAI-RECOGNITION-001: exported (pure, unchanged) so the recognition
+// tests can assert that an OpenAI hypothesis reaches the guard and the anchor
+// gate with the SAME identity assessment the current engine produces. Adding
+// `export` alters no behaviour — every existing call site is internal.
+export function assessFallbackIdentity(recognition) {
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
   const brand = topBrand?.brand || 'unidentified';
