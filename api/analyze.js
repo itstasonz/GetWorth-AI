@@ -755,12 +755,12 @@ export function buildVerificationPrompt(recognition, candidates, corrections, la
 
   const candidateBlock = candidates.length > 0
     ? `\nMATCHED PRODUCTS FROM DATABASE (${candidates.length} results):
-${candidates.map((c, i) => `${i + 1}. [ID:${promptSafe(c.id, 40)}] ${promptSafe(c.brand)} ${promptSafe(c.model || '')} — Category: ${promptSafe(c.category)}
+${fence('CATALOG_ROWS', candidates.map((c, i) => `${i + 1}. [ID:${promptSafe(c.id, 40)}] ${promptSafe(c.brand)} ${promptSafe(c.model || '')} — Category: ${promptSafe(c.category)}
      Retail: ₪${c.retail_price_ils ?? '?'} | Used avg: ₪${c.avg_used_price_ils ?? '?'} | Range: ₪${c.price_low_ils ?? '?'}-${c.price_high_ils ?? '?'}
      Evidence: ${CLASS_LABEL[c._evidence_class] || 'unclassified'}${c._sibling_of ? ` — DIFFERENT MODEL from "${promptSafe(c._sibling_of)}". Same family, NOT the scanned item unless text confirms it.` : ''}
      Rank score: ${(c.similarity * 100).toFixed(1)}/100 (internal ranking weight, NOT a measured similarity) | Scans: ${c.popularity_score || 0}
      Aliases: ${promptSafeList(c.aliases) || 'none'}
-     Keywords: ${promptSafeList(c.keywords) || 'none'}`).join('\n')}`
+     Keywords: ${promptSafeList(c.keywords) || 'none'}`).join('\n'))}`
     : '\nNo matching products found in database. Use your own knowledge of Israeli market prices.';
 
   const correctionBlock = corrections.length > 0
@@ -771,7 +771,8 @@ ${corrections.map(c => `- AI said "${promptSafe(c.original)}" → user corrected
   // User correction — mandatory identity override when present
   const userCorrectionBlock = recognition._user_correction
     ? `\nUSER CORRECTION — MANDATORY OVERRIDE (HIGHEST PRIORITY):
-The user has explicitly identified this product as: "${promptSafe(recognition._user_correction)}"
+The user has explicitly identified this product as the fenced value below.
+${fence('USER_CORRECTION', promptSafe(recognition._user_correction))}
 - You MUST set final_brand and final_model to match this identity exactly.
 - This overrides Stage 1 vision, OCR, and DB candidates.
 - Use your knowledge of this product for Israeli used-goods market pricing.
@@ -781,10 +782,12 @@ The user has explicitly identified this product as: "${promptSafe(recognition._u
   // Phase 3: Google Vision findings as a 3rd opinion
   const visionBlock = visionData
     ? `\nGOOGLE VISION ANALYSIS (independent second opinion — use to confirm/reject Stage 1):
+${FENCE_OPEN('VISION')}
 - Labels: ${(visionData.labels || []).slice(0, 8).map(l => `${promptSafe(l.description)} (${Math.round(l.score * 100)}%)`).join(', ') || 'none'}
 - Text/OCR: ${promptSafeList(visionData.text, { items: 5 }) || 'none'}
 - Logos detected: ${(visionData.logos || []).map(l => `${promptSafe(l.description)} (${Math.round((l.score || 0) * 100)}%)`).join(', ') || 'none'}
 - Web entities (similar items found online): ${promptSafeList(visionData.webEntities, { items: 5 }) || 'none'}
+${FENCE_CLOSE('VISION')}
 
 VISION USAGE RULES:
 - If Vision logo detection confirms Stage 1 brand → boost confidence
@@ -816,10 +819,10 @@ ${FENCE_OPEN('STAGE1')}
 - Materials: ${promptSafeList(recognition.visual_features?.materials) || 'unknown'}
 - Colors: ${promptSafeList(recognition.visual_features?.colors) || 'unknown'}
 ${FENCE_CLOSE('STAGE1')}
-${fence('CATALOG', candidateBlock)}
-${fence('VISION', visionBlock)}
-${fence('PAST_CORRECTIONS', correctionBlock)}
-${fence('USER_CORRECTION', userCorrectionBlock)}
+${candidateBlock}
+${visionBlock}
+${correctionBlock}
+${userCorrectionBlock}
 
 VERIFICATION RULES:
 - Adopt a DB candidate's IDENTITY only when its Evidence line reads EXACT or MODEL TEXT. Then use its pricing → price_method = "comp_based".
@@ -3790,7 +3793,12 @@ async function handleRequest(req) {
         ];
         recognition._user_correction = corrText;
         recognition._correction_source = 'user_selected';
-        console.log(`[Analyze correction received] refineModel="${refineModel.trim()}" → brand="${corrBrand}" model="${corrModel}"${corrText !== refineModel.trim() ? ` (sanitized → "${corrText}")` : ''}`);
+        // H1: never read refineModel raw. It is client-controlled and untyped,
+        // so `.trim()` on a non-string throws into the Stage 1 catch, which
+        // returns a retryable 503 AND REFUNDS THE QUOTA - an unbounded supply of
+        // free paid Vision calls. promptSafe also strips CR/LF so a payload
+        // cannot forge lines in the log stream.
+        console.log(`[Analyze correction received] refineModel="${promptSafe(refineModel)}" → brand="${corrBrand}" model="${corrModel}"`);
       }
     } catch (stage1Err) {
       // Stage 1 failure is NOT a product classification — it is a retryable error.
