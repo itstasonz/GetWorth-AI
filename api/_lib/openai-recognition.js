@@ -457,6 +457,10 @@ export function buildOpenAITelemetry({ requested, used, recognition, meta, failu
     openai_output_tokens: meta?.output_tokens ?? null,
     identity_confidence: o?.identity_confidence ?? null,
     needs_confirmation: o?.needs_confirmation ?? null,
+    // Surfaced so the benchmark can split corroboration by packaging-vs-item
+    // and MEASURE the accepted box-copy false negative instead of assuming it
+    // is small (recognition review).
+    is_packaging: o?.is_packaging ?? null,
     // Named to state what they measure, not what a reader might hope they
     // measure: the claim APPEARS in the strings the model returned. When the
     // model echoes its own guess, that is a tautology, not corroboration.

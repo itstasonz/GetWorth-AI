@@ -48,10 +48,12 @@ const analyzeSrc = readFileSync(ANALYZE_URL, 'utf8');
 const adapterSrc = readFileSync(ADAPTER_URL, 'utf8');
 const contractSrc = readFileSync(new URL('../api/_lib/openai-recognition-contract.js', import.meta.url), 'utf8');
 const normalizeSrc = readFileSync(new URL('../api/_lib/openai-recognition-normalize.js', import.meta.url), 'utf8');
+const tokensSrc = readFileSync(new URL('../api/_lib/openai-recognition-tokens.js', import.meta.url), 'utf8');
 // Every server-only module of this feature. Source-level assertions below name
 // the specific file they mean; this list is for the checks that must hold
 // across ALL of them (credentials, VITE_ leakage).
-const ALL_MODULE_SRC = [['adapter', adapterSrc], ['contract', contractSrc], ['normalize', normalizeSrc]];
+const ALL_MODULE_SRC = [['adapter', adapterSrc], ['contract', contractSrc],
+  ['normalize', normalizeSrc], ['tokens', tokensSrc]];
 
 // A well-formed OpenAI payload. `over` lets each test bend one thing.
 const payload = (over = {}) => ({
@@ -367,11 +369,15 @@ test('OAI-10c REGRESSION corroboration must hold in BOTH directions', () => {
     'conservative miss — see the asymmetry note in the adapter');
 
   // The variant suffixes must never be treated as noise on either side.
-  const noiseStart = normalizeSrc.indexOf('const LABEL_NOISE');
-  const noiseEnd = normalizeSrc.indexOf('const isRating');
+  // LABEL_NOISE lives in the tokens module. Locating it is asserted below
+  // because a bad slice yields '' and makes the loop pass vacuously — that
+  // class of silent failure has now bitten this suite three times, and the
+  // guard is what turned this module move into a loud failure instead.
+  const noiseStart = tokensSrc.indexOf('LABEL_NOISE = new Set');
+  const noiseEnd = tokensSrc.indexOf('const isRating');
   assert.ok(noiseStart > -1 && noiseEnd > noiseStart,
     'LABEL_NOISE not located — a bad slice would make the loop below pass vacuously');
-  const adapterNoise = normalizeSrc.slice(noiseStart, noiseEnd);
+  const adapterNoise = tokensSrc.slice(noiseStart, noiseEnd);
   for (const variantToken of ['pro', 'max', 'plus', 'mini', 'lite', 'ultra', 'air', 'wireless', 'gaming', 'mouse']) {
     assert.equal(new RegExp(`'${variantToken}'`).test(adapterNoise), false,
       `'${variantToken}' distinguishes siblings and must not be filtered as label noise`);
@@ -398,13 +404,80 @@ test('OAI-11 identity_confidence reaches telemetry only — nothing branches on 
   assert.equal(t.identity_confidence, 0.99);
 });
 
-test('OAI-12 confidences are clamped into range whatever the model emits', () => {
+test('OAI-12 an out-of-range confidence reads as UNKNOWN, never as maximum', () => {
+  // Round-3 review: this previously clamped to [0,1], so `95` — a model
+  // meaning "95%" — became 1.0. That manufactures maximum confidence out of a
+  // malformed value, in the one direction that is unsafe. The schema asks for
+  // 0..1 and strict mode cannot enforce a numeric range, so out-of-range means
+  // the response is broken, and a broken confidence is "we do not know" = 0.
+  // Mapping v/100 would be inventing precision we were not given.
   const r = normalizeOpenAIRecognition(payload({
-    brand_confidence: 7, model_confidence: -3, identity_confidence: 'high',
+    brand_confidence: 95, model_confidence: -3, identity_confidence: 'high',
   }));
-  assert.equal(r.brand_candidates[0].confidence, 1);
+  assert.equal(r.brand_candidates[0].confidence, 0, '95 must not read as certainty');
   assert.equal(r.model_candidates[0].confidence, 0);
   assert.equal(r.category_confidence, 0);
+  // In-range values are untouched.
+  const ok = normalizeOpenAIRecognition(payload({ brand_confidence: 0.94, model_confidence: 0.5 }));
+  assert.equal(ok.brand_candidates[0].confidence, 0.94);
+  assert.equal(ok.model_candidates[0].confidence, 0.5);
+});
+
+test('OAI-12b REGRESSION round-3 recognition findings stay closed', () => {
+  const ev = (o) => normalizeOpenAIRecognition(payload(o));
+  const lvl = (o) => calibrateRecognition(ev(o)).identity_resolution.level;
+
+  // H2 (HIGH) — a logo is a brand mark the model NAMED, not text it read.
+  // Naming a logo "G502 Hero" with visible_text empty was the last zero-effort
+  // route to a text-confirmed MODEL claim.
+  const logoOnly = ev({ model: 'G502 Hero', logos: ['G502 Hero'], visible_text: [] });
+  assert.equal(logoOnly._openai.model_appears_in_returned_text, false);
+  assert.equal(logoOnly.model_candidates[0].evidence, 'visual_match');
+  assert.equal(lvl({ model: 'G502 Hero', logos: ['G502 Hero'], visible_text: [] }), 'family');
+  // A logo may still corroborate the BRAND — that is legitimate evidence.
+  assert.equal(ev({ brand: 'Logitech', logos: ['Logitech'], visible_text: [] })
+    ._openai.brand_appears_in_returned_text, true);
+
+  // C1 threshold — boilerplate is not identifying text. "CE" is printed on
+  // every compliant device sold in Israel, so this is most of the fleet.
+  for (const junk of ['CE', 'OK', '12', 'FC', 'MADE IN CHINA', 'CERTIFIED']) {
+    const r = ev({ model_confidence: 0.96, visible_text: [junk], logos: [] });
+    assert.equal(r.ocr_text.has_readable_text, false, `${junk} is not identifying text`);
+    assert.equal(calibrateRecognition(r).model_candidates[0].confidence <= 0.70, true,
+      `${junk} must not unlock the silhouette clamp`);
+  }
+  // Real identifying text still counts.
+  assert.equal(ev({ visible_text: ['G502 HERO'] }).ocr_text.has_readable_text, true);
+  assert.equal(ev({ visible_text: ['מקלדת'] }).ocr_text.has_readable_text, true);
+
+  // M1 — a DECLINED primary is itself the ambiguity signal, however many
+  // alternatives were offered. One candidate at 0.88 used to reach `exact`.
+  assert.equal(lvl({ model: null, model_confidence: 0, visible_text: ['G502 HERO'],
+    candidate_models: [{ model: 'G502 Hero', confidence: 0.88 }] }), 'family');
+  assert.equal(lvl({ model: 'G502 Hero', model_confidence: 0.88, visible_text: ['G502 HERO'] }), 'exact',
+    'a committed primary must still be able to resolve exactly');
+
+  // M3 — explicit non-answers must not become search terms.
+  for (const junk of ['Unbranded', '???', 'various', 'OEM', 'TBD', '-', 'no model', 'illegible']) {
+    const r = ev({ brand: junk, model: junk });
+    assert.deepEqual(r.brand_candidates, [], `brand ${JSON.stringify(junk)} must produce no candidate`);
+    assert.deepEqual(r.model_candidates, [], `model ${JSON.stringify(junk)} must produce no candidate`);
+  }
+
+  // M4 — the packaging evidence path analyze.js already implements was dead
+  // for every OpenAI scan, costing boxed items 0.72 -> 0.57 and buying an
+  // extra Vision call each.
+  const boxed = ev({ is_packaging: true, brand: 'Apple', brand_confidence: 0.7,
+    model: null, model_confidence: 0, visible_text: [], logos: [] });
+  assert.equal(boxed.brand_candidates[0].evidence, 'packaging_design');
+  const bare = ev({ brand: 'Apple', brand_confidence: 0.7, model: null,
+    model_confidence: 0, visible_text: [], logos: [] });
+  assert.equal(bare.brand_candidates[0].evidence, 'visual_match');
+  assert.ok(calibrateRecognition(boxed).category_confidence > calibrateRecognition(bare).category_confidence,
+    'packaging evidence must restore the calibration floor boxed items are entitled to');
+  // Read text still outranks "it is a box".
+  assert.equal(ev({ is_packaging: true, brand: 'Apple', visible_text: ['Apple'] })
+    .brand_candidates[0].evidence, 'readable_text');
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

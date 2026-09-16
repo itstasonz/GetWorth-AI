@@ -227,6 +227,9 @@ function score(c, res) {
     // Tracked per scan because it would otherwise hide inside total_ms and be
     // misread as model latency.
     vision_used: dbg.pipeline?.vision_used ?? null,
+    // Packaging split (recognition review) — see corroboration_rate_* above.
+    is_packaging: dbg.recognition_engine?.is_packaging ?? null,
+    model_text_corroborated: dbg.recognition_engine?.model_appears_in_returned_text ?? null,
     error: res.status >= 400 ? (r.error || r.code || `HTTP ${res.status}`) : null,
   };
 }
@@ -335,6 +338,16 @@ function summarize(engine) {
         ? s.latency.stage1_span_ms - s.latency.recognition_ms
         : null)),
     google_vision_rate: pctOf(attributable, (s) => s.vision_used === true),
+    // Recognition review: the accepted corroboration false negative (box copy
+    // like "Logitech G502 HERO Gaming Mouse" under-corroborates, because
+    // category nouns are deliberately NOT filtered — "Magic Mouse" is a model
+    // name) is concentrated on packaging photos, not spread evenly. Split the
+    // rate so the residual is MEASURED rather than assumed small.
+    corroboration_rate_packaging: pctOf(attributable.filter((s) => s.is_packaging === true),
+      (s) => s.model_text_corroborated === true),
+    corroboration_rate_item: pctOf(attributable.filter((s) => s.is_packaging !== true),
+      (s) => s.model_text_corroborated === true),
+    packaging_share: pctOf(attributable, (s) => s.is_packaging === true),
   };
 }
 
@@ -386,6 +399,13 @@ for (const [label, key] of [
   console.log('  ' + label.padEnd(26) + ms(S.current[key]).padStart(9) + ms(S.openai[key]).padStart(9));
 }
 console.log('  ' + 'google vision fired'.padEnd(26) + pct(S.current.google_vision_rate).padStart(9) + pct(S.openai.google_vision_rate).padStart(9));
+for (const [label, key] of [
+  ['corroborated, item', 'corroboration_rate_item'],
+  ['corroborated, packaging', 'corroboration_rate_packaging'],
+  ['packaging share', 'packaging_share'],
+]) {
+  console.log('  ' + label.padEnd(26) + pct(S.current[key]).padStart(9) + pct(S.openai[key]).padStart(9));
+}
 console.log('  ' + '─'.repeat(44));
 console.log('  ' + 'attributable scans'.padEnd(26) + String(S.current.attributable).padStart(9) + String(S.openai.attributable).padStart(9));
 console.log('  ' + 'fell back to other'.padEnd(26) + String(S.current.fell_back).padStart(9) + String(S.openai.fell_back).padStart(9));
@@ -426,5 +446,9 @@ console.log('     scan a fixture may get a cached Vision result the first one pa
 console.log('  5. The OpenAI adapter applies a STRICTER text-evidence rule than the current');
 console.log('     engine (>=2 alphanumeric chars to count as readable text). Some accuracy');
 console.log('     difference comes from that, not from the model. See the prototype doc.');
-console.log('  6. stage1 overhead should be a few ms. A large value means the measurement');
+console.log('  6. Corroboration is reported split by packaging-vs-item: box copy is a known,');
+console.log('     accepted false negative (category nouns are not filtered, because "Magic');
+console.log('     Mouse" is a model name). A low packaging rate is expected, not a bug —');
+console.log('     but if packaging_share is high, that residual is doing real damage.');
+console.log('  7. stage1 overhead should be a few ms. A large value means the measurement');
 console.log('     boundary moved and the two engines are no longer being timed alike.\n');

@@ -20,17 +20,35 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { CATEGORIES, CONDITIONS, CATEGORY_HEBREW } from './openai-recognition-contract.js';
+import { tokenize, isNoise, carriesIdentifyingText } from './openai-recognition-tokens.js';
 
 const NULLISH_IDENTITY = new Set([
   '', 'null', 'none', 'n/a', 'na', 'unknown', 'unidentified', 'not visible',
   'not applicable', 'unspecified', 'undetermined', 'no brand', 'generic',
+  // Round-3 review: each of these reached retrieval as a real search term and
+  // produced a `level: exact` identity out of an explicit non-answer.
+  'unbranded', 'nobrand', 'no-name', 'noname', 'oem', 'tbd', 'various',
+  'assorted', 'misc', 'miscellaneous', 'not specified', 'not determined',
+  'cannot determine', 'indeterminate', 'no model', 'no brand visible',
+  'not legible', 'illegible', 'unreadable',
 ]);
+
+// A value made only of punctuation, or a single character, is not an identity
+// however the model phrased it: "???", "-", "--", ".".
+const isPlaceholderShape = (t) => t.length < 2 || !/[a-z0-9֐-׿]/i.test(t);
 
 
 const clamp01 = (n) => {
   const v = Number(n);
   if (!Number.isFinite(v)) return 0;
-  return Math.min(Math.max(v, 0), 1);
+  // Round-3 review: clamping put `95` (a model meaning "95%") at 1.0 —
+  // maximum confidence manufactured from a malformed value, in the one
+  // direction that is unsafe. The schema asks for 0..1 and strict mode cannot
+  // enforce a numeric range, so an out-of-range number is a broken response,
+  // and the safe reading of a broken confidence is "we do not know" = 0.
+  // Guessing intent (v / 100) would invent precision we were not given.
+  if (v < 0 || v > 1) return 0;
+  return v;
 };
 
 // Returns a trimmed identity string, or null when the model meant "I don't
@@ -48,6 +66,7 @@ const identityOrNull = (v) => {
   if (typeof v !== 'string') return null;
   const t = v.trim().slice(0, STR_MAX);
   if (!t) return null;
+  if (isPlaceholderShape(t)) return null;
   return NULLISH_IDENTITY.has(t.toLowerCase()) ? null : t;
 };
 
@@ -127,8 +146,7 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
   // has no other use either — retrieval's isUsefulOcrToken discards anything
   // under 3 characters, so these strings were never going to become search
   // tokens. A "reading" of one glyph is noise, not data.
-  const MEANINGFUL_TEXT = /[a-z0-9֐-׿]{2,}/i;   // Latin, digits, or Hebrew
-  const readableText = visibleText.filter((t) => MEANINGFUL_TEXT.test(t));
+  const readableText = visibleText.filter(carriesIdentifyingText);
   const hasReadableText = readableText.length > 0;
 
   // Did the model actually read the identity off the item, or infer it from
@@ -171,9 +189,6 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
   //   shorter; if the claim leaves tokens of that entry unexplained, the item
   //   is a variant the claim does not name. That is the rule that makes the
   //   sibling/variant direction come out right.
-  const tokenize = (str) => String(str || '').toLowerCase()
-    .split(/[^a-z0-9֐-׿]+/i).filter(Boolean);
-
   // Entry-side noise: tokens that appear ON labels but are never part of a
   // model name. Kept DELIBERATELY SHORT. The obvious additions — pro, max,
   // plus, mini, lite, ultra, air, wireless, se — are exactly the tokens that
@@ -188,28 +203,22 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
   // strictly smaller than that one anyway — analyze.js drops variant suffixes,
   // which would be wrong here. Unifying them behind a shared module is a
   // follow-up, noted so the duplication is a decision rather than an accident.
-  const LABEL_NOISE = new Set([
-    'model', 'serial', 'sn', 'no', 'number', 'made', 'in', 'by',
-    'china', 'vietnam', 'taiwan', 'japan', 'korea', 'india', 'thailand',
-    'warranty', 'certified', 'designed', 'assembled', 'patent', 'patents',
-    'ce', 'fcc', 'rohs', 'ul', 'weee', 'caution', 'warning',
-    'inc', 'ltd', 'llc', 'corp', 'co', 'gmbh',
-    'the', 'and', 'for', 'with', 'of',
-  ]);
-  // Electrical ratings (5v, 1.5a, 3w, 60hz) and serial-shaped runs.
-  const isRating = (t) => /^\d+(\.\d+)?(v|a|ma|w|hz|khz|mah|wh)$/.test(t);
-  const isSerial = (t) => t.length >= 6 && (t.match(/\d/g) || []).length >= 6;
-  const isNoise  = (t) => LABEL_NOISE.has(t) || isRating(t) || isSerial(t);
 
   const brandToks = new Set(tokenize(brand));
-  const textTokenSet = new Set([...readableText, ...logos].flatMap(tokenize));
+  // H2 (recognition reviewer, HIGH). Two pools, not one. A logo is a brand
+  // mark the model NAMED; it is not a string transcribed off the item. Naming
+  // a logo "G502 Hero" with visible_text empty was the last zero-effort route
+  // to a text-confirmed MODEL claim. Brand corroboration may use logos — a
+  // visible logo is legitimate brand evidence. Model corroboration may not.
+  const brandTokenSet = new Set([...readableText, ...logos].flatMap(tokenize));
+  const readTextTokenSet = new Set(readableText.flatMap(tokenize));
 
   // BRAND: whole-token presence. A brand legitimately appears inside a longer
   // string, so containment is right — it just may not be a substring of a
   // token, which is what killed "a" inside "abcdefg".
   const brandCorroborated = (name) => {
     const toks = tokenize(name);
-    return toks.length > 0 && toks.every((t) => textTokenSet.has(t));
+    return toks.length > 0 && toks.every((t) => brandTokenSet.has(t));
   };
 
   // MODEL: corroboration must hold in BOTH directions. Each half blocks a
@@ -232,7 +241,7 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
   // NEGATIVE only costs 0.96 -> 0.70, which is the conservative direction.
   const claimAccountedForByText = (claim) => {
     const toks = tokenize(claim).filter((t) => !brandToks.has(t));
-    return toks.length > 0 && toks.every((t) => textTokenSet.has(t));
+    return toks.length > 0 && toks.every((t) => readTextTokenSet.has(t));
   };
   // Strip electrical ratings BEFORE tokenizing: "1.5A" splits into "1" and
   // "5a" on the decimal point, and only the second half looks like a rating.
@@ -246,7 +255,7 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
   const textAccountedForByClaim = (claim) => {
     const claimToks = new Set(tokenize(claim));
     if (claimToks.size === 0) return false;
-    return [...readableText, ...logos].some((entry) => {
+    return readableText.some((entry) => {
       const entryToks = tokenize(stripRatings(entry)).filter((t) => !brandToks.has(t) && !isNoise(t));
       if (entryToks.length === 0) return false;
       return entryToks.every((t) => claimToks.has(t));
@@ -285,10 +294,16 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
     seenBrands.add(key);
     brand_candidates.push({ brand: clean, confidence: clamp01(confidence), evidence });
   };
+  // M4: 'packaging_design' is the vocabulary calibrateRecognition already
+  // looks for. Read text still outranks it — a model string transcribed off
+  // the box is stronger evidence than the box being a box.
+  const isPackaging = src.is_packaging === true;
   pushBrand(
     brand,
     src.brand_confidence,
-    brandInReadText ? 'readable_text' : (logos.length ? 'logo_visual' : 'visual_match'),
+    brandInReadText ? 'readable_text'
+      : isPackaging ? 'packaging_design'
+      : (logos.length ? 'logo_visual' : 'visual_match'),
   );
 
   // REVIEW FINDING (valuation reviewer, CRITICAL — introduced by the fix for
@@ -370,9 +385,19 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
   // Ambiguity: the model's own flag OR the structural fact that it offered more
   // than one model. Either is enough — an `exact_model_ambiguous: false` next to
   // three candidate_models is a contradiction, and the safe reading wins.
+  // M1 (recognition reviewer). `model: null` plus ONE candidate at 0.88
+  // resolved to `level: exact` on a `sibling_candidate` evidence string — the
+  // model explicitly declined to name a primary, and the pipeline promoted its
+  // suggestion to a determination anyway. Prompt rule 4 only ever constrained
+  // the two-or-more case, so a lone candidate slipped through.
+  //
+  // A declined primary IS the ambiguity signal, independent of how many
+  // alternatives were offered.
+  const primaryDeclined = model === null && model_candidates.length > 0;
   const exact_model_ambiguous = src.needs_confirmation === true
     || identityOrNull(src.ambiguity_reason) !== null
-    || model_candidates.length > 1;
+    || model_candidates.length > 1
+    || primaryDeclined;
 
   const embedding_text = [
     brand, model || family, category,
@@ -429,6 +454,7 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
       model_number: modelNum,
       identity_confidence: clamp01(src.identity_confidence),
       needs_confirmation: src.needs_confirmation === true,
+      is_packaging: isPackaging,
       ambiguity_reason: identityOrNull(src.ambiguity_reason),
       // NAMED FOR WHAT THEY ARE (recognition review). These were
       // `brand_text_corroborated` / `model_text_corroborated`, which a reviewer

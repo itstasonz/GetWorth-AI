@@ -350,6 +350,40 @@ Both are rewritten with fixtures that isolate the behaviour and explicit
 negative controls. Recorded because it happened twice: an assertion is only
 worth what its fixture lets it see.
 
+**Round 3 — a further HIGH and five smaller findings, all fixed.**
+
+- **H2 (HIGH).** `logos` was still pooled with transcribed text for MODEL
+  corroboration, so naming a logo `"G502 Hero"` with `visible_text` empty
+  produced `model_number_text` / `exact` / 0.96 — the last zero-effort route to
+  the self-corroboration outcome. Brand and model now use separate token
+  pools: a logo is legitimate *brand* evidence and is never *model* evidence.
+- **Clamp threshold.** `has_readable_text` asked only for two alphanumerics, so
+  `CE`, `OK`, `12`, `FC`, `MADE IN CHINA` and `CERTIFIED` each unlocked the
+  silhouette clamp. CE is printed on every compliant device sold in Israel —
+  that is most of the fleet, not an edge case.
+- **M1.** `model: null` plus a single candidate at 0.88 resolved to `exact`: the
+  model declined to name a primary and the pipeline promoted its suggestion to
+  a determination. A declined primary is now itself an ambiguity signal.
+- **M3.** `Unbranded`, `OEM`, `TBD`, `various`, `???`, `-` reached retrieval as
+  real search terms.
+- **M4.** `analyze.js` has a packaging calibration branch keyed on
+  `packaging_design` evidence; the adapter emitted no such string, so it was
+  dead for every OpenAI scan. Measured 0.72 → 0.57 on the same retail-box
+  photo — which crosses `VISION_TRIGGER_THRESHOLD` and buys an extra Vision
+  call per boxed item. Retail boxes are a first-class scan type, so this was
+  systematic. Fixed with an `is_packaging` field.
+- **L3.** `clamp01(95)` returned `1.0` — maximum confidence manufactured from a
+  malformed value, in the one direction that is unsafe. Out-of-range now reads
+  as *unknown* (0); guessing `v / 100` would invent precision.
+
+**Not fixed, by decision.** `isCompatibleAnchor`'s `rowText.includes(normModel)`
+lets identity `G502` match `G502 X Plus` and `G502 Lightspeed` — the guard
+`evaluateFastPath` leans on to block sibling substitution. **Pre-existing
+`analyze.js` behaviour affecting both engines**; Phase 11 forbids touching it.
+Raised as a separate ticket. Cross-script brand matching (`Logitech` vs
+`לוגיטק`) is likewise left alone: transliteration is a feature, not a patch,
+and getting it wrong in either direction is worse than the conservative miss.
+
 **Known parity issues, deliberately NOT fixed** (fixing them asymmetrically
 would confound the comparison, and Phase 11 forbids touching the old pipeline):
 

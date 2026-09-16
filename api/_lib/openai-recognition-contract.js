@@ -114,6 +114,7 @@ export const OPENAI_IDENTITY_SCHEMA = {
   // ever wrong.
   required: [
     'object_type', 'category', 'subcategory',
+    'is_packaging',
     'visible_text', 'logos',
     'brand', 'brand_confidence',
     'product_family', 'model', 'model_number', 'model_confidence',
@@ -125,6 +126,16 @@ export const OPENAI_IDENTITY_SCHEMA = {
     object_type:  { type: 'string', description: 'Plain noun for the object, e.g. "gaming mouse". Never empty.' },
     category:     { type: 'string', enum: CATEGORIES },
     subcategory:  { type: 'string' },
+
+    // M4 (recognition reviewer). analyze.js has a whole packaging calibration
+    // branch — calibrateRecognition floors a packaging-evidence brand at
+    // 0.60-0.79 — keyed on the evidence strings 'packaging_design' /
+    // 'packaging_visual'. The adapter emitted neither, so that branch was dead
+    // for every OpenAI scan: measured 0.72 -> 0.57 on the same retail-box
+    // photo, which crosses VISION_TRIGGER_THRESHOLD and buys an extra Vision
+    // call per boxed item. Retail boxes are a first-class scan type (step 0 of
+    // the existing Stage 1 prompt), so this was a systematic loss, not an edge.
+    is_packaging: { type: 'boolean', description: 'true when the photo shows a retail box or packaging rather than the bare item.' },
 
     visible_text: { type: 'array', items: { type: 'string' }, description: 'Exact strings read off the item. Empty when none.' },
     logos:        { type: 'array', items: { type: 'string' } },
@@ -215,7 +226,7 @@ RULES
 2. brand / model / model_number: null unless you can actually determine them. An empty field is a correct answer; an invented one is not.
 3. Shape alone never exceeds 0.70 model_confidence. Reaching 0.75+ requires text or a logo you actually read.
 4. Two or more plausible siblings: list them all in candidate_models at equal low confidence, set needs_confirmation true, give ambiguity_reason, and set product_family instead of picking one.
-5. Retail box or packaging: identify the product inside, not the box.
+5. Retail box or packaging: set is_packaging true and identify the product INSIDE, not the box.
 6. model_number is only what is physically printed on the item or its label. If it is not legible in the photo, use null — do not supply one you know from the product name.
 7. candidate_brands: list any other brand this could plausibly be. If a luxury or designer brand is a genuine possibility, include it even at low confidence — a missed possibility is worse than a listed one.
 ${language === 'he' ? '8. Keep visible_text in its original script, including Hebrew.' : '8. Keep visible_text in its original script.'}`;
