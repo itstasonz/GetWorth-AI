@@ -562,3 +562,155 @@ downstream sinks, making a real production guard invisible.
 
 The PI-19 corrections fixture now models `fetchCorrections` — the **weaker** of
 the two producers — and enters raw. That made sites #16, #17 and #18 observable.
+
+---
+
+## Round 6 — a provider lifecycle, and a harness that can see it
+
+### Why round 5 failed
+
+`paidCallConsumed` was **the wrong primitive**. It marked *"our helper
+returned"*, which is a different event from *"the provider billed us"*.
+Everything between those two points — reading the body, parsing JSON, validating
+the contract, finding content, trimming it — runs after the provider has already
+charged. A throw anywhere in that window left the flag false and refunded a
+billed call.
+
+Two HIGH findings followed from that one error, and neither was visible to any
+unit test, because every refund assertion was indirect.
+
+### The harness comes first
+
+`tests/helpers/analyze-harness.mjs` drives the **real exported handler** with
+`globalThis.fetch` replaced, routing by URL to controllable Anthropic / OpenAI /
+Vision / Supabase responders. A refund is observed as an actual
+`decrement_user_daily_scan` RPC.
+
+> **The only oracle that counts: did the real request handler call the refund RPC?**
+
+Both round-5 HIGHs were reproduced in it **before** any production change:
+`refunds=1` in each case; after the fix, `refunds=0`.
+
+### The lifecycle model
+
+Consumption is recorded at the **provider's own success response** — the
+earliest point at which we can honestly claim billing may have occurred — inside
+each call helper at `res.ok`, *before* the body is touched.
+
+| Provider | Boundary | Evidence |
+|---|---|---|
+| Anthropic (`recognize`) | `if (res.ok) onBilled('anthropic', http_<status>)` | 2xx ⇒ tokens generated |
+| Anthropic (`ocrSerialLabel`) | same | 2xx ⇒ tokens generated |
+| OpenAI (adapter) | `if (res.ok) onBilled('openai', http_<status>)` | 2xx ⇒ tokens generated |
+
+`createProviderLedger()` is **monotonic**: `UNCONSUMED → CONSUMED`, never back.
+It exposes no way to un-consume, so a fallback to a second provider structurally
+cannot erase the first provider's billing. A mutation that adds a `reset()` and
+calls it before the fallback is killed by RL-14 and RL-15.
+
+### Refund lifecycle matrix — derived from observed provider behaviour
+
+| Provider outcome | Request sent | HTTP | 2xx? | Billing evidence | Consumed | Refund |
+|---|---|---|---|---|---|---|
+| client body rejected pre-provider | no | — | — | none | no | **no** (nothing charged) |
+| network failure before response | yes | — | no | none | no | **YES** |
+| 401 / 429 / 500 / 503 | yes | 4xx/5xx | no | none | no | **YES** |
+| 200 + body unreadable | yes | 200 | yes | 2xx | **yes** | **no** |
+| 200 + bad content shape | yes | 200 | yes | 2xx | **yes** | **no** |
+| 200 + `max_tokens` truncation | yes | 200 | yes | 2xx | **yes** | **no** |
+| 200 + unparseable model prose | yes | 200 | yes | 2xx | **yes** | **no** |
+| 200 valid, later calibration throw | yes | 200 | yes | 2xx | **yes** | **no** |
+| 200 valid, later logging throw | yes | 200 | yes | 2xx | **yes** | **no** |
+| 200 valid, unknown internal throw | yes | 200 | yes | 2xx | **yes** | **no** |
+| OpenAI 200 + usage + invalid contract | yes | 200 | yes | 2xx + usage tokens | **yes** | **no** |
+| OpenAI consumed → Anthropic fallback fails | yes | 200 then any | — | OpenAI 2xx | **yes** | **no** |
+| OpenAI 4xx/5xx → Anthropic fallback fails | yes | 4xx/5xx | no | none | no | **YES** |
+
+This **resolves the round-5 reviewer conflict on evidence rather than opinion.**
+The valuation reviewer said six classes were wrongly denied refunds; the security
+reviewer said the denials were correct. Both were reasoning about
+`other_failure`, a bucket that mixed billed and unbilled outcomes. Once the
+question becomes *"did the provider answer 2xx?"*, each case has a determinate
+answer and no judgement call is required.
+
+`max_tokens` truncation and unparseable prose are **200s** — billed. They
+correctly do not refund. That is not a UX position; it is what the provider did.
+
+### HIGH-3 — corrected disposition, 47/47
+
+Round 5 reported 46 load-bearing / 1 redundant / 0 misclassified. **Two sites
+were classified backwards.**
+
+| Disposition | Count |
+|---|---|
+| **A — load-bearing** | **46** |
+| **B — provably redundant** | **0** |
+| **C — non-security** | **1** (site #11) |
+| **Unexplained survivors** | **0** |
+
+Full matrix at this commit: **47/47 killed.**
+
+- **#38 `promptNum(c.avg_used_price_ils)` — LOAD-BEARING**, not redundant.
+  `ToNumber` skips Unicode whitespace, so `LINE_SEPARATOR + "5" > 0` is **true**
+  and the row reaches the guard. Separately, relational `>` uses the NUMBER hint
+  while template interpolation uses the STRING hint, so one value can pass the
+  filter as `5` and render as a fence breaker. PI-30 now feeds both and asserts
+  the rendered line.
+- **#11 `promptNum(Number(c.similarity) * 100, …)` — NON-SECURITY.** The bare
+  `Number(...)` collapses every hostile value before `promptNum` is reached, so
+  the site cannot emit a newline or a fence marker. Its mutation is "killed" by
+  tests that assert *rendering* (`0.0` vs `NaN`). PI-31 pins this with
+  executable evidence.
+
+**The methodology error behind both:** a mutation matrix measures test
+*sensitivity*, not security relevance. Round 5 read "a test fails" as "this is a
+security guard". Disposition now requires evidence about the *property*.
+
+### False oracles removed
+
+| Test | Asserted | Why it was false |
+|---|---|---|
+| `RP-09` | `paidCallConsumed = true` appears within 220 chars of the call | passes while the assignment is on the **wrong side of the billing boundary** — it checked a statement existed, not what it meant |
+| `PI-30` | "any non-numeric value yields `NaN > 0 === false`" | **false** — U+2028 is `ToNumber` whitespace. Worse, it stated #38 would only become load-bearing "if the filter is removed", **licensing removal of a live guard** |
+
+Both now observe the property directly. No source-text assertion is treated as
+proof of runtime refund behaviour.
+
+---
+
+## GW-SCAN-ENTITLEMENT-001 — recorded, NOT built
+
+**Required: YES** (as a product/accounting decision, not a security fix.)
+
+The valuation reviewer's concern is real and survives this round: a user whose
+scan fails on a **billed** provider outcome — `max_tokens` truncation on a busy
+label, or a model emitting prose — loses a scan unit. At `USER_DAILY_LIMIT = 50`,
+on the 50th scan of the day, the retry is refused `429 retryable:false` and the
+user gets no price at all.
+
+Round 6 does **not** fix this, deliberately. Refunding a billed call is the loop.
+
+The underlying issue is that one counter is doing two jobs:
+
+| Concept | Question it answers |
+|---|---|
+| **Provider-cost / abuse quota** | did GetWorth incur provider cost for this request? |
+| **User entitlement** | should an honest user lose a usable scan because GetWorth or the model failed? |
+
+These are not the same state, and no single setting of one counter satisfies
+both. Separating them is a product design decision with schema implications
+(`check_and_increment_scan_rate`, `decrement_user_daily_scan`, `USER_DAILY_LIMIT`)
+and is out of scope here. **No second quota system was built.**
+
+---
+
+## Round 6 follow-ups — recorded, NOT fixed
+
+Unchanged from earlier rounds and re-confirmed as not newly exploitable:
+`promptSafe` passes U+0085, the C1 block and all Unicode `Cf` (including TAG
+characters) · unvalidated client `scan_uuid` · dead `openai_no_fallback_budget`
+allow-list entry · `openai_no_images` denies a never-billed failure ·
+`isRefundEligible(null)` throws on an explicit null (fails closed; no call site
+passes one) · the bare `Number(c.similarity)` at site #11 · the inaccurate `lang`
+comment · FU-1 (`public.products` column types unverifiable from this repo) ·
+FU-2 (`RECOGNITION_SCHEMA` never applied) · FU-3/FU-4.

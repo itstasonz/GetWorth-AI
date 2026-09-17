@@ -49,14 +49,14 @@ test('RP-01 A — a provider failure BEFORE a usable result is refundable', () =
     'anthropic_upstream_error', 'anthropic_api_error', 'upstream_network_error',
     'openai_timeout', 'openai_network', 'openai_auth', 'openai_rate_limited',
     'openai_upstream_5xx', 'openai_http_500', 'openai_http_429']) {
-    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, paidCallConsumed: false }), true,
+    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, providerConsumed: false }), true,
       `${kind} is a named provider failure and must refund`);
   }
 });
 
 test('RP-02 B–G — ANY failure after a consumed paid call refunds NOTHING', () => {
   // One assertion per enumerated internal-failure class, plus classes that do
-  // not exist yet. The discriminator is `paidCallConsumed`, which is a fact
+  // not exist yet. The discriminator is `providerConsumed`, which is a fact
   // about billing rather than a guess about an exception's type — so it holds
   // for faults nobody has enumerated.
   const INTERNAL = [
@@ -70,36 +70,36 @@ test('RP-02 B–G — ANY failure after a consumed paid call refunds NOTHING', (
     ['G unexpected response shape', 'other_failure'],
   ];
   for (const [label, kind] of INTERNAL) {
-    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, paidCallConsumed: true }), false,
+    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, providerConsumed: true }), false,
       `${label} must NOT refund a consumed paid call`);
   }
 
   // And the invariant beats the allow-list: even a genuinely refundable class
   // cannot refund once the paid call delivered.
   for (const kind of REFUNDABLE_FAILURE_KINDS) {
-    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, paidCallConsumed: true }), false,
+    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, providerConsumed: true }), false,
       `${kind} must NOT refund once the paid call was consumed`);
   }
 });
 
 test('RP-03 H — malformed client input rejected before the paid call', () => {
   // Nothing charged yet ⇒ nothing to refund, so no loop can exist here.
-  assert.equal(isRefundEligible({ quotaCharged: false, failureKind: 'pre_paid_call_fatal', paidCallConsumed: false }), false);
-  assert.equal(isRefundEligible({ quotaCharged: false, failureKind: 'stage1_timeout', paidCallConsumed: false }), false);
+  assert.equal(isRefundEligible({ quotaCharged: false, failureKind: 'pre_paid_call_fatal', providerConsumed: false }), false);
+  assert.equal(isRefundEligible({ quotaCharged: false, failureKind: 'stage1_timeout', providerConsumed: false }), false);
   // Charged but not yet billed: refunding is correct and costs nothing.
-  assert.equal(isRefundEligible({ ...CHARGED, failureKind: 'pre_paid_call_fatal', paidCallConsumed: false }), true);
+  assert.equal(isRefundEligible({ ...CHARGED, failureKind: 'pre_paid_call_fatal', providerConsumed: false }), true);
 });
 
 test('RP-04 the default is NO REFUND — eligibility must be positively named', () => {
   // Unclassified buckets are exactly where our own exceptions land.
   for (const kind of ['other_failure', 'openai_unknown', 'unknown', '', 'internal_fatal_after_paid_call']) {
-    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, paidCallConsumed: false }), false,
+    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, providerConsumed: false }), false,
       `"${kind}" is not a named provider failure and must not refund`);
   }
   // Non-strings and missing context fail closed rather than throwing.
   for (const kind of [null, undefined, {}, [], 42, true, Symbol('x')]) {
-    assert.doesNotThrow(() => isRefundEligible({ ...CHARGED, failureKind: kind, paidCallConsumed: false }));
-    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, paidCallConsumed: false }), false);
+    assert.doesNotThrow(() => isRefundEligible({ ...CHARGED, failureKind: kind, providerConsumed: false }));
+    assert.equal(isRefundEligible({ ...CHARGED, failureKind: kind, providerConsumed: false }), false);
   }
   assert.equal(isRefundEligible({}), false, 'no context at all must not refund');
   assert.equal(isRefundEligible(), false, 'no argument at all must not refund');
@@ -137,7 +137,7 @@ test('RP-06 WITNESS A — a numeric Stage-1 model still fails, but refunds nothi
     'the witness must still throw — we did not paper over it');
 
   // It is an internal fault, and calibration runs after the paid call.
-  assert.equal(isRefundEligible({ ...CHARGED, failureKind: 'other_failure', paidCallConsumed: true }), false,
+  assert.equal(isRefundEligible({ ...CHARGED, failureKind: 'other_failure', providerConsumed: true }), false,
     'witness A must not refund');
 });
 
@@ -156,7 +156,7 @@ test('RP-07 WITNESS B — a hostile raw_texts element still fails, but refunds n
   assert.throws(() => (out.ocr_text?.raw_texts || []).join('|'), TypeError,
     'the witness must still throw at the log join');
 
-  assert.equal(isRefundEligible({ ...CHARGED, failureKind: 'internal_fatal_after_paid_call', paidCallConsumed: true }), false,
+  assert.equal(isRefundEligible({ ...CHARGED, failureKind: 'internal_fatal_after_paid_call', providerConsumed: true }), false,
     'witness B must not refund');
 });
 
@@ -179,33 +179,50 @@ test('RP-08 every refundDailyQuota call site is gated by isRefundEligible', () =
     'no refund may be gated on quotaCharged alone');
 });
 
-test('RP-09 paidCallConsumed is set at every paid upstream boundary', () => {
-  // Two paid Anthropic calls sit after the quota charge: the serialOCR early
-  // exit and Stage 1. Both must mark the quota as consumed.
-  assert.match(src, /let paidCallConsumed = false;/, 'the flag must exist');
-  const afterOcr = src.slice(src.indexOf('await ocrSerialLabel('), src.indexOf('await ocrSerialLabel(') + 220);
-  assert.match(afterOcr, /paidCallConsumed = true/,
-    'the serialOCR paid call must mark the quota consumed');
-  const afterStage1 = src.slice(src.indexOf('recognition = await runStage1();'),
-                                src.indexOf('recognition = await runStage1();') + 420);
-  assert.match(afterStage1, /paidCallConsumed = true/,
-    'Stage 1 must mark the quota consumed immediately after it returns');
+test('RP-09 consumption is marked at the PROVIDER RESPONSE, not at helper return', () => {
+  // THIS TEST WAS THE FALSE ORACLE THAT LET ROUND-5 HIGH-1 SHIP. It asserted
+  // that the string `paidCallConsumed = true` appeared within 220 characters
+  // of the call — which passes happily while the assignment sits on the WRONG
+  // SIDE of the billing boundary. It checked that a statement existed, not
+  // that it meant anything.
+  //
+  // Source-text assertions cannot establish runtime refund behaviour. The real
+  // proof now lives in tests/refund-lifecycle.test.mjs, which drives the real
+  // handler and counts `decrement_user_daily_scan` calls. What remains here is
+  // only the structural claim that source CAN carry: that the mark happens at
+  // `res.ok` inside each helper, before the body is touched.
+  const ledger = /createProviderLedger\(\)/;
+  assert.match(src, ledger, 'the request must use a provider ledger');
+
+  // Anthropic: both helpers mark on the provider's own success response.
+  for (const helper of ['async function recognize(', 'async function ocrSerialLabel(']) {
+    const body = src.slice(src.indexOf(helper), src.indexOf(helper) + 3000);
+    assert.match(body, /if \(res\.ok\) onBilled\?\.\('anthropic'/,
+      `${helper} must mark consumption at res.ok`);
+    // And it must come BEFORE the body is read — that is the whole fix.
+    assert.ok(body.indexOf('onBilled?.(') < body.indexOf('await res.json()'),
+      `${helper} must mark consumption BEFORE reading the body`);
+  }
+
+  // The old, wrong primitive must be gone.
+  assert.equal(/paidCallConsumed\s*=\s*true/.test(src), false,
+    'no helper-return-based consumption marker may remain');
 });
 
 test('RP-10 the outer fatal catch classifies by whether the paid call was consumed', () => {
   // EQUIVALENT-MUTANT NOTE. Collapsing this to a constant `pre_paid_call_fatal`
-  // does NOT produce a refund — `isRefundEligible` checks `paidCallConsumed`
+  // does NOT produce a refund — `isRefundEligible` checks `providerConsumed`
   // first and unconditionally, so the invariant still blocks it. That is
   // defence in depth working as intended. It is pinned here anyway so the
   // classification cannot silently drift into something a future edit trusts,
   // and so the two gates stay independently observable.
   assert.match(src,
-    /const fatalKind = paidCallConsumed \? 'internal_fatal_after_paid_call' : 'pre_paid_call_fatal';/,
-    'the outer catch must classify on paidCallConsumed');
+    /const fatalKind = providerLedger\.consumed \? 'internal_fatal_after_paid_call' : 'pre_paid_call_fatal';/,
+    'the outer catch must classify on the provider ledger');
 
   // Both gates are independently load-bearing: each alone refuses the refund.
-  assert.equal(isRefundEligible({ quotaCharged: true, failureKind: 'internal_fatal_after_paid_call', paidCallConsumed: false }), false,
+  assert.equal(isRefundEligible({ quotaCharged: true, failureKind: 'internal_fatal_after_paid_call', providerConsumed: false }), false,
     'classification alone must refuse an internal fatal');
-  assert.equal(isRefundEligible({ quotaCharged: true, failureKind: 'stage1_timeout', paidCallConsumed: true }), false,
+  assert.equal(isRefundEligible({ quotaCharged: true, failureKind: 'stage1_timeout', providerConsumed: true }), false,
     'the paid-call invariant alone must refuse a named provider failure');
 });

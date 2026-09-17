@@ -1007,14 +1007,20 @@ test('OAI-30 the current engine is byte-for-byte unchanged', () => {
   // The ticket forbids modifying the existing engine. These are the exact
   // artefacts the current path is built from.
   assert.match(analyzeSrc, /const MODEL_VISION = 'claude-sonnet-4-6';/);
-  assert.match(analyzeSrc, /async function recognize\(images, language, apiKey, attemptTimeoutMs = 12000\)/);
+  // ROUND 6: the signature gained an `onBilled` callback. That is a deliberate,
+  // authorised change — it is how the provider's BILLING BOUNDARY is recorded,
+  // at `res.ok`, before the response body is touched. The model, token cap and
+  // request shape are what this test exists to pin, and those are unchanged.
+  assert.match(analyzeSrc, /async function recognize\(images, language, apiKey, attemptTimeoutMs = 12000, onBilled = null\)/);
+  assert.match(analyzeSrc, /if \(res\.ok\) onBilled\?\.\('anthropic'/,
+    'the billing boundary must be recorded at the provider response');
   assert.match(analyzeSrc, /model: MODEL_VISION,\s*\n\s*max_tokens: 1500,/);
   // And with the flag off, the ONLY call the branch can make is the old one.
   const region = analyzeSrc.slice(
     analyzeSrc.indexOf('if (recognitionEngine !== RECOGNITION_ENGINE_OPENAI)'),
     analyzeSrc.indexOf('const openaiCap ='),
   );
-  assert.match(region, /timed\('stage1_vision', withTimeout\(\s*recognize\(imageList, lang, apiKey, stage1Cap\)/);
+  assert.match(region, /timed\('stage1_vision', withTimeout\(\s*recognize\(imageList, lang, apiKey, stage1Cap, onBilled\)/);
   // Assert on CODE, not commentary — a comment naming the constant is fine,
   // a call reaching it is not.
   const code = region

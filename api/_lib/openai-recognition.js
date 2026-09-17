@@ -297,6 +297,12 @@ export async function recognizeWithOpenAI(images, {
   safetyIdentifier = null,
   fetchImpl = fetch,
   env = process.env,
+  // BILLING BOUNDARY callback. Invoked the moment OpenAI answers 2xx — tokens
+  // have been generated and charged by then, and everything after it (body
+  // read, JSON parse, contract validation, refusal/incomplete checks) can
+  // throw. A caller that falls back to another provider must still know this
+  // attempt was billed. Round-6: a 200 that fails OUR schema is still billed.
+  onBilled = null,
 } = {}) {
   if (!apiKey) throw new Error('[OpenAI] OPENAI_API_KEY not configured');
   if (!Array.isArray(images) || images.length === 0) throw new Error('[OpenAI] no images supplied');
@@ -374,6 +380,8 @@ export async function recognizeWithOpenAI(images, {
     }
     throw new Error(`[OpenAI] network error after ${elapsed}ms: ${scrubKey(err?.message, env)}`);
   }
+
+  if (res.ok) onBilled?.('openai', `http_${res.status}`);
 
   if (!res.ok) {
     // Clear AFTER the body read, not before (security review L1): clearing

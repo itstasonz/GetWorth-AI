@@ -1029,7 +1029,7 @@ Respond ONLY with valid JSON:
 // §3  STAGE 1 — RECOGNITION (Claude Vision)
 // ═══════════════════════════════════════════════════════
 
-async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
+async function recognize(images, language, apiKey, attemptTimeoutMs = 12000, onBilled = null) {
   const prompt = buildRecognitionPrompt(language);
 
   const content = [
@@ -1065,6 +1065,13 @@ async function recognize(images, language, apiKey, attemptTimeoutMs = 12000) {
       messages: [{ role: 'user', content }],
     }),
   }, 0, innerAttemptMs);
+
+  // BILLING BOUNDARY. A 2xx from Anthropic means tokens were generated and
+  // charged. Record it HERE, before the body is touched — `res.json()`, the
+  // max_tokens check, the content lookup and parseJSON all run after this
+  // point and all can throw. Marking after the helper returns (round 5) left
+  // every one of those failures refunding a billed call.
+  if (res.ok) onBilled?.('anthropic', `http_${res.status}`);
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -1253,14 +1260,47 @@ export const REFUNDABLE_FAILURE_KINDS = Object.freeze([
   'openai_no_fallback_budget',
 ]);
 
+// ── PROVIDER-ATTEMPT LIFECYCLE (round 6) ────────────────────────────────────
+//
+// `paidCallConsumed` was the WRONG PRIMITIVE. It marked "our helper returned",
+// which is a different event from "the provider billed us". Everything between
+// those two points — reading the body, parsing JSON, validating the contract,
+// finding content, trimming it — runs AFTER the provider has already charged.
+// A throw anywhere in that window left the flag false and refunded a billed
+// call. Two HIGH findings, both reproduced through the real handler.
+//
+// The honest evidence that a request may have incurred billable usage is the
+// PROVIDER'S OWN SUCCESS RESPONSE. That is the earliest point we can claim it,
+// and it is recorded inside each call helper at `res.ok` — BEFORE we touch the
+// body, so no local processing failure can unwind it.
+//
+// MONOTONIC: UNCONSUMED -> CONSUMED, never back. A fallback to a second
+// provider cannot erase the fact that the first one already billed.
+export function createProviderLedger() {
+  const attempts = [];
+  let consumed = false;
+  return {
+    // `evidence` names WHY we believe billing occurred, so telemetry and
+    // reviewers can audit the claim rather than trust the flag.
+    markConsumed(provider, evidence) {
+      consumed = true;
+      attempts.push({ provider, evidence });
+    },
+    get consumed() { return consumed; },
+    get attempts() { return attempts.slice(); },
+    summary() { return attempts.map((a) => `${a.provider}:${a.evidence}`).join(',') || 'none'; },
+  };
+}
+
 // The one decision point. Pure and exported so the policy can be tested and
 // mutated directly, rather than inferred from which catch block ran.
 export function isRefundEligible(ctx = {}) {
-  const { failureKind, paidCallConsumed, quotaCharged } = ctx;
+  const { failureKind, providerConsumed, quotaCharged } = ctx;
   // Nothing was taken, so there is nothing to give back.
   if (quotaCharged !== true) return false;
-  // (a) THE INVARIANT. We were billed and got a result; the fault is ours.
-  if (paidCallConsumed === true) return false;
+  // (a) THE INVARIANT. A provider already billed for this request; a later
+  //     failure of OURS cannot turn it back into a refundable scan.
+  if (providerConsumed === true) return false;
   // (b) Refund only a positively named provider failure. An unclassified
   //     error — including every internal one — is not refundable.
   if (typeof failureKind !== 'string') return false;
@@ -3549,7 +3589,7 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
 // §9.5  SERIAL OCR — lightweight label text extraction
 // ═══════════════════════════════════════════════════════
 
-async function ocrSerialLabel(imageBase64, apiKey) {
+async function ocrSerialLabel(imageBase64, apiKey, onBilled = null) {
   const res = await fetchWithRetry('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -3570,6 +3610,10 @@ async function ocrSerialLabel(imageBase64, apiKey) {
       }],
     }),
   });
+  // BILLING BOUNDARY — same reasoning as recognize(). Everything below this
+  // line (res.json(), the content lookup, .trim()) runs after Anthropic has
+  // charged, and every one of them can throw. Round-5 HIGH-1 lived here.
+  if (res.ok) onBilled?.('anthropic', `http_${res.status}`);
   if (!res.ok) return '';
   const data = await res.json();
   return data.content?.find(c => c.type === 'text')?.text?.trim() || '';
@@ -3726,7 +3770,10 @@ async function handleRequest(req) {
   // been billed, so no later failure of ours may return the user's quota. This
   // is a fact about billing, not a guess about an exception's type, so it also
   // covers internal faults nobody has enumerated yet.
-  let paidCallConsumed = false;
+  // Round 6 — replaces the paidCallConsumed boolean. Monotonic, and marked at
+  // the PROVIDER'S success response rather than at our helper's return.
+  const providerLedger = createProviderLedger();
+  const onBilled = (provider, evidence) => providerLedger.markConsumed(provider, evidence);
 
   try {
     // Reject oversized bodies before JSON parsing (5 images × 5 MB + envelope).
@@ -3824,8 +3871,7 @@ async function handleRequest(req) {
 
     // ── SERIAL OCR EARLY EXIT — skip full pipeline (rate-limited above) ──
     if (serialOCR) {
-      const ocrText = await ocrSerialLabel(imageList[0], apiKey);
-      paidCallConsumed = true; // a billed Anthropic call returned
+      const ocrText = await ocrSerialLabel(imageList[0], apiKey, onBilled);
       return json({ ocrText, raw_texts: [ocrText] }, 200, cors);
     }
 
@@ -3886,7 +3932,7 @@ async function handleRequest(req) {
       if (recognitionEngine !== RECOGNITION_ENGINE_OPENAI) {
         recognitionEngineUsed = RECOGNITION_ENGINE_CURRENT;
         return timed('stage1_vision', withTimeout(
-          recognize(imageList, lang, apiKey, stage1Cap),
+          recognize(imageList, lang, apiKey, stage1Cap, onBilled),
           stage1Cap,
           'Stage 1 recognition'
         ));
@@ -3901,7 +3947,7 @@ async function handleRequest(req) {
       plog('Stage 1 OpenAI start', `cap=${openaiCap}ms rem=${rem()}ms`);
       try {
         const out = await timed('stage1_openai', withTimeout(
-          recognizeWithOpenAI(imageList, { timeoutMs: openaiCap, language: lang }),
+          recognizeWithOpenAI(imageList, { timeoutMs: openaiCap, language: lang, onBilled }),
           openaiCap + 500,
           'Stage 1 OpenAI recognition'
         ));
@@ -3938,11 +3984,11 @@ async function handleRequest(req) {
     let recognition;
     try {
       recognition = await runStage1();
-      // THE BOUNDARY. runStage1 has returned, so the paid Vision call was
-      // billed and delivered. Everything below this line — calibration,
-      // logging, correction injection, prompt building — is OUR code, and a
-      // fault in it is not the provider's fault and is not refundable.
-      paidCallConsumed = true;
+      // NOTE: consumption is NOT marked here. It was in round 5, and that was
+      // the defect — by the time runStage1 returns, the provider has long since
+      // billed, and any throw inside it (body read, parse, contract validation)
+      // skipped this line and refunded a billed call. The ledger is now marked
+      // inside each helper at the provider's own success response.
       recognition = calibrateRecognition(recognition);
 
       // ── USER CORRECTION INJECTION — highest-priority signal ──
@@ -4036,11 +4082,11 @@ async function handleRequest(req) {
       // `failureKind` was already computed here and used for logs only; it is
       // now load-bearing, and it is gated by whether the paid call was actually
       // consumed. An internal TypeError after a successful Vision call
-      // classifies as `other_failure` with paidCallConsumed=true, and refunds
+      // classifies as `other_failure` with providerConsumed=true, and refunds
       // nothing.
-      const refundEligible = isRefundEligible({ failureKind, paidCallConsumed, quotaCharged });
+      const refundEligible = isRefundEligible({ failureKind, providerConsumed: providerLedger.consumed, quotaCharged });
       if (refundEligible) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
-      blog(`[Pipeline] Stage 1 FAILED (${failureKind}) — returning 503 (quota ${refundEligible ? 'refunded' : `NOT refunded: internal fault after paid call=${paidCallConsumed}`}): ${msg}`);
+      blog(`[Pipeline] Stage 1 FAILED (${failureKind}) — returning 503 (quota ${refundEligible ? 'refunded' : `NOT refunded: provider already billed [${providerLedger.summary()}]`}): ${msg}`);
       return json({
         error: lang === 'he'
           ? 'הזיהוי נכשל — אנא נסה שוב'
@@ -5053,8 +5099,8 @@ async function handleRequest(req) {
     // witness lands exactly here — an object in `ocr_text.raw_texts` survives
     // calibration and throws at the Stage-1-end log line, which sits OUTSIDE
     // the Stage-1 try.
-    const fatalKind = paidCallConsumed ? 'internal_fatal_after_paid_call' : 'pre_paid_call_fatal';
-    if (isRefundEligible({ failureKind: fatalKind, paidCallConsumed, quotaCharged })) {
+    const fatalKind = providerLedger.consumed ? 'internal_fatal_after_paid_call' : 'pre_paid_call_fatal';
+    if (isRefundEligible({ failureKind: fatalKind, providerConsumed: providerLedger.consumed, quotaCharged })) {
       await refundDailyQuota(getSupabase(), authUser?.id); quotaCharged = false;
     }
     console.error('[Pipeline] Fatal:', error);
