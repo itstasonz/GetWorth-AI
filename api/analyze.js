@@ -3974,7 +3974,10 @@ async function handleRequest(req) {
         blog(`[OpenAI] failed (${openaiFallbackReason}) — falling back to the current engine (cap=${fallbackCap}ms): ${detail}`);
         recognitionEngineUsed = RECOGNITION_ENGINE_CURRENT;
         return timed('stage1_vision', withTimeout(
-          recognize(imageList, lang, apiKey, fallbackCap),
+          // Round 7: the fallback MUST carry the ledger too. Omitting it here
+          // (round 6) left a BILLED Anthropic 200 unmarked on the whole
+          // OpenAI-outage path, so any later internal throw refunded it.
+          recognize(imageList, lang, apiKey, fallbackCap, onBilled),
           fallbackCap,
           'Stage 1 recognition'
         ));
@@ -3989,6 +3992,24 @@ async function handleRequest(req) {
       // billed, and any throw inside it (body read, parse, contract validation)
       // skipped this line and refunded a billed call. The ledger is now marked
       // inside each helper at the provider's own success response.
+      //
+      // ROUND 7 — MAKE THE DOWNSTREAM DEPENDENCY EXPLICIT, NOT ASSUMED.
+      // Five further billable providers run only after this point: Google
+      // Vision, two Voyage embedding calls, Stage 2, and the rescue pricing
+      // call. None marks the ledger itself; all are safe only because Stage 1
+      // has already marked it. That is transitive safety through a single line
+      // — exactly the property whose absence, one call site away, produced the
+      // round-6 HIGH. A reached-but-unconsumed state here means a provider
+      // returned 2xx without being recorded, so say so loudly rather than
+      // letting the next refund decision quietly inherit it.
+      //
+      // Deliberately NOT a throw: throwing here would itself be a post-billing
+      // internal fault, which is the exact shape this ticket exists to stop.
+      if (!providerLedger.consumed) {
+        console.error('[Refund] INVARIANT: Stage 1 delivered a recognition but no provider ' +
+          'consumption was recorded — a billable call is unmarked. Downstream providers ' +
+          '(Vision, embeddings, Stage 2, rescue) are about to run uncovered.');
+      }
       recognition = calibrateRecognition(recognition);
 
       // ── USER CORRECTION INJECTION — highest-priority signal ──
