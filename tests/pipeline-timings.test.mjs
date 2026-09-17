@@ -256,7 +256,17 @@ test('RG-03 the budget ceiling is unchanged — this is not a timeout increase',
   // request more time.
   assert.match(src, /const BUDGET_MS = 50_000;/, 'BUDGET_MS must remain 50s');
   assert.match(src, /export const config = \{ maxDuration: 60 \};/, 'maxDuration must remain 60s');
-  assert.match(src, /Math\.max\(Math\.min\(28_000, rem\(\) - 12_000\), 8_000\)/, 'Stage 1 cap unchanged');
+  // ROUND 8: the Stage-1 cap expression changed shape, but NOT its ceiling.
+  // It was `max(min(28_000, rem()-12_000), 8_000)`. The 8s FLOOR was removed,
+  // because a floor clamping UPWARD is what manufactured a doomed provider call
+  // on a collapsed budget — the round-7 slow-upload exploit. Removing a floor
+  // lowers the minimum; it cannot raise a timeout. The ceiling is still 28s and
+  // is now expressed through named constants shared with the ingestion gate, so
+  // the two cannot drift apart.
+  assert.match(src, /const STAGE1_INTENDED_CAP_MS   = 28_000;/, 'Stage 1 ceiling must remain 28s');
+  assert.match(src, /const STAGE1_BUDGET_RESERVE_MS = 12_000;/, 'Stage 1 reserve must remain 12s');
+  assert.match(src, /Math\.min\(STAGE1_INTENDED_CAP_MS, rem\(\) - STAGE1_BUDGET_RESERVE_MS\)/, 'Stage 1 cap unchanged in ceiling');
+  assert.equal(/Math\.max\(Math\.min\(28_000/.test(src), false, 'the upward-clamping floor must not return');
   assert.match(src, /Math\.max\(8_000, Math\.min\(24_000, rem\(\) - STAGE2_RESERVE_MS\)\)/, 'Stage 2 cap unchanged');
 });
 

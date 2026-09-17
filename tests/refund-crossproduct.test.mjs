@@ -234,6 +234,30 @@ test('XP-STRUCT every provider host in source is inside a ledger-covered helper'
       'add onBilled marking at its res.ok, or classify it as downstream-of-Stage-1 here');
   }
 
+  // ── ORDERING, NOT MEMBERSHIP (round 8, MEDIUM-2) ────────────────────────
+  // The check above asserts a NAME is in a set. That is not the property being
+  // claimed. Round 7 proved it: inserting a `fallbackVision(...)` call ABOVE
+  // `await runStage1()` left all 43 cases green, because nothing looked at call
+  // ORDER. A DOWNSTREAM classification is only true if the call genuinely
+  // cannot execute before Stage 1 has marked the ledger — so assert that.
+  const stage1Idx = ANALYZE.indexOf('recognition = await runStage1();');
+  assert.ok(stage1Idx > -1, 'the Stage-1 call must be locatable');
+
+  for (const fn of DOWNSTREAM) {
+    // Every INVOCATION of a downstream provider helper inside handleRequest
+    // must appear after the Stage-1 call that marks the ledger.
+    const callRe = new RegExp(String.raw`(?<![\w.])${fn}\s*\(`, 'g');
+    for (const m of ANALYZE.matchAll(callRe)) {
+      // Skip the declaration itself.
+      const before = ANALYZE.slice(Math.max(0, m.index - 30), m.index);
+      if (/function\s$/.test(before) || /async function\s$/.test(before)) continue;
+      assert.ok(m.index > stage1Idx,
+        `${fn}() is called at source index ${m.index}, BEFORE await runStage1() at ${stage1Idx}. ` +
+        'A downstream-classified provider call cannot run before the ledger is marked — ' +
+        'either move it after Stage 1, or thread onBilled into it and reclassify it DIRECT.');
+    }
+  }
+
   // The direct markers must exist and sit at the provider response.
   for (const fn of DIRECT) {
     const body = ANALYZE.slice(ANALYZE.indexOf(`function ${fn}(`));

@@ -64,7 +64,16 @@ consumption evidence exists. Both reproduced as `refunds: 1 → 0`:
 - **`upstream_network_error` in the post-response window.** The body dies
   mid-transfer after a 200.
 
-Both windows are narrow (Anthropic's non-streaming endpoint normally emits
+**Correction (round 8): "narrow" was true of only one of them.** The
+post-response ambiguity below is genuinely narrow. The *pre-provider* window is
+not — round 7 showed a client can open it on demand by delivering its upload
+slowly, collapsing the Stage-1 budget until the provider is aborted
+mid-generation. That was a deterministic, repeatable free-paid-call loop, and it
+is fixed in round 8 by an ingestion boundary that refuses the request rather
+than calling a provider on a doomed clock. What remains here is only the
+genuinely narrow case:
+
+Both remaining windows are narrow (Anthropic's non-streaming endpoint normally emits
 headers with the body), but they are real, and they mean the entitlement gap
 **grew** in round 6 rather than holding steady.
 
@@ -101,9 +110,11 @@ It did **not** establish the converse. `no 2xx ⇒ unbilled` is **false**:
   provider, and we never see a 2xx. Reproduced: `stage1_timeout`, `refunds=1`.
 - A network failure after the provider began generating is in the same position.
 
-So the current policy **refunds some billed attempts** (abort/network cases) and
-**consumes some unbilled ones** is not claimed either way. Any accounting design
-must treat these as **UNKNOWN billing state**, not assume free. Inventing
+So the current policy **refunds some attempts that may well have been billed**
+(the abort and mid-transfer cases). Whether it also *consumes* some genuinely
+unbilled ones is **not claimed either way** — we have no evidence either
+direction. Any accounting design must treat both as **UNKNOWN billing state**,
+never as "free". Inventing
 certainty here would be the same error the security work spent three rounds
 undoing.
 
@@ -126,3 +137,50 @@ undoing.
 and the refund sites in `api/analyze.js`. Do not reuse `decrement_user_daily_scan`
 for entitlement restoration — it is the abuse-accounting lever, and overloading
 it a second time is how this conflation started.
+
+---
+
+## 6. Round-7 addendum — the gap grew on the OpenAI-fallback path
+
+Recorded because the entitlement cost of a security fix must not be absorbed
+silently. This is the direct trade of round 7's HIGH fix.
+
+Round 7 threaded the provider ledger into the Anthropic **fallback** call
+(`recognize(..., onBilled)` on the OpenAI-failure path). That closed a real
+free-paid-call loop: a billed fallback 200 followed by an internal fault was
+being refunded. The cost is that **five failure classes moved from refund to no
+refund on that path**, verified `refunds: 1 → 0`:
+
+`body-parse` · `content-extract` · `contract/parse` · `truncation` · `calibration`
+
+In every case the user still receives a 503 with no price — **the delta is the
+allowance, never the number** — but the scan is now consumed where it previously
+was not.
+
+**Latency of the exposure.** `RECOGNITION_ENGINE` defaults to `current`
+(`api/_lib/openai-recognition.js`, `resolveRecognitionEngine`), so the
+OpenAI-fallback path does not execute in the default configuration. This
+expansion is therefore **latent behind an off-by-default flag** in the currently
+verified setup — real, but not currently reachable in production as configured.
+It becomes live the moment that flag is turned on.
+
+## 7. Round-8 addendum — what the ingestion boundary changed
+
+Round 8 removed the largest entitlement *risk* rather than adding to it, but it
+did change who gets rejected and when.
+
+- **Slow uploads are now refused before the provider is called.** If ingestion
+  consumes enough of the budget that Stage 1 cannot be given its full intended
+  cap, the request returns `503 INGESTION_TOO_SLOW` with **no quota charged and
+  no provider call**. Previously the same user got a doomed provider call, a
+  mid-generation abort, a 503, and a refund. Net effect for an honest user on a
+  slow connection: **the same 503, sooner, with no scan consumed** — strictly
+  better — but it is a new rejection reason that did not exist before, and a
+  user on a genuinely slow network will now see it where they previously saw a
+  (failing) scan attempt.
+- **serialOCR provider failures now return 503 and refund**, where they
+  previously returned `200` with an empty string and silently consumed the
+  scan. That is an entitlement *improvement*: the user keeps the allowance and
+  can tell the difference between "no text in the photo" and "OCR failed".
+
+Neither changes a price or an identity.

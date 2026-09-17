@@ -284,6 +284,74 @@ async function verifyJWT(authHeader) {
 // Client strips the data URI prefix before sending (raw base64 only).
 const IMAGE_MAX_DECODED_BYTES = 5 * 1024 * 1024;
 
+// ── REQUEST INGESTION CEILING (GW-PROMPT-INJECTION-001 round 8) ─────────────
+// The single canonical request-body limit: 5 images x 5 MB + envelope. It was
+// previously a bare literal enforced ONLY through Content-Length, and the
+// comment beside it said the check is skipped when that header is absent — so
+// a chunked request bypassed it entirely. Measured before this fix: 157 MB was
+// fully buffered and JSON-parsed with no 413.
+//
+// Content-Length remains a useful EARLY rejection. It is not the boundary.
+// The authoritative enforcement is the running byte count in readBodyBounded(),
+// which stops consuming the moment the ceiling is crossed — before
+// Buffer.concat, before JSON.parse, before auth is trusted, before quota, and
+// before any provider call.
+const REQUEST_BODY_MAX_BYTES = 26_214_400;
+
+// serialOCR outcomes. "The provider found no text" and "the provider failed"
+// are different facts and must never render as the same empty string.
+export const OCR_FOUND            = 'ocr_found';
+export const OCR_NO_TEXT          = 'ocr_no_text';
+export const OCR_PROVIDER_FAILURE = 'ocr_provider_failure';
+
+// Stage-1's intended provider budget, extracted so the ingestion gate and the
+// cap cannot drift apart. These are the values Stage 1 already used inline.
+const STAGE1_INTENDED_CAP_MS   = 28_000;
+const STAGE1_BUDGET_RESERVE_MS = 12_000;
+
+// Thrown by readBodyBounded so the handler can distinguish "too big" from
+// "malformed" — a size failure is not a JSON failure.
+class BodyTooLargeError extends Error {
+  constructor(bytes) {
+    super(`Request body exceeds ${REQUEST_BODY_MAX_BYTES} bytes`);
+    this.name = 'BodyTooLargeError';
+    this.bytesSeen = bytes;
+  }
+}
+
+// A WHATWG ReadableStream (the Edge/Web Request shape) as an async iterable, so
+// one bounded reader serves both runtimes.
+async function* streamToAsyncIterable(stream) {
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      if (value) yield value;
+    }
+  } finally {
+    try { reader.releaseLock(); } catch { /* already released */ }
+  }
+}
+
+// Read an async byte stream with a HARD running ceiling.
+// Overshoot is bounded by one chunk: the counter is checked after each chunk
+// arrives, because a stream yields whole chunks and we cannot refuse a partial
+// one. We stop before retaining it, so the ceiling bounds RETAINED bytes.
+async function readBodyBounded(asyncChunks, max = REQUEST_BODY_MAX_BYTES) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of asyncChunks) {
+    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : Buffer.from(chunk);
+    total += buf.length;                      // RAW BYTES, not string length —
+                                              // a multi-byte character must not
+                                              // read as one byte.
+    if (total > max) throw new BodyTooLargeError(total);
+    chunks.push(buf);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 function validateImages(imageList) {
   if (!Array.isArray(imageList) || imageList.length === 0) return 'No image data provided';
   if (imageList.length > 5) return 'Too many images (max 5)';
@@ -3614,9 +3682,29 @@ async function ocrSerialLabel(imageBase64, apiKey, onBilled = null) {
   // line (res.json(), the content lookup, .trim()) runs after Anthropic has
   // charged, and every one of them can throw. Round-5 HIGH-1 lived here.
   if (res.ok) onBilled?.('anthropic', `http_${res.status}`);
-  if (!res.ok) return '';
+
+  // ROUND 8 (MEDIUM-1) — A PROVIDER FAILURE IS NOT A VALID EMPTY OCR RESULT.
+  // This returned `''` on every non-2xx, which the caller could not tell apart
+  // from "the provider succeeded and the image genuinely has no text". The
+  // client got HTTP 200 with an empty string, could not know anything failed,
+  // and would retry — burning another scan each time. Three outcomes now, so
+  // the caller can distinguish them.
+  if (!res.ok) {
+    return {
+      outcome: OCR_PROVIDER_FAILURE,
+      httpStatus: res.status,
+      // Reuse the Stage-1 taxonomy rather than inventing a second one, so the
+      // refund policy sees a class it already knows.
+      failureKind:
+        (res.status === 401 || res.status === 403) ? 'anthropic_auth_error'
+        : res.status === 429                       ? 'anthropic_rate_limited'
+        : res.status >= 500                        ? 'anthropic_upstream_error'
+        : 'anthropic_api_error',
+    };
+  }
   const data = await res.json();
-  return data.content?.find(c => c.type === 'text')?.text?.trim() || '';
+  const text = data.content?.find(c => c.type === 'text')?.text?.trim() || '';
+  return { outcome: text ? OCR_FOUND : OCR_NO_TEXT, text };
 }
 
 
@@ -3739,8 +3827,23 @@ async function handleRequest(req) {
   // concurrently with it. Semantics unchanged: the body is only USED after
   // auth succeeds, and a parse failure surfaces exactly where it used to.
   const bodyPromise = (async () => {
-    try { return await req.json(); }
-    catch (e) { return { __parse_error: e?.message || 'invalid JSON' }; }
+    try {
+      // Round 8 — bound the read on BOTH paths. The Node adapter bounds its own
+      // stream; a Web Request (Edge) exposes `body` as a ReadableStream, so
+      // bound that here rather than letting the platform's req.json() buffer an
+      // arbitrary payload. If neither is available, fall back to req.json().
+      if (req.body && typeof req.body.getReader === 'function') {
+        const raw = await readBodyBounded(streamToAsyncIterable(req.body));
+        return raw ? JSON.parse(raw) : {};
+      }
+      return await req.json();
+    } catch (e) {
+      // A SIZE failure is not a JSON failure. Keep them distinguishable so the
+      // handler can answer 413 vs 400 and so telemetry does not conflate a
+      // hostile upload with a malformed one.
+      if (e instanceof BodyTooLargeError) return { __body_too_large: e.bytesSeen };
+      return { __parse_error: e?.message || 'invalid JSON' };
+    }
   })();
   try {
     // Fire-and-forget pool warmup — result ignored, errors swallowed.
@@ -3779,13 +3882,20 @@ async function handleRequest(req) {
     // Reject oversized bodies before JSON parsing (5 images × 5 MB + envelope).
     // Content-Length may be absent on chunked transfers; skip the check if so.
     const bodyLen = parseInt(req.headers.get('content-length') || '0', 10);
-    if (bodyLen > 26_214_400) {
+    if (bodyLen > REQUEST_BODY_MAX_BYTES) {
       return json({ error: 'Request body too large' }, 413, cors);
     }
 
     // SCAN-008 (B-3): body was parsed concurrently with auth (above). A parse
     // failure throws here — same catch path and 500 status as before.
     const parsedBody = await timed('body_parse', bodyPromise);
+    // SIZE FAILURE != JSON FAILURE. The streaming counter is the authoritative
+    // boundary; the Content-Length check above is only an early rejection, and
+    // a chunked request skips it. Same 413 contract either way.
+    if (parsedBody?.__body_too_large) {
+      blog(`[Ingestion] REJECTED oversized body — stopped at ${parsedBody.__body_too_large}B (ceiling ${REQUEST_BODY_MAX_BYTES}B)`);
+      return json({ error: 'Request body too large' }, 413, cors);
+    }
     if (parsedBody?.__parse_error) throw new Error(`Body parse failed: ${parsedBody.__parse_error}`);
     const { imageData, images: imagesArr, lang: rawLang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = parsedBody;
     // Round 4 — `lang` reaches a template at the Stage-1 log line, and `${obj}`
@@ -3818,6 +3928,51 @@ async function handleRequest(req) {
     const imgErr = validateImages(imageList);
     if (imgErr) return json({ error: imgErr }, 400, cors);
     blog(`[Timing] images validated count=${imageList.length}`);
+
+    // ── INGESTION / AI-PROCESSING BOUNDARY (round 8, HIGH-A) ────────────────
+    //
+    // Everything above is REQUEST INGESTION: reading the body, parsing it and
+    // validating the images. Its duration is chosen by the CLIENT. Everything
+    // below is AI PROCESSING, and its budget must not be a function of how
+    // slowly the photo arrived.
+    //
+    // The defect: `stage1Cap` derives from `rem()`, which counts from request
+    // arrival. A client that drips its upload for ~34s collapsed the cap to its
+    // 8s floor, so `recognize()` aborted at 7.5s — against a generation the
+    // comment below says routinely needs 15-25s. That produced `stage1_timeout`,
+    // a REFUNDABLE class, with the ledger unconsumed: a real Anthropic call was
+    // billed and the quota handed straight back. Unbounded, deterministic and
+    // client-triggered.
+    //
+    // The wall is real — the platform kills the function at maxDuration — so we
+    // cannot hand back budget that no longer exists. The honest boundary is:
+    // EITHER the provider gets its intended budget, OR it is not called at all.
+    // Never call it on a clock that guarantees a mid-generation abort and then
+    // treat the resulting timeout as refundable.
+    //
+    // A PARTIAL budget is still the exploit. Gating only on the 8s floor left a
+    // 24s stall producing a 14s cap — the provider still aborted mid-generation
+    // and the timeout was still refundable, so the attacker simply tunes the
+    // stall. The invariant has to be all-or-nothing: the provider receives the
+    // SAME intended budget a fast upload would give it, or it is not called.
+    //
+    // Both constants below are the ones Stage 1 already uses, not new policy.
+    // Placed BEFORE the rate-limit/quota charge, so a rejected request consumes
+    // no quota and reaches no provider — nothing to refund, because nothing was
+    // taken.
+    const ingestMs = Date.now() - TREQ;
+    if (rem() < STAGE1_INTENDED_CAP_MS + STAGE1_BUDGET_RESERVE_MS) {
+      blog(`[Ingestion] REJECTED — ingestion took ${ingestMs}ms, leaving rem=${rem()}ms; ` +
+           'Stage 1 cannot be funded. No quota charged, no provider called.');
+      return json({
+        error: lang === 'he'
+          ? 'העלאת התמונה איטית מדי — אנא נסה שוב'
+          : 'Upload took too long — please try again',
+        code: 'INGESTION_TOO_SLOW',
+        retryable: true,
+      }, 503, cors);
+    }
+    blog(`[Timing] ingestion complete in ${ingestMs}ms — AI budget rem=${rem()}ms`);
 
     // ── PHASE 3: RATE LIMITING — fail closed on DB error ──
     const supa = getSupabase();
@@ -3871,8 +4026,28 @@ async function handleRequest(req) {
 
     // ── SERIAL OCR EARLY EXIT — skip full pipeline (rate-limited above) ──
     if (serialOCR) {
-      const ocrText = await ocrSerialLabel(imageList[0], apiKey, onBilled);
-      return json({ ocrText, raw_texts: [ocrText] }, 200, cors);
+      // A one-shot OCR endpoint: there is no second recognition path to fall
+      // back to, so a provider failure must surface AS a failure. Reporting it
+      // as 200 + empty string told the client nothing had gone wrong and
+      // invited a retry that burned another scan.
+      const ocr = await ocrSerialLabel(imageList[0], apiKey, onBilled);
+      if (ocr.outcome === OCR_PROVIDER_FAILURE) {
+        // Non-2xx means the provider did not bill, so the ledger is unconsumed
+        // and the existing refund policy applies unchanged — the same gate
+        // Stage 1 uses, not a second one.
+        const eligible = isRefundEligible({
+          failureKind: ocr.failureKind, providerConsumed: providerLedger.consumed, quotaCharged,
+        });
+        if (eligible) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
+        blog(`[SerialOCR] provider failed (${ocr.failureKind}, http ${ocr.httpStatus}) — 503 (quota ${eligible ? 'refunded' : 'NOT refunded'})`);
+        return json({
+          error: lang === 'he' ? 'קריאת הטקסט נכשלה — אנא נסה שוב' : 'Text extraction failed — please try again',
+          code: 'OCR_PROVIDER_FAILURE',
+          retryable: true,
+        }, 503, cors);
+      }
+      // OCR_FOUND or OCR_NO_TEXT — both are genuine successful results.
+      return json({ ocrText: ocr.text, raw_texts: [ocr.text] }, 200, cors);
     }
 
     // ── PIPELINE STAGES ──
@@ -3894,7 +4069,9 @@ async function handleRequest(req) {
     // Sonnet Vision generating the full recognition JSON routinely needs 15-25 s,
     // and the 45 s budget leaves this headroom unused.
     // With 45 s budget and ~2 s auth+parse → ~42 s remaining → cap = 28 s.
-    const stage1Cap = Math.max(Math.min(28_000, rem() - 12_000), 8_000);
+    // The ingestion gate guarantees rem() can fund the full intended cap, so
+    // this can no longer be clamped upward by a floor into a doomed call.
+    const stage1Cap = Math.min(STAGE1_INTENDED_CAP_MS, rem() - STAGE1_BUDGET_RESERVE_MS);
     const imgByteEst = imageList.reduce((sum, b64) => sum + Math.round(b64.length * 0.75), 0);
     plog('Stage 1 start', `images=${imageList.length} ~bytes=${imgByteEst} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
 
@@ -5157,12 +5334,12 @@ function toWebRequest(nodeReq) {
         if (nodeReq.body !== undefined && nodeReq.body !== null && nodeReq.body !== '') {
           return typeof nodeReq.body === 'string' ? JSON.parse(nodeReq.body) : nodeReq.body;
         }
-        // Otherwise read the raw request stream.
-        const chunks = [];
-        for await (const chunk of nodeReq) {
-          chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-        }
-        const raw = Buffer.concat(chunks).toString('utf8');
+        // Otherwise read the raw request stream — BOUNDED. This loop previously
+        // accumulated without limit and concatenated afterwards, which is how a
+        // chunked request with no Content-Length bypassed the ceiling entirely.
+        // readBodyBounded stops consuming the moment the limit is crossed, so
+        // the hostile payload is never fully buffered and never parsed.
+        const raw = await readBodyBounded(nodeReq);
         return raw ? JSON.parse(raw) : {};
       })();
       return _bodyPromise;
