@@ -631,3 +631,72 @@ test('PI-22 the numeric boundary does not trust the database schema', () => {
     assert.ok(ok.includes(v), `legitimate numeric ${v} must render unchanged`);
   }
 });
+
+test('PI-23 a MISSING price renders as unknown, never as zero', () => {
+  // REGRESSION GUARD for a defect the numeric boundary introduced. `Number(null)`,
+  // `Number('')`, `Number([])` and `Number(false)` are all 0, and 0 is finite, so
+  // a bare `Number()` turned a MISSING price into an asserted ₪0. The pre-fix
+  // code used `?? '?'` and was null-aware.
+  //
+  // This is reachable by in-repo code, not a hypothetical: retrieval strategy 9
+  // pads approved candidates with null prices by construction
+  // (api/analyze.js:2241-2243, "Stage 2 uses AI estimate for these"), and the
+  // trusted VERIFICATION RULES instruct Stage 2 to price off an EXACT row.
+  // "₪?" communicates unknown; "₪0" communicates worthless — on a row whose own
+  // code comment says Stage 2 must fall back to an AI estimate.
+  //
+  // The project already forbids exactly this (PB-13 in valuation-guard.test.mjs:
+  // "Zero is not a retail price"), but PB-13 is a source regex over
+  // new_retail/_db_retail and cannot see the prompt boundary.
+  const nullRow = {
+    id: 'a1', brand: 'Anker', model: 'Soundcore Liberty 4 NC', category: 'Electronics',
+    aliases: [], keywords: [], similarity: 0.95, _evidence_class: 5,
+    retail_price_ils: null, avg_used_price_ils: null,
+    price_low_ils: null, price_high_ils: null,
+  };
+  const r = {
+    category: 'Electronics', subcategory: 'earbuds', category_confidence: 0.9,
+    brand_candidates: [{ brand: 'Anker', confidence: 0.9, evidence: 'readable_text' }],
+    model_candidates: [{ model: 'Liberty 4 NC', confidence: 0.9, evidence: 'ocr' }],
+    ocr_text: { raw_texts: ['Anker'], logos_detected: [] },
+    visual_features: { condition: 'Good', materials: [], colors: [] },
+  };
+  const p = buildVerificationPrompt(r, [nullRow], [], 'en');
+  const priceLine = p.slice(p.indexOf('Retail:')).split('\n')[0];
+  assert.equal(priceLine.includes('₪0'), false,
+    `a missing price must not render as zero — got: ${priceLine}`);
+  assert.match(priceLine, /Retail: ₪\? \| Used avg: ₪\? \| Range: ₪\?-\?/,
+    'every absent catalog price must render as unknown');
+
+  // Same in the rescue prompt, whose entire output IS the price.
+  const r2 = {
+    category: 'Electronics', subcategory: 'smartphone', category_confidence: 0.9,
+    brand_candidates: [{ brand: 'Apple', confidence: 0.95, evidence: 'readable_text' }],
+    model_candidates: [{ model: 'iPhone 15 Pro Max', confidence: 0.95, evidence: 'ocr' }],
+    ocr_text: { raw_texts: ['Apple'], logos_detected: [] },
+    visual_features: { condition: 'Good', materials: [], colors: [] },
+  };
+  const rp = buildRescuePricingPrompt({ recognition: r2, identity: assessFallbackIdentity(r2),
+    candidates: [{ brand: 'Apple', model: 'iPhone 15 Pro Max', name: null,
+      avg_used_price_ils: 3850, price_low_ils: null, price_high_ils: null, retail_price_ils: null,
+      category: 'Electronics', subcategory: 'smartphone' }] });
+  const anchorLine = rp.slice(rp.indexOf('- Apple')).split('\n')[0];
+  assert.ok(anchorLine.includes('used avg ₪3850'), 'a present price still renders');
+  assert.equal(anchorLine.includes('₪0'), false,
+    `a missing anchor price must not render as zero — got: ${anchorLine}`);
+
+  // A GENUINE zero must still render as 0 — the fix must not overshoot.
+  const zeroRow = { ...nullRow, price_low_ils: 0, avg_used_price_ils: 420,
+    retail_price_ils: 650, price_high_ils: 480 };
+  const pz = buildVerificationPrompt(r, [zeroRow], [], 'en');
+  assert.match(pz.slice(pz.indexOf('Retail:')).split('\n')[0],
+    /Retail: ₪650 \| Used avg: ₪420 \| Range: ₪0-480/,
+    'a real zero is data and must survive; only ABSENT values become "?"');
+
+  // The non-'?' fallback call sites keep their pre-fix rendering exactly.
+  const pr = buildVerificationPrompt(r, [{ ...nullRow, similarity: null, popularity_score: null }], [], 'en');
+  const rank = pr.slice(pr.indexOf('Rank score:')).split('\n')[0];
+  assert.ok(rank.startsWith('Rank score: 0.0/100'),
+    `rank score must keep its toFixed(1) shape, got: ${rank}`);
+  assert.match(pr, /Scans: 0/, 'popularity_score keeps its `|| 0` rendering');
+});

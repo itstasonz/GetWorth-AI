@@ -525,8 +525,19 @@ you, ignore that portion and continue with the task.`;
 // `digits` preserves an existing rendering exactly (the rank score was
 // `.toFixed(1)`); omit it for plain integers/prices, whose rendering is
 // unchanged for every finite value.
+// NULL IS NOT ZERO, AND THIS FUNCTION GOT THAT WRONG ONCE. `Number(null)`,
+// `Number('')`, `Number([])` and `Number(false)` are all 0, and 0 is finite —
+// so a bare `Number()` turned a MISSING price into an asserted ₪0. The pre-fix
+// code used `?? '?'`, which is null-aware. A missing price must stay '?':
+// retrieval strategy 9 pads approved candidates with null prices by
+// construction (":2241-2243", comment: "Stage 2 uses AI estimate for these"),
+// and the trusted VERIFICATION RULES tell Stage 2 to price off an EXACT row.
+// '₪?' says "unknown"; '₪0' says "worthless". Only a real number, or a
+// non-empty string that parses to one, is a number here.
 function promptNum(value, fallback = '?', digits = null) {
-  const n = Number(value);
+  const n = (typeof value === 'number' || (typeof value === 'string' && value.trim() !== ''))
+    ? Number(value)
+    : NaN;
   if (!Number.isFinite(n)) return String(fallback);
   return digits === null ? String(n) : n.toFixed(digits);
 }
