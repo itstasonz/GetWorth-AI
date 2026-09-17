@@ -457,3 +457,108 @@ zero-width and bidi survivors · two uncapped arrays (`model_candidates`,
 `visionData.logos`) · `CLASS_LABEL` prototype lookup · FU-1 (`public.products`
 column types unverifiable from this repo) · FU-2 (`RECOGNITION_SCHEMA` never
 applied).
+
+---
+
+## Round 5 — the refund loop as a class, and the complete 47-site disposition
+
+### The refund policy
+
+**INVARIANT: an internal application failure must NEVER refund a paid upstream
+call that already succeeded.**
+
+Reaching a catch block is not evidence that the provider failed. The old policy
+refunded on `quotaCharged` alone, inside a `try` that wraps both the paid Vision
+call and all of our own post-processing. So any throw after that call — a
+`TypeError` in calibration, a logging bug, a future unknown exception — returned
+the user's quota while GetWorth had already been billed.
+
+Refund is now positive and fail-closed, requiring **both**:
+
+1. **`paidCallConsumed === false`** — a fact about billing, not a guess about an
+   exception's type. It therefore covers internal faults nobody has enumerated.
+   Set at both paid boundaries: the `serialOCR` early exit and the moment
+   `runStage1()` returns.
+2. **an explicitly named provider failure class** — `REFUNDABLE_FAILURE_KINDS`,
+   frozen, with no catch-all. `other_failure` and `openai_unknown` are
+   deliberately absent: those are the unclassified buckets where our own
+   exceptions land.
+
+`isRefundEligible()` is pure and exported, so the policy is asserted directly
+rather than inferred from which catch block ran. Genuine transport failures stay
+refundable via a new named class, `upstream_network_error`, rather than arriving
+through the `other_failure` catch-all.
+
+#### Refund-site inventory
+
+| Site | Failure source | Classification | Paid call occurred? | Refund? | Why |
+|---|---|---|---|---|---|
+| `:3955` Stage-1 catch | provider timeout / 4xx / 5xx / network | named upstream class | No | **YES** | user got nothing, we were not billed for a result |
+| `:3955` Stage-1 catch | our own throw after `runStage1()` returned | `other_failure` | **Yes** | **NO** | our bug; refunding funds free paid calls |
+| `:3955` Stage-1 catch | anything unclassified | `other_failure` | either | **NO** | fail closed by default |
+| `:4964` outer fatal | fault before any paid call | `pre_paid_call_fatal` | No | **YES** | charged but never billed; costs nothing |
+| `:4964` outer fatal | fault after a paid call | `internal_fatal_after_paid_call` | **Yes** | **NO** | witness B lands here |
+| pre-charge failures | malformed body, rate limit, auth | n/a | No | **NO** | `quotaCharged` false — nothing to refund |
+
+#### The two witnesses, after the fix
+
+Both still fail. **Input validation was not weakened to avoid the exception** —
+only the refund decision changed.
+
+- **A — `{"model": 910006178}`**: still throws `m0.model.toLowerCase is not a
+  function` in `calibrateRecognition`. Classified `other_failure` with
+  `paidCallConsumed = true` ⇒ **no refund**.
+- **B — hostile object in `ocr_text.raw_texts`**: still passes calibration and
+  throws at the Stage-1-end log line, which sits outside the Stage-1 try.
+  Classified `internal_fatal_after_paid_call` ⇒ **no refund**.
+
+#### Mutation proof — 11 applied, 11 killed
+
+Dropping the invariant, bypassing classification, adding a catch-all to the
+allow-list, re-gating on `quotaCharged`, replacing eligibility with truthiness,
+routing unknown errors into the refundable class, removing either
+`paidCallConsumed` assignment, removing the `quotaCharged` gate, and collapsing
+the outer-catch classification — every one fails a test.
+
+One mutation (collapsing the outer-catch classification to a constant) is an
+**equivalent mutant**: the `paidCallConsumed` gate runs first and unconditionally,
+so it cannot produce a refund. It is pinned anyway by PI/RP-10 so the two gates
+stay independently observable.
+
+### HIGH-3 — all 47 sites disposed
+
+Full matrix: every `promptSafe` / `promptSafeList` / `promptNum` / `fence` call
+inside both prompt sinks, replaced one at a time with a raw pass-through.
+
+| Disposition | Count |
+|---|---|
+| **A — load-bearing** (removal fails a test) | **46** |
+| **B — provably redundant** | **1** |
+| **C — misclassified / non-security** | **0** |
+| **Unexplained survivors** | **0** |
+
+**The one B:** site #38, `promptNum(c.avg_used_price_ils)` in the rescue anchors.
+`if (!(c.avg_used_price_ils > 0)) continue;` (`:5560`) runs before the row
+renders, so any non-numeric value gives `NaN > 0 === false` and the row is
+dropped entirely — no fence-breaking content can reach the prompt through that
+field, and for values that do survive the filter `promptNum` is an identity.
+The redundancy holds only while the filter exists, so PI-30 asserts **the
+filter**, not the guard. If the filter is ever removed, #38 becomes load-bearing
+again and PI-30 fails.
+
+### Test methodology — fixtures must enter at production trust level
+
+Round 4 exposed a fixture-design fault: tests fed already-sanitized values into
+downstream sinks, making a real production guard invisible.
+
+| Source | Trust level | First sanitization point | Final sink |
+|---|---|---|---|
+| `body.corrections` | untrusted client | `sanitizeClientCorrections` (`:3696`) | `buildVerificationPrompt` `:873` |
+| `fetchCorrections(userId)` | **untrusted DB text**, never sanitized | **none** — `:873` is the only guard | same |
+| `body.refineModel` | untrusted client | `typeof` gate + `promptSafe` (`:3884`) | `:880` |
+| Stage-1 output | untrusted (derived from the client's image) | the sink's own `promptSafe` | `:913-925` |
+| catalog rows | untrusted DB | the sink's own `promptSafe`/`promptNum` | `:852-857`, `:5653` |
+| Google Vision | untrusted third party | the sink's own `promptSafe` | `:891-894` |
+
+The PI-19 corrections fixture now models `fetchCorrections` — the **weaker** of
+the two producers — and enters raw. That made sites #16, #17 and #18 observable.

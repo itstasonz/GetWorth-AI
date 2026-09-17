@@ -1208,7 +1208,70 @@ async function checkRateLimit(supa, ip, userId) {
   }
 }
 
+// ── REFUND POLICY (GW-PROMPT-INJECTION-001 round 5) ─────────────────────────
+//
+// INVARIANT: an INTERNAL application failure must NEVER refund a paid upstream
+// call that already succeeded.
+//
+// Reaching a catch block is not evidence of an upstream failure. The previous
+// policy refunded on `quotaCharged` alone, so ANY throw after the paid Vision
+// call — a TypeError in calibration, a logging bug, a future unknown exception
+// — handed the user's quota back while GetWorth had already been billed. That
+// is an unbounded supply of free paid calls, and it needs no attack to reach:
+// a product whose model number arrives as a JSON number is enough
+// (`m0.model.toLowerCase is not a function`).
+//
+// Refund is now POSITIVE and FAIL-CLOSED. It requires BOTH:
+//   (a) the paid upstream call did NOT deliver a usable result, and
+//   (b) an explicitly classified upstream failure class we intend to refund.
+// The default, for anything unclassified or unforeseen, is NO REFUND.
+//
+// (a) is the load-bearing half: it is a fact about what we were billed for,
+// not a guess about an exception's type, so it holds for internal faults
+// nobody has enumerated yet. (b) is an independent second gate, so that a
+// future edit which forgets to set the flag still cannot refund on an
+// unclassified error.
+
+// Upstream/provider failure classes GetWorth intentionally refunds. Every one
+// names a specific provider-side outcome. Deliberately ABSENT: `other_failure`
+// and `openai_unknown` — the unclassified buckets, which is exactly where an
+// internal fault lands. Adding a catch-all here reopens the loop.
+export const REFUNDABLE_FAILURE_KINDS = Object.freeze([
+  'stage1_timeout',
+  'anthropic_auth_error',
+  'anthropic_rate_limited',
+  'anthropic_upstream_error',
+  'anthropic_api_error',
+  'upstream_network_error',
+  'pre_paid_call_fatal',
+  'openai_timeout',
+  'openai_network',
+  'openai_auth',
+  'openai_rate_limited',
+  'openai_upstream_5xx',
+  'openai_not_configured',
+  'openai_no_fallback_budget',
+]);
+
+// The one decision point. Pure and exported so the policy can be tested and
+// mutated directly, rather than inferred from which catch block ran.
+export function isRefundEligible(ctx = {}) {
+  const { failureKind, paidCallConsumed, quotaCharged } = ctx;
+  // Nothing was taken, so there is nothing to give back.
+  if (quotaCharged !== true) return false;
+  // (a) THE INVARIANT. We were billed and got a result; the fault is ours.
+  if (paidCallConsumed === true) return false;
+  // (b) Refund only a positively named provider failure. An unclassified
+  //     error — including every internal one — is not refundable.
+  if (typeof failureKind !== 'string') return false;
+  // `openai_http_4xx/5xx` is generated from an observed status code, so it
+  // cannot be enumerated above. Matched explicitly, never by truthiness.
+  if (/^openai_http_(4|5)\d{2}$/.test(failureKind)) return true;
+  return REFUNDABLE_FAILURE_KINDS.includes(failureKind);
+}
+
 // Refund a previously-charged daily scan after a failed scan. Best-effort.
+// Callers MUST gate on isRefundEligible() — this function does not re-check.
 async function refundDailyQuota(supa, userId) {
   if (!supa || !userId) return;
   try {
@@ -3658,6 +3721,12 @@ async function handleRequest(req) {
 
   // Hoisted so both the Stage 1 catch and the outer fatal catch can refund.
   let quotaCharged = false;
+  // Round 5 — the refund invariant's load-bearing fact. Set to true the moment
+  // a PAID upstream call returns a usable result. From that point GetWorth has
+  // been billed, so no later failure of ours may return the user's quota. This
+  // is a fact about billing, not a guess about an exception's type, so it also
+  // covers internal faults nobody has enumerated yet.
+  let paidCallConsumed = false;
 
   try {
     // Reject oversized bodies before JSON parsing (5 images × 5 MB + envelope).
@@ -3756,6 +3825,7 @@ async function handleRequest(req) {
     // ── SERIAL OCR EARLY EXIT — skip full pipeline (rate-limited above) ──
     if (serialOCR) {
       const ocrText = await ocrSerialLabel(imageList[0], apiKey);
+      paidCallConsumed = true; // a billed Anthropic call returned
       return json({ ocrText, raw_texts: [ocrText] }, 200, cors);
     }
 
@@ -3868,6 +3938,11 @@ async function handleRequest(req) {
     let recognition;
     try {
       recognition = await runStage1();
+      // THE BOUNDARY. runStage1 has returned, so the paid Vision call was
+      // billed and delivered. Everything below this line — calibration,
+      // logging, correction injection, prompt building — is OUR code, and a
+      // fault in it is not the provider's fault and is not refundable.
+      paidCallConsumed = true;
       recognition = calibrateRecognition(recognition);
 
       // ── USER CORRECTION INJECTION — highest-priority signal ──
@@ -3950,10 +4025,22 @@ async function handleRequest(req) {
         // (architecture review). openaiFallbackReason is already the stable
         // classification, so reuse it rather than adding a second taxonomy.
         : openaiFallbackReason                            ? `openai_${openaiFallbackReason}`
+        // Round 5: a genuine transport failure is an UPSTREAM failure and stays
+        // refundable, but it has to be named to be refundable — it can no
+        // longer arrive via the `other_failure` catch-all, because that bucket
+        // is where our own exceptions land.
+        : /fetch failed|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|socket hang up|network error/i.test(msg)
+                                                          ? 'upstream_network_error'
         : 'other_failure';
-      // Refund the daily quota — a failed scan must not consume the user's allowance.
-      if (quotaCharged) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
-      blog(`[Pipeline] Stage 1 FAILED (${failureKind}) — returning 503 (quota refunded): ${msg}`);
+      // Round 5 — REFUND IS NO LONGER IMPLIED BY REACHING THIS CATCH.
+      // `failureKind` was already computed here and used for logs only; it is
+      // now load-bearing, and it is gated by whether the paid call was actually
+      // consumed. An internal TypeError after a successful Vision call
+      // classifies as `other_failure` with paidCallConsumed=true, and refunds
+      // nothing.
+      const refundEligible = isRefundEligible({ failureKind, paidCallConsumed, quotaCharged });
+      if (refundEligible) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
+      blog(`[Pipeline] Stage 1 FAILED (${failureKind}) — returning 503 (quota ${refundEligible ? 'refunded' : `NOT refunded: internal fault after paid call=${paidCallConsumed}`}): ${msg}`);
       return json({
         error: lang === 'he'
           ? 'הזיהוי נכשל — אנא נסה שוב'
@@ -4959,9 +5046,17 @@ async function handleRequest(req) {
     return json({ content: [{ type: 'text', text: JSON.stringify(result) }] }, 200, cors);
 
   } catch (error) {
-    // Refund daily quota on any fatal failure so a broken scan isn't charged.
-    // No-op if already refunded or never charged.
-    if (quotaCharged) { await refundDailyQuota(getSupabase(), authUser?.id); quotaCharged = false; }
+    // Round 5 — a fatal here is refundable ONLY if it happened before a paid
+    // upstream call delivered. That case is genuine: the user's quota was
+    // charged and we were never billed, so returning it costs nothing and
+    // creates no loop. After a paid call, this is our bug, and the second
+    // witness lands exactly here — an object in `ocr_text.raw_texts` survives
+    // calibration and throws at the Stage-1-end log line, which sits OUTSIDE
+    // the Stage-1 try.
+    const fatalKind = paidCallConsumed ? 'internal_fatal_after_paid_call' : 'pre_paid_call_fatal';
+    if (isRefundEligible({ failureKind: fatalKind, paidCallConsumed, quotaCharged })) {
+      await refundDailyQuota(getSupabase(), authUser?.id); quotaCharged = false;
+    }
     console.error('[Pipeline] Fatal:', error);
     return json({ error: 'Internal server error' }, 500, cors);
   }
