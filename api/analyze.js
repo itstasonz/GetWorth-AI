@@ -457,6 +457,46 @@ async function fetchWithRetry(url, options, maxRetries = 1, attemptTimeoutMs = 1
 // Newline collapsing is the load-bearing half of (1): without it a payload can
 // emit a blank line followed by "SYSTEM: ..." and visually become a new section.
 
+// ── TOTAL BOUNDARY COERCION (GW-PROMPT-INJECTION-001 round 4) ───────────────
+// No boundary helper may throw on ANY input, because throwing IS the exploit.
+//
+// `String(x)`, `Number(x)`, `${x}` and `.trim()` all invoke coercion the CLIENT
+// controls, and JSON.parse can build a value whose coercion throws:
+// `{"toString":1,"valueOf":2}` has neither method callable, so ToPrimitive
+// raises TypeError. Round 3 shipped that throw inside the Stage-1 try, whose
+// catch REFUNDS THE QUOTA after the paid Vision call has already completed —
+// an unbounded supply of free paid calls at zero quota cost.
+//
+// The contract is: decide on `typeof` FIRST, coerce only what is already a
+// primitive. Never let an object reach an implicit conversion. Both helpers
+// below are total, and every request-boundary sanitizer routes through them.
+
+// Text fields. A string is itself; a finite number or a boolean is a
+// deliberate primitive and renders as one. EVERYTHING else — null, undefined,
+// object, array, function, symbol, bigint, NaN, Infinity — is "absent" and
+// yields ''. Objects are never implicitly stringified.
+function boundaryText(value) {
+  const t = typeof value;
+  if (t === 'string')  return value;
+  if (t === 'number')  return Number.isFinite(value) ? String(value) : '';
+  if (t === 'boolean') return String(value);
+  return '';
+}
+
+// Integer fields, clamped. Mirrors promptNum's gate so the two agree: only a
+// real number, or a non-empty string that parses to one, is numeric. null,
+// undefined, '', [], {} and booleans are ABSENT and take the fallback — they
+// must never silently become 0. (MISSING != ZERO; see promptNum.)
+function boundaryInt(value, { min, max, fallback }) {
+  const t = typeof value;
+  let n;
+  if (t === 'number') n = value;
+  else if (t === 'string' && value.trim() !== '') n = Number(value);
+  else return fallback;
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(Math.max(Math.trunc(n), min), max);
+}
+
 // Fence delimiters. Chosen to contain '<' / '>' so that stripping those two
 // characters from every quarantined value (below) makes the tokens unforgeable.
 const FENCE_OPEN  = (label) => `<<<UNTRUSTED_${label}>>>`;
@@ -476,10 +516,15 @@ const PROMPT_STR_MAX = 120;
 // - removes '<' and '>' entirely, which makes FENCE_OPEN/FENCE_CLOSE unforgeable
 //   and also kills XML/tag-shaped injection. Product names do not contain them.
 // - collapses runs of whitespace, trims, and hard-caps length
+//
+// TOTAL BY CONSTRUCTION — see boundaryText. `String(value)` was the throw site
+// behind the round-3 refund DoS, so the type decision happens BEFORE any
+// coercion can run.
 function promptSafe(value, max = PROMPT_STR_MAX) {
-  if (value === null || value === undefined) return '';
+  const text = boundaryText(value);
+  if (!text) return '';
   let out = '';
-  for (const ch of String(value)) {
+  for (const ch of text) {
     const c = ch.codePointAt(0);
     if (c === 0x09 || c === 0x0A || c === 0x0D) { out += ' '; continue; }
     if (c < 0x20 || c === 0x7F) continue;
@@ -580,8 +625,11 @@ export function sanitizeClientCorrections(input) {
     const original  = promptSafe(entry.original);
     const corrected = promptSafe(entry.corrected);
     if (!original || !corrected) continue;
-    const n = Number(entry.count);
-    const count = Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), 999) : 1;
+    // Round 4: was a raw `Number(entry.count)`. That is a THIRD throw site in
+    // this function, independent of the two promptSafe calls above and not
+    // covered by promptNum's gate — `Number({"toString":1,"valueOf":2})` and
+    // `Number(Symbol())` both raise TypeError on a value the client chooses.
+    const count = boundaryInt(entry.count, { min: 1, max: 999, fallback: 1 });
     out.push({ original, corrected, count });
   }
   return out;
@@ -3052,7 +3100,11 @@ export function composeBrandModelName(brand, model) {
 // is rebuilt from the sanitized parts ONLY when stripping changed something —
 // otherwise the user's text is preserved verbatim.
 export function sanitizeUserCorrection(refineModel, stage1Brand) {
-  const raw = refineModel.trim();
+  // Round 4 — total. `.trim()` on a non-string throws, and this is an exported
+  // boundary function: the handler already gates on `typeof` and wraps the
+  // value in promptSafe, but a second caller must not be able to reintroduce
+  // the refund DoS by forgetting to. boundaryText decides on typeof first.
+  const raw = boundaryText(refineModel).trim();
   const spaceIdx = raw.indexOf(' ');
   const corrBrand = spaceIdx > 0 ? raw.slice(0, spaceIdx) : (stage1Brand || null);
   const rawModel  = spaceIdx > 0 ? raw.slice(spaceIdx + 1) : raw;
@@ -3619,7 +3671,14 @@ async function handleRequest(req) {
     // failure throws here — same catch path and 500 status as before.
     const parsedBody = await timed('body_parse', bodyPromise);
     if (parsedBody?.__parse_error) throw new Error(`Body parse failed: ${parsedBody.__parse_error}`);
-    const { imageData, images: imagesArr, lang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = parsedBody;
+    const { imageData, images: imagesArr, lang: rawLang = 'he', hints = [], corrections: clientCorrections = [], serialOCR = false, refineModel = null, scan_uuid: clientScanUuid = null } = parsedBody;
+    // Round 4 — `lang` reaches a template at the Stage-1 log line, and `${obj}`
+    // invokes client-controlled coercion exactly as String() does. The
+    // destructuring default only covers `undefined`, so an object still got
+    // through. Normalise once, here, rather than at each use: a non-string lang
+    // compared false everywhere downstream anyway, so this changes no behaviour
+    // beyond removing the throw.
+    const lang = typeof rawLang === 'string' ? rawLang : 'he';
     // TIMING: req.json() blocks until the full request body has uploaded. On Edge
     // this upload time is inside the budget clock — this log isolates it.
     blog(`[Timing] body read+parsed (req.json) bodyLen=${bodyLen}B`);
@@ -3815,7 +3874,14 @@ async function handleRequest(req) {
       // When the user explicitly selects an alternative or types a correction,
       // refineModel carries their intent (e.g. "Logitech G900").
       // Override Stage 1 so Stage 2 treats this as a mandatory identity.
-      if (refineModel) {
+      // Round 4 — the guard is `typeof`, not truthiness. `{"toString":1,
+      // "valueOf":2}` is truthy, and every later read of it (promptSafe, and
+      // before round 3 a bare .trim()) threw INSIDE this try, whose catch
+      // refunds the quota after the paid Vision call already ran. A malformed
+      // correction is not a scan failure: skip the block and let the scan
+      // proceed on Stage 1's own identity, which is what happens when no
+      // correction is sent at all.
+      if (typeof refineModel === 'string' && refineModel.trim()) {
         // SCAN-013 (B-20): sanitizeUserCorrection strips a (possibly doubled)
         // brand prefix from the model and rebuilds the stored correction text,
         // so every downstream consumer (_user_correction passthrough, Stage 2
@@ -3856,6 +3922,10 @@ async function handleRequest(req) {
         // free paid Vision calls. promptSafe also strips CR/LF so a payload
         // cannot forge lines in the log stream.
         console.log(`[Analyze correction received] refineModel="${promptSafe(refineModel)}" → brand="${corrBrand}" model="${corrModel}"`);
+      } else if (refineModel !== null && refineModel !== undefined) {
+        // Observable, not silent: a correction was sent and could not be used.
+        // `typeof` only — never interpolate the value itself, that is the throw.
+        console.log(`[Analyze correction ignored] refineModel was ${typeof refineModel}, expected a non-empty string`);
       }
     } catch (stage1Err) {
       // Stage 1 failure is NOT a product classification — it is a retryable error.

@@ -344,3 +344,116 @@ excluded digits and could not see `UNTRUSTED_STAGE1` at all. It is now visible
 and measurable, and is **not** one of the seven approved corrections, so it has
 not been changed. Moving the parenthetical after `FENCE_CLOSE('STAGE1')` is a
 one-line fix for a follow-up ticket.
+
+---
+
+## Round 4 — HIGH-2 and HIGH-3
+
+### HIGH-2 — total request-boundary coercion
+
+`String(x)`, `Number(x)`, `${x}` and `.trim()` all invoke coercion the **client**
+controls, and `JSON.parse` can build a value whose coercion throws:
+`{"toString":1,"valueOf":2}` has both properties present but neither callable,
+so `ToPrimitive` raises `TypeError`. A throw inside the Stage-1 `try` reaches a
+catch that returns a retryable 503 **and refunds the quota**, after the paid
+Vision call has already completed — unbounded free paid calls at zero quota
+cost. Round 3 closed one instance (`.trim()`); the throw moved to `String()`.
+
+Two total helpers now carry the contract — both decide on `typeof` **before**
+any coercion, so neither can throw on any input:
+
+- `boundaryText(value)` — string is itself; a finite number or boolean renders
+  as a primitive; **everything else** (null, undefined, object, array,
+  function, symbol, bigint, NaN, Infinity) is absent and yields `''`. Objects
+  are never implicitly stringified.
+- `boundaryInt(value, {min,max,fallback})` — mirrors `promptNum`'s gate, so the
+  two agree. Absent values take the fallback; they never silently become `0`.
+
+Sites closed, all verified by execution:
+
+| Site | Was | Severity |
+|---|---|---|
+| `promptSafe` | `String(value)` | **HIGH** — inside the Stage-1 try, on the refund path |
+| `sanitizeClientCorrections` `count` | raw `Number(entry.count)` | MEDIUM — pre-quota, unhandled 500 |
+| `sanitizeUserCorrection` | raw `.trim()` | HIGH — exported; a second caller could reintroduce the DoS |
+| handler `refineModel` gate | `if (refineModel)` (truthy) | **HIGH** — the entry point for the above |
+| handler `lang` | `${lang}` in the Stage-1 log template | MEDIUM — post-quota, pre-paid-call |
+
+The `refineModel` gate is now `typeof refineModel === 'string' && refineModel.trim()`.
+A malformed correction is **not** a scan failure: the block is skipped and the
+scan proceeds on Stage 1's own identity, exactly as when no correction is sent.
+The skip is logged **by type, never by value** — interpolating the value is
+itself the throw.
+
+**Refund behaviour for real downstream failures is unchanged.** The refund path
+is untouched; only the ability of malformed *client data* to reach it is
+removed.
+
+### HIGH-3 — the §6 oracle tested fencing, not sanitization
+
+§6 declared `SOURCE → SANITIZATION → FENCE → DEPTH → CONSUMER` but asserted only
+fence position. Its payload contained no LF, CR or angle brackets, so it
+rendered **identically whether or not `promptSafe` ran** — nine of this fix's
+own sanitization call sites could be deleted with the whole suite green,
+including the one feeding the rescue sink whose entire output is a price.
+
+The payload now carries CR, LF, angle brackets, a forged fence marker and an
+inline imperative at once. Each source asserts **both**:
+
+- **A — SANITIZATION.** The payload's head and tail must land on one line
+  (`promptSafe` collapses CR/LF to spaces, so a split proves it did not run),
+  the rendered value carries no `<`/`>`/CR/TAB, and no forged marker survives.
+  Asserted on the value's own line — the Stage-1 and catalog blocks are
+  legitimately multi-line, so scanning the whole fenced span would fail on
+  GetWorth's own formatting and prove nothing.
+- **B — FENCE.** The sanitized value sits inside the correct `UNTRUSTED_*` span.
+
+Coverage: 19 sources in the Stage-2 sink and 6 in the rescue sink, including
+`refineModel`, `corrections`/`hints`, `corrBrand`, `corrModel`,
+`identity.brand`, `identity.model`, `recognition.category`, Stage-1 OCR,
+`visual_features.condition`, brand/model candidate values and evidence, catalog
+brand, model/name, aliases, keywords, `_sibling_of`, Google Vision values, and
+the rescue-pricing inputs.
+
+**Negative proof:** all nine previously-green sites now fail. Deleting
+sanitization from any one of them fails PI-19 or PI-20.
+
+---
+
+## Follow-ups — recorded, NOT fixed in round 4
+
+Out of scope by instruction. None is on the quota-refund path.
+
+### FU-4 — five non-request coercion throws in `buildVerificationPrompt` (LOW)
+
+Measured, one field hostile at a time with a `{"toString":1,"valueOf":2}` bomb:
+
+| Field | Mechanism |
+|---|---|
+| `category_confidence` | `Math.round(x * 100)` — arithmetic invokes ToPrimitive |
+| `brand_candidates[0].confidence` | same |
+| `brand_candidates[0].evidence` | `.includes('packaging')` on a non-string |
+| `catalog.similarity` | `Number(c.similarity) * 100` |
+| `catalog._evidence_class` | `CLASS_LABEL[x]` — object as property key |
+
+**Not request-controlled.** These come from Stage-1 model output and DB rows;
+the client-settable `brand`/`model` slots are filled from `corrBrand`/`corrModel`,
+which are strings by construction, and `evidence` is the literal
+`'user_correction'`.
+
+**Not on the refund path.** Verified: `buildVerificationPrompt` is called from
+`verifyAndPrice`, whose caller catches at the Stage-2 `try` and routes to
+`runPricingRescue`. The scan completes with a rescue price — a
+**fallback-forcing** vector, not a free-paid-call one. No 503, no refund.
+
+Two of the five are already on the standing follow-up list (`CLASS_LABEL`
+prototype lookup; and the raw reads are FU-2's `RECOGNITION_SCHEMA` gap).
+
+### Still open from earlier rounds
+
+`U+0085` / C1 handling · homoglyph fence markers · two GetWorth directives
+rendering inside untrusted spans (FU-3 and the `_sibling_of` sibling warning) ·
+zero-width and bidi survivors · two uncapped arrays (`model_candidates`,
+`visionData.logos`) · `CLASS_LABEL` prototype lookup · FU-1 (`public.products`
+column types unverifiable from this repo) · FU-2 (`RECOGNITION_SCHEMA` never
+applied).
