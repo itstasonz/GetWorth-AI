@@ -184,3 +184,41 @@ did change who gets rejected and when.
   can tell the difference between "no text in the photo" and "OCR failed".
 
 Neither changes a price or an identity.
+
+## 8. Round-8 measurement — the ingestion gate's real cost to honest users
+
+Quantified by the round-8 independent security review, driving a **real HTTP
+server** (not a mocked adapter), so these are wire-accurate:
+
+| Case | Result |
+|---|---|
+| fast upload | `200`, ingest 13 ms, cap 28,000 ms |
+| **legitimate 25 MB over 12 s** | **`503 INGESTION_TOO_SLOW`** — no quota charged, no provider call |
+| legitimate 25 MB over 40 s | `503 INGESTION_TOO_SLOW` — no quota charged |
+| 9 s stall + 3 s rate-limit RPC | `200`, cap 28,000 ms |
+
+**A 25 MB upload taking 12 seconds is entirely ordinary on mobile**, and it is
+now refused. That is the honest cost of the ingestion boundary, and it belongs
+in this ticket rather than in a commit message.
+
+Before round 8 the same user was not served either: they got a doomed provider
+call, a mid-generation abort, a 503, and a refund. So **no user who previously
+received a PRICE now receives none** — the change is that the refusal is
+earlier, cheaper, and does not consume the scan. But the *reason* shown to them
+is new, and a slow-network user will now see `INGESTION_TOO_SLOW` routinely
+where they previously saw a generic recognition failure.
+
+This is the clearest case yet of the A/B split this ticket exists to name:
+**provider-cost accounting** is fully protected, while **user entitlement** on a
+slow connection is bounded by an upload-speed threshold nobody chose as a
+product decision — it fell out of a 50 s budget minus a 28 s provider cap minus
+a 12 s reserve.
+
+### Ingestion timeout — what actually exists
+
+Measured on the real server: Node's HTTP defaults are `requestTimeout = 300000`
+(5 minutes) and `headersTimeout = 60000`. So an ingestion timeout **does** exist
+at the runtime layer — an earlier round-8 note that "no application-level
+ingestion timeout exists" was correct only about the *application*, and
+incomplete. GetWorth's own ingestion gate now fires far earlier than either,
+so the runtime values are defence-in-depth rather than the operative control.

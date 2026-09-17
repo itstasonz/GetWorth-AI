@@ -67,7 +67,7 @@ const JPEG = Buffer.concat([
 // Drives the real handler. `counters.emitted` is what the TEST pushed into the
 // stream; the implementation stops pulling once it rejects, so the gap between
 // emitted and the ceiling is the observable memory property.
-async function drive({ bodyChunks, headers = {}, stallMs = 0, anthropic = null }) {
+async function drive({ bodyChunks, headers = {}, stallMs = 0, anthropic = null, slowQuotaMs = 0 }) {
   const counters = { emitted: 0, providerCalls: 0, refunds: 0, quotaCharges: 0 };
   globalThis.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : String(input?.url ?? input);
@@ -80,6 +80,7 @@ async function drive({ bodyChunks, headers = {}, stallMs = 0, anthropic = null }
     }
     if (url.includes('/rpc/check_and_increment_scan_rate')) {
       counters.quotaCharges++;
+      if (slowQuotaMs) await new Promise((r) => setTimeout(r, slowQuotaMs));
       return new Response(JSON.stringify([{ allowed: true, limit_type: null, daily_count: 1, charged: true }]), { headers: { 'content-type': 'application/json' } });
     }
     if (url.includes('/rpc/decrement_user_daily_scan')) {
@@ -286,4 +287,32 @@ test('IB-12 the counter measures BYTES, not string length (multi-byte UTF-8)', a
     `byte counting must not be fooled by multi-byte characters; ` +
     `ceiling=${CEILING}, accepted=${r.emitted}`);
   assert.equal(r.providerCalls, 0);
+});
+
+test('IB-13 the budget is re-asserted AT THE POINT OF USE, not only at the gate', async () => {
+  // RECOVERED FROM THE ROUND-8 SECURITY REVIEW (witness T5). The ingestion gate
+  // runs ~110 lines before stage1Cap is computed, with the rate-limit RPC — a
+  // network call — in between, so the gate's guarantee is STALE by the time the
+  // budget is spent. Measured before this fix: a 9.5s upload stall passed the
+  // gate at rem=40,461ms, a 5.5s rate-limit RPC followed, cap came out
+  // 22,952ms, the provider was called on a budget that could not fund it,
+  // aborted, and the timeout was REFUNDED. providerCalls=1, refunds=1.
+  //
+  // Checking a budget in one place and spending it in another is the same
+  // check-then-use gap as any other, just in time rather than in state.
+  const r = await drive({
+    bodyChunks: function* () {
+      const b = JSON.stringify({ imageData: JPEG, lang: 'en' });
+      yield b.slice(0, 10); yield b.slice(10);
+    },
+    stallMs: 9_500,              // passes the gate, but only just
+    slowQuotaMs: 5_500,          // then latency eats the margin
+  });
+
+  assert.equal(r.providerCalls, 0,
+    'the provider must not be called on a budget that cannot fund it');
+  assert.equal(r.status, 503);
+  assert.equal(r.body?.code, 'INGESTION_TOO_SLOW');
+  assert.equal(/cap=(\d+)ms/.test(r.log) && Number(/cap=(\d+)ms/.exec(r.log)[1]) < 28_000, false,
+    'no Stage-1 call may run with less than the full intended cap');
 });

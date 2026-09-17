@@ -4069,8 +4069,34 @@ async function handleRequest(req) {
     // Sonnet Vision generating the full recognition JSON routinely needs 15-25 s,
     // and the 45 s budget leaves this headroom unused.
     // With 45 s budget and ~2 s auth+parse → ~42 s remaining → cap = 28 s.
-    // The ingestion gate guarantees rem() can fund the full intended cap, so
-    // this can no longer be clamped upward by a floor into a doomed call.
+    // RE-ASSERT AT THE POINT OF USE. The ingestion gate runs ~110 lines above,
+    // with the rate-limit RPC — a network call — in between, so its guarantee
+    // is STALE here. Measured: a 9.5s upload stall passed the gate at
+    // rem=40,461ms, then a 5.5s rate-limit RPC left cap=22,952ms; the provider
+    // was called on a budget that could not fund it, aborted, and the timeout
+    // was refunded. Checking a budget in one place and spending it in another
+    // is the same check-then-use gap, just in time rather than in state.
+    //
+    // Quota IS charged by now, but no provider has been called, so nothing was
+    // billed: returning the scan here is correct and opens no loop. It routes
+    // through the same refund policy as everything else rather than a second
+    // one — `pre_paid_call_fatal` is exactly what this is.
+    if (rem() < STAGE1_INTENDED_CAP_MS + STAGE1_BUDGET_RESERVE_MS) {
+      const eligible = isRefundEligible({
+        failureKind: 'pre_paid_call_fatal', providerConsumed: providerLedger.consumed, quotaCharged,
+      });
+      if (eligible) { await refundDailyQuota(supa, authUser.id); quotaCharged = false; }
+      blog(`[Ingestion] REJECTED at Stage-1 entry — rem=${rem()}ms cannot fund the intended ` +
+           `${STAGE1_INTENDED_CAP_MS}ms cap. No provider called (quota ${eligible ? 'refunded' : 'NOT refunded'}).`);
+      return json({
+        error: lang === 'he'
+          ? 'העלאת התמונה איטית מדי — אנא נסה שוב'
+          : 'Upload took too long — please try again',
+        code: 'INGESTION_TOO_SLOW',
+        retryable: true,
+      }, 503, cors);
+    }
+    // Now provably exactly STAGE1_INTENDED_CAP_MS — the min can no longer bind.
     const stage1Cap = Math.min(STAGE1_INTENDED_CAP_MS, rem() - STAGE1_BUDGET_RESERVE_MS);
     const imgByteEst = imageList.reduce((sum, b64) => sum + Math.round(b64.length * 0.75), 0);
     plog('Stage 1 start', `images=${imageList.length} ~bytes=${imgByteEst} lang=${lang} cap=${stage1Cap}ms rem=${rem()}ms`);
