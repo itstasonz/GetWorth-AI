@@ -242,3 +242,105 @@ and re-verified against the code. The approach was right; the scope was not.
 
 Design and evidence only. **Nothing implemented. Nothing deployed.**
 Awaiting approval of the approach before any code is written.
+
+---
+
+## Correction round 2 — what changed, and what was deliberately left out
+
+Seven approved corrections, all applied. Five came from the two independent
+reviews of `08639cf`; two are test-oracle repairs for defects those reviews
+exposed in the suite itself.
+
+| # | Correction | Site |
+|---|---|---|
+| 1 | Fence the correction VALUES; the GetWorth header stays trusted | `api/analyze.js` `correctionBlock` |
+| 2 | Fence-depth matcher recognises digits (`[A-Z0-9_]+`) | `tests/prompt-injection.test.mjs`, one hoisted definition |
+| 3 | PI-02 gains a fence-depth assertion and a non-header oracle | `tests/prompt-injection.test.mjs` |
+| 4 | Stage-1 OCR cap `items: 12 → 25` | `buildVerificationPrompt` |
+| 5 | `CORRECTION_MAX_ENTRIES 5 → 15` | prompt-input quarantine |
+| 6 | `promptSafe(c.model \|\| c.name, 200)` | `buildRescuePricingPrompt` |
+| 7 | Allowlist projects the three permitted fields instead of dropping the entry | `sanitizeClientCorrections` |
+
+Plus, per the approval's numeric-boundary instruction and **without any
+migration**: `promptNum()` validates the six numeric interpolations at the
+prompt boundary, so prompt construction no longer assumes a runtime value is
+safe because a schema is expected to be numeric.
+
+### Why mutation testing was not sufficient, and what replaced it
+
+The round-2 defect — `corrections[]` rendering at fence depth 0 — survived a
+green 18-test suite **and** a mutation matrix in which 17 of 18 guards were
+confirmed load-bearing. Mutation testing asks whether removing an existing
+guard breaks a test. It cannot ask whether a guard that should exist is
+missing, because there is nothing to mutate.
+
+§6 of the suite now asserts the boundary **positively**, per source:
+`SOURCE → SANITIZATION → FENCE → CORRECT DEPTH → PROMPT CONSUMER`, covering
+`refineModel`, `corrections`/`hints`, `corrBrand`, `corrModel`,
+`identity.brand`, `identity.model`, `recognition.category`, Stage-1 OCR,
+catalog-derived strings and the rescue-pricing inputs — and asserting both
+that malicious content cannot escape its span and that legitimate evidence
+survives without lossy regression. Verified non-vacuous: deleting any one
+fence fails PI-19 or PI-20.
+
+---
+
+## Follow-up risks — recorded, deliberately NOT addressed in this ticket
+
+### FU-1 — `public.products` column types are unverifiable from this repo (MEDIUM)
+
+The four price columns, `similarity` and `popularity_score` were interpolated
+raw on the reasoning that the database declares them `NUMERIC`. That guarantee
+does not hold from this repository:
+
+- the types are declared only on the RPCs' `RETURNS TABLE`
+  (`supabase/migrations/20260526000003_add_product_search_rpcs.sql:29-33`),
+  which coerces only those RPCs' own output;
+- nine retrieval strategies read the table directly with `select('*')` and
+  bypass that coercion;
+- `public.products` has **no `CREATE TABLE` in any migration** — asserted in
+  terms at
+  `supabase/migrations/20260730000003_val001_products_trgm_indexes.sql:110-115`
+  ("this table is created by no migration in this repo — it exists only in
+  production").
+
+A text-valued price column would close a fence early and put everything after
+it at prompt level. This was **executed and confirmed** as a mechanism, and is
+**not reachable today**: no user-facing path writes text into those columns
+(`writeBack` updates only `popularity_score`/`scan_count`/`last_scanned_at`;
+community rows arrive via `product_candidates` with all four price columns
+hard-nulled).
+
+`promptNum()` removes the prompt's dependency on the assumption entirely, which
+is the correct fix at this boundary. **The underlying schema uncertainty is not
+resolved and is not a prompt-layer problem.** Resolving it means reconciling
+production DDL into a migration — a separate ticket, and explicitly out of
+scope here. No migration was executed.
+
+### FU-2 — `RECOGNITION_SCHEMA` is declared but never applied (LOW, pre-existing)
+
+`RECOGNITION_SCHEMA` is declared and validated against by nothing; the comment
+at `api/analyze.js:2403` records this. Stage-1 output therefore reaches raw
+reads such as `brand_candidates[0].evidence?.includes('packaging')` and
+`model_candidates.map(...)` without type enforcement, and a non-conforming
+shape throws.
+
+Confirmed by execution: this is caught downstream and degrades to
+`runPricingRescue`. It is a **fallback-forcing** vector, not a quota-refund one
+— the refund class this ticket closed is a different path. Pre-existing,
+untouched by this ticket, and fixing it means Stage-1 schema enforcement, which
+is a redesign rather than a correction.
+
+### FU-3 — a GetWorth directive still renders inside `<<<UNTRUSTED_STAGE1>>>` (MEDIUM)
+
+`- Brand evidence: …(RETAIL PACKAGING DETECTED — identify the product inside
+the box)` sits inside the Stage-1 fence. It is the same inversion class the
+round-1 correction fixed, at smaller scale: live impact is limited because
+`VERIFICATION RULES` restates the instruction outside the fence, so the
+duplication is currently load-bearing.
+
+This was invisible to PI-17 until correction 2, because the old matcher
+excluded digits and could not see `UNTRUSTED_STAGE1` at all. It is now visible
+and measurable, and is **not** one of the seven approved corrections, so it has
+not been changed. Moving the parenthetical after `FENCE_CLOSE('STAGE1')` is a
+one-line fix for a follow-up ticket.
