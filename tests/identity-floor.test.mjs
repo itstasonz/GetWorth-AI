@@ -1010,3 +1010,34 @@ describe('E2E the real pipeline, read through a real oracle', () => {
     } finally { h.restore(); }
   });
 });
+
+test('ctx.comps actually reaches the guard — V-FX has a reachable input', () => {
+  // The guard read ctx.comps and the only production caller built gctx as an
+  // explicit field whitelist WITHOUT it, so the currency boundary could never
+  // fire. A rule with no reachable input is the fourth time that shape appeared
+  // in this work — the FAMILY tier, the CATEGORY_ONLY tier, the market fence,
+  // and this. Found by an independent architecture review.
+  const src = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
+  const gctx = src.slice(src.indexOf('const gctx = {'), src.indexOf('let verdict = null;'));
+  assert.ok(gctx.length > 100, 'fixture: the gctx builder must be locatable');
+  assert.match(gctx, /comps:/,
+    'gctx is a field whitelist — a field the guard reads must be listed here or it is silently dropped');
+
+  // And the guard must still read it, so the two cannot drift apart.
+  const guard = readFileSync(new URL('../api/_lib/valuation-guard.js', import.meta.url), 'utf8');
+  assert.match(guard, /Array\.isArray\(ctx\.comps\)/, 'V-FX must still consume ctx.comps');
+});
+
+test('V-FX fires end to end once a comparable is present', () => {
+  // Proves the wiring, not just the field name: an unconvertible USD comp must
+  // now degrade through the same ctx the handler builds.
+  const withBadComp = {
+    stage: 'stage2',
+    identity: { brandOk: true, modelOk: true, identityHigh: true, brandC: 0.95, modelC: 0.9 },
+    recognition: { category: 'Electronics', subcategory: 'gaming mouse', category_confidence: 0.95 },
+    comps: [{ price_amount: 120, currency: 'USD' }],
+  };
+  const v = validateQuote({ low: 250, mid: 380, high: 520, currency: 'ILS' }, withBadComp);
+  assert.equal(v.action, 'degrade', 'a USD comp with no conversion record must degrade');
+  assert.match(v.metadata.degraded_reason, /V-FX/);
+});

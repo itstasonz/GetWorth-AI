@@ -3540,6 +3540,19 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     recognition,
     model: guardCtx.model || null,
     condition: verification.condition || recognition.visual_features?.condition,
+    // V-FX READS THIS, AND NOTHING WAS PASSING IT.
+    //
+    // `gctx` is an explicit field WHITELIST, so the currency boundary built in
+    // this ticket could never fire: the guard read `ctx.comps`, no caller set
+    // it, and no test noticed — a rule with no reachable input, which is the
+    // fourth time that shape has appeared in this work. Wired now so V-FX is
+    // live the day Phase B produces its first comparable, rather than
+    // discovering then that the boundary was decorative.
+    //
+    // Phase A produces none, so this is `[]` today and V-FX iterates nothing.
+    // That is the correct behaviour, not a placeholder: a scan with no market
+    // evidence has no money to validate.
+    comps: guardCtx.comps || [],
   };
 
   let verdict = null;
