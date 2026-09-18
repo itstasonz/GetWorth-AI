@@ -1781,7 +1781,25 @@ export function isSpecificTokenMatch(row, tok, brandHead = null) {
   if (isModelShapedToken(tok)) return true;
   const compat = brandCompatible(row?.brand, brandHead);
   if (compat !== null) return compat;
-  return sameModelString(row?.model, tok);
+  // ── HIGH-4: OCR ALONE CANNOT MAKE AN UNSUPPORTED IDENTITY EXACT ──────────
+  //
+  // This used to end `return sameModelString(row?.model, tok)`, which is the
+  // "duo" defect in one line. With NO recognised brand at all, a plain word
+  // read off the item that happens to equal a catalog row's model column
+  // graded that row as EXACT evidence: OCR "duo" on an unbranded machine
+  // matched SodaStream Duo, and an unsupported identity became a priceable
+  // exact product on the strength of a coincidence. Dozens of rows across
+  // unrelated brands are called Duo, Air, Pro, Classic or Mini.
+  //
+  // A MODEL-SHAPED token is unaffected — it returned true above, before any of
+  // this — so WH-1000XM5, G502 and A2848 still corroborate without a brand.
+  // That is the distinction that matters: a manufacturer part number carries
+  // its own specificity, an English word does not.
+  //
+  // Narrow by construction: this branch is reached ONLY when brandHead is
+  // absent or the row has no brand, i.e. when there is nothing to corroborate
+  // against. Every branded path is decided by `compat` above and is unchanged.
+  return false;
 }
 
 // A row is independently corroborated only when an evidence-origin token

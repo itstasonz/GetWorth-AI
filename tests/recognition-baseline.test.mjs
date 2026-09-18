@@ -673,12 +673,35 @@ test('C-04 CASE 3: a plain word within the RIGHT brand stays evidence', () => {
   assert.equal(gradeRowEvidence(SODASTREAM_DUO_WHITE, ['duo'], ['duo'], 'sodastream'), true);
 });
 
-test('C-05 CASE 4: with no recognised brand, a plain word must BE the model', () => {
-  // Neither constraint is available, so the conservative fallback applies:
-  // the token has to be the whole model string, not a fragment of it.
-  assert.equal(isSpecificTokenMatch(SODASTREAM_DUO, 'duo', null), true);
+test('C-05 CASE 4: with no recognised brand, a plain word is NOT evidence at all', () => {
+  // ── REVERSED IN THE FOUNDATION ROUND 2 (HIGH-4), DELIBERATELY ─────────────
+  //
+  // This test used to assert `isSpecificTokenMatch(SODASTREAM_DUO, 'duo', null)
+  // === true`, on the reasoning that requiring the token to BE the whole model
+  // string — rather than a fragment of it — was already the conservative
+  // fallback. It was conservative RELATIVE TO SUBSTRING MATCHING. It was not
+  // conservative in absolute terms, and it is the "duo" defect stated as a
+  // rule: with no brand recognised anywhere, a plain English word read off the
+  // item made a catalog row EXACT evidence. Dozens of rows across unrelated
+  // brands are called Duo, Air, Pro, Classic or Mini, so the match carries no
+  // information about which product this is — and exact evidence is what makes
+  // a scan priceable as a specific model.
+  //
+  // The new rule: with nothing to corroborate against, only a MODEL-SHAPED
+  // token is specific. A manufacturer part number carries its own
+  // specificity; an English word does not.
+  assert.equal(isSpecificTokenMatch(SODASTREAM_DUO, 'duo', null), false,
+    'OCR alone must not turn an unsupported identity into an exact product');
   assert.equal(isSpecificTokenMatch(SODASTREAM_DUO_WHITE, 'duo', null), false);
+  assert.equal(gradeRowEvidence(SODASTREAM_DUO, ['duo'], ['duo'], null), false,
+    'the historical witness: OCR "duo" on an unbranded machine graded SodaStream Duo as exact');
   assert.equal(gradeRowEvidence(SODASTREAM_DUO_WHITE, ['duo'], ['duo'], null), false);
+
+  // WHAT DID NOT CHANGE, so this is a narrowing and not a blanket refusal.
+  // A model-shaped token is decided before this branch is ever reached.
+  assert.equal(isSpecificTokenMatch(SODASTREAM_DUO, 'sf301', null), true,
+    'a part number identifies a product without a brand — C-03 depends on this');
+  assert.equal(isSpecificTokenMatch(LOGITECH_G502, 'g502', null), true);
 
   assert.equal(brandCompatible('SodaStream', null), null, 'unknown brand must report unknown, not false');
   assert.equal(brandCompatible('', 'ninja'), null);

@@ -208,18 +208,69 @@ function buildEnvelopes() {
 
 export const ENVELOPES = buildEnvelopes();
 
+// ── EVIDENCE CLASSIFICATION (HIGH-4) ───────────────────────────────────────
+// `evidence` on a brand/model candidate is a FREE-FORM STRING the model writes
+// about its own reasoning — the schema declares `{ type: 'string' }` and nothing
+// constrains it. It is therefore not a trust input by itself; it is only ever
+// used here to answer one narrow question:
+//
+//   does this candidate rest on characters read off the item?
+//
+// If it does, the candidate is photographed text by another name, and the
+// narrow-only rule applies to it exactly as it applies to `raw_texts`.
+//
+// FAILS CLOSED. An unrecognised evidence string is 'unknown', which is treated
+// as read-off-the-item. A new value invented by a model, or by a future engine,
+// cannot buy widening power by being unfamiliar — and 'unknown' is where an
+// absent, empty, or non-string evidence field lands too.
+//
+// Only 'visual' — shape, silhouette, form factor, colour — is evidence that
+// does NOT come from reading the item, and only 'visual' may widen an envelope.
+const EVIDENCE_PATTERNS = [
+  [/text|ocr|label|sticker|engrav|print|serial|marking|writ|read/, 'text'],
+  [/logo|emblem|badge|wordmark/, 'logo'],
+  [/packag|box|carton|blister/, 'packaging'],
+  [/shape|silhouette|form|visual|appearance|colou?r|material|design/, 'visual'],
+];
+
+export function evidenceClass(evidence) {
+  if (typeof evidence !== 'string') return 'unknown';
+  const e = evidence.toLowerCase().trim();
+  if (!e) return 'unknown';
+  for (const [pattern, cls] of EVIDENCE_PATTERNS) if (pattern.test(e)) return cls;
+  return 'unknown';
+}
+
 // ── Category key matcher ───────────────────────────────────────────────────
 // Ported from getCategoryFallbackPricing (analyze.js:3576-3625), ordered,
 // first match wins. THIS module is the intended single authority for the
 // taxonomy; analyze.js still carries its own copy for the PRE category
 // fallback and should later delegate to resolveEnvelopeKey() so the envelope
 // and the fallback price can never disagree about what an item is.
-function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
+function resolveEnvelopeKeyFrom(recognition, { trustOcr, trustRead = true }) {
   const cat = (recognition.category || '').toLowerCase();
   const sub = (recognition.subcategory || '').toLowerCase();
   const pt = (recognition.product_type || '').toLowerCase();
-  const mdl = (recognition.model_candidates?.[0]?.model || '').toLowerCase();
-  const brnd = (recognition.brand_candidates?.[0]?.brand || '').toLowerCase();
+  // ── HIGH-4: THE CANDIDATES ARE PHOTOGRAPHED TEXT TOO ─────────────────────
+  // `resolveEnvelopeKey` resolves twice and keeps the lower ceiling, so
+  // photographed text may narrow an envelope and never widen it. That rule was
+  // defeated on BOTH passes, because `brand_candidates` and `model_candidates`
+  // ARE distilled from photographed text — Stage 1 reads a sticker and emits
+  // `{ brand: 'Rolex', evidence: 'readable_text' }`. The supposedly
+  // OCR-independent resolution read that candidate and selected
+  // `watches:luxury`, hard_max 250,000, from a baseline of 6,400. Excluding
+  // `raw_texts` while trusting the candidates distilled from them is not a
+  // boundary; it is the same input wearing a different field name.
+  //
+  // `trustRead: false` is the THIRD resolution — shape and category only, no
+  // value that rests on characters read off the item. See resolveEnvelopeKey
+  // for what is done with the difference, and for why the answer is not simply
+  // "take the tighter one".
+  const usable = (c) => (trustRead ? true : evidenceClass(c?.evidence) === 'visual');
+  const topModel = recognition.model_candidates?.[0];
+  const topBrand = recognition.brand_candidates?.[0];
+  const mdl = (usable(topModel) ? topModel?.model || '' : '').toLowerCase();
+  const brnd = (usable(topBrand) ? topBrand?.brand || '' : '').toLowerCase();
   const ocr = trustOcr ? (recognition.ocr_text?.raw_texts || []).join(' ').toLowerCase() : '';
   const sig = `${sub} ${pt} ${mdl} ${ocr}`;
   const el = cat.includes('electron');
@@ -326,6 +377,45 @@ export function resolveEnvelopeKey(recognition = {}) {
   // Strictly narrowing only. Equal ceilings keep the OCR key, because a
   // same-ceiling bucket is a more specific description at no extra permission.
   return ceiling(ocrKey) <= ceiling(trustedKey) ? ocrKey : trustedKey;
+}
+
+/**
+ * HIGH-4 — is the resolved envelope LOOSER than what shape alone would allow?
+ *
+ * WHY THIS IS NOT "just take the tighter one".
+ * The obvious fix — resolve without the read-derived candidates and keep that —
+ * is wrong, and measurably so. Specific envelopes are LOOSER than their generic
+ * parents on purpose, because specific products are worth more:
+ * `electronics:iphone` allows 24,000 where `electronics` allows 6,400. Almost
+ * every legitimate identity is text-derived, so refusing all text-derived
+ * escalation would cap every iPhone GetWorth ever sees at ₪6,400. That is a
+ * pricing regression wearing a safety argument, and this round forbids exactly
+ * that trade.
+ *
+ * So the escalation is ALLOWED and made CONDITIONAL. When the only reason a
+ * looser bucket was selected is a value read off the item, the resulting
+ * envelope requires an ANCHOR above its soft_max — real catalog corroboration,
+ * not more photographed text.
+ *
+ * WHAT THIS DOES AND DOES NOT DO, stated plainly. It does NOT lower the Rolex
+ * witness's 250,000 ceiling. `watches:luxury` already carried
+ * `requiresAnchorAboveSoft`, so a sticker-only Rolex was already bounded at
+ * 40,000 — which the review said, and which is why it was a HIGH and not a
+ * CRITICAL. What changes is that the bound is now a RULE that follows from how
+ * the identity was obtained, rather than a flag someone happened to set on one
+ * row of a table. A luxury bucket added tomorrow without the flag inherits it.
+ */
+export function envelopeIsReadEscalated(recognition = {}) {
+  const chosen = resolveEnvelopeKey(recognition);
+  if (!chosen) return false;
+  const visualKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: false, trustRead: false });
+  if (visualKey === chosen) return false;
+
+  const soft = (k) => (k && ENVELOPES[k] ? ENVELOPES[k].soft_max : 0);
+  const hard = (k) => (k && ENVELOPES[k] ? ENVELOPES[k].hard_max : 0);
+  // Looser in either dimension. A tighter-or-equal escalation is not an
+  // escalation, and must not acquire a requirement it does not need.
+  return soft(chosen) > soft(visualKey) || hard(chosen) > hard(visualKey);
 }
 
 // ctx.anchor — a catalog row the CALLER has already confirmed compatible via
@@ -574,13 +664,24 @@ export function resolveEnvelope(ctx = {}) {
     }
     return { key: key || 'global', basis: 'global', ...GLOBAL_ENVELOPE, requiresAnchorAboveSoft: false };
   }
+  // HIGH-4. If the only reason this bucket is looser than the shape-only one is
+  // a value READ OFF THE ITEM, everything above its soft_max needs an anchor —
+  // catalog corroboration, not more photographed text. See
+  // envelopeIsReadEscalated for why the escalation is permitted at all.
+  //
+  // `ctx.envelope_key` deliberately does NOT get this treatment: a
+  // caller-supplied key is already refused as an identity answer by
+  // V-IDENTITY-FLOOR, and re-deriving escalation from a key whose provenance we
+  // do not know would be guessing.
+  const readEscalated = ctx.envelope_key == null && envelopeIsReadEscalated(ctx.recognition || {});
   return {
     key: env.key,
     basis: env.class === 'manual_only' ? 'manual_only' : 'category',
     floor: env.floor,
     soft_max: env.soft_max,
     hard_max: env.hard_max,
-    requiresAnchorAboveSoft: !!env.requiresAnchorAboveSoft,
+    requiresAnchorAboveSoft: !!env.requiresAnchorAboveSoft || readEscalated,
+    readEscalated,
   };
 }
 
