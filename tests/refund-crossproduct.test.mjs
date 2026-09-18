@@ -195,6 +195,37 @@ test('XP control — a request rejected before any provider call refunds nothing
 // notices. This derives the provider call sites FROM SOURCE and requires each
 // to be either directly ledger-marked, or covered by the stated downstream
 // invariant — so a newly added provider call cannot ship uncovered.
+//
+// ROUND 9 — AND THE ORDERING HALF OF IT WAS VACUOUS FOR TWO OF FIVE.
+//
+// Round 8 added an ordering check because membership in a set is not the
+// property being claimed: `fallbackVision` is only "downstream of Stage 1" if it
+// genuinely cannot run before Stage 1 marks the ledger. That check looked for
+// `fn(` in the source and asserted every match sat after `await runStage1()`.
+//
+// For two of the five names it found NOTHING, and a `for` loop over an empty
+// set passes. Measured at 89ea434:
+//
+//   fallbackVision          1 call site   ordering genuinely checked
+//   generateQueryEmbedding  1 call site   ordering genuinely checked
+//   verifyAndPrice          1 call site   ordering genuinely checked
+//   generateEmbedding       0 call sites  VACUOUS — the function was dead
+//   preQuoteFromAI          0 call sites  VACUOUS — invoked through a table
+//
+// Two different causes, one symptom. `generateEmbedding` had no caller at all
+// (superseded in 83ed273; removed in round 9). `preQuoteFromAI` is reached as
+// `PRE_SOURCES[1]` — the text `preQuoteFromAI(` never appears outside its own
+// declaration, so a regex for it can only ever match zero times, no matter
+// where the call actually sits.
+//
+// So the guard is rebuilt on two rules:
+//   1. ZERO RESOLVED CALL SITES IS A FAILURE, never a pass. A provider helper
+//      is either reachable — and then its ordering is checked — or it is
+//      declared dead in DEAD_PROVIDERS, which is a claim someone has to write
+//      down and a reviewer can read.
+//   2. Reachability follows INDIRECTION. A reference to `fn` inside a
+//      module-level dispatch table resolves to the invocation sites of whatever
+//      reads that table, transitively.
 // ─────────────────────────────────────────────────────────────────────────────
 import { readFileSync } from 'node:fs';
 
@@ -203,7 +234,145 @@ const OPENAI_LIB = readFileSync(new URL('../api/_lib/openai-recognition.js', imp
 
 const PROVIDER_HOSTS = ['api.anthropic.com', 'api.openai.com', 'vision.googleapis.com', 'api.voyageai.com'];
 
-test('XP-STRUCT every provider host in source is inside a ledger-covered helper', () => {
+// ── Source resolution helpers ───────────────────────────────────────────────
+
+/**
+ * `ANALYZE` with every comment and string literal blanked to spaces, LENGTH AND
+ * NEWLINES PRESERVED so every index is still an index into the real file.
+ *
+ * Reachability is a question about CODE. A third of api/analyze.js is
+ * commentary (1,897 of 5,651 non-blank lines), and those comments name the
+ * functions they discuss — `verifyAndPrice` is mentioned in two of them, one of
+ * which sits ~44,000 characters before Stage 1. Matching identifiers in raw
+ * text reports that comment as a call site executing before the ledger is
+ * marked: a false failure, only marginally better than the false pass it
+ * replaced.
+ *
+ * Quote state is tracked BEFORE comment state on purpose — `'https://api.…'`
+ * contains `//`, and a comment stripper that does not know it is inside a
+ * string blanks the rest of that line as if it were prose.
+ */
+const NL = String.fromCharCode(10);
+const BACKSLASH = String.fromCharCode(92);
+const CODE = (() => {
+  const src = ANALYZE;
+  const out = Array.from(src);
+  let i = 0;
+  const blank = (from, to) => {
+    for (let k = from; k < to; k++) if (out[k] !== NL) out[k] = ' ';
+  };
+  while (i < src.length) {
+    const c = src[i], d = src[i + 1];
+    if (c === '/' && d === '/') { const j = src.indexOf(NL, i); const end = j === -1 ? src.length : j; blank(i, end); i = end; continue; }
+    if (c === '/' && d === '*') { const j = src.indexOf('*/', i + 2); const end = j === -1 ? src.length : j + 2; blank(i, end); i = end; continue; }
+    if (c === "'" || c === '"' || c === '`') {
+      let j = i + 1;
+      while (j < src.length) {
+        if (src[j] === BACKSLASH) { j += 2; continue; }
+        if (src[j] === c) break;
+        j++;
+      }
+      blank(i, Math.min(j + 1, src.length));
+      i = j + 1; continue;
+    }
+    i++;
+  }
+  return out.join('');
+})();
+
+/** The top-level `function NAME` / `const NAME` binding that encloses `index`. */
+const TOP_LEVEL_DECL = /^(?:export\s+)?(?:async\s+)?(?:function|const|let|var)\s+(\w+)/gm;
+function enclosingSymbol(index) {
+  let name = null;
+  for (const m of CODE.matchAll(TOP_LEVEL_DECL)) {
+    if (m.index > index) break;
+    name = m[1];
+  }
+  return name;
+}
+
+/** Invocation sites of `name`, excluding its own declaration. */
+function directCalls(name) {
+  const re = new RegExp(String.raw`(?<![\w.])${name}\s*\(`, 'g');
+  const out = [];
+  for (const m of CODE.matchAll(re)) {
+    const before = CODE.slice(Math.max(0, m.index - 40), m.index);
+    if (/(?:export\s+)?(?:async\s+)?function\s+$/.test(before)) continue; // the declaration
+    out.push(m.index);
+  }
+  return out;
+}
+
+/** Bare (non-calling, non-declaring) mentions of `name` — table entries, iteration. */
+function bareReferences(name) {
+  const re = new RegExp(String.raw`(?<![\w.])${name}(?![\w(])`, 'g');
+  const out = [];
+  for (const m of CODE.matchAll(re)) {
+    const before = CODE.slice(Math.max(0, m.index - 40), m.index);
+    if (/(?:export\s+)?(?:const|let|var)\s+$/.test(before)) continue;    // the declaration
+    if (/(?:export\s+)?(?:async\s+)?function\s+$/.test(before)) continue;
+    out.push(m.index);
+  }
+  return out;
+}
+
+/**
+ * Every source index at which `name` can actually begin executing, following
+ * indirection through dispatch tables and wrapper functions.
+ *
+ * `preQuoteFromAI` is the case this exists for:
+ *   preQuoteFromAI  →  referenced by  const PRE_SOURCES = [...]
+ *   PRE_SOURCES     →  read inside    pricingRescueEngine()
+ *   pricingRescueEngine  →  called at  handleRequest, after Stage 1
+ *
+ * Returns `{ sites, trail }` so a failure can name the path it followed rather
+ * than just a number.
+ */
+function reachableCallSites(name, seen = new Set()) {
+  if (seen.has(name)) return { sites: [], trail: [] };
+  seen.add(name);
+
+  const sites = directCalls(name).map((index) => ({ index, via: [name] }));
+  const trail = [];
+
+  for (const ref of bareReferences(name)) {
+    const owner = enclosingSymbol(ref);
+    if (!owner || owner === name || seen.has(owner)) continue;
+    trail.push(`${name} ← ${owner}`);
+    const up = reachableCallSites(owner, seen);
+    trail.push(...up.trail);
+    for (const s of up.sites) sites.push({ index: s.index, via: [name, ...s.via] });
+  }
+  return { sites, trail };
+}
+
+// ── THE PROVIDER INVENTORY ──────────────────────────────────────────────────
+// Exact, not a floor. `>= 7` was the old shape, and it accepts an eighth
+// provider call appearing with no disposition at all. Every provider host in
+// the source must appear here, and every entry here must still be in the source.
+//
+//   DIRECT     — the helper marks the ledger itself, at the provider's own 2xx.
+//   DOWNSTREAM — the helper is reachable ONLY after Stage 1 marked the ledger,
+//                and that claim is checked by ordering below.
+const INVENTORY = [
+  { fn: 'recognize',              host: 'api.anthropic.com',     ledger: 'DIRECT' },
+  { fn: 'ocrSerialLabel',         host: 'api.anthropic.com',     ledger: 'DIRECT' },
+  { fn: 'fallbackVision',         host: 'vision.googleapis.com', ledger: 'DOWNSTREAM' },
+  { fn: 'generateQueryEmbedding', host: 'api.voyageai.com',      ledger: 'DOWNSTREAM' },
+  { fn: 'verifyAndPrice',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
+  { fn: 'preQuoteFromAI',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
+];
+
+// Provider helpers deliberately kept with NO reachable caller. Empty, and that
+// is the point: `generateEmbedding` used to belong here in all but name, and
+// nothing said so. Adding an entry is a written claim, reviewable on its own.
+const DEAD_PROVIDERS = [];
+
+const DIRECT = new Set(INVENTORY.filter((e) => e.ledger === 'DIRECT').map((e) => e.fn));
+const DOWNSTREAM = new Set(INVENTORY.filter((e) => e.ledger === 'DOWNSTREAM').map((e) => e.fn));
+
+/** Every provider host occurrence in api/analyze.js, with its enclosing function. */
+function providerSitesFromSource() {
   const lines = ANALYZE.split(/\r?\n/);
   const found = [];
   lines.forEach((l, i) => {
@@ -217,47 +386,126 @@ test('XP-STRUCT every provider host in source is inside a ledger-covered helper'
       found.push({ line: i + 1, host, fn });
     }
   });
-  assert.ok(found.length >= 7, `expected the known provider sites, found ${found.length}`);
+  return found;
+}
 
-  // Helpers that mark the ledger themselves, at the provider's own 2xx.
-  const DIRECT = new Set(['recognize', 'ocrSerialLabel']);
-  // Helpers reachable ONLY after Stage 1 delivered, and therefore covered by
-  // the explicit invariant check that follows `await runStage1()`. This is a
-  // documented, asserted dependency — not an assumption.
-  const DOWNSTREAM = new Set(['fallbackVision', 'generateEmbedding', 'generateQueryEmbedding',
-    'verifyAndPrice', 'preQuoteFromAI']);
+test('XP-STRUCT the provider inventory matches the source exactly', () => {
+  const found = providerSitesFromSource();
+  const actual = found.map((s) => `${s.fn}@${s.host}`).sort();
+  const declared = INVENTORY.map((e) => `${e.fn}@${e.host}`).sort();
+
+  assert.deepEqual(actual, declared,
+    'the set of provider call sites in api/analyze.js has changed. Every one needs an ' +
+    'explicit ledger disposition — add it to INVENTORY as DIRECT (marks onBilled at ' +
+    'res.ok) or DOWNSTREAM (provably unreachable before Stage 1).\n' +
+    `  in source, not declared: ${actual.filter((a) => !declared.includes(a)).join(', ') || '(none)'}\n` +
+    `  declared, not in source: ${declared.filter((d) => !actual.includes(d)).join(', ') || '(none)'}`);
+});
+
+test('XP-STRUCT every provider host in source is inside a ledger-covered helper', () => {
+  const found = providerSitesFromSource();
+  assert.equal(found.length, INVENTORY.length,
+    `expected the known provider sites, found ${found.length}`);
 
   for (const site of found) {
-    const covered = DIRECT.has(site.fn) || DOWNSTREAM.has(site.fn);
-    assert.ok(covered,
+    assert.ok(DIRECT.has(site.fn) || DOWNSTREAM.has(site.fn),
       `provider call in ${site.fn}() at api/analyze.js:${site.line} has NO ledger relationship — ` +
       'add onBilled marking at its res.ok, or classify it as downstream-of-Stage-1 here');
   }
+});
 
-  // ── ORDERING, NOT MEMBERSHIP (round 8, MEDIUM-2) ────────────────────────
-  // The check above asserts a NAME is in a set. That is not the property being
-  // claimed. Round 7 proved it: inserting a `fallbackVision(...)` call ABOVE
-  // `await runStage1()` left all 43 cases green, because nothing looked at call
-  // ORDER. A DOWNSTREAM classification is only true if the call genuinely
-  // cannot execute before Stage 1 has marked the ledger — so assert that.
-  const stage1Idx = ANALYZE.indexOf('recognition = await runStage1();');
+// ── ORDERING, NOT MEMBERSHIP — AND NEVER VACUOUSLY ──────────────────────────
+test('XP-STRUCT every DOWNSTREAM provider has at least one REACHABLE call site', () => {
+  // Rule 1. This is the assertion whose absence made round 8's ordering check a
+  // no-op for two of five names. It runs BEFORE the ordering test so a vacuous
+  // classification fails on its own terms rather than passing an empty loop.
+  for (const fn of DOWNSTREAM) {
+    const { sites, trail } = reachableCallSites(fn);
+    assert.ok(sites.length > 0,
+      `${fn}() is classified DOWNSTREAM but has ZERO resolved call sites, so its ordering ` +
+      'relative to Stage 1 is unobservable and the classification is vacuous. Either it IS ' +
+      `reachable and the resolver cannot see how (trail: ${trail.join(' | ') || 'none'}) — ` +
+      'teach reachableCallSites that shape — or it is dead, in which case delete it, or ' +
+      'declare it in DEAD_PROVIDERS with the evidence.');
+  }
+});
+
+test('XP-STRUCT a DEAD_PROVIDERS entry must really have no caller', () => {
+  // The escape hatch cannot become a way to silence rule 1 for live code.
+  for (const fn of DEAD_PROVIDERS) {
+    const { sites } = reachableCallSites(fn);
+    assert.equal(sites.length, 0,
+      `${fn}() is declared dead but resolves to ${sites.length} call site(s). ` +
+      'Remove it from DEAD_PROVIDERS and give it a real ledger disposition.');
+    assert.ok(!DOWNSTREAM.has(fn) && !DIRECT.has(fn),
+      `${fn}() cannot be both dead and ledger-classified`);
+  }
+});
+
+test('XP-STRUCT no DOWNSTREAM provider can execute before Stage 1 marks the ledger', () => {
+  // A DOWNSTREAM classification is only true if the call genuinely cannot run
+  // before Stage 1 has marked the ledger — so assert that, through indirection.
+  // Round 7 proved the naive version wrong: inserting a `fallbackVision(...)`
+  // call ABOVE `await runStage1()` left all 43 cases green.
+  const stage1Idx = CODE.indexOf('recognition = await runStage1();');
   assert.ok(stage1Idx > -1, 'the Stage-1 call must be locatable');
 
   for (const fn of DOWNSTREAM) {
-    // Every INVOCATION of a downstream provider helper inside handleRequest
-    // must appear after the Stage-1 call that marks the ledger.
-    const callRe = new RegExp(String.raw`(?<![\w.])${fn}\s*\(`, 'g');
-    for (const m of ANALYZE.matchAll(callRe)) {
-      // Skip the declaration itself.
-      const before = ANALYZE.slice(Math.max(0, m.index - 30), m.index);
-      if (/function\s$/.test(before) || /async function\s$/.test(before)) continue;
-      assert.ok(m.index > stage1Idx,
-        `${fn}() is called at source index ${m.index}, BEFORE await runStage1() at ${stage1Idx}. ` +
-        'A downstream-classified provider call cannot run before the ledger is marked — ' +
-        'either move it after Stage 1, or thread onBilled into it and reclassify it DIRECT.');
+    const { sites } = reachableCallSites(fn);
+    assert.ok(sites.length > 0, `${fn} must have a reachable call site (see the vacuity test)`);
+    for (const site of sites) {
+      assert.ok(site.index > stage1Idx,
+        `${fn}() is reachable at source index ${site.index}, BEFORE await runStage1() at ` +
+        `${stage1Idx}, via ${site.via.join(' → ')}. A downstream-classified provider call ` +
+        'cannot run before the ledger is marked — either move it after Stage 1, or thread ' +
+        'onBilled into it and reclassify it DIRECT.');
     }
   }
+});
 
+test('XP-STRUCT the indirect resolver actually resolves the indirect case', () => {
+  // The resolver is the load-bearing part of the two tests above, and a resolver
+  // that silently returned [] would make them fail rather than pass — but one
+  // that resolved to the WRONG place would make them pass for the wrong reason.
+  // So pin the known chain explicitly.
+  const { sites } = reachableCallSites('preQuoteFromAI');
+  assert.equal(directCalls('preQuoteFromAI').length, 0,
+    'fixture: preQuoteFromAI is invoked ONLY through PRE_SOURCES — if that changed, ' +
+    'this test no longer proves the resolver follows indirection');
+  assert.ok(sites.length > 0, 'the resolver must reach preQuoteFromAI through the table');
+  assert.ok(sites.some((s) => s.via.includes('PRE_SOURCES')),
+    `expected the chain to pass through PRE_SOURCES, got: ${sites.map((s) => s.via.join('→')).join(' | ')}`);
+  assert.ok(sites.some((s) => s.via.includes('pricingRescueEngine')),
+    'expected the chain to pass through pricingRescueEngine');
+});
+
+test('XP-STRUCT the comment/string mask preserves indices and blanks only prose', () => {
+  // Everything above rests on CODE being ANALYZE-with-prose-removed at the SAME
+  // offsets. A mask that shifted indices would compare call sites against a
+  // meaningless stage1Idx; a mask that blanked too much would hide real calls
+  // and re-create the vacuity this round removed, silently.
+  assert.equal(CODE.length, ANALYZE.length, 'the mask must not shift a single index');
+  assert.equal(CODE.split(NL).length, ANALYZE.split(NL).length, 'line count must be preserved');
+
+  // Real code survives, at its real offset.
+  const needle = 'recognition = await runStage1();';
+  assert.equal(CODE.indexOf(needle), ANALYZE.indexOf(needle), 'a real statement must survive in place');
+  assert.ok(CODE.includes('const PRE_SOURCES = ['), 'the dispatch table must survive');
+
+  // And prose does not. `verifyAndPrice` is named in two comments, one of them
+  // ~44,000 characters before Stage 1 — that mention is what made the first
+  // draft of this resolver report a false ordering violation.
+  const proseMentions = (ANALYZE.match(/in verifyAndPrice/g) || []).length;
+  assert.ok(proseMentions > 0, 'fixture: api/analyze.js must still discuss verifyAndPrice in prose');
+  assert.equal((CODE.match(/in verifyAndPrice/g) || []).length, 0,
+    'comment mentions must be blanked — they are not call sites');
+
+  // A URL containing `//` must not have taken the rest of its line with it.
+  assert.ok(CODE.includes('fetchWithRetry('),
+    'string-before-comment ordering must keep code after a URL literal intact');
+});
+
+test('XP-STRUCT the ledger markers and the downstream invariant are present', () => {
   // The direct markers must exist and sit at the provider response.
   for (const fn of DIRECT) {
     const body = ANALYZE.slice(ANALYZE.indexOf(`function ${fn}(`));

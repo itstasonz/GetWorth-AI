@@ -342,3 +342,57 @@ describe('the budget ledger is complete', () => {
     }
   });
 });
+
+// ── ROUND 9: the exemptions must be OBSERVABLY live ─────────────────────────
+// Two separate bugs have now made `exempt` dead code without changing a single
+// visible thing about the linter: first a wrong base for `relative()`, then the
+// platform path separator. Both presented identically — `raw-hex` 292/273 — and
+// both turned `npm test` RED at step 2 of 4, so no security suite ran at all.
+//
+// The shared property neither bug could survive: an exempt file's violations
+// must NOT be counted, and a non-exempt sibling's MUST be. Asserting the
+// property (rather than the separator, or the count) covers the next cause too.
+describe('exempt files are genuinely exempt', () => {
+  // `rel` is computed against SRC's PARENT, so the directory handed to
+  // DESIGN_LINT_SRC has to be named `src` for `src/lib/tokens.js` to be the
+  // path the predicate actually sees.
+  const tree = (name, files) => {
+    const root = join(work, `tree-${name}`);
+    for (const [rel, content] of Object.entries(files)) {
+      const abs = join(root, 'src', ...rel.split('/'));
+      mkdirSync(join(abs, '..'), { recursive: true });
+      writeFileSync(abs, content, 'utf8');
+    }
+    return join(root, 'src');
+  };
+
+  const HEX = `export const C = { a: '#6FEEE1', b: '#4FD1C5', c: '#003733' };\n`;
+
+  test('src/lib/tokens.js contributes nothing to raw-hex', () => {
+    const r = run(lintCopy('exempt-tokens'), tree('exempt', { 'lib/tokens.js': HEX }));
+    assert.equal(r.status, 0,
+      'src/lib/tokens.js is the sanctioned literal mirror — its hex values must not be counted:\n' + r.stdout);
+    const j = run(lintCopy('exempt-tokens-json'), tree('exempt', { 'lib/tokens.js': HEX }), ['--json']);
+    assert.equal(JSON.parse(j.stdout).counts['raw-hex'], 0, 'the exempt file must count zero, not merely fit the budget');
+  });
+
+  test('a NON-exempt file with the same content still fails', () => {
+    // The control. Without it the test above passes just as well when the rule
+    // itself has stopped matching, which is the failure mode this file exists
+    // to catch.
+    const r = run(lintCopy('nonexempt-tokens'), tree('nonexempt', { 'lib/colors.js': HEX }));
+    assert.equal(r.status, 1, 'src/lib/colors.js is not exempt and must still be counted');
+    assert.match(r.stdout, /raw-hex\s+3\s*\/\s*0/, 'expected all three literals to be counted');
+  });
+
+  test('the real repository is exactly at budget, not under a raised one', () => {
+    // The budget was never the problem — 292 − 19 (tokens.js) = 273 — so a
+    // future "fix" that raises the number instead of restoring the exemption
+    // must not be able to pass. Runs the REAL linter against the REAL src/.
+    const r = spawnSync(process.execPath, [REAL_LINT, '--json'], { cwd: ROOT, encoding: 'utf8' });
+    assert.equal(r.status, 0, `the real tree must lint clean:\n${r.stdout}${r.stderr}`);
+    assert.equal(JSON.parse(r.stdout).counts['raw-hex'], 273,
+      'raw-hex must be exactly 273 — 292 raw minus the 19 in the exempt token mirror');
+    assert.match(source(), /'raw-hex':\s*273,/, 'the raw-hex budget must still be 273');
+  });
+});

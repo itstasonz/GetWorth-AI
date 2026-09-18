@@ -1733,33 +1733,32 @@ async function fallbackVision(imageBase64, supa) {
 // §4  EMBEDDING GENERATION
 // ═══════════════════════════════════════════════════════
 
-async function generateEmbedding(text) {
-  const voyageKey = process.env.VOYAGE_API_KEY;
-  if (!voyageKey) return null;
-
-  try {
-    const res = await fetch('https://api.voyageai.com/v1/embeddings', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${voyageKey}`,
-      },
-      body: JSON.stringify({
-        model: 'voyage-3',
-        input: [text],
-        input_type: 'document',
-      }),
-    });
-
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data.data?.[0]?.embedding || null;
-  } catch (err) {
-    console.warn('[Embedding] Generation failed:', err.message);
-    return null;
-  }
-}
-
+// ROUND 9 — `generateEmbedding` (input_type: 'document') WAS REMOVED HERE.
+//
+// It was not reserved for future use; it was SUPERSEDED, and had been dead for
+// four and a half months, since May 2026. Two steps, both recoverable from git:
+//
+//   83ed273 (2026-05-04) replaced its ONLY call site — the write-back path —
+//   with the already-computed `queryEmbedding`, stating the reason in the diff:
+//   "Reuse queryEmbedding from the pipeline rather than making a duplicate paid
+//   API call." From that commit on, the function had zero callers.
+//
+//   6481b39 (2026-07-05) then dropped the embedding argument from `writeBack`
+//   altogether; it is `writeBack(recognition, verification)` today. So there is
+//   no longer even a parameter this function could be reconnected to.
+//
+// At round 9 it had ZERO references anywhere in the repository: no caller, no
+// export, no test.
+//
+// What it left behind was a live, unreferenced Voyage endpoint inside the
+// billable-provider surface — a call site the refund cross-product had to
+// classify and could only classify vacuously, because a function nothing calls
+// cannot be ordered relative to Stage 1. Deleting it is what makes the
+// remaining inventory checkable.
+//
+// It is recoverable from git if a document-type embedding is ever genuinely
+// needed; re-adding it means re-adding a paid call, which is a decision, not an
+// oversight to silently preserve.
 async function generateQueryEmbedding(text) {
   const voyageKey = process.env.VOYAGE_API_KEY;
   if (!voyageKey) return null;

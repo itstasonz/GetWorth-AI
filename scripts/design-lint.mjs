@@ -32,7 +32,7 @@
  * as `lint-suppression`, so silencing a rule costs a visible ledger edit.
  */
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Assembled rather than written literally, so this file's own use of the marker
@@ -356,7 +356,21 @@ for (const file of walk(SRC)) {
   // exemptions dead code under exactly the conditions the tests and the mutation
   // harness run in: `raw-hex` reported 292 instead of 273 because
   // src/lib/tokens.js was no longer exempt.
-  const rel = relative(join(SRC, '..'), file);
+  //
+  // ROUND 9 — AND THE SAME EXEMPTIONS WERE STILL DEAD, ON WINDOWS, FOR A
+  // SECOND REASON. `relative()` emits the PLATFORM separator, so this produced
+  // `src\lib\tokens.js` there while every `exempt` predicate compares against
+  // the POSIX spelling `src/lib/tokens.js`. The comparison could never be true,
+  // so tokens.js — the ONE file licensed to hold colour literals — was linted
+  // like any other and contributed its 19 hex values to the count. `raw-hex`
+  // reported 292/273 again, identically to the bug above, and `npm test` was
+  // RED before a single security suite could run.
+  //
+  // The 19 are not violations and the budget is not wrong: 292 − 19 = 273,
+  // exactly. Normalising to POSIX here fixes the COMPARISON rather than the
+  // number, so the budget keeps meaning what it says on every platform. The
+  // report still prints whatever the reader's OS spells natively.
+  const rel = relative(join(SRC, '..'), file).split(sep).join('/');
   const source = readFileSync(file, 'utf8');
 
   for (const rule of FILE_RULES) {

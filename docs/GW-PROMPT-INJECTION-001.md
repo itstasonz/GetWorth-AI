@@ -3,8 +3,19 @@
 **Severity: HIGH. Live in production today. Independent of GW-OPENAI-INTELLIGENCE-002.**
 
 Found during the Phase 2 security review of the OpenAI intelligence work.
-Not caused by it. This document is design + evidence only — **no fix has been
-implemented, nothing deployed.**
+Not caused by it.
+
+> **ROUND 9 — the sentence that used to sit here was falsified.** It read "This
+> document is design + evidence only — **no fix has been implemented, nothing
+> deployed**", and it survived eight rounds of shipped code, as did the matching
+> § Status near the middle of the file.
+>
+> **Actual state:** the fix is **implemented** across rounds 2–9 and is **not
+> deployed**. §1–§3 below are the ORIGINAL as-found analysis and are kept as the
+> record of what was true when the vulnerability was found — they describe code
+> that has since changed, and their line numbers are stale. The current state
+> starts at "Correction round 2" and is summarised in
+> "Round 9 — corrections to this document" at the end of the file.
 
 ---
 
@@ -125,13 +136,26 @@ fidelity of what reaches `raw_texts`, and therefore the prompt.
 **Correct, and entirely unused.** Verified by call-site count in
 `api/analyze.js`:
 
-| symbol | defined | call sites |
-|---|---|---|
-| `promptSafe` | `:479` | `sanitizeClientCorrections` only |
-| `fence` | `:494` | **0** |
-| `FENCE_RULE` | `:503` | **0** |
-| `promptSafeList` | `:512` | **0** |
-| `sanitizeClientCorrections` | `:526` | **0** — exported, dead |
+> **ROUND 9 — this table is the AS-FOUND state and was being read as current.**
+> Every count in the "call sites" column became false the moment round 2 wired
+> the layer up, and nothing in the table said so. The `defined` column is stale
+> too: `api/analyze.js` has grown from ~5,400 to 6,078 lines since, and every
+> one of those five line numbers now points at unrelated code. Both columns are
+> kept, because the zeroes ARE the finding this ticket exists for — but the
+> current state is now beside them so the table cannot be misread as a
+> measurement of today's source.
+
+| symbol | defined (as found) | call sites (as found) | defined **now** | call sites **now** |
+|---|---|---|---|---|
+| `promptSafe` | `:479` | `sanitizeClientCorrections` only | `:591` | **31** |
+| `fence` | `:494` | **0** | `:607` | **5** |
+| `FENCE_RULE` | `:503` | **0** | `:616` | **3** (both sinks + the export) |
+| `promptSafeList` | `:512` | **0** | `:659` | **8** |
+| `sanitizeClientCorrections` | `:526` | **0** — exported, dead | `:686` | **1** (the request boundary) |
+
+Counts measured at the round-9 commit and re-derivable with
+`node tests/mutations/sanitizer-run.mjs --list`, which enumerates every guard
+call site it can find in the two sinks and the two request boundaries.
 
 `promptSafe` itself is sound: it maps tab/LF/CR to space, drops other control
 characters and `DEL`, strips `<` and `>` (which makes the fence tokens
@@ -240,8 +264,18 @@ and re-verified against the code. The approach was right; the scope was not.
 
 ## Status
 
-Design and evidence only. **Nothing implemented. Nothing deployed.**
-Awaiting approval of the approach before any code is written.
+> **CORRECTED IN ROUND 9 — this section was falsified.** It read "Design and
+> evidence only. **Nothing implemented. Nothing deployed.** Awaiting approval of
+> the approach before any code is written," and stayed that way through eight
+> rounds of shipped code. It was the single most misleading line in the file:
+> a reader checking the status of this ticket was told nothing had been built
+> while the entire quarantine layer, the refund lifecycle, the provider ledger
+> and the ingestion boundary were all live in `api/analyze.js`.
+>
+> **Actual status at round 9:** implemented across rounds 2–9, not deployed.
+> Everything below §4 describes code that exists. See "Round 9 — corrections to
+> this document" at the end for what else in this file was stale, and for the
+> convention that keeps the line numbers honest from here on.
 
 ---
 
@@ -514,6 +548,15 @@ only the refund decision changed.
 
 #### Mutation proof — 11 applied, 11 killed
 
+> **ROUND 9 — this number was never reproducible from the repository.** It was
+> produced by hand, in a working copy that no longer exists, and nothing in the
+> repo could re-derive it. Same for "47/47 killed" below and the round-8 "88/88".
+> A security argument that cannot be re-run is a claim, not evidence. The
+> refund-side matrix is now `tests/refund-crossproduct.test.mjs`, which
+> GENERATES the cross-product rather than listing it; the sanitizer-side matrix
+> is now `tests/mutations/sanitizer-run.mjs`. Read the round-9 section for the
+> re-derivable numbers.
+
 Dropping the invariant, bypassing classification, adding a catch-all to the
 allow-list, re-gating on `quotaCharged`, replacing eligibility with truthiness,
 routing unknown errors into the refundable class, removing either
@@ -650,6 +693,13 @@ were classified backwards.**
 
 Full matrix at this commit: **47/47 killed.**
 
+> **ROUND 9 — likewise hand-produced and not re-derivable.** The 47 sites are
+> real and the generator finds exactly them (35 in `buildVerificationPrompt`, 12
+> in `buildRescuePricingPrompt`); the SCORE was not something the repo could
+> reproduce. `node tests/mutations/sanitizer-run.mjs` now regenerates it from
+> the current source, and its first run found that **six** of those guards had
+> no observing test at all. See the round-9 section.
+
 - **#38 `promptNum(c.avg_used_price_ils)` — LOAD-BEARING**, not redundant.
   `ToNumber` skips Unicode whitespace, so `LINE_SEPARATOR + "5" > 0` is **true**
   and the row reaches the guard. Separately, relational `>` uses the NUMBER hint
@@ -714,3 +764,236 @@ allow-list entry · `openai_no_images` denies a never-billed failure ·
 passes one) · the bare `Number(c.similarity)` at site #11 · the inaccurate `lang`
 comment · FU-1 (`public.products` column types unverifiable from this repo) ·
 FU-2 (`RECOGNITION_SCHEMA` never applied) · FU-3/FU-4.
+
+---
+
+# Round 9 — corrections to this document, and a reproducible mutation score
+
+Round 9 is a stabilisation round. It changed **no** recognition, pricing,
+valuation, prompt, Fast-Path, model-selection, provider-timeout, quota or
+ingestion-threshold behaviour. One dead function was deleted from
+`api/analyze.js`; everything else in the round is tests, a mutation harness, a
+linter portability fix, and this section.
+
+## 1. What in this document was false
+
+| # | Claim | Status | Correction |
+|---|---|---|---|
+| 1 | "**Status:** Design and evidence only. Nothing implemented." | **FALSIFIED** | Implemented across rounds 2–9; still not deployed. Corrected in place at § Status. |
+| 2 | §3 call-site table: `fence` 0, `FENCE_RULE` 0, `promptSafeList` 0, `sanitizeClientCorrections` 0, `promptSafe` "sanitizeClientCorrections only" | **STALE** — true as-found, false since round 2 | Current counts added beside the as-found ones: 31 / 5 / 3 / 8 / 1. |
+| 3 | Round 5 "Mutation proof — 11 applied, 11 killed" | **UNREPRODUCIBLE** | Hand-produced. Replaced by `tests/mutations/sanitizer-run.mjs` + the generated refund cross-product. |
+| 4 | Round 6 "Full matrix at this commit: 47/47 killed" | **UNREPRODUCIBLE, and optimistic** | The 47 sites are real; the score was not re-derivable, and six of those guards turned out to have no observing test. |
+| 5 | Every `analyze.js:NNNN` reference in §1–§6 and the round-5 tables | **STALE** | `api/analyze.js` is now 6,071 lines. See the line-number table below and the convention in §5. |
+
+## 2. Where the named symbols actually are
+
+Measured at the round-9 commit. This table exists so the stale references above
+have one place to be resolved against, rather than being rewritten individually
+in prose that will go stale again.
+
+| symbol | round-1 reference | now |
+|---|---|---|
+| `boundaryText` / `boundaryInt` | — | `:546` / `:558` |
+| `promptSafe` | `:479` | `:591` |
+| `fence` | `:494` | `:607` |
+| `FENCE_RULE` | `:503` | `:616` |
+| `promptNum` | — | `:650` |
+| `promptSafeList` | `:512` | `:659` |
+| `sanitizeClientCorrections` | `:526` | `:686` |
+| `buildVerificationPrompt` (SINK 1) | — | `:915` |
+| site #11 `promptNum(Number(c.similarity) * 100, …)` | — | `:923` |
+| `fence('CATALOG_ROWS')` | — | `:920` |
+| `fence('PAST_CORRECTIONS')` | `:768` | `:941` |
+| `fence('USER_CORRECTION')` | `:774` | `:948` |
+| vision `webEntities` sink | `:785`, `:787` | `:962` |
+| Stage-1 OCR sink | `:809` | `:988` |
+| `isRefundEligible` | — | `:1365` |
+| `sanitizeUserCorrection` | — | `:3272` |
+| `ocrSerialLabel` | — | `:3659` |
+| `const clientHints = sanitizeClientCorrections(…)` | `:3696` | `:3921` |
+| ingestion gate 1 / gate 2 (`INGESTION_TOO_SLOW`) | — | `:3963` / `:4083` |
+| serialOCR early exit | — | `:4027` |
+| `recognition = await runStage1()` | `:3955` | `:4191` |
+| `sanitizeUserCorrection(promptSafe(refineModel), …)` | `:3884` | `:4243` |
+| `assessFallbackIdentity` | `:5061` | `:5585` |
+| anchor compatibility filter (guards site #38) | `:5560` | `:5702` |
+| `buildRescuePricingPrompt` (SINK 2) | `:5381` | `:5905` |
+| site #38 `promptNum(c.avg_used_price_ils)` | — | `:5922` |
+| `preQuoteFromAI` | `:5416` | `:5948` |
+| `preQuoteFromCategory` | `:5459` | `:5990` |
+| `PRE_SOURCES` / `pricingRescueEngine` | — | `:6013` / `:6015` |
+
+## 3. The mutation score is now infrastructure
+
+`npm run test:mutation:sanitizer` (also in `npm run test:mutation`).
+
+It derives the SITE matrix from source — every `promptSafe` / `promptSafeList` /
+`promptNum` / `fence` call inside `buildVerificationPrompt`,
+`buildRescuePricingPrompt`, `sanitizeClientCorrections` and the `handleRequest`
+request boundary — and adds 18 hand-written PRIMITIVE mutants that reach inside
+the helpers the site matrix can only assume work.
+
+**Every mutant must prove `MUTATION_APPLIED = YES` before its result is read.**
+A find that matched zero or many sites, a replacement byte-identical to the
+original, or a mutant that does not load, is `INVALID` and is scored in neither
+direction. That gate is the whole reason to have the harness in the repo rather
+than in a review comment.
+
+Result at the round-9 commit:
+
+| | |
+|---|---|
+| selected | 69 |
+| **APPLIED** | **69** |
+| **KILLED** | **68 / 68 scored** |
+| **SURVIVED** | **0** |
+| **INVALID** | **0** |
+| EQUIVALENT (excluded from the denominator) | 1 |
+
+### Security relevance is declared, never inferred from a kill
+
+Round 6 established that "a test failed" and "this is a security control" are
+different statements, and got the disposition wrong in both directions before
+fixing it. So each mutant carries an explicit `security` field with its
+reasoning, and the runner prints the two dimensions in separate blocks. Two
+killed mutants are declared **non-security**:
+
+- **`S30` — site #11**, `promptNum(Number(c.similarity) * 100, '0.0', 1)`. The
+  bare `Number()` collapses every hostile value before `promptNum` is reached.
+  Killed by rendering assertions, not injection ones. Unchanged from round 6;
+  now carried in the catalog rather than only in prose, so the classification
+  travels with the code.
+- **`P07` — `boundaryInt`'s MISSING-is-not-ZERO gate.** A valuation-correctness
+  property. It cannot break a fence.
+
+### The one equivalent mutant
+
+**`P01`** — letting LF/CR/TAB through `promptSafe`'s explicit branch. The
+trailing `.replace(/\s+/g, ' ')` already maps all three to a single space, so
+the mutant is byte-identical for every input; verified by differential probe,
+not asserted. It is excluded from the denominator because no test *can* kill it,
+and counting it would cap the achievable score below 100% and make the number
+useless as a signal. **The branch is not dead code** and must not be removed on
+the strength of this: it states the intent that the collapse happens to satisfy.
+If it is ever marked equivalent but then dies, the runner says so and demands
+the marker be dropped.
+
+### What the first run found
+
+Six guards had **no observing test**. They were live, correct, and unprotected —
+exactly the condition this ticket was opened about, one layer up. Closed by
+`PI-32`…`PI-36`:
+
+| survivor | the guard nothing observed | closed by |
+|---|---|---|
+| `P03` | `promptSafe` drops C0 control characters and DEL | `PI-32` |
+| `P13` | `promptSafeList` caps ITEMS, not just characters | `PI-33` |
+| `P14` | `promptSafeList` refuses a non-array instead of wrapping it | `PI-34` |
+| `P18` | `sanitizeClientCorrections` discards a non-array payload | `PI-35` |
+| `S48`, `S49` | the corrections boundary neutralises its OWN fields | `PI-36` |
+
+`S48`/`S49` are the most instructive. Round 5's methodology note deliberately
+made the `PI-19` fixture model `fetchCorrections` — untrusted DB text that
+enters the SINK raw, the weaker of the two producers. That was right, and it
+left the *boundary* sanitiser itself unobserved: both `promptSafe` calls inside
+the exported `sanitizeClientCorrections` could be deleted with the suite green,
+because no test ever looked at what the boundary RETURNS. A second caller of
+that export — and it is exported — has only that layer.
+
+`P03` is the one the ticket had already promised. §5 item 7 says "Vision
+`webEntities` containing control characters → stripped". Nothing asserted it.
+
+## 4. Two guards that were passing vacuously
+
+### The provider-ordering guard (`tests/refund-crossproduct.test.mjs`)
+
+Round 8 added an ordering check because set membership is not the property being
+claimed. It searched for `fn(` in the source and required every match to sit
+after `await runStage1()`. For two of its five names it matched **nothing**, and
+a loop over an empty set passes:
+
+| provider | call sites the round-8 guard found | |
+|---|---|---|
+| `fallbackVision` | 1 | ordering genuinely checked |
+| `generateQueryEmbedding` | 1 | ordering genuinely checked |
+| `verifyAndPrice` | 1 | ordering genuinely checked |
+| `generateEmbedding` | **0** | **vacuous** — the function was dead |
+| `preQuoteFromAI` | **0** | **vacuous** — invoked through `PRE_SOURCES` |
+
+`preQuoteFromAI` is reached as `PRE_SOURCES[1]`, iterated by
+`pricingRescueEngine`, called from `handleRequest` after Stage 1. The literal
+text `preQuoteFromAI(` appears nowhere but its own declaration, so a regex for
+it could only ever match zero times regardless of where the call actually sat.
+
+The guard is rebuilt on two rules: **zero resolved call sites is a FAILURE**
+(or an explicit `DEAD_PROVIDERS` declaration, which is a claim a reviewer can
+read), and reachability **follows indirection** through dispatch tables and
+wrappers, transitively. The provider inventory is now an exact set rather than a
+`>= 7` floor, so an eighth provider call cannot appear undisposed.
+
+Resolution runs against a comment- and string-masked copy of the source with
+indices preserved. Matching identifiers in raw text reported a *comment*
+mentioning `verifyAndPrice`, 44,000 characters before Stage 1, as an ordering
+violation — a false failure, only marginally better than the false pass.
+
+**Mutation evidence.** With an unsafe indirect ordering introduced
+(`pricingRescueEngine` hoisted above `runStage1`), the round-8 guard passes
+**43/43**. The round-9 guard fails on it. Three other mutations — hoisting
+`fallbackVision` directly, removing `preQuoteFromAI` from `PRE_SOURCES`, and
+adding an undeclared provider call — are each killed by the specific assertion
+that should catch them.
+
+### `generateEmbedding` — resolved as dead, and deleted
+
+It had a live Voyage endpoint and no caller. Not reserved for future use:
+**superseded**. Commit `83ed273` replaced its only call site — the write-back
+path — with the already-computed `queryEmbedding`, stating the reason in a
+comment that is still in the file: *"Reuse queryEmbedding from the pipeline
+rather than making a duplicate paid API call."* After that it had zero
+references anywhere in the repository: no caller, no export, no test — dead
+since 2026-05-04. A second refactor, `6481b39` (2026-07-05), then dropped the
+embedding argument from `writeBack` entirely (`writeBack(recognition,
+verification)` today), so there is no longer even a parameter it could be
+reconnected to.
+
+Removed in round 9, with the reasoning left at the site. Re-adding a
+document-type embedding means re-adding a paid provider call, which is a
+decision someone should make deliberately rather than a fossil to preserve.
+
+## 5. Convention for line numbers from here on
+
+Line references in this file are **historical**, valid at the round in which
+they were written, and they will keep going stale. §2 above is the single
+resolution table; when a future round needs one, add a row there rather than
+rewriting the prose. The assertions that must not go stale live in the tests,
+where a moved symbol fails a run instead of quietly misleading a reader.
+
+## 6. Round 9 follow-ups — recorded, NOT fixed
+
+- **`visionData.logos` has no item cap.** `buildVerificationPrompt` maps over the
+  whole array (`:961`), unlike the four `promptSafeList` positions beside it.
+  Every entry is `promptSafe`'d, so it is a prompt-inflation surface, not an
+  injection one, and it is fenced. It is filled by our own `parseVisionResponse`
+  from Google's response rather than by the client. Recorded, not changed —
+  capping it is a behaviour change to a prompt, which round 9 is not permitted
+  to make. `model_candidates` has the same shape.
+- **MEDIUM-2, the ingestion deadline.** See
+  `docs/GW-SCAN-ENTITLEMENT-001.md` § "MEDIUM-2".
+- **`npm run test:mutation` is RED, and was RED before round 9.** The VAL-001
+  harness (`tests/mutations/run.mjs`) reports **9 MALFORMED** mutants — `M03`,
+  `M14`, `M22`, `M23`, `M25`, `M26`, `M27`, `M28` and `M30` — whose `find`
+  strings no longer match `api/_lib/valuation-guard.js` exactly once. `M03`'s
+  `needsReview = true;` now matches twice, for instance. Scored: killed 18/27,
+  survived 0, equivalent 3, **score 66.7%**.
+  The harness is behaving exactly as designed — it refuses to report a score
+  against code it is no longer pinned to — but nothing surfaced the refusal,
+  because `test:mutation` is not part of `npm test`. Round 9 did not touch
+  `api/_lib/valuation-guard.js`, `tests/mutations/mutants.mjs` or
+  `tests/valuation-guard.test.mjs` (`git diff HEAD` on all three is empty), and
+  did not fix it: re-pinning nine mutants requires reading the valuation-guard
+  refactor that moved them, which is VAL-001 work, not stabilisation work.
+  `tests/valuation-guard.test.mjs` itself is green (95/95).
+  **Separate ticket.** It is the same class of decay this section exists to
+  retire: a verification artefact quietly not verifying.
+- Everything in "Round 6 follow-ups" above remains open and re-confirmed as not
+  newly exploitable.

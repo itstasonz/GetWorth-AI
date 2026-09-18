@@ -14,9 +14,37 @@ import { strict as assert } from 'node:assert';
 import { createClient } from '@supabase/supabase-js';
 
 // Load env exactly as the app receives it (supabase.js falls back to process.env under node)
-for (const line of readFileSync(new URL('../.env.local', import.meta.url), 'utf8').split('\n')) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+try {
+  for (const line of readFileSync(new URL('../.env.local', import.meta.url), 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim();
+  }
+} catch { /* no .env.local — handled by the credential gate below */ }
+
+// ── ROUND 9: SKIP, LOUDLY, RATHER THAN CRASH THE WHOLE TEST RUN ─────────────
+//
+// This file talks to the LIVE production database with real credentials.
+// Without them, `src/lib/supabase.js` throws at import — and until round 9 this
+// was the THIRD command in `npm test`'s `&&` chain, ahead of every security
+// suite. So on any machine whose .env.local lacks the two VITE_ keys (a fresh
+// clone, or any CI without secrets) a missing credential silently took the
+// whole security suite down with it. Exactly the failure shape round 9 fixed in
+// design-lint: an unrelated gate deciding whether the security tests run at all.
+//
+// Round 9 does both halves. package.json now runs this AFTER the `node --test`
+// block, so it cannot gate anything; and a credential that is ABSENT is a
+// statement about the environment rather than about the code, so it skips here
+// and says so. A credential that is PRESENT but does not work is a real failure
+// and still fails the run — nothing below this point is weakened, and nothing
+// is masked.
+const MISSING = ['VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY'].filter((k) => !process.env[k]);
+if (MISSING.length) {
+  console.log('── reputation integration — SKIPPED');
+  console.log(`   ${MISSING.join(' and ')} not set.`);
+  console.log('   This suite reads the LIVE production database with the anon key; it cannot');
+  console.log('   run offline. Put the VITE_ keys in .env.local to include it.');
+  console.log('   Skipped here so a missing credential cannot stop the security suites.');
+  process.exit(0);
 }
 
 const { fetchReviewsFor, fetchAllReviews, enrichReviewRows } = await import('../src/lib/reviews.js');

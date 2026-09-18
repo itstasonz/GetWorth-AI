@@ -197,6 +197,14 @@ server** (not a mocked adapter), so these are wire-accurate:
 | legitimate 25 MB over 40 s | `503 INGESTION_TOO_SLOW` — no quota charged |
 | 9 s stall + 3 s rate-limit RPC | `200`, cap 28,000 ms |
 
+> **ROUND 9 — do not read a threshold off this table.** Every row is accurate,
+> but the two "25 MB" rows invite the inference that the boundary is near 12 s,
+> or that it depends on payload size. Neither is true: the gate never looks at
+> bytes, and the boundary is exactly **10.000 s of wall time**. The same 25 MB
+> delivered in 9 s passes; a 40 KB payload delivered over 11 s fails. Derivation
+> and the two gate sites are in "Round 9 — the ingestion threshold, stated as a
+> number" at the end of this file.
+
 **A 25 MB upload taking 12 seconds is entirely ordinary on mobile**, and it is
 now refused. That is the honest cost of the ingestion boundary, and it belongs
 in this ticket rather than in a commit message.
@@ -222,3 +230,171 @@ at the runtime layer — an earlier round-8 note that "no application-level
 ingestion timeout exists" was correct only about the *application*, and
 incomplete. GetWorth's own ingestion gate now fires far earlier than either,
 so the runtime values are defence-in-depth rather than the operative control.
+
+---
+
+# Round 9 — the ingestion threshold, stated as a number
+
+Documentation only. Round 9 changed **no** ingestion behaviour, **no** threshold,
+**no** quota policy, **no** retry policy and **no** provider budget.
+
+## The threshold is 10 seconds, and §8 above never said so
+
+§8 records the round-8 measurements — "fast upload → 200", "25 MB over 12 s →
+`503 INGESTION_TOO_SLOW`" — and from those two rows a reader naturally infers a
+boundary somewhere near 12 s, or a boundary that depends on payload size. Both
+readings are wrong. The gate does not look at bytes at all, and the boundary is
+exact.
+
+`api/analyze.js:3963`:
+
+```js
+const ingestMs = Date.now() - TREQ;
+if (rem() < STAGE1_INTENDED_CAP_MS + STAGE1_BUDGET_RESERVE_MS) { … 503 INGESTION_TOO_SLOW }
+```
+
+with `BUDGET_MS = 50_000` (`:3726`), `STAGE1_INTENDED_CAP_MS = 28_000` and
+`STAGE1_BUDGET_RESERVE_MS = 12_000` (`:309-310`), and
+`rem() = BUDGET_MS - (Date.now() - TREQ)`. Substituting:
+
+```
+reject  ⟺  50_000 − elapsed  <  28_000 + 12_000
+        ⟺  elapsed  >  10_000 ms
+```
+
+**The ingestion budget is exactly 10.000 seconds of wall time from the start of
+`handleRequest`**, and it is spent by everything in that window, not only by the
+upload: body read, JSON parse, auth, and the CORS/limit preamble all come out of
+the same 10 s.
+
+That is the behaviour round 8's own review measured from the outside:
+
+| ingestion time | outcome |
+|---|---|
+| ~9.9 s | **passes** — `200`, and Stage 1 receives its full 28,000 ms cap |
+| ~9.95 s and above | **`503 INGESTION_TOO_SLOW`** — no quota charged, no provider called |
+
+The residual gap between "10.000 s of budget" and "~9.95 s of upload" is the
+auth and parse work that shares the window. §8's "25 MB over 12 s" row is a
+*consequence* of the 10 s rule, not the rule; the same 25 MB delivered in 9 s
+passes, and a 40 KB payload delivered over 11 s fails.
+
+**No number was chosen here as a product decision.** 10 s is the arithmetic
+residue of a 50 s request budget minus a 28 s provider cap minus a 12 s reserve
+— exactly the A/B split §8 names. It is recorded as a number now so that a
+future change to any of those three constants is visibly a change to the upload
+deadline users experience.
+
+### There are TWO gates, not one
+
+| # | site | when | if the quota was already charged |
+|---|---|---|---|
+| 1 | `:3963` | after body parse and auth, **before** the rate-limit RPC | nothing charged yet — nothing to refund |
+| 2 | `:4083` | at Stage-1 entry, **after** the rate-limit RPC | refunds (`pre_paid_call_fatal`, unconsumed ledger) |
+
+Gate 2 is round 8b. It exists because gate 1's guarantee is **stale** by the
+time Stage 1 starts: the rate-limit RPC is a network call, and a measured 5.5 s
+RPC after a 9.5 s upload left `cap = 22,952 ms` against an intended 28,000 ms.
+Both gates return the identical `503 INGESTION_TOO_SLOW` body, so the split is
+invisible to the client — but only gate 2 can need to give a scan back.
+
+## MEDIUM-2 — no application-level deadline on an INCOMPLETE body
+
+**Audited in round 9. NOT fixed. Recorded for a separate ticket.**
+
+### What exists, and what does not
+
+`readBodyBounded` (`api/analyze.js:341`) enforces a **size** ceiling and no
+**time** ceiling:
+
+```js
+for await (const chunk of asyncChunks) {
+  total += buf.length;
+  if (total > max) throw new BodyTooLargeError(total);
+  chunks.push(buf);
+}
+```
+
+The loop stops consuming the instant the byte ceiling is crossed. It will wait
+indefinitely on a client that opens a connection, sends a few bytes, and then
+neither sends more nor closes. Nothing in the application interrupts that wait.
+
+The 10 s gate above does **not** help: it runs *after* `await bodyPromise`
+resolves, so a body that never completes never reaches it.
+
+### Why this is MEDIUM and not HIGH
+
+- **A wall does exist.** `export const config = { maxDuration: 60 }`
+  (`api/analyze.js:21`) is the operative control. Node's own
+  `requestTimeout = 300_000` and `headersTimeout = 60_000` sit at or above it,
+  so the platform kills the function first. §8's "Ingestion timeout — what
+  actually exists" note stands.
+- **It costs nothing the attacker can convert.** The stall happens before the
+  rate-limit RPC and before any provider call, so a held request charges no
+  quota, bills no provider and returns no price. The cost is one occupied
+  function instance for up to 60 s.
+- **It is not an entitlement bug.** No honest user loses a scan to it.
+
+The exposure is therefore concurrency/resource, bounded at 60 s per connection,
+against a platform that reuses instances across concurrent requests.
+
+### A safe implementation exists, and it needs no new number
+
+The instruction for round 9 was to propose one only if it introduces no
+arbitrary timeout and no new product policy. It does not have to:
+
+> **The deadline already exists and is already decisive.** A request still
+> ingesting at `TREQ + 10_000 ms` is, by the arithmetic above, *guaranteed* to be
+> refused by the gate at `:3963` the moment its body finally arrives. Aborting
+> the read at that same instant changes **no outcome** — same `503`, same
+> `INGESTION_TOO_SLOW` code, same "no quota charged, no provider called" — it
+> changes only **when** the identical refusal is issued, and releases the
+> instance up to ~50 s earlier.
+
+Concretely: pass the already-computed deadline into `readBodyBounded` and have
+it stop consuming when the clock crosses it, exactly as it already stops when
+the byte count crosses `REQUEST_BODY_MAX_BYTES`. The deadline is
+`BUDGET_MS − STAGE1_INTENDED_CAP_MS − STAGE1_BUDGET_RESERVE_MS` from `TREQ` —
+derived from the three constants Stage 1 already uses, with no fourth constant
+introduced. A `BodyDeadlineError` would map to the same 503 the gate produces,
+so the client contract is unchanged.
+
+### Why round 9 did not implement it
+
+1. It is a **runtime behaviour change on the ingestion path**, and round 9 is
+   explicitly scoped to leave ingestion behaviour and thresholds alone. The
+   change is outcome-neutral by the argument above, but "outcome-neutral by
+   argument" is exactly the class of claim this ticket's history says should be
+   demonstrated before it is believed.
+2. It needs its own regression coverage: a client that stalls **mid-body** and
+   never completes, driven against a real HTTP server. `tests/ingestion-boundary.test.mjs`
+   already has the harness shape for it (`drive({ bodyChunks, stallMs })` at
+   `:70`), but every existing case stalls and then *finishes*; none of them
+   never-finishes, and that is the case being defended against.
+3. The severity does not force it. Nothing in round 9 raised it.
+
+**Disposition: MEDIUM, open, proposed, unimplemented.** The proposal above is
+the recommended shape; the new ticket should carry the never-completing-client
+test, not just the change.
+
+## Entitlement / UX — still unresolved, still a product decision
+
+Unchanged by round 9 and restated so it is not mistaken for a security item:
+
+- A user on a slow connection is refused at **10 s of ingestion** with
+  `503 INGESTION_TOO_SLOW`, `retryable: true`.
+- **The client does not retry**, despite `retryable: true`. The flag is
+  advisory and nothing acts on it.
+- Round 8 established the boundary empirically: ~9.9 s passes, ~9.95 s does not.
+- Nobody chose 10 s. It is `50 − 28 − 12`.
+
+These four facts are a **product/UX decision**, not a security defect, and
+round 9 deliberately did not mix them back into the security work. The
+`INGESTION_TOO_SLOW` threshold, the quota policy, the retry policy, the provider
+budget and the 50 s request budget are all **unchanged**.
+
+The open question for that decision — the same A/B split this ticket exists to
+name — is whether a user who cannot upload in 10 s should see a refusal at all,
+or should be served by a path that does not require the full provider budget.
+Answering it means changing a threshold or adding a path, and both are outside a
+stabilisation round.
