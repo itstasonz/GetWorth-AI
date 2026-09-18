@@ -24,8 +24,9 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
-  canonicalCategory, canonicalCategoryName, envelopeAgreesWithCategory,
+  canonicalCategory, canonicalCategoryName, envelopeAgreesWithCategory, aliasVocabulary,
   CANONICAL_CATEGORIES, UNKNOWN_CATEGORY,
 } from '../api/_lib/category.js';
 import { resolveEnvelopeKey, ENVELOPES } from '../api/_lib/valuation-guard.js';
@@ -187,31 +188,56 @@ describe('normalisation: accept, map, or refuse', () => {
 // bucket a string selects, it would be a silent pricing change dressed as a
 // normalisation. Assert the invariant directly over every string the pipeline
 // realistically produces, rather than inspecting the table and hoping.
-describe('normalisation never changes which envelope a string selects', () => {
-  const STRINGS = [
-    ...CANONICAL_CATEGORIES,
-    'electronics', 'Electronics & Gadgets', 'Electronics > Blender',
-    'Household', 'Home & Kitchen', 'Kitchen', 'Cleaning',
-    'Fashion', 'Apparel', 'Clothing & Accessories',
-    'Cosmetics', 'Beauty & Personal Care',
-    'Handbags', 'Bags & Luggage', 'Backpacks',
-    'Jewellery', 'Fine Jewelry',
-    'Vape', 'Tobacco', 'Smoking Accessories',
-    'Fitness', 'Sports & Outdoors', 'Outdoor',
-    'Hardware', 'Tools & DIY',
-    'Beverages', 'Food & Drink',
-    'Sofa', 'Chairs', 'Furniture & Decor',
-    'Automotive', 'Cars', 'Motorcycles',
-    'Watches & Clocks', 'Books & Media', 'Toys & Games',
-    'Footwear', 'Luxury Gaming Appliance', 'Collectibles', 'Music', 'Gaming', 'Art',
-  ];
+describe('normalisation never widens the envelope a string selects', () => {
+  // ══ THE CORPUS IS GENERATED, AND THE REASON IS A FINDING ════════════════
+  // This property first ran against a HAND-LISTED corpus, and an independent
+  // reviewer walked straight past it: the `gadget` alias widened "Gadget" from
+  // no bucket to `electronics`, and no hand-listed corpus contained the word.
+  // A property tested against remembered inputs tests the memory.
+  //
+  // The vocabulary now comes from the two places that can actually produce a
+  // mapping, and from nowhere else:
+  //   1. `aliasVocabulary()` — every literal the alias table matches on, derived
+  //      from the table itself, so a new alias brings its own test words.
+  //   2. the `cat.includes('…')` literals READ OUT OF the valuation guard's
+  //      source, so a new envelope matcher brings its own test words too.
+  // Neither list can be updated without updating this corpus, because neither
+  // is written down here.
+  const GUARD_SRC = readFileSync(new URL('../api/_lib/valuation-guard.js', import.meta.url), 'utf8');
+  const MATCHER_WORDS = [...new Set(
+    [...GUARD_SRC.matchAll(/cat\.includes\('([^']+)'\)/g)].map((m) => m[1]),
+  )];
 
-  // NARROW-ONLY, not identity. The same rule the global-envelope inversion
-  // established for identity, applied to the taxonomy: normalisation may tighten
-  // an envelope or drop it, and may NEVER hand a string a bucket it did not have
-  // or a looser one than it had. Three aliases were deleted by this property
-  // rather than by inspection — 'backpack', 'automotive' and 'kitchen' all
-  // widened — which is the whole reason it is a property and not a review note.
+  const VOCAB = [...new Set([
+    ...CANONICAL_CATEGORIES.map((c) => c.toLowerCase()),
+    ...aliasVocabulary(),
+    ...MATCHER_WORDS,
+  ])];
+
+  // Each word in the shapes a model actually emits: bare, plural, title case,
+  // joined with another canonical name, and as a path or a marketing phrase.
+  const DECORATIONS = [
+    (w) => w,
+    (w) => (w.endsWith('s') ? w : w + 's'),   // never 'carss'; see CB-12d
+    (w) => w[0].toUpperCase() + w.slice(1),
+    (w) => w + ' & Accessories',
+    (w) => 'Consumer ' + w,
+    (w) => w + ' > Misc',
+    (w) => 'Other / ' + w,
+  ];
+  const CONTEXTS = [
+    {},
+    { subcategory: 'gaming mouse', product_type: 'mouse' },
+    { subcategory: 'monitor' },
+    { subcategory: 'laptop' },
+    { subcategory: 'fragrance', product_type: 'perfume' },
+    { subcategory: 'blender' },
+    { subcategory: 'watch' },
+  ];
+  const STRINGS = [...new Set(VOCAB.flatMap((w) => DECORATIONS.map((d) => d(w))))];
+
+  // NARROW-ONLY, not identity. Normalisation may tighten a bucket or drop it,
+  // and may never hand a string one it did not have or a looser one than it had.
   const widened = (from, to) => {
     if (from === to) return false;
     if (to === null) return false;                       // dropping a bucket narrows
@@ -221,70 +247,84 @@ describe('normalisation never changes which envelope a string selects', () => {
     return b.hard_max > a.hard_max || b.soft_max > a.soft_max || b.floor < a.floor;
   };
 
-  test('CB-12 canonicalisation NEVER widens the envelope a string selects', () => {
+  test('CB-12 canonicalisation NEVER widens, over a generated corpus', () => {
     const drifted = [];
-    for (const s of STRINGS) {
-      // Every other recognition field is held constant, so the ONLY difference
-      // between the two resolutions is the category string itself.
-      for (const extra of [
-        {},
-        { subcategory: 'gaming mouse', product_type: 'mouse' },
-        { subcategory: 'monitor' },
-        { subcategory: 'fragrance', product_type: 'perfume' },
-        { subcategory: 'blender' },
-      ]) {
-        const raw = resolveEnvelopeKey({ category: s, ...extra });
-        const canon = resolveEnvelopeKey({ category: canonicalCategoryName(s), ...extra });
-        if (widened(raw, canon)) {
-          drifted.push(`${JSON.stringify(s)} ${JSON.stringify(extra)}: ${raw} -> ${canon}`);
-        }
+    for (const str of STRINGS) {
+      for (const extra of CONTEXTS) {
+        const raw = resolveEnvelopeKey({ category: str, ...extra });
+        const canon = resolveEnvelopeKey({ category: canonicalCategoryName(str), ...extra });
+        if (widened(raw, canon)) drifted.push(`${JSON.stringify(str)} ${JSON.stringify(extra)}: ${raw} -> ${canon}`);
       }
     }
-    assert.deepEqual(drifted, [],
-      'canonicalisation WIDENED the envelope a string selects. That is a pricing change ' +
-      'wearing a normalisation costume: the raw string would have been refused that ceiling, ' +
-      'and mapping it handed the ceiling over. Either the alias is wrong, or it is a ' +
-      'deliberate pricing decision, which does not belong in this boundary.');
+    assert.deepEqual(drifted.slice(0, 12), [],
+      `${drifted.length} of ${STRINGS.length * CONTEXTS.length} pairs WIDENED. That is a pricing ` +
+      'change wearing a normalisation costume: the raw string would have been refused that ' +
+      'ceiling, and mapping it handed the ceiling over.');
   });
 
-  test('CB-12b the narrowings that DO happen are enumerated, not incidental', () => {
+  test('CB-12b the corpus is large, derived, and NOT vacuous', () => {
+    // Three ways this property could pass while proving nothing, all refused.
+    assert.ok(STRINGS.length >= 200,
+      `the generated corpus is only ${STRINGS.length} strings — too small to be doing work`);
+    assert.ok(MATCHER_WORDS.length >= 20,
+      `only ${MATCHER_WORDS.length} matcher words were read out of the guard source; the ` +
+      'extraction regex has probably stopped matching');
+    for (const w of ['electron', 'household', 'jewel', 'vape', 'motor']) {
+      assert.ok(MATCHER_WORDS.includes(w) || VOCAB.includes(w), `the corpus lost the word ${w}`);
+    }
+    const selecting = STRINGS.filter((s) => resolveEnvelopeKey({ category: s }) !== null);
+    assert.ok(selecting.length >= 30,
+      `only ${selecting.length} corpus strings select any envelope — CB-12 would pass on a ` +
+      'corpus of universal nulls');
+    // And the withdrawn aliases must still be refused, by name.
+    for (const w of ['Gadget', 'Backpacks', 'Automotive', 'Kitchen']) {
+      assert.equal(canonicalCategoryName(w), 'Other', `${w} was removed as a widening alias`);
+    }
+  });
+
+  test('CB-12d the guard matches SUBSTRINGS, the aliases match WORDS — and that narrows', () => {
+    // Surfaced by the generated corpus, and kept rather than papered over.
+    // `resolveEnvelopeKeyFrom` tests `cat.includes('car')`, so any string
+    // CONTAINING those letters selects `vehicles`. The alias uses a word
+    // boundary, so it does not. A "Caravan" or a "Railcar" therefore loses the
+    // vehicles envelope at the boundary.
+    //
+    // NARROWING, so CB-12 permits it, and it is the safe direction: the raw
+    // behaviour was a substring coincidence, not a category. Recorded because
+    // the two matchers disagreeing is exactly the drift this module exists to
+    // remove, and the day someone tightens the guard's matchers this test says
+    // where to look.
+    for (const s of ['Caravan', 'Railcar', 'Scorecard']) {
+      assert.equal(resolveEnvelopeKey({ category: s }), 'vehicles',
+        `the guard still reads ${s} as a vehicle by substring`);
+      assert.equal(canonicalCategoryName(s), 'Other',
+        `${s} is not a category, and the alias table does not pretend it is`);
+      assert.equal(resolveEnvelopeKey({ category: canonicalCategoryName(s) }), null);
+    }
+  });
+
+  test('CB-12c the narrowings that DO happen are enumerated, not incidental', () => {
     // A narrow-only rule is only honest if the narrowings are known. Anything
     // not listed here is a change nobody decided to make.
-    const narrowed = [];
-    for (const s of STRINGS) {
-      for (const extra of [{}, { subcategory: 'gaming mouse', product_type: 'mouse' }, { subcategory: 'monitor' },
-        { subcategory: 'fragrance', product_type: 'perfume' }, { subcategory: 'blender' }]) {
-        const raw = resolveEnvelopeKey({ category: s, ...extra });
-        const canon = resolveEnvelopeKey({ category: canonicalCategoryName(s), ...extra });
-        if (raw !== canon) narrowed.push(`${s} -> ${raw} => ${canon}`);
+    const narrowed = new Set();
+    for (const str of STRINGS) {
+      for (const extra of CONTEXTS) {
+        const raw = resolveEnvelopeKey({ category: str, ...extra });
+        const canon = resolveEnvelopeKey({ category: canonicalCategoryName(str), ...extra });
+        if (raw !== canon) narrowed.add(`${raw} => ${canon}`);
       }
     }
-    assert.deepEqual([...new Set(narrowed)].sort(), [
+    assert.deepEqual([...narrowed].sort(), [
       // 'household' contains neither 'home' nor 'kitchen', so the raw string
       // reached the generic `home` bucket and missed the kitchen-appliance one.
-      // Canonical 'Home' reaches it: identical soft_max and hard_max, floor 12
-      // raised to 20. Strictly tighter, and correct — a household blender is a
-      // kitchen appliance.
-      'Household -> home => home:kitchen appliance',
-
-      // The PRICE THIS COSTS, recorded rather than buried. Dropping the
-      // 'kitchen' alias was forced by the narrow-only rule: with it, a bare
-      // "Kitchen" acquired the `home` envelope (hard_max 4800) that the raw
-      // string was refused. Without it, a "Kitchen" scan whose subcategory
-      // already reads as an appliance loses the bucket it had and falls to
-      // MANUAL_ONLY. Safe direction, real cost. Unlikely in practice now that
-      // the enum and the prompt both name 'Home' — and if it ever shows up in
-      // production, widening is a pricing decision with its own review, not a
-      // line quietly added to an alias table.
-      'Kitchen -> home:kitchen appliance => null',
-    ].sort(), 'an unlisted envelope change means the alias table moved a price without a decision');
-  });
-
-  test('CB-13 the corpus is not vacuous — some of these really do select a bucket', () => {
-    const selected = STRINGS.filter((s) => resolveEnvelopeKey({ category: s }) !== null);
-    assert.ok(selected.length >= 10,
-      `only ${selected.length} of ${STRINGS.length} strings select any envelope — CB-12 would ` +
-      'pass on a corpus of universal nulls, which proves nothing');
+      // Canonical 'Home' reaches it: identical soft and hard, floor 12 -> 20.
+      // Strictly tighter, and correct — a household blender is a kitchen appliance.
+      'home => home:kitchen appliance',
+      // The cost of dropping the 'kitchen' alias: a "Kitchen" scan whose
+      // subcategory already reads as an appliance loses the bucket it had.
+      // Safe direction, real cost, recorded rather than buried.
+      'home:kitchen appliance => null',
+    ], 'an unlisted envelope change means the alias table moved a price without a decision');
   });
 });
 

@@ -208,69 +208,24 @@ function buildEnvelopes() {
 
 export const ENVELOPES = buildEnvelopes();
 
-// ── EVIDENCE CLASSIFICATION (HIGH-4) ───────────────────────────────────────
-// `evidence` on a brand/model candidate is a FREE-FORM STRING the model writes
-// about its own reasoning — the schema declares `{ type: 'string' }` and nothing
-// constrains it. It is therefore not a trust input by itself; it is only ever
-// used here to answer one narrow question:
-//
-//   does this candidate rest on characters read off the item?
-//
-// If it does, the candidate is photographed text by another name, and the
-// narrow-only rule applies to it exactly as it applies to `raw_texts`.
-//
-// FAILS CLOSED. An unrecognised evidence string is 'unknown', which is treated
-// as read-off-the-item. A new value invented by a model, or by a future engine,
-// cannot buy widening power by being unfamiliar — and 'unknown' is where an
-// absent, empty, or non-string evidence field lands too.
-//
-// Only 'visual' — shape, silhouette, form factor, colour — is evidence that
-// does NOT come from reading the item, and only 'visual' may widen an envelope.
-const EVIDENCE_PATTERNS = [
-  [/text|ocr|label|sticker|engrav|print|serial|marking|writ|read/, 'text'],
-  [/logo|emblem|badge|wordmark/, 'logo'],
-  [/packag|box|carton|blister/, 'packaging'],
-  [/shape|silhouette|form|visual|appearance|colou?r|material|design/, 'visual'],
-];
-
-export function evidenceClass(evidence) {
-  if (typeof evidence !== 'string') return 'unknown';
-  const e = evidence.toLowerCase().trim();
-  if (!e) return 'unknown';
-  for (const [pattern, cls] of EVIDENCE_PATTERNS) if (pattern.test(e)) return cls;
-  return 'unknown';
-}
-
 // ── Category key matcher ───────────────────────────────────────────────────
 // Ported from getCategoryFallbackPricing (analyze.js:3576-3625), ordered,
 // first match wins. THIS module is the intended single authority for the
 // taxonomy; analyze.js still carries its own copy for the PRE category
 // fallback and should later delegate to resolveEnvelopeKey() so the envelope
 // and the fallback price can never disagree about what an item is.
-function resolveEnvelopeKeyFrom(recognition, { trustOcr, trustRead = true }) {
+function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
   const cat = (recognition.category || '').toLowerCase();
+  // HIGH-4, RECORDED RATHER THAN FIXED. Every field below except `cat` is Stage
+  // 1 describing the photograph, and ANY of them can carry the identity: a scan
+  // with no candidates at all but `subcategory: 'iphone'` reaches the same
+  // bucket as one naming Apple outright. So the `trustOcr` split below bounds
+  // `raw_texts` and nothing else — the narrow-only guarantee it provides is
+  // narrower than its name suggests, and saying so is the point.
   const sub = (recognition.subcategory || '').toLowerCase();
   const pt = (recognition.product_type || '').toLowerCase();
-  // ── HIGH-4: THE CANDIDATES ARE PHOTOGRAPHED TEXT TOO ─────────────────────
-  // `resolveEnvelopeKey` resolves twice and keeps the lower ceiling, so
-  // photographed text may narrow an envelope and never widen it. That rule was
-  // defeated on BOTH passes, because `brand_candidates` and `model_candidates`
-  // ARE distilled from photographed text — Stage 1 reads a sticker and emits
-  // `{ brand: 'Rolex', evidence: 'readable_text' }`. The supposedly
-  // OCR-independent resolution read that candidate and selected
-  // `watches:luxury`, hard_max 250,000, from a baseline of 6,400. Excluding
-  // `raw_texts` while trusting the candidates distilled from them is not a
-  // boundary; it is the same input wearing a different field name.
-  //
-  // `trustRead: false` is the THIRD resolution — shape and category only, no
-  // value that rests on characters read off the item. See resolveEnvelopeKey
-  // for what is done with the difference, and for why the answer is not simply
-  // "take the tighter one".
-  const usable = (c) => (trustRead ? true : evidenceClass(c?.evidence) === 'visual');
-  const topModel = recognition.model_candidates?.[0];
-  const topBrand = recognition.brand_candidates?.[0];
-  const mdl = (usable(topModel) ? topModel?.model || '' : '').toLowerCase();
-  const brnd = (usable(topBrand) ? topBrand?.brand || '' : '').toLowerCase();
+  const mdl = (recognition.model_candidates?.[0]?.model || '').toLowerCase();
+  const brnd = (recognition.brand_candidates?.[0]?.brand || '').toLowerCase();
   const ocr = trustOcr ? (recognition.ocr_text?.raw_texts || []).join(' ').toLowerCase() : '';
   const sig = `${sub} ${pt} ${mdl} ${ocr}`;
   const el = cat.includes('electron');
@@ -379,44 +334,48 @@ export function resolveEnvelopeKey(recognition = {}) {
   return ceiling(ocrKey) <= ceiling(trustedKey) ? ocrKey : trustedKey;
 }
 
-/**
- * HIGH-4 — is the resolved envelope LOOSER than what shape alone would allow?
- *
- * WHY THIS IS NOT "just take the tighter one".
- * The obvious fix — resolve without the read-derived candidates and keep that —
- * is wrong, and measurably so. Specific envelopes are LOOSER than their generic
- * parents on purpose, because specific products are worth more:
- * `electronics:iphone` allows 24,000 where `electronics` allows 6,400. Almost
- * every legitimate identity is text-derived, so refusing all text-derived
- * escalation would cap every iPhone GetWorth ever sees at ₪6,400. That is a
- * pricing regression wearing a safety argument, and this round forbids exactly
- * that trade.
- *
- * So the escalation is ALLOWED and made CONDITIONAL. When the only reason a
- * looser bucket was selected is a value read off the item, the resulting
- * envelope requires an ANCHOR above its soft_max — real catalog corroboration,
- * not more photographed text.
- *
- * WHAT THIS DOES AND DOES NOT DO, stated plainly. It does NOT lower the Rolex
- * witness's 250,000 ceiling. `watches:luxury` already carried
- * `requiresAnchorAboveSoft`, so a sticker-only Rolex was already bounded at
- * 40,000 — which the review said, and which is why it was a HIGH and not a
- * CRITICAL. What changes is that the bound is now a RULE that follows from how
- * the identity was obtained, rather than a flag someone happened to set on one
- * row of a table. A luxury bucket added tomorrow without the flag inherits it.
- */
-export function envelopeIsReadEscalated(recognition = {}) {
-  const chosen = resolveEnvelopeKey(recognition);
-  if (!chosen) return false;
-  const visualKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: false, trustRead: false });
-  if (visualKey === chosen) return false;
+// ── HIGH-4, ENVELOPE HALF: WITHDRAWN, AND WHY ─────────────────────────
+//
+// This round shipped a derived rule here: a bucket looser than the one some
+// baseline signal selects is an "escalation", and everything above its soft_max
+// then needs a catalog anchor. It was wrong twice, and the second failure is the
+// instructive one.
+//
+// FIRST VERSION — baseline = candidates whose `evidence` string named shape
+// rather than text. Defeated by relabelling: `evidence: 'readable_text'`
+// required an anchor, `evidence: 'shape_only'` did not, on an otherwise
+// identical scan. The rule handed WIDER permission to the WEAKER evidence
+// class, on the strength of a free-form string the model writes about its own
+// reasoning — the exact circularity SCAN-017 in api/analyze.js already rejected
+// for confidence. Also defeated by moving the identity from `brand_candidates`
+// into `subcategory: 'iphone'`, which every pass read unconditionally.
+//
+// SECOND VERSION — baseline = the canonical category alone, the one field that
+// is enum-constrained and not a free-form description of the photograph. That
+// closes both defeats. It also degrades a ₪12,000 laptop, because
+// `electronics:laptop` allows soft 7,500 against `electronics` 2,000/6,400 —
+// and V-ENVELOPE-SOFT-01 says in terms that a ₪12,000 laptop is real and must be
+// FLAGGED, not refused.
+//
+// THE REASON NO THIRD VERSION FOLLOWS. Specific buckets are looser than their
+// category parents by design, and four of them sit above their parent's hard
+// ceiling: iphone 7,500, laptop 7,500, macbook 12,500, watches:luxury 40,000.
+// A laptop legitimately exceeds what "Electronics" alone allows, and a watch
+// with ROLEX printed on it claims to. NOTHING in the recognition distinguishes
+// them: `subcategory` is the legitimate route to a specific bucket AND is
+// itself derived from the image. Any threshold that separates the two is a
+// number chosen to make the laptop pass, which is a pricing decision.
+//
+// So the correct fix is NOT a derived rule. It is `requiresAnchorAboveSoft`
+// set per bucket in ENVELOPES, reviewed one bucket at a time against the real
+// market — exactly as `watches:luxury` already has it, which is why the review
+// rated the Rolex witness HIGH and not CRITICAL: it is bounded at 40,000
+// without a catalog row today. That is a pricing change, this round forbids
+// pricing changes, and shipping a rule that is both defeatable and regressive
+// is worse than recording the gap.
+//
+// RECORDED AS OPEN. See docs/GW-OPENAI-INTELLIGENCE-002-PHASE3-REV4.md §4d.
 
-  const soft = (k) => (k && ENVELOPES[k] ? ENVELOPES[k].soft_max : 0);
-  const hard = (k) => (k && ENVELOPES[k] ? ENVELOPES[k].hard_max : 0);
-  // Looser in either dimension. A tighter-or-equal escalation is not an
-  // escalation, and must not acquire a requirement it does not need.
-  return soft(chosen) > soft(visualKey) || hard(chosen) > hard(visualKey);
-}
 
 // ctx.anchor — a catalog row the CALLER has already confirmed compatible via
 // isCompatibleAnchor (analyze.js:3726). This module cannot import that function:
@@ -487,6 +446,39 @@ export const IDENTITY_TIER = Object.freeze({
  * fail in different directions: identity can be empty while a category string
  * is confidently wrong, which is exactly the Ninja shape.
  */
+// ── A CONFIDENCE IS A PROBABILITY, AND EVERY READ OF ONE GOES THROUGH HERE ──
+//
+// Round 1 probing found that `5`, `99` and `true` all read as strong, and the
+// fix was written — and applied to `category_confidence` ALONE. The comment
+// above that check stated the rule in general terms ("Out of [0,1], or not a
+// number at all, is malformed input") while two feet below it `brandC` and
+// `modelC` were still read through a bare `Number()` with no type check and no
+// upper bound. An independent reviewer walked straight through the gap.
+//
+// The witness is not exotic. A model writing confidences on a 0-100 scale is
+// the single most common malformation of this field, and `RECOGNITION_SCHEMA`
+// is documentation — api/analyze.js says so itself: it is never applied. So:
+//
+//   brandC 0.30  ->  unidentified  ->  DEGRADE 0/0/0
+//   brandC 30    ->  exact_model   ->  ACCEPT  250/380/520
+//
+// The same 30%, one scale apart, turning an honest refusal into a top-tier
+// price on an invented Nike / "Air Max" identity with 0.20 category confidence.
+//
+// This is the fifth time in this work that a comment has asserted a rule the
+// code applied in only one of the places it named. Hence ONE function, used by
+// every confidence read in this module: a rule that exists in a single place
+// cannot be applied to two thirds of its subjects.
+//
+// Returns NaN for anything malformed, and every comparison against NaN is
+// false — so malformed fails closed by construction rather than by remembering.
+function confidence(value) {
+  if (typeof value !== 'number') return NaN;      // strings, booleans, objects, arrays
+  if (!Number.isFinite(value)) return NaN;        // NaN, Infinity
+  if (value < 0 || value > 1) return NaN;         // a probability, not a percentage
+  return value;
+}
+
 export function resolveIdentityTier(ctx = {}) {
   // AN ABSENT IDENTITY IS NOT A NEUTRAL IDENTITY. With no `ctx.identity` at all
   // the tier used to fall through to CATEGORY_ONLY and price — so a caller that
@@ -511,22 +503,14 @@ export function resolveIdentityTier(ctx = {}) {
   // score, because `confirmed_by_text` means the name was READ off the item —
   // which is stronger evidence than any number the model assigns itself.
   const textConfirmed = id.brandConfLabel === 'confirmed_by_text';
-  const brandEvidenced = textConfirmed || Number(id.brandC) >= IDENTITY_CONFIDENCE_FLOOR;
-  const modelEvidenced = textConfirmed || Number(id.modelC) >= IDENTITY_CONFIDENCE_FLOOR;
+  const brandEvidenced = textConfirmed || confidence(id.brandC) >= IDENTITY_CONFIDENCE_FLOOR;
+  const modelEvidenced = textConfirmed || confidence(id.modelC) >= IDENTITY_CONFIDENCE_FLOOR;
 
   const brandOk = id.brandOk === true && brandEvidenced;
   const modelOk = id.modelOk === true && modelEvidenced;
 
-  // A confidence is a PROBABILITY, and it must arrive as a NUMBER. Probing
-  // found two ways past a naive check: `5` and `99` are finite and above the
-  // floor, and `true` coerces to exactly 1. Neither is a confidence; both bought
-  // category trust. Out of [0,1], or not a number at all, is malformed input —
-  // and malformed input must never read as strong.
-  const raw = ctx.recognition?.category_confidence;
-  const catConf = typeof raw === 'number' ? raw : NaN;
-  const categoryTrusted = Number.isFinite(catConf)
-    && catConf >= CATEGORY_CONFIDENCE_FLOOR
-    && catConf <= 1;
+  // The same rule, on the same function's other confidence. See `confidence()`.
+  const categoryTrusted = confidence(ctx.recognition?.category_confidence) >= CATEGORY_CONFIDENCE_FLOOR;
 
   // `model_family` is the field BOTH engines actually put on the recognition
   // root: the current engine declares it in RECOGNITION_SCHEMA, and the OpenAI
@@ -664,24 +648,13 @@ export function resolveEnvelope(ctx = {}) {
     }
     return { key: key || 'global', basis: 'global', ...GLOBAL_ENVELOPE, requiresAnchorAboveSoft: false };
   }
-  // HIGH-4. If the only reason this bucket is looser than the shape-only one is
-  // a value READ OFF THE ITEM, everything above its soft_max needs an anchor —
-  // catalog corroboration, not more photographed text. See
-  // envelopeIsReadEscalated for why the escalation is permitted at all.
-  //
-  // `ctx.envelope_key` deliberately does NOT get this treatment: a
-  // caller-supplied key is already refused as an identity answer by
-  // V-IDENTITY-FLOOR, and re-deriving escalation from a key whose provenance we
-  // do not know would be guessing.
-  const readEscalated = ctx.envelope_key == null && envelopeIsReadEscalated(ctx.recognition || {});
   return {
     key: env.key,
     basis: env.class === 'manual_only' ? 'manual_only' : 'category',
     floor: env.floor,
     soft_max: env.soft_max,
     hard_max: env.hard_max,
-    requiresAnchorAboveSoft: !!env.requiresAnchorAboveSoft || readEscalated,
-    readEscalated,
+    requiresAnchorAboveSoft: !!env.requiresAnchorAboveSoft,
   };
 }
 

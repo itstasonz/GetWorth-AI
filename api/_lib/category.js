@@ -48,6 +48,27 @@ export const CANONICAL_CATEGORIES = Object.freeze([
 
 const CANONICAL_SET = new Set(CANONICAL_CATEGORIES);
 
+// The literal vocabulary this table matches on, exported so the narrow-only
+// property can generate its corpus from the table rather than from memory.
+// Deriving it here, from ALIASES itself, means a word added below cannot be
+// left untested by forgetting to add it somewhere else too.
+export function aliasVocabulary() {
+  const words = new Set();
+  const BACKSLASH = String.fromCharCode(92);
+  for (const [pattern] of ALIASES) {
+    for (const alt of pattern.source.split('|')) {
+      // Strip regex syntax to the bare word: `\bcars?\b` -> `cars`, and also
+      // emit the singular so `car` is exercised as well as `cars`.
+      const bare = alt.split(BACKSLASH + 'b').join('').replace(/[()^$]/g, '');
+      const withOptional = bare.replace(/\?/g, '');
+      if (withOptional) words.add(withOptional);
+      const withoutOptional = bare.replace(/(.)\?/g, '');
+      if (withoutOptional && withoutOptional !== withOptional) words.add(withoutOptional);
+    }
+  }
+  return [...words];
+}
+
 // The unknown bucket. It is a real canonical value — an item IS sometimes
 // "Other" — but it owns no envelope, so it can never become a pricing bucket.
 export const UNKNOWN_CATEGORY = 'Other';
@@ -70,17 +91,25 @@ export const UNKNOWN_CATEGORY = 'Other';
 // not already select, and nothing here refuses one it did — verified as a
 // property, not by inspection, in tests/category-boundary.test.mjs.
 //
-// THREE ALIASES WERE REMOVED BY THAT PROPERTY, not by review: 'backpack',
-// 'automotive' and 'kitchen'. None of those strings selects an envelope today —
-// the guard matches `cat.includes('bag')`, `cat.includes('motor')` and
-// `cat.includes('home')`, and none of the three words contains its match — so
-// mapping them would have HANDED each an envelope it did not have. More
-// correct, probably. Still a pricing change, and a pricing change does not
-// belong inside a normalisation boundary. Recorded as a deliberate non-change,
-// and each is still reachable through a string that names the category outright
-// ('Home & Kitchen' → Home).
+// FOUR ALIASES WERE REMOVED BY THAT PROPERTY, not by review: 'backpack',
+// 'automotive', 'kitchen' and 'gadget'. None of those strings selects an
+// envelope today — the guard matches `cat.includes('bag')`, `'motor'`, `'home'`
+// and `'electron'`, and none of the four words contains its match — so mapping
+// them would have HANDED each an envelope it did not have. More correct,
+// probably. Still a pricing change, and a pricing change does not belong inside
+// a normalisation boundary. Each remains reachable through a string that names
+// the category outright ('Home & Kitchen' → Home).
+//
+// 'gadget' was found by an INDEPENDENT REVIEWER, not by the property — because
+// the corpus the property ran against was HAND-LISTED, and a hand-listed corpus
+// contains only the words somebody thought of. That is the same shape as every
+// other finding in this work: the artefact claimed a guarantee its inputs could
+// not deliver. The corpus is generated now, from `aliasVocabulary()` above
+// crossed with the envelope matchers' own substrings read out of
+// api/_lib/valuation-guard.js, so an alias added below is tested by the very
+// words it introduces.
 const ALIASES = [
-  [/electron|gadget/, 'Electronics'],
+  [/electron/, 'Electronics'],
   [/furni|sofa|chair|table/, 'Furniture'],
   [/vehicle|\bcars?\b|motor/, 'Vehicles'],
   [/watch/, 'Watches'],

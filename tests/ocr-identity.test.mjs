@@ -12,27 +12,29 @@
 //   PRODUCER                         REACHES                        BOUND BY
 //   Stage-1 ocr_text.raw_texts       envelope selection             narrow-only
 //   Stage-1 ocr_text.logos_detected  prompt evidence only           (not a trust input)
-//   Stage-1 brand_candidates[]       envelope, identity tier        evidenceClass + escalation
-//   Stage-1 model_candidates[]       envelope, identity tier        evidenceClass + escalation
+//   Stage-1 brand_candidates[]       envelope, identity tier        identity floor only (envelope: OPEN)
+//   Stage-1 model_candidates[]       envelope, identity tier        identity floor only (envelope: OPEN)
 //   Google Vision text               the Stage-2 identity upgrade   phrase + corroboration
 //   Google Vision logos              the Stage-2 identity upgrade   score >= VISION_TRIGGER
 //   serial OCR (ocrSerialLabel)      serial display                 not an identity input
 //   retrieval evidence tokens        catalog row grading            isSpecificTokenMatch
 //
-// THE ONE THAT WAS OPEN. `resolveEnvelopeKey` resolves twice and keeps the
-// lower ceiling, so photographed text may narrow an envelope and never widen
-// it — except that `brand_candidates` and `model_candidates` ARE photographed
-// text, distilled by Stage 1 into a different field name, and BOTH passes read
-// them. A sticker reading ROLEX selected watches:luxury, hard_max 250,000, from
-// a baseline of 6,400.
+// WHAT THIS FILE CLOSES, AND WHAT IT DOES NOT.
+// CLOSED: the "duo" class — a plain word read off an unbranded item no longer
+// grades a catalog row as exact evidence — and the cross-brand collision, whose
+// bound at the anchor gate is now asserted rather than assumed.
+// OPEN: the ENVELOPE half. `resolveEnvelopeKey` resolves twice and keeps the
+// lower ceiling, so photographed text may narrow and never widen — except that
+// `brand_candidates`, `model_candidates`, `subcategory` and `product_type` are
+// ALL Stage 1 describing the photograph, and every pass reads them. A sticker
+// reading ROLEX still selects watches:luxury. A derived rule to close it was
+// written, defeated twice, and withdrawn; see the block above the Rolex tests.
 //
 //   node --test tests/ocr-identity.test.mjs
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  resolveEnvelope, resolveEnvelopeKey, envelopeIsReadEscalated, evidenceClass, ENVELOPES,
-} from '../api/_lib/valuation-guard.js';
+import { resolveEnvelope, validateQuote, ENVELOPES } from '../api/_lib/valuation-guard.js';
 import { isSpecificTokenMatch, gradeRowEvidence } from '../api/analyze.js';
 
 const CONFIRMED = { brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.9, brandConfLabel: 'confirmed_by_text' };
@@ -65,76 +67,76 @@ const ROLEX_STICKER = {
   ocr_text: { raw_texts: ['ROLEX SUBMARINER'] },
 };
 
-describe('evidence classification fails closed', () => {
-  test('OI-1 anything read off the item classifies as read, not as shape', () => {
-    for (const e of ['readable_text', 'ocr', 'label_sticker', 'serial_number', 'printed_marking', 'engraved']) {
-      assert.equal(evidenceClass(e), 'text', `${e} is characters read off the item`);
-    }
-    for (const e of ['logo', 'logo_visible', 'brand_emblem', 'wordmark']) assert.equal(evidenceClass(e), 'logo');
-    for (const e of ['packaging_design', 'packaging_visual', 'retail_box']) assert.equal(evidenceClass(e), 'packaging');
-    for (const e of ['shape_only', 'silhouette', 'form_factor', 'colour_match', 'material']) {
-      assert.equal(evidenceClass(e), 'visual', `${e} does not rest on reading the item`);
-    }
-  });
-
-  test('OI-2 an UNRECOGNISED evidence string cannot buy widening power', () => {
-    // `evidence` is `{ type: 'string' }` in the schema — free-form model output.
-    // A value nobody anticipated must not be treated as shape evidence just
-    // because it is unfamiliar.
-    const BOMB = JSON.parse('{"toString":1,"valueOf":2}');
-    for (const e of ['', 'none', 'vibes', 'high_confidence', 'i_just_know', null, undefined, 42, [], {}, BOMB, true]) {
-      assert.equal(evidenceClass(e), 'unknown');
-    }
-  });
-});
-
-describe('OCR-derived candidates cannot silently widen an envelope', () => {
-  test('OI-3 THE ROLEX WITNESS — a sticker cannot buy an unbounded ceiling', () => {
+// ════════════════════════════════════════════════════════════════════════════════
+// THE ENVELOPE HALF OF HIGH-4 IS OPEN, AND THESE TESTS SAY SO
+//
+// A derived escalation rule was written here and WITHDRAWN. An independent
+// reviewer defeated it twice, and the second version, which closed both
+// defeats, degraded a ₪12,000 laptop — an item V-ENVELOPE-SOFT-01 says in terms
+// is real and must be FLAGGED, not refused.
+//
+// The reason no third version follows is in api/_lib/valuation-guard.js beside
+// the withdrawal: specific buckets are looser than their category parents by
+// design, four of them sit above their parent's hard ceiling, and `subcategory`
+// is BOTH the legitimate route to a specific bucket AND derived from the image.
+// A laptop legitimately exceeds what "Electronics" allows; a watch with ROLEX
+// printed on it claims to. No field in the recognition separates them, so any
+// threshold that does is a number chosen to make the laptop pass.
+//
+// These tests therefore pin THE BOUND THAT ACTUALLY EXISTS, so that nobody
+// reads the section heading and assumes more. If one of them starts failing,
+// the envelope behaviour has moved and the gap needs re-measuring.
+// ════════════════════════════════════════════════════════════════════════════════
+describe('the Rolex witness: what bounds it today, measured not assumed', () => {
+  test('OI-3 a sticker DOES still reach watches:luxury — the gap, stated', () => {
     const e = env(ROLEX_STICKER);
-    assert.equal(e.key, 'watches:luxury', 'the bucket is still selected — text may narrow identity');
-    assert.equal(e.readEscalated, true,
-      'the ONLY reason this is not the 6,400 watches bucket is a value read off the item');
-    assert.equal(e.requiresAnchorAboveSoft, true,
-      'so everything above soft_max needs a catalog anchor, not more photographed text');
+    assert.equal(e.key, 'watches:luxury');
+    assert.equal(e.hard_max, 250000,
+      'OCR-derived candidates still select this bucket. That is the open finding, unclosed.');
   });
 
-  test('OI-4 the escalation requirement follows from HOW, not from a table flag', () => {
-    // watches:luxury already carried requiresAnchorAboveSoft, which is why the
-    // review rated this HIGH rather than CRITICAL. The point of the fix is that
-    // the bound is now derived from the provenance of the identity, so a bucket
-    // added tomorrow WITHOUT the flag inherits it.
-    assert.equal(ENVELOPES['electronics:iphone'].requiresAnchorAboveSoft, false,
-      'this bucket carries no flag of its own — if it did, the test below would prove nothing');
-    const iphone = {
-      category: 'Electronics', subcategory: 'smartphone', category_confidence: 0.9,
-      brand_candidates: [{ brand: 'Apple', confidence: 0.9, evidence: 'readable_text' }],
-      model_candidates: [{ model: 'iPhone 15 Pro', confidence: 0.9, evidence: 'ocr' }],
-      ocr_text: { raw_texts: ['iPhone'] },
-    };
-    const e = env(iphone);
-    assert.equal(e.key, 'electronics:iphone');
-    assert.equal(e.requiresAnchorAboveSoft, true,
-      'an unflagged bucket reached only through read evidence still needs an anchor above soft');
+  test('OI-4 the bound is requiresAnchorAboveSoft on the BUCKET, set by hand', () => {
+    // This is what the review meant by "bounded by requiresAnchorAboveSoft",
+    // and it is why the witness is HIGH and not CRITICAL. It is a per-bucket
+    // decision in the ENVELOPES table, not a rule derived from the scan.
+    const e = env(ROLEX_STICKER);
+    assert.equal(e.requiresAnchorAboveSoft, true);
+    assert.equal(ENVELOPES['watches:luxury'].requiresAnchorAboveSoft, true,
+      'the flag lives on the table row — a bucket added without it inherits nothing');
   });
 
-  test('OI-5 the escalation is ALLOWED — this is not a cap on legitimate value', () => {
-    // The naive fix (resolve without read-derived candidates and keep that) caps
-    // every iPhone at the generic electronics ceiling of 6,400. That is a
-    // pricing regression dressed as a safety fix, and it is refused here.
-    const iphone = {
-      category: 'Electronics', subcategory: 'smartphone', category_confidence: 0.9,
-      brand_candidates: [{ brand: 'Apple', confidence: 0.9, evidence: 'readable_text' }],
-      model_candidates: [{ model: 'iPhone 15 Pro', confidence: 0.9, evidence: 'ocr' }],
-      ocr_text: { raw_texts: ['iPhone'] },
-    };
-    assert.equal(env(iphone).hard_max, 24000, 'the iPhone envelope is still reachable');
-    assert.ok(env(iphone).soft_max >= 7500, 'and the soft ceiling still covers the real market');
+  test('OI-5 so a sticker-only Rolex is refused above soft, and priced below it', () => {
+    // The actual money consequence, both directions, so the bound is a measured
+    // number rather than a claim.
+    const hi = validateQuote({ low: 90000, mid: 120000, high: 160000, currency: 'ILS' },
+      { stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: ROLEX_STICKER, identity: CONFIRMED });
+    assert.equal(hi.action, 'degrade', 'above soft_max with no catalog anchor');
+    assert.match(hi.metadata.degraded_reason, /V-ENVELOPE-SOFT/);
+
+    const lo = validateQuote({ low: 8000, mid: 12000, high: 18000, currency: 'ILS' },
+      { stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: ROLEX_STICKER, identity: CONFIRMED });
+    assert.notEqual(lo.action, 'degrade',
+      'below soft_max a text-confirmed watch is priced — ₪40,000 is the real bound, not ₪250,000');
   });
 
-  test('OI-6 NON-REGRESSION: the three priceable cases are not escalated at all', () => {
-    // Their buckets come from category and subcategory — fields that describe
-    // the SHAPE of the thing, not characters read off it. Nothing changes for
-    // them, which is the test that keeps this fix from being a blunt instrument.
+  test('OI-6 THE BUCKETS WITH NO SUCH FLAG, enumerated — this is the gap', () => {
+    // Four specific buckets sit above their category parent's hard ceiling.
+    // Exactly one of them carries the anchor requirement. The other three are
+    // the unclosed surface, and listing them is the deliverable: the fix is to
+    // decide each one against the real market, which is a pricing change.
+    const parentHard = ENVELOPES.electronics.hard_max;
+    const exposed = Object.entries(ENVELOPES)
+      .filter(([k, e]) => k.startsWith('electronics:') && e.soft_max > parentHard)
+      .filter(([, e]) => !e.requiresAnchorAboveSoft)
+      .map(([k, e]) => `${k} soft=${e.soft_max} hard=${e.hard_max}`);
+    assert.deepEqual(exposed.sort(), [
+      'electronics:iphone soft=7500 hard=24000',
+      'electronics:laptop soft=7500 hard=24000',
+      'electronics:macbook soft=12500 hard=40000',
+    ], 'if this list changes, the open finding has changed shape and must be re-reported');
+  });
+
+  test('OI-7 NON-REGRESSION: the three priceable cases keep their envelopes', () => {
     for (const [name, rec, key] of [
       ['Logitech', LOGITECH, 'electronics:gaming mouse'],
       ['LG', LG, 'electronics:monitor'],
@@ -142,37 +144,22 @@ describe('OCR-derived candidates cannot silently widen an envelope', () => {
     ]) {
       const e = env(rec);
       assert.equal(e.key, key, `${name} must keep its envelope`);
-      assert.equal(e.readEscalated, false, `${name} is not read-escalated — its bucket comes from its shape`);
-      assert.equal(e.requiresAnchorAboveSoft, false, `${name} must not acquire an anchor requirement`);
-      assert.equal(envelopeIsReadEscalated(rec), false);
+      assert.equal(e.requiresAnchorAboveSoft, false,
+        `${name} must not acquire an anchor requirement it did not have`);
     }
   });
 
-  test('OI-7 stripping the read evidence does not change the three cases', () => {
-    // The property behind OI-6, stated directly: if the candidates were removed
-    // entirely, these three resolve to the same bucket. That is what "not
-    // read-escalated" means, and it is checked rather than asserted.
-    for (const rec of [LOGITECH, LG, LV]) {
-      const blind = { ...rec, brand_candidates: [], model_candidates: [], ocr_text: { raw_texts: [] } };
-      assert.equal(resolveEnvelopeKey(blind), resolveEnvelopeKey(rec));
-    }
-    // And the contrast: the Rolex witness collapses to the generic bucket.
-    const blindRolex = { ...ROLEX_STICKER, brand_candidates: [], model_candidates: [], ocr_text: { raw_texts: [] } };
-    assert.equal(resolveEnvelopeKey(blindRolex), 'watches');
-    assert.equal(ENVELOPES.watches.hard_max, 6400, 'the 6,400 baseline the review named');
-  });
-
-  test('OI-8 a SHAPE-evidenced candidate is not treated as read', () => {
-    // The rule is about provenance, not about the field. A brand proposed from
-    // the silhouette carries no photographed text, so it does not trigger the
-    // anchor requirement — it is bounded by its own low confidence instead.
-    const shaped = {
-      ...ROLEX_STICKER,
-      brand_candidates: [{ brand: 'Rolex', confidence: 0.4, evidence: 'shape_only' }],
-      model_candidates: [{ model: 'Submariner', confidence: 0.3, evidence: 'silhouette' }],
-      ocr_text: { raw_texts: [] },
-    };
-    assert.equal(envelopeIsReadEscalated(shaped), false);
+  test('OI-8 the ₪12,000 laptop — the case that withdrew the rule', () => {
+    // Kept as a live test rather than a comment, because it is the reason the
+    // rule is not here. If a future change makes this degrade, that change has
+    // made the same mistake.
+    const laptop = { category: 'Electronics', subcategory: 'Laptop', product_type: '', category_confidence: 0.9,
+      brand_candidates: [], model_candidates: [], ocr_text: { raw_texts: [] }, visual_features: { condition: 'Good' } };
+    const v = validateQuote({ low: 10000, mid: 12000, high: 14000, currency: 'ILS' },
+      { stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: laptop,
+        identity: { brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.8 } });
+    assert.equal(v.action, 'accept', 'a ₪12,000 laptop is real — flag it, do not refuse it');
+    assert.equal(v.metadata.needs_review, true);
   });
 });
 

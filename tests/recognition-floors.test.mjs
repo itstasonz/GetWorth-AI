@@ -13,13 +13,24 @@
 // system while pricing an object nobody had identified.
 //
 //   AXIS                 VALUES
-//   brand evidence       absent · weak · OCR-only · corroborated
-//   model evidence       absent · weak · OCR-only · exact
+//   brand evidence       absent · weak · OCR-only · corroborated ·
+//                        percent-scale · boolean
+//   model evidence       absent · weak · OCR-only · exact · percent-scale ·
+//                        numeric-string
 //   category evidence    absent · weak · canonical · model-suggested · free-form
 //   recognition state    normal · stage-1 timeout · fallback · generic-only ·
 //                        DB missing · DB candidate · AI estimate
 //   confidence           absent · NaN · string · 0 · below · exactly · above · >1
 //   pricing source       catalog · AI · registered · unknown
+//
+// THE MATRIX MISSED A CRITICAL, AND THE SHAPE OF THE MISS IS THE LESSON. Its
+// confidence axis varied `category_confidence` across eight encodings and left
+// the IDENTITY confidences well-formed, so an independent reviewer found what it
+// could not see: `brandC: 30` — the same 30% on a percent scale — read as
+// strong and took a refused scan to the top tier. A generated matrix is only as
+// complete as its axes, and an axis that varies one of three sibling fields is
+// a hand-listed corpus with extra steps. Both identity confidences now carry
+// malformed encodings of their own.
 //
 //   node --test tests/recognition-floors.test.mjs
 // ══════════════════════════════════════════════════════════════════════════════
@@ -186,12 +197,23 @@ const BRAND_EVIDENCE = {
   weak:         { brandOk: true, brandC: 0.3, brandLabel: undefined },
   ocr_only:     { brandOk: true, brandC: 0.75, brandLabel: undefined },
   corroborated: { brandOk: true, brandC: 0.9, brandLabel: 'confirmed_by_text' },
+  // THE AXIS THIS MATRIX WAS MISSING. It varied `category_confidence` across
+  // eight encodings and left the IDENTITY confidences at well-formed values, so
+  // it could not see the bypass an independent reviewer found: `brandC: 30` —
+  // the same 30% on a percent scale — read as strong and took a refused scan to
+  // the top tier. A generated matrix is only as complete as its axes, and an
+  // axis that varies one of three sibling fields is a hand-listed corpus with
+  // extra steps.
+  percent_scale: { brandOk: true, brandC: 30, brandLabel: undefined },
+  boolean_true:  { brandOk: true, brandC: true, brandLabel: undefined },
 };
 const MODEL_EVIDENCE = {
   absent: { modelOk: false, modelC: undefined },
   weak:   { modelOk: true, modelC: 0.25 },
   ocr:    { modelOk: true, modelC: 0.72 },
   exact:  { modelOk: true, modelC: 0.95 },
+  percent_scale: { modelOk: true, modelC: 30 },
+  numeric_string: { modelOk: true, modelC: '0.95' },
 };
 const CATEGORY_EVIDENCE = {
   absent:          { category: '', subcategory: '' },
@@ -271,7 +293,7 @@ const priced = (v) => v.action !== 'degrade' && Number(v.prices?.mid) > 0;
 
 describe('the generated matrix', () => {
   test('SM-0 the matrix is the size it claims, and BOTH outcomes occur', () => {
-    assert.equal(ALL_CASES.length, 4 * 4 * 5 * 7 * 8 * 4);
+    assert.equal(ALL_CASES.length, 6 * 6 * 5 * 7 * 8 * 4);
     const results = ALL_CASES.map((c) => priced(validateQuote(QUOTE, c.ctx)));
     const yes = results.filter(Boolean).length;
     assert.ok(yes > 0, 'a matrix where nothing is ever priced proves no invariant');
@@ -376,6 +398,46 @@ describe('the generated matrix', () => {
       assert.equal(tier, IDENTITY_TIER.CATEGORY_ONLY,
         `${id} priced at tier ${tier} with no brand and no model`);
     }
+  });
+
+  test('SM-9 a MALFORMED IDENTITY confidence never reads as strong', () => {
+    // The reviewer's CRITICAL, pinned. `resolveIdentityTier` hardened
+    // `category_confidence` against exactly these encodings in round 1 and the
+    // comment stated the rule in general terms, while `brandC` and `modelC` two
+    // lines below were still read through a bare `Number()` with no type check
+    // and no upper bound. The witness is not exotic: a model writing
+    // confidences on a 0-100 scale is the commonest malformation of the field,
+    // and RECOGNITION_SCHEMA is never applied.
+    const rec = {
+      category: 'Clothing', subcategory: 'sneaker', category_confidence: 0.20,
+      brand_candidates: [{ brand: 'Nike', confidence: 0.3, evidence: 'visual_shape' }],
+      model_candidates: [{ model: 'Air Max', confidence: 0.3, evidence: 'visual_shape' }],
+      ocr_text: { raw_texts: [] },
+    };
+    const at = (c) => ({
+      stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: rec,
+      identity: { brandOk: true, modelOk: true, brandC: c, modelC: c },
+    });
+
+    // The honest reading of this scan.
+    assert.equal(resolveIdentityTier(at(0.30)), IDENTITY_TIER.UNIDENTIFIED);
+    assert.equal(validateQuote(QUOTE, at(0.30)).action, 'degrade');
+
+    // Every malformation must land in the SAME place, never above it.
+    const BOMB = JSON.parse('{"toString":1,"valueOf":2}');
+    for (const c of [30, 99, 5, true, '30', '0.9', [0.9], { valueOf: () => 1 }, BOMB,
+      Infinity, -Infinity, NaN, -1, 1.5, null, undefined, 0]) {
+      const tier = resolveIdentityTier(at(c));
+      assert.equal(tier, IDENTITY_TIER.UNIDENTIFIED,
+        `brandC/modelC ${String(typeof c === 'object' ? JSON.stringify(c) : c)} reached ${tier}`);
+      assert.equal(validateQuote(QUOTE, at(c)).prices.mid, 0,
+        'a malformed confidence must not produce a number');
+    }
+
+    // And a REAL confidence still works, so this is a floor and not a wall.
+    assert.equal(resolveIdentityTier(at(0.9)), IDENTITY_TIER.EXACT_MODEL);
+    assert.notEqual(validateQuote(QUOTE, at(0.9)).action, 'degrade');
+    assert.equal(resolveIdentityTier(at(1)), IDENTITY_TIER.EXACT_MODEL, 'exactly 1 is a valid probability');
   });
 
   test('SM-8 the identity floor constants still stand where they were placed', () => {
