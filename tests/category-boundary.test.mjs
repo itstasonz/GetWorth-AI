@@ -26,7 +26,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
-  canonicalCategory, canonicalCategoryName, envelopeAgreesWithCategory, aliasVocabulary,
+  canonicalCategory, canonicalCategoryName, aliasVocabulary,
   CANONICAL_CATEGORIES, UNKNOWN_CATEGORY,
 } from '../api/_lib/category.js';
 import { resolveEnvelopeKey, ENVELOPES } from '../api/_lib/valuation-guard.js';
@@ -166,8 +166,6 @@ describe('normalisation: accept, map, or refuse', () => {
     for (const a of ['Footwear', 'Luxury Gaming Appliance', 'Collectibles', 'Music']) {
       assert.equal(resolveEnvelopeKey({ category: canonicalCategoryName(a) }), null,
         `${a} canonicalises to Other, which must own no bucket`);
-      assert.equal(envelopeAgreesWithCategory('electronics:iphone', a), false,
-        'an unknown category agrees with no envelope');
     }
   });
 
@@ -330,14 +328,32 @@ describe('normalisation never widens the envelope a string selects', () => {
 
 // ── THE SAME VALUE, END TO END ──────────────────────────────────────────────
 describe('one representation, used everywhere', () => {
-  test('CB-14 the guard prices from the category the client is shown', async () => {
-    // The disagreement this closes: the envelope was resolved from STAGE 1's
-    // category while the client was shown STAGE 2's. Stage 2 exists in order to
-    // disagree with Stage 1, so that was not a corner case.
+  test('CB-14 the guard prices from the STAGE 1 category — and the gap is recorded', async () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, AND IT WAS WRONG.
+    //
+    // It pinned the source text of `{ ...recognition, category:
+    // verification.final_category || recognition.category }` on the reasoning
+    // that the price and the label must come from the same string. They must.
+    // But that line made it true by taking BOTH from the LESS trusted one:
+    // Stage 2 is the stage whose prompt carries OCR, Vision labels, catalog
+    // rows and the user's correction. A paperback Stage 1 read correctly as
+    // Books (hard_max 480) could be priced at ₪4,000 by Stage 2 answering
+    // "Furniture" (16,000). Two independent reviews produced that witness.
+    //
+    // Pinning a line of SOURCE TEXT is also why this test could not see the
+    // problem: it asserted that the line existed, not what it did.
     const src = (await import('node:fs')).readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
-    assert.match(src, /recognition: \{ \.\.\.recognition, category: verification\.final_category \|\| recognition\.category \}/,
-      'the guard context must carry the FINAL category, or the price and the label come from ' +
-      'different taxonomy branches with nothing recording it');
+    assert.ok(!/recognition: \{ \.\.\.recognition, category: verification\.final_category/.test(src),
+      'the guard must not resolve its envelope from the Stage 2 category');
+
+    // The behaviour, asserted as behaviour. Stage 2 naming a looser category
+    // must not move the ceiling.
+    const book = { category: 'Books', subcategory: 'paperback', category_confidence: 0.9,
+      brand_candidates: [], model_candidates: [], ocr_text: { raw_texts: [] } };
+    assert.equal(resolveEnvelopeKey(book), 'books');
+    assert.equal(ENVELOPES.books.hard_max, 480);
+    assert.ok(ENVELOPES.furniture.hard_max > 10000,
+      'the two ceilings must really differ, or this test proves nothing');
   });
 
   test('CB-15 calibrateRecognition canonicalises, and records how', async () => {

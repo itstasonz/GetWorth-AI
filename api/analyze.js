@@ -540,7 +540,7 @@ import {
 // HIGH-3 — the canonical category boundary. A model may SUGGEST a category; it
 // may not invent one. See api/_lib/category.js for why this is one module and
 // not four disagreeing lists.
-import { canonicalCategory, CANONICAL_CATEGORIES, envelopeAgreesWithCategory } from './_lib/category.js';
+import { canonicalCategory, CANONICAL_CATEGORIES } from './_lib/category.js';
 
 export { webSafe, webSafeBlock };
 
@@ -3418,15 +3418,36 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     anchor: guardCtx.anchor || null,
     anchorModelEvidence: guardCtx.anchorModelEvidence || false,
     identity: guardCtx.identity || null,
-    // HIGH-3: THE PRICE AND THE LABEL MUST COME FROM THE SAME STRING.
+    // ── REVERTED. THIS LINE WAS A CRITICAL, AND IT WAS MINE. ────────────────
     //
-    // This passed `recognition` unchanged, so the envelope was resolved from
-    // STAGE 1's category while the client was shown STAGE 2's. When the two
-    // disagreed — and Stage 2 exists to disagree — the number came from one
-    // taxonomy branch and the label from another, with nothing recording that
-    // it had happened. Both values are canonical by the time they arrive here,
-    // so this is a choice between two registered names, not a widening.
-    recognition: { ...recognition, category: verification.final_category || recognition.category },
+    // For one commit this read
+    //   `{ ...recognition, category: verification.final_category || recognition.category }`
+    // on the reasoning that the price and the displayed label must come from
+    // the same string. They must — but I made that true by taking BOTH from the
+    // LESS trusted one. Stage 2 is the stage whose prompt carries OCR
+    // raw_texts, Vision labels, catalog rows and the user's refineModel: the
+    // entire GW-PROMPT-INJECTION-001 attack surface. One line turned "Stage 2
+    // may suggest a label" into "Stage 2 may choose its own price ceiling".
+    //
+    // Witness, found independently by the security and valuation reviews. A
+    // paperback, Stage 1 correctly `Books` (hard_max 480), Stage 2 asked 4,000:
+    //   final_category Books       -> books        mid 0     MANUAL_REQUIRED
+    //   final_category Electronics -> electronics  mid 4000  LOW
+    //   final_category Furniture   -> furniture    mid 4000  MEDIUM
+    // The enum bounds the NAMES. It does not bound the ceilings, which run from
+    // 480 to 250,000.
+    //
+    // Worse than the bug: `envelopeAgreesWithCategory` — written in the same
+    // ticket to detect exactly this disagreement — was imported here and never
+    // called. `grep -c` returned 1: the import line. I shipped the detector for
+    // this defect, dead, in the commit that introduced the defect. That is the
+    // ninth instance of this project's recurring pattern and the most direct.
+    //
+    // The envelope is resolved from Stage 1's category again. The underlying
+    // finding — a displayed category that disagrees with the priced envelope —
+    // is REOPENED and recorded, because the fix for it is not "trust the later
+    // string", and I am not inventing a third derived rule in this round.
+    recognition,
     model: guardCtx.model || null,
     condition: verification.condition || recognition.visual_features?.condition,
     // V-FX READS THIS, AND NOTHING WAS PASSING IT.

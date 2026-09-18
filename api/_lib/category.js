@@ -168,21 +168,14 @@ export function canonicalCategoryName(raw) {
   return canonicalCategory(raw).category;
 }
 
-/**
- * Does a resolved envelope key belong to the canonical category?
- *
- * The envelope key's family is its segment before ':' — 'electronics:iphone'
- * belongs to Electronics. A displayed category that disagrees with the priced
- * bucket is the shape this exists to catch: the number says one thing, the
- * label says another, and the user is shown the label.
- *
- * `null` (no bucket) is coherent with everything: refusing to choose a bucket
- * is never a contradiction.
- */
-export function envelopeAgreesWithCategory(envelopeKey, category) {
-  if (!envelopeKey) return true;
-  const family = String(envelopeKey).split(':')[0];
-  const canonical = canonicalCategoryName(category);
-  if (canonical === UNKNOWN_CATEGORY) return false;   // Other owns no bucket
-  return canonicalCategoryName(family) === canonical;
-}
+// `envelopeAgreesWithCategory` USED TO LIVE HERE, AND ITS DELETION IS THE POINT.
+//
+// It was written to detect a displayed category disagreeing with the priced
+// envelope. It was imported by api/analyze.js and NEVER CALLED — `grep -c`
+// returned 1, the import line — while the same commit introduced exactly the
+// disagreement it was written to catch. A detector that ships dead beside its
+// own defect is the fourth "rule with no reachable input" in this work, and
+// keeping it would preserve the appearance of a control without the control.
+//
+// It comes back when something calls it. The finding it was meant to close is
+// recorded as open in docs/GW-OPENAI-INTELLIGENCE-002-PHASE3-REV4.md §4d.
