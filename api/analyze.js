@@ -415,6 +415,10 @@ const VISION_DAILY_LIMIT = 1500;             // Hard cap per day across all user
 const VISION_RATE_PER_MIN = 5;               // Per-IP scan rate limit
 const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same image
 const VISION_TRIGGER_THRESHOLD = 0.60;       // Vision fires when Stage 1 identity (brand/model) or category confidence is below this
+// FLOOR-A. The floor below which a Vision signal is not shown to Stage 2 at all.
+// It is the value `webEntities` has always used; labels and logos had none,
+// which is the finding. Named rather than repeated so the three cannot drift.
+const VISION_SIGNAL_FLOOR = 0.5;
 // SCAN-021: cap for the rate-limit RPC. One round trip; ~2-3s against a cold
 // Supabase pool in production, so this is headroom, not a target. A breach
 // DENIES the scan (fail closed) — see the call site.
@@ -840,6 +844,13 @@ ${FENCE_OPEN('VISION')}
 - Logos detected: ${(visionData.logos || []).map(l => `${promptSafe(l.description)} (${Math.round((l.score || 0) * 100)}%)`).join(', ') || 'none'}
 - Web entities (similar items found online): ${promptSafeList(visionData.webEntities, { items: 5 }) || 'none'}
 ${FENCE_CLOSE('VISION')}
+
+VISION SIGNAL CLASSES — ranked, strongest first. A weaker class NEVER overrides a stronger one:
+  1. TEXT/OCR read off the item itself — characters physically present on the product or its label. The only class that can establish an exact model.
+  2. LOGO detected on the item — brand-level evidence. It identifies the MAKER, never the model.
+  3. LABEL — Vision's guess at what KIND of object this is. Category-level only. A label is never evidence of a brand, a model, or a price.
+  4. WEB ENTITY — things that LOOK similar online. This is resemblance, not evidence. It may not establish brand, model or category on its own.
+Every signal carries its own confidence. A high-confidence LABEL is still a LABEL: it cannot name a product. If a label or a web entity disagrees with text read off the item, the text wins.
 
 VISION USAGE RULES:
 - If Vision logo detection confirms Stage 1 brand → boost confidence
@@ -1353,20 +1364,43 @@ export function parseVisionResponse(response) {
   const verts = (poly, key) => (poly?.[key] || []).map(v => ({ x: v.x ?? 0, y: v.y ?? 0 }));
 
   return {
-    labels: (response.labelAnnotations || []).map(l => ({
-      description: l.description,
-      score: l.score,
-    })),
+    // ── FLOOR-A: A SCORE FLOOR ON LABELS ─────────────────────────────────
+    // `webEntities` below has been filtered at `score > 0.5` since it was
+    // written. `labels` had NO floor at all, so a 12%-confidence guess was
+    // handed to Stage 2 in the same list, in the same shape, as a 97% one.
+    // Witness: the Ninja blender, whose Stage-2 prompt carried low-score
+    // "Footwear" and "Ballet shoe" labels and whose displayed category came
+    // back "Footwear".
+    //
+    // Same threshold as webEntities, deliberately — the asymmetry WAS the
+    // defect, and a second number would be a second thing to keep in step.
+    // Stage 2 still sees each surviving score, so this is a floor, not a
+    // replacement for judgement.
+    labels: (response.labelAnnotations || [])
+      .filter(l => l.description && Number(l.score) > VISION_SIGNAL_FLOOR)
+      .map(l => ({
+        description: l.description,
+        score: l.score,
+      })),
     text: (response.textAnnotations || [])
       .slice(1)
       .map(t => t.description)
       .filter(t => t && t.length > 1 && t.length < 80),
-    logos: (response.logoAnnotations || []).map(l => ({
-      description: l.description,
-      score: l.score,
-    })),
+    // FLOOR-A, same rule, same reason. A 2%-confidence logo was rendered into
+    // the Stage-2 prompt as "Apple (2%)" — indistinguishable in shape from a
+    // 94% Logitech. The identity-upgrade predicate already refuses a logo below
+    // VISION_TRIGGER_THRESHOLD, but the PROMPT still showed it, and the prompt
+    // is where Stage 2 forms the identity that predicate is then asked to
+    // confirm. `ocr_context.logo_boxes` stays UNFILTERED on purpose: that field
+    // is capture for OCE scoring and feeds no decision.
+    logos: (response.logoAnnotations || [])
+      .filter(l => l.description && Number(l.score) > VISION_SIGNAL_FLOOR)
+      .map(l => ({
+        description: l.description,
+        score: l.score,
+      })),
     webEntities: (response.webDetection?.webEntities || [])
-      .filter(e => e.description && e.score > 0.5)
+      .filter(e => e.description && Number(e.score) > VISION_SIGNAL_FLOOR)
       .map(e => e.description),
     ocr_context: {
       version: 1,

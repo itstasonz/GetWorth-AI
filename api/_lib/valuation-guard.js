@@ -731,7 +731,16 @@ export function derivePricingSource(ctx = {}) {
       ? { source: 'stage2_comp_anchored', grade: 'HIGH' }
       : { source: 'stage2_ai', grade: 'MEDIUM' };
   }
-  return { source: 'unknown', grade: 'LOW' };
+  // THE SIBLING HOLE, CLOSED. The `default:` inside the PRE switch was changed
+  // to MANUAL_REQUIRED on the reasoning that an unregistered source is not a
+  // low-confidence source but an unknown one — and then this line, three
+  // statements later, kept returning LOW for an unrecognised STAGE and priced
+  // it. Same doctrine, same module, one branch applied and one not; it was
+  // carried as a MEDIUM when it is the same root class as the HIGH above it.
+  //
+  // An unrecognised stage means the caller is a code path this module has never
+  // been reasoned about. That is the definition of unknown.
+  return { source: 'unknown', grade: 'MANUAL_REQUIRED' };
 }
 
 // ── Spread limits (from the prompt's own rules, analyze.js:680-681) ────────

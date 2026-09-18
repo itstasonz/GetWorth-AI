@@ -4,12 +4,12 @@
     "sha256": "90e38a2c39c34cf1111cfb129039789fdc3aa859eb062282345639e44f7aeb69"
   },
   "verification:he": {
-    "len": 10360,
-    "sha256": "60e1b7a40a0317ae4dcb20dce4738c1d1b1384ae6ca7b798cb33ecb56fff1922"
+    "len": 11178,
+    "sha256": "d872dfa10b4fb26ae4261d4b3afe1eea3e9b79473a985c696207ad0cf1076c24"
   },
   "verification-noforensics:he": {
-    "len": 6799,
-    "sha256": "4b1f17da3a7279ca990d3697b4d220d667578f2182ad98dd50f723e0436e4454"
+    "len": 7617,
+    "sha256": "f6522147d6832fad0318d6177d16cb2d8ec8a008b004c164533a23d251a22fd3"
   },
   "verification-novision:he": {
     "len": 9459,
@@ -36,12 +36,12 @@
     "sha256": "b6a20a5beb8cac87fba0377fdae4236d2fd1c7ca39485e2f54fcde367de7b142"
   },
   "verification:en": {
-    "len": 10360,
-    "sha256": "4b60ad554da4720fd3b66de09f6899f59e2d7de605c5e41013c8a4165927275c"
+    "len": 11178,
+    "sha256": "7f986c0d86eaeeb90f220e2c1a87aab164764b80c100d7cd8dd77b2e871635fc"
   },
   "verification-noforensics:en": {
-    "len": 6799,
-    "sha256": "280cfaed9b04076b6ceb7453f46b21339310b626197ff003ed68fc7c55cdff78"
+    "len": 7617,
+    "sha256": "995464748b21c4882080a74be02bfae80fa284b6a6d8cc0e808172de31eb83f1"
   },
   "verification-novision:en": {
     "len": 9459,
