@@ -257,24 +257,81 @@ const BACKSLASH = String.fromCharCode(92);
 const CODE = (() => {
   const src = ANALYZE;
   const out = Array.from(src);
+  const blank = (k) => { if (out[k] !== NL) out[k] = ' '; };
+  const blankRange = (from, to) => { for (let k = from; k < to; k++) blank(k); };
+
+  // A STACK, not a flag. The first version of this treated a template literal
+  // as flat text ending at the next backtick — which is wrong the moment a
+  // `${…}` interpolation contains a quote, a nested template, or a `}`.
+  // api/analyze.js's prompt builders are full of exactly that, so the scanner
+  // desynchronised inside buildRecognitionPrompt and stayed desynchronised:
+  // it went on to read the apostrophe in the prose word "doesn't" as a string
+  // opener and blanked 1,688 characters of real code after it. Measured
+  // consequence: the declarations of `recognize`, `fallbackVision` and
+  // `generateQueryEmbedding` were erased from the masked source. The ordering
+  // results happened to survive, which is worse, not better — the guard was
+  // right by luck.
+  //
+  // Two independent containments, because the runaway needed two mistakes:
+  //   1. this stack, so a nested template or a `}` inside `${…}` cannot end the
+  //      outer literal early;
+  //   2. a quoted string may not cross a newline, so even if the scanner does
+  //      desynchronise, one stray apostrophe costs one line, not 1,688
+  //      characters.
+  // Either alone happens to contain the damage in THIS file; both are kept
+  // because "happens to" is the reasoning that produced the bug. Regex literals
+  // get the standard previous-significant-token heuristic for the same reason —
+  // this file has regexes containing quotes, and reading one as a string opener
+  // is the same runaway by a third route.
+  const modes = [{ kind: 'code', depth: 0, interp: false }];
+  let prev = '';                       // last significant code char, for regex detection
   let i = 0;
-  const blank = (from, to) => {
-    for (let k = from; k < to; k++) if (out[k] !== NL) out[k] = ' ';
-  };
+
   while (i < src.length) {
+    const m = modes[modes.length - 1];
     const c = src[i], d = src[i + 1];
-    if (c === '/' && d === '/') { const j = src.indexOf(NL, i); const end = j === -1 ? src.length : j; blank(i, end); i = end; continue; }
-    if (c === '/' && d === '*') { const j = src.indexOf('*/', i + 2); const end = j === -1 ? src.length : j + 2; blank(i, end); i = end; continue; }
-    if (c === "'" || c === '"' || c === '`') {
+
+    if (m.kind === 'template') {
+      if (c === BACKSLASH) { blank(i); blank(i + 1); i += 2; continue; }
+      if (c === '`') { modes.pop(); blank(i); i++; continue; }
+      if (c === '$' && d === '{') { blank(i); blank(i + 1); modes.push({ kind: 'code', depth: 0, interp: true }); i += 2; continue; }
+      blank(i); i++; continue;
+    }
+
+    // code
+    if (c === '/' && d === '/') { const j = src.indexOf(NL, i); const end = j === -1 ? src.length : j; blankRange(i, end); i = end; continue; }
+    if (c === '/' && d === '*') { const j = src.indexOf('*/', i + 2); const end = j === -1 ? src.length : j + 2; blankRange(i, end); i = end; continue; }
+    if (c === "'" || c === '"') {
       let j = i + 1;
-      while (j < src.length) {
+      while (j < src.length && src[j] !== NL) {   // an unterminated quote cannot cross a line
         if (src[j] === BACKSLASH) { j += 2; continue; }
         if (src[j] === c) break;
         j++;
       }
-      blank(i, Math.min(j + 1, src.length));
-      i = j + 1; continue;
+      blankRange(i, Math.min(j + 1, src.length));
+      prev = 'x'; i = j + 1; continue;
     }
+    if (c === '`') { modes.push({ kind: 'template' }); blank(i); i++; continue; }
+    if (c === '/' && /[(,=:[!&|?{};+\-*%~^<>]/.test(prev)) {
+      // Regex literal. Scan to the closing '/', honouring escapes and classes.
+      let j = i + 1, inClass = false;
+      while (j < src.length && src[j] !== NL) {
+        if (src[j] === BACKSLASH) { j += 2; continue; }
+        if (src[j] === '[') inClass = true;
+        else if (src[j] === ']') inClass = false;
+        else if (src[j] === '/' && !inClass) break;
+        j++;
+      }
+      blankRange(i, Math.min(j + 1, src.length));
+      prev = 'x'; i = j + 1; continue;
+    }
+    if (c === '{') { m.depth++; prev = c; i++; continue; }
+    if (c === '}') {
+      if (m.depth > 0) { m.depth--; prev = c; i++; continue; }
+      if (m.interp) { modes.pop(); blank(i); i++; continue; }  // end of ${…}
+      prev = c; i++; continue;
+    }
+    if (!/\s/.test(c)) prev = c;
     i++;
   }
   return out.join('');
@@ -327,6 +384,15 @@ function bareReferences(name) {
  *
  * Returns `{ sites, trail }` so a failure can name the path it followed rather
  * than just a number.
+ *
+ * LIMITS, stated rather than implied. It resolves through TOP-LEVEL bindings
+ * only: a provider helper stashed in a local variable inside a closure, reached
+ * through a computed property, or passed as an argument, is invisible to it.
+ * That is not a silent hole in the vacuity rule — an unresolvable helper
+ * resolves to ZERO sites and therefore FAILS — but it is a hole in the ordering
+ * rule, which can only check the sites it can see. If a helper is ever reached
+ * both before and after Stage 1 and only the later path is resolvable, this
+ * passes. Widening the resolver is the fix; a comment is not.
  */
 function reachableCallSites(name, seen = new Set()) {
   if (seen.has(name)) return { sites: [], trail: [] };
@@ -503,6 +569,28 @@ test('XP-STRUCT the comment/string mask preserves indices and blanks only prose'
   // A URL containing `//` must not have taken the rest of its line with it.
   assert.ok(CODE.includes('fetchWithRetry('),
     'string-before-comment ordering must keep code after a URL literal intact');
+
+  // ── THE RUNAWAY CHECK ────────────────────────────────────────────────────
+  // The assertions above are all "does this ONE thing survive", and the first
+  // version of the mask passed every one of them while having erased the
+  // declarations of `recognize`, `fallbackVision` and `generateQueryEmbedding`
+  // — it desynchronised inside a template literal's `${…}` and then read the
+  // apostrophe in the prose word "doesn't" as a string opener. The ordering
+  // results still came out right, by luck, which is the worst possible
+  // outcome for a guard whose whole job is to not be vacuous.
+  //
+  // So check the WHOLE surface: every top-level declaration visible in the raw
+  // file must still be visible, at the same offset, in the masked one. A mask
+  // that runs away anywhere loses every declaration after that point.
+  const DECL_ALL = /^(?:export\s+)?(?:async\s+)?(?:function|const|let|var)\s+(\w+)/gm;
+  const rawDecls = [...ANALYZE.matchAll(DECL_ALL)].map((m) => ({ name: m[1], index: m.index }));
+  const maskedIdx = new Set([...CODE.matchAll(DECL_ALL)].map((m) => m.index));
+  const lost = rawDecls.filter((d) => !maskedIdx.has(d.index));
+
+  assert.ok(rawDecls.length > 100, `fixture: expected the full declaration set, found ${rawDecls.length}`);
+  assert.deepEqual(lost.map((d) => `${d.name}@${ANALYZE.slice(0, d.index).split(NL).length}`), [],
+    'the mask erased real top-level declarations — it ran away on a template literal, ' +
+    'a regex or a quote, and every resolution result above is computed on corrupted source');
 });
 
 test('XP-STRUCT the ledger markers and the downstream invariant are present', () => {

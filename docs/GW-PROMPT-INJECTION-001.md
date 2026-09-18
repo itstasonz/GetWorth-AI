@@ -936,6 +936,24 @@ indices preserved. Matching identifiers in raw text reported a *comment*
 mentioning `verifyAndPrice`, 44,000 characters before Stage 1, as an ordering
 violation — a false failure, only marginally better than the false pass.
 
+The mask itself then had to be fixed twice, which is worth recording because the
+first version **passed every test written for it while being broken**. It
+treated a template literal as flat text ending at the next backtick, so a
+nested template inside a `${…}` interpolation ended the outer one early; the
+scanner desynchronised inside `buildRecognitionPrompt` and went on to read the
+apostrophe in the prose word *"doesn't"* as a string opener, blanking 1,688
+characters of real code. Measured consequence: the declarations of `recognize`,
+`fallbackVision` and `generateQueryEmbedding` were erased from the masked
+source. **The ordering results still came out right**, because the call sites
+happened to survive — a guard against vacuity that was itself correct by luck.
+
+It is now a proper scanner with an interpolation stack, a rule that a quoted
+string cannot cross a newline, and regex-literal detection; and the suite
+asserts the whole surface rather than samples of it — every one of the 126
+top-level declarations visible in the raw file must still be visible, at the
+same offset, in the masked one. Restoring the original mask fails that
+assertion.
+
 **Mutation evidence.** With an unsafe indirect ordering introduced
 (`pricingRescueEngine` hoisted above `runStage1`), the round-8 guard passes
 **43/43**. The round-9 guard fails on it. Three other mutations — hoisting
