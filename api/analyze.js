@@ -2013,8 +2013,14 @@ export function gradeRowEvidence(r, evidenceTokens, uniqueKw, brandHead = null) 
   const modelTokens = rowBrand
     ? evidenceTokens.filter(tok => !rowBrand.includes(tok))
     : evidenceTokens;
+  // TOTAL COERCION (§0.9). `String(f)` throws on a value whose ToPrimitive
+  // throws — `{"toString":1,"valueOf":2}` has neither method callable — and these
+  // rows are catalog rows, which nine retrieval strategies read with select('*')
+  // and therefore WITHOUT the RPC's RETURNS TABLE coercion. Same argument as
+  // promptNum's, same conclusion: the type is not guaranteed from this repo, so
+  // the read must be total. An object is not evidence; it reads as absent.
   const fields = [r.model, r.name, ...(r.keywords || []), ...(r.aliases || [])]
-    .filter(Boolean).map(f => String(f).toLowerCase());
+    .map(boundaryText).filter(Boolean).map(f => f.toLowerCase());
   // SCAN-018: a substring hit is evidence only when the token is specific.
   if (modelTokens.some(tok => fields.some(f => f.includes(tok))
                               && isSpecificTokenMatch(r, tok, brandHead))) return true;
@@ -5961,8 +5967,12 @@ export function assessFallbackIdentity(recognition) {
 //   Brand-only identities (no usable model) pass on R1+R2+R3 alone; the
 //   caller caps those quotes at LOW (sibling pricing, never model pricing).
 export function isCompatibleAnchor(row, identity, recognition) {
+  // TOTAL COERCION (§0.9). `join` invokes ToPrimitive on every element, so one
+  // hostile catalog value threw INSIDE the anchor gate — and this gate runs at
+  // guardCtx anchor resolution, so the throw lands in the valuation guard's own
+  // input, not in a leaf. Found by the rendered-prompt fixtures, not by review.
   const rowText = [row.model, row.name, ...(row.aliases || [])]
-    .filter(Boolean).join(' ').toLowerCase();
+    .map(boundaryText).filter(Boolean).join(' ').toLowerCase();
 
   let modelMatched = false;
   let modelUsable = false;
