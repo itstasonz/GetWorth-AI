@@ -4673,7 +4673,95 @@ async function handleRequest(req) {
       pre_source: verification._pricing_meta?.pre_source || null,
       anchor: guardAnchor,
       anchorModelEvidence: !!guardAnchor?.model,
-      identity: assessFallbackIdentity(recognition),
+      // ── THE GUARD MUST SEE WHAT STAGE 2 ESTABLISHED, NOT ONLY STAGE 1 ──────
+      //
+      // `assessFallbackIdentity(recognition)` reads STAGE 1 ONLY. Once
+      // V-IDENTITY-FLOOR started refusing to price an unidentified item, that
+      // became a FALSE REFUSAL on the exact scan the pipeline is built to
+      // rescue: Stage 1 blank, Vision reads the logo and the model plate, and
+      // Stage 2 returns `ocr_confirmed` at high confidence. The guard could not
+      // see any of it and withheld a price from a correctly identified item.
+      //
+      // Stage 2's own `brand_confidence` is NOT taken at face value — that is
+      // the model grading its own homework, and SCAN-022 exists because
+      // self-declared evidence is worth nothing. The upgrade requires
+      // CORROBORATION the model did not author: the brand string must actually
+      // appear in text read off the image, by Google Vision or by Stage-1 OCR.
+      // Reading a name off the item is evidence; asserting one is not.
+      identity: (() => {
+        const base = assessFallbackIdentity(recognition);
+        if (base.brandOk) return base;                       // Stage 1 already has it
+        const b = String(verification?.final_brand ?? '').trim();
+        const m = String(verification?.final_model ?? '').trim();
+        if (!b || b.toLowerCase() === 'unidentified') return base;
+        if (verification?.identification_method !== 'ocr_confirmed') return base;
+
+        // CORROBORATION IS MATCHED ON WHOLE TOKENS, AND THE CLAIM THAT MUST BE
+        // CORROBORATED IS THE MODEL.
+        //
+        // The first version of this tested `readText.includes(brand)` — a raw
+        // substring — which is satisfiable by coincidence, and satisfying it
+        // forged the strongest label in the system. Vision reading
+        // "APPLE JUICE 1L" corroborated brand "Apple", and a juice carton
+        // shipped as "Apple iPhone 15 Pro" at ₪1,500 with grade MEDIUM, no
+        // warning, and a 2.50 spread — SPREAD_MAX_CONFIRMED, the NARROWEST band
+        // the system has. "ORANGE JUICE" did the same for brand "GE". Because
+        // the upgrade writes `confirmed_by_text` and 0.9 confidences, it also
+        // walked straight past IDENTITY_CONFIDENCE_FLOOR: the hallucinated-
+        // identity hole, reopened through a side door by its own fix.
+        //
+        // `ocr_confirmed` is a claim that the MODEL was read off the item, not
+        // merely that the brand appeared somewhere. So verify the claim that
+        // was actually made. A brand may also be corroborated by a Vision LOGO,
+        // which is a different signal class from a word printed on a label.
+        const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+        const toks = (s) => norm(s).split(' ').filter(Boolean);
+        const readTokens = new Set(toks([
+          ...(visionData?.text || []),
+          ...(recognition.ocr_text?.raw_texts || []),
+        ].join(' ')));
+        // A LOGO ONLY CORROBORATES IF VISION WAS ACTUALLY CONFIDENT IN IT.
+        //
+        // `parseVisionResponse` maps logoAnnotations with NO score filter,
+        // while `webEntities` two lines below it are filtered at score > 0.5 —
+        // the same asymmetry that let an unscored label become "Footwear". A
+        // 2%-confidence logo guess was corroborating a brand identically to a
+        // 94% one, and because this path writes `confirmed_by_text` it bought a
+        // bypass of IDENTITY_CONFIDENCE_FLOOR and the narrowest spread band in
+        // the system. Witness: a silicone phone case whose OCR reads "For
+        // iPhone 15 Pro" plus an Apple logo guessed at 0.02, priced ₪1,500.
+        //
+        // VISION_TRIGGER_THRESHOLD, not a fourth number: it is already the
+        // pipeline's definition of "confident enough to act on".
+        const logoNames = (visionData?.logos || [])
+          .filter((l) => Number(l?.score) >= VISION_TRIGGER_THRESHOLD)
+          .map((l) => norm(l?.description));
+
+        const brandToks = toks(b);
+        const brandCorroborated = logoNames.includes(norm(b))
+          || (brandToks.length > 0 && brandToks.every((t) => readTokens.has(t)));
+        if (!brandCorroborated) return base;
+
+        // A model-SHAPED token ("g502", "wh1000xm5") is the strongest signal;
+        // failing that, the whole model name must appear as whole tokens.
+        const modelToks = toks(m);
+        const shaped = modelToks.filter((t) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/.test(t));
+        const modelCorroborated = modelToks.length > 0 && (
+          shaped.some((t) => readTokens.has(t))
+          || modelToks.every((t) => readTokens.has(t))
+        );
+        if (!modelCorroborated) return base;
+
+        const modelOk = !!m && m.toLowerCase() !== 'unidentified';
+        blog(`[Guard] identity upgraded from Stage 2 — "${b}${modelOk ? ' ' + m : ''}" corroborated by read text`);
+        return {
+          ...base,
+          brand: b, model: modelOk ? m : base.model,
+          brandOk: true, modelOk,
+          brandC: 0.9, modelC: modelOk ? 0.9 : 0,
+          brandConfLabel: 'confirmed_by_text',
+        };
+      })(),
       // SCAN-022: the fast path called NO model. Recording MODEL_VISION would
       // claim a Sonnet call that never happened, and this value is persisted
       // with the valuation, so a future audit would be reading a fiction.

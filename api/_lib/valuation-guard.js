@@ -330,7 +330,39 @@ export function resolveEnvelopeKey(recognition = {}) {
 // The floor mirrors VISION_TRIGGER_THRESHOLD (0.60, api/analyze.js) — the value
 // the pipeline already uses to decide "this identity is too weak to trust".
 // Reusing it keeps one definition of weak rather than inventing a second.
-export const CATEGORY_CONFIDENCE_FLOOR = 0.60;
+// Reachability matters as much as the number. `calibrateRecognition`
+// (api/analyze.js) caps a BRANDLESS recognition at `min(conf, 0.55)` and then
+// subtracts 0.15 more when there is no readable text — and the guard reads the
+// CALIBRATED value. At 0.60 the CATEGORY_ONLY tier could therefore never be
+// entered in production: the whole branch, and the longest comment in this
+// file, described code that could not run. Its tests passed only because they
+// call validateQuote directly with hand-built ctx — the same "verification
+// artefact quietly not verifying" class as SEC-9.
+//
+// 0.50 sits below the 0.55 brandless ceiling and above the 0.40 a brandless,
+// textless scan lands on, so the tier is reachable AND still refuses the Ninja
+// shape (0.10).
+export const CATEGORY_CONFIDENCE_FLOOR = 0.50;
+
+// A NAME IS NOT EVIDENCE.
+//
+// `assessFallbackIdentity` derives `brandOk` as `brand !== 'unidentified'` — a
+// string-PRESENCE test. So any non-empty name bought the EXACT_MODEL tier, and
+// a hallucinated identity priced cleanly: brand "Nike" 0.55 from
+// `evidence: visual_shape`, model "Air Max" 0.50 from shape alone, category
+// Footwear — accepted at ₪35/70/130, grade MEDIUM, zero violations.
+//
+// That is the Ninja defect's sibling and it is the more dangerous half. The
+// first draft of V-IDENTITY-FLOOR closed "no identity ⇒ no price" and left
+// "INVENTED identity ⇒ priced" wide open, while applying a confidence floor to
+// the category and none at all to the brand or the model. The recognition path
+// — unscored Vision labels, and a Stage-2 prompt that is told to prefer them —
+// is precisely the machine that manufactures a confident-sounding name.
+//
+// 0.60 is VISION_TRIGGER_THRESHOLD: the value the pipeline ALREADY uses to
+// decide an identity is too weak to trust. Reusing it keeps one definition of
+// weak rather than inventing a second.
+export const IDENTITY_CONFIDENCE_FLOOR = 0.60;
 
 export const IDENTITY_TIER = Object.freeze({
   EXACT_MODEL:   'exact_model',
@@ -366,8 +398,17 @@ export function resolveIdentityTier(ctx = {}) {
   // a future caller passes by accident — must not buy the top tier. Adversarial
   // probing found exactly that: `{ brandOk: 'yes', modelOk: 'yes' }` with a
   // nonsense category reached EXACT_MODEL and the global envelope.
-  const brandOk = id.brandOk === true;
-  const modelOk = id.modelOk === true;
+  // PRESENCE **and** EVIDENCE. `brandOk`/`modelOk` only say a name is not the
+  // literal string "unidentified"; the confidence is what says anyone had a
+  // reason for it. A text-confirmed brand is accepted regardless of the numeric
+  // score, because `confirmed_by_text` means the name was READ off the item —
+  // which is stronger evidence than any number the model assigns itself.
+  const textConfirmed = id.brandConfLabel === 'confirmed_by_text';
+  const brandEvidenced = textConfirmed || Number(id.brandC) >= IDENTITY_CONFIDENCE_FLOOR;
+  const modelEvidenced = textConfirmed || Number(id.modelC) >= IDENTITY_CONFIDENCE_FLOOR;
+
+  const brandOk = id.brandOk === true && brandEvidenced;
+  const modelOk = id.modelOk === true && modelEvidenced;
 
   // A confidence is a PROBABILITY, and it must arrive as a NUMBER. Probing
   // found two ways past a naive check: `5` and `99` are finite and above the
@@ -865,6 +906,30 @@ export function validateQuote(rawQuote, ctx = {}) {
 
   let grade = derived.grade;
   let needsReview = false;
+
+  // A CATEGORY-ONLY PRICE MAY NOT CLAIM MORE THAN CATEGORY-LEVEL CONFIDENCE.
+  //
+  // CATEGORY_ONLY prices are legitimate — generic clothing really does have a
+  // category price — but nothing distinguished one from a fully identified
+  // product. A brandless, modelless "Clothing" scan and a forged identity both
+  // surfaced as MEDIUM, which is the collision that makes the grade useless as
+  // a signal. The grade is the machine-readable field the spread limits and
+  // downstream logic key on, so capping it here is what actually changes
+  // behaviour; the matching UI label is a frontend change against
+  // `identity_tier`, which is already on the wire.
+  // Flagged for EVERY category-only price, not only when the grade needs
+  // lowering. Some sources already grade LOW, and "this describes the category,
+  // not the product" is worth surfacing whichever source produced it —
+  // otherwise the signal appears or vanishes depending on an unrelated detail.
+  if (identityTier === IDENTITY_TIER.CATEGORY_ONLY) {
+    if (grade === 'HIGH' || grade === 'MEDIUM') grade = 'LOW';
+    needsReview = true;
+    violations.push({
+      rule: 'V-IDENTITY-GRADE-CAP',
+      detail: 'category-only identity — no brand and no model were established, so the price ' +
+              'describes the category rather than the product',
+    });
+  }
 
   // V-ENVELOPE-SOFT — plausible but exceptional. Priced and flagged, graded
   // down one step. For the buckets flagged requiresAnchorAboveSoft, an
