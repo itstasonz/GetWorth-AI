@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull, VALID_CATEGORIES } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
@@ -3232,7 +3232,6 @@ export function AppProvider({ children }) {
           ? (lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required')
           : (lang === 'he' ? 'העלאת התמונות נכשלה. בדוק את החיבור ונסה שוב.' : 'Image upload failed. Check your connection and try again.'));
       }
-      const VALID_CATEGORIES = ['Electronics', 'Furniture', 'Vehicles', 'Watches', 'Clothing', 'Sports', 'Beauty', 'Books', 'Toys', 'Home', 'Tools', 'Music', 'Food', 'Other'];
       const rawCategory = (result?.category || 'Other').trim();
       const normalizedCategory = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'Other';
       const qualityScore = computeQualityScore({

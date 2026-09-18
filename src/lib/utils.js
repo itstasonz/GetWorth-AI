@@ -127,6 +127,25 @@ export const timeAgo = (d, t) => {
 // own versioned copy on marketValue.condition_ladder; this local constant is
 // the fallback for responses that predate that field (e.g. a client running
 // against an older deploy, or a cached result).
+// ── CANONICAL CATEGORIES — CLIENT MIRROR ────────────────────────────────────
+// HIGH-3. This list existed inline in AppContext.jsx with FOURTEEN entries, one
+// of which ("Music") appears in no server list at all, while three that the
+// server does register — Smoking, Bags, Jewelry — were missing. So a handbag
+// the server correctly categorised as "Bags" was relabelled "Other" by the
+// client on its way into a listing row.
+//
+// The client cannot import api/_lib (different runtime, different bundle), so
+// this is a MIRROR, and a mirror is only safe if something compares it: the
+// server list is api/_lib/category.js CANONICAL_CATEGORIES, and
+// tests/category-boundary.test.mjs fails if the two ever differ. Same pattern
+// as hasRealPrice / positivePriceOrNull, for the same reason.
+export const VALID_CATEGORIES = Object.freeze([
+  'Electronics', 'Furniture', 'Vehicles', 'Watches', 'Clothing', 'Sports',
+  'Smoking', 'Home', 'Beauty', 'Books', 'Toys', 'Tools', 'Food',
+  'Bags', 'Jewelry',
+  'Other',
+]);
+
 export const CONDITION_LADDER = Object.freeze({
   newSealed: 0,
   likeNew:   0.15,

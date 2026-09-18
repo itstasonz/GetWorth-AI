@@ -533,6 +533,11 @@ import {
   MARKET_BLOCK_MAX_SNIPPETS, MARKET_BLOCK_MAX_CHARS,
 } from './_lib/prompt-trust.js';
 
+// HIGH-3 — the canonical category boundary. A model may SUGGEST a category; it
+// may not invent one. See api/_lib/category.js for why this is one module and
+// not four disagreeing lists.
+import { canonicalCategory, CANONICAL_CATEGORIES, envelopeAgreesWithCategory } from './_lib/category.js';
+
 export { webSafe, webSafeBlock };
 
 // Boundary validation for client-supplied corrections/hints (ALPHA-003 pattern:
@@ -650,7 +655,7 @@ export const VERIFICATION_SCHEMA = {
   type: 'object',
   required: ['final_category', 'final_brand', 'final_model', 'match_confidence', 'price_estimate_low', 'price_estimate_mid', 'price_estimate_high', 'price_method'],
   properties: {
-    final_category:        { type: 'string' },
+    final_category:        { type: 'string', enum: CANONICAL_CATEGORIES },
     final_category_hebrew: { type: 'string' },
     final_brand:           { type: 'string' },
     final_model:           { type: 'string' },
@@ -717,7 +722,7 @@ EXTRACTION STEPS (follow in order):
    - Headphones: WH-1000XM3/XM4/XM5, QC35/QC45/QC35II look very similar. Ear-cup shape and headband stitching are key. Cap at 0.55 without brand text.
    - HARD RULE: NEVER assign >0.70 model confidence from silhouette/shape alone. Text or logo OCR confirmation is required to reach ≥0.75.
 
-5. CATEGORY — Classify (Electronics, Furniture, Vehicles, Watches, Clothing, Sports, Smoking, Home, Beauty, Books, Toys, Tools, Food, Other)
+5. CATEGORY — Classify. Use EXACTLY one of these names, verbatim: Electronics, Furniture, Vehicles, Watches, Clothing, Sports, Smoking, Home, Beauty, Books, Toys, Tools, Food, Bags, Jewelry, Other. Do NOT invent a category; if none fits, answer Other.
 
 6. CONDITION — New, Like New, Good, Fair, Poor
 
@@ -2564,6 +2569,23 @@ async function verifyAndPrice(recognition, candidates, corrections, language, ap
 // ═══════════════════════════════════════════════════════
 
 export function calibrateRecognition(recognition) {
+  // ── HIGH-3: THE CANONICAL CATEGORY BOUNDARY ──────────────────────────────
+  // This is the ONE place both engines meet, so it is the one place the
+  // taxonomy is enforced. `final_category` was a free-form string all the way
+  // to the client: the Ninja blender was displayed as "Footwear", and a
+  // confident-sounding label for a category GetWorth holds no evidence about
+  // could sit next to a price chosen from a different bucket entirely.
+  //
+  // The raw string is KEPT, as evidence, and is never displayed and never a
+  // trust input. `category_basis` records whether the value was registered,
+  // mapped, or refused, so a displayed category that was guessed is auditable
+  // as guessed rather than indistinguishable from one the model got right.
+  const cat = canonicalCategory(recognition.category);
+  if (cat.basis !== 'canonical') {
+    recognition = { ...recognition, category: cat.category, category_raw: cat.raw };
+  }
+  recognition = { ...recognition, category_basis: cat.basis };
+
   let conf = recognition.category_confidence ?? 0.5;
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
@@ -2666,6 +2688,24 @@ export function calibrateRecognition(recognition) {
 }
 
 export function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
+  // ── HIGH-3: THE SAME BOUNDARY, ON THE WAY OUT ────────────────────────────
+  // Every verification — Stage 2, the fast path, the rescue engine and the
+  // fallback — passes through here, so this is where `final_category` stops
+  // being whatever a model wrote. Stage 2 is invited to CHOOSE a category; it
+  // is not permitted to define one.
+  //
+  // The schema now carries the enum as well, but a schema is a request and this
+  // is the enforcement: VERIFICATION_SCHEMA is documentation for the model,
+  // and this repo has already learned once (SCAN-015) what happens to a rule
+  // that lives only in a prompt.
+  {
+    const fc = canonicalCategory(verification.final_category);
+    if (fc.basis !== 'canonical') {
+      verification = { ...verification, final_category: fc.category, final_category_raw: fc.raw };
+    }
+    verification = { ...verification, final_category_basis: fc.basis };
+  }
+
   let conf = verification.match_confidence ?? 0.5;
   const brand = verification.final_brand || '';
   const model = verification.final_model || '';
@@ -3326,7 +3366,15 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     anchor: guardCtx.anchor || null,
     anchorModelEvidence: guardCtx.anchorModelEvidence || false,
     identity: guardCtx.identity || null,
-    recognition,
+    // HIGH-3: THE PRICE AND THE LABEL MUST COME FROM THE SAME STRING.
+    //
+    // This passed `recognition` unchanged, so the envelope was resolved from
+    // STAGE 1's category while the client was shown STAGE 2's. When the two
+    // disagreed — and Stage 2 exists to disagree — the number came from one
+    // taxonomy branch and the label from another, with nothing recording that
+    // it had happened. Both values are canonical by the time they arrive here,
+    // so this is a choice between two registered names, not a widening.
+    recognition: { ...recognition, category: verification.final_category || recognition.category },
     model: guardCtx.model || null,
     condition: verification.condition || recognition.visual_features?.condition,
     // V-FX READS THIS, AND NOTHING WAS PASSING IT.

@@ -36,12 +36,14 @@
 // prompt suggestion into a structural gap.
 //
 // ANY future edit to valuation-guard's matcher list must be mirrored here.
-export const CATEGORIES = [
-  'Electronics', 'Furniture', 'Vehicles', 'Watches', 'Clothing', 'Sports',
-  'Smoking', 'Home', 'Beauty', 'Books', 'Toys', 'Tools', 'Food',
-  'Bags', 'Jewelry',
-  'Other',
-];
+// HIGH-3: ONE taxonomy. This used to be a second copy of the list, and the
+// four copies in this repo had already drifted — the Stage-1 prompt named 14 of
+// these in prose, the client named a fifteenth ("Music") that exists on no
+// server, and the valuation guard matched substrings of whatever arrived. A
+// JSON enum that disagrees with the prompt that produces it is not a schema, it
+// is a coincidence.
+export { CANONICAL_CATEGORIES as CATEGORIES } from './category.js';
+import { CANONICAL_CATEGORIES as CATEGORIES } from './category.js';
 
 export const CONDITIONS = ['New', 'Like New', 'Good', 'Fair', 'Poor'];
 

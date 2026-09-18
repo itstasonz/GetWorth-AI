@@ -1,7 +1,7 @@
 {
   "recognition:he": {
-    "len": 5746,
-    "sha256": "967ac0c8a46302d485b85d4fc95c53760006ae861c6f8718f21064d78a5a1f18"
+    "len": 5857,
+    "sha256": "90e38a2c39c34cf1111cfb129039789fdc3aa859eb062282345639e44f7aeb69"
   },
   "verification:he": {
     "len": 10360,
@@ -32,8 +32,8 @@
     "sha256": "770f406ae4a21b3eb5f90d150a5e5de4b310b1d6f5c2757c008d57ede1a82b31"
   },
   "recognition:en": {
-    "len": 5723,
-    "sha256": "3260e665afefbbe34a5f0be35a2ffb2318c0629b11e7debfa9b765573dc520d1"
+    "len": 5834,
+    "sha256": "b6a20a5beb8cac87fba0377fdae4236d2fd1c7ca39485e2f54fcde367de7b142"
   },
   "verification:en": {
     "len": 10360,
