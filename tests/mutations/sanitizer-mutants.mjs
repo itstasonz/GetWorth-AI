@@ -83,6 +83,7 @@ export const NON_SECURITY_SITES = [
 export const PRIMITIVE_MUTANTS = [
   {
     id: 'P01-promptSafe-newline-passthrough',
+    file: 'trust',
     property: 'LF/CR/TAB are converted to a single space, so no attacker-supplied ' +
               'text can begin a line of its own and forge a section header.',
     security: true,
@@ -107,6 +108,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P02-promptSafe-angle-brackets-pass',
+    file: 'trust',
     property: "'<' and '>' are removed, which is the ONLY reason the fence tokens " +
               '<<<UNTRUSTED_*>>> cannot be forged by quarantined content.',
     security: true,
@@ -118,6 +120,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P03-promptSafe-control-chars-pass',
+    file: 'trust',
     property: 'C0 control characters and DEL are dropped, so a payload cannot smuggle ' +
               'structure the reader of the prompt cannot see.',
     security: true,
@@ -128,6 +131,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P04-promptSafe-no-length-cap',
+    file: 'trust',
     property: 'A hard length cap bounds one field. Without it an oversized refineModel ' +
               'inflates the Stage-2 prompt past its cap, times Stage 2 out, and routes ' +
               'pricing to the rescue engine — the self-triggering attack in §2.',
@@ -139,6 +143,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P05-promptSafe-total-coercion-removed',
+    file: 'trust',
     property: 'The type decision happens BEFORE any coercion, so a client-chosen object ' +
               'with no callable toString/valueOf cannot throw inside the Stage-1 try — ' +
               'the round-3 refund DoS.',
@@ -149,6 +154,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P06-boundaryText-stringifies-objects',
+    file: 'trust',
     property: 'Only primitives are rendered; every object is ABSENT. Implicit ' +
               'stringification of a client-controlled object is the throw site itself.',
     security: true,
@@ -157,6 +163,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P07-boundaryInt-missing-becomes-zero',
+    file: 'trust',
     property: 'MISSING is not ZERO. null/""/[]/false must take the fallback, not ' +
               'silently render as an asserted 0.',
     security: false,
@@ -168,6 +175,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P08-fence-emits-nothing',
+    file: 'trust',
     property: 'Quarantined spans are actually wrapped. An unfenced span renders at ' +
               'prompt level, which is the round-2 defect (corrections[] at depth 0).',
     security: true,
@@ -176,6 +184,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P09-fence-rule-neutered',
+    file: 'trust',
     property: 'The standing DATA-vs-INSTRUCTIONS rule is what gives the fences meaning. ' +
               'Delimiters with no rule are decoration.',
     security: true,
@@ -184,16 +193,18 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P10-fence-tokens-forgeable',
+    file: 'trust',
     property: "The fence delimiters contain '<' and '>' SPECIFICALLY so that stripping " +
               'those two characters from quarantined content makes the tokens ' +
               'unforgeable. Delimiters built from characters promptSafe passes through ' +
               'can be closed by the payload.',
     security: true,
-    find: 'const FENCE_OPEN  = (label) => `<<<UNTRUSTED_${label}>>>`;\nconst FENCE_CLOSE = (label) => `<<<END_UNTRUSTED_${label}>>>`;',
-    replace: 'const FENCE_OPEN  = (label) => `[[[UNTRUSTED_${label}]]]`;\nconst FENCE_CLOSE = (label) => `[[[END_UNTRUSTED_${label}]]]`;',
+    find: 'export const FENCE_OPEN  = (label) => `<<<UNTRUSTED_${label}>>>`;\nexport const FENCE_CLOSE = (label) => `<<<END_UNTRUSTED_${label}>>>`;',
+    replace: 'export const FENCE_OPEN  = (label) => `[[[UNTRUSTED_${label}]]]`;\nexport const FENCE_CLOSE = (label) => `[[[END_UNTRUSTED_${label}]]]`;',
   },
   {
     id: 'P11-promptNum-null-becomes-zero',
+    file: 'trust',
     property: "A missing price stays '?'. Number(null) is 0 and 0 is finite, so a bare " +
               'Number() turns an unknown price into an asserted ₪0 — "worthless" rather ' +
               'than "unknown", straight into the pricing model.',
@@ -203,6 +214,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P12-promptNum-renders-raw',
+    file: 'trust',
     property: 'A non-finite or non-numeric value renders as a fixed token, never as ' +
               'attacker text. Returning the raw value puts an unsanitised string into ' +
               'the prompt at a position the reader trusts as a number.',
@@ -212,6 +224,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P13-promptSafeList-no-item-cap',
+    file: 'trust',
     property: 'The item cap bounds how much quarantined text one list can contribute.',
     security: true,
     find: '  return arr.slice(0, items).map(v => promptSafe(v, max)).filter(Boolean).join(\', \');',
@@ -219,6 +232,7 @@ export const PRIMITIVE_MUTANTS = [
   },
   {
     id: 'P14-promptSafeList-non-array-passes',
+    file: 'trust',
     property: 'A non-array is refused outright rather than coerced.',
     security: true,
     find: '  if (!Array.isArray(arr)) return \'\';',

@@ -42,6 +42,30 @@ const ANALYZE_URL = process.env.GWPI_ANALYZE_PATH
 const A = await import(ANALYZE_URL.href);
 const src = readFileSync(ANALYZE_URL, 'utf8');
 
+// HIGH-5: the quarantine primitives (§0.9) and the market boundary (§0.95) now
+// live in api/_lib/prompt-trust.js so /api/enrich can import the SAME
+// implementation instead of retyping the fence label and the rule.
+//
+// Source-text assertions therefore have to look in both places — and the
+// UNION is the honest surface for "is this wired yet?", because the whole point
+// of the extraction is that a second endpoint could wire it. Overridable for
+// the same reason ANALYZE_URL is: the mutation harness mutates whichever file
+// holds the code, and the suite must be judged against the mutated one.
+const TRUST_URL = process.env.GWPI_TRUST_PATH
+  ? pathToFileURL(process.env.GWPI_TRUST_PATH)
+  : new URL('../api/_lib/prompt-trust.js', import.meta.url);
+const trustSrc = readFileSync(TRUST_URL, 'utf8');
+const srcAll = src + String.fromCharCode(10) + trustSrc;
+
+// The same union with `import {...} from '...'` and `export { ... }` statements
+// removed. Naming an identifier in an import list is a BINDING, not a use, and
+// counting it as one turns every tripwire that says "this has no consumer yet"
+// into a false alarm the moment the definition is shared — which is exactly
+// what the extraction was for.
+const srcAllUses = srcAll
+  .replace(/^import\s*\{[^}]*\}\s*from\s*'[^']*';/gms, '')
+  .replace(/^export\s*\{[^}]*\};/gms, '');
+
 const {
   buildVerificationPrompt, buildRescuePricingPrompt,
   sanitizeClientCorrections, assessFallbackIdentity,
@@ -1354,28 +1378,70 @@ test('PI-40 snippets are bounded per-item AND per-block', () => {
 test('PI-41 the MARKET fence is a distinct label with its own evidential rule', () => {
   // Reusing STAGE1 / VISION / CATALOG_ROWS would let retrieved third-party text
   // inherit trust that a different producer earned.
-  assert.match(src, /MARKET_FENCE_LABEL = 'MARKET_UNTRUSTED'/, 'market content needs its own fence label');
-  assert.match(src, /MARKET-EVIDENCE RULE/, 'the market fence needs its own standing rule');
+  assert.match(trustSrc, /MARKET_FENCE_LABEL = 'MARKET_UNTRUSTED'/, 'market content needs its own fence label');
+  assert.match(trustSrc, /MARKET-EVIDENCE RULE/, 'the market fence needs its own standing rule');
   for (const clause of [/never establish the item's identity/, /never set price_method/, /never supply a URL/]) {
-    assert.match(src, clause, 'the market rule must bound what market text is allowed to do');
+    assert.match(trustSrc, clause, 'the market rule must bound what market text is allowed to do');
   }
 });
 
-test('PI-42 webSafe is DEFINED but deliberately NOT WIRED yet', () => {
+test('PI-41b the market fence is SHARED, not copied — HIGH-5', () => {
+  // The finding was that these constants were module-private, so /api/enrich
+  // would have to retype the label and the rule. Two copies of a security
+  // control cannot be reviewed as one, and the second copy is the one that goes
+  // stale. Assert the single source, and assert that api/analyze.js consumes it
+  // rather than keeping a private twin.
+  assert.match(trustSrc, /^export const MARKET_FENCE_LABEL/m, 'the label must be importable by a second endpoint');
+  assert.match(trustSrc, /^export const MARKET_FENCE_RULE/m, 'so must the rule');
+  assert.match(trustSrc, /^export function webSafe/m);
+  assert.match(trustSrc, /^export function webSafeBlock/m);
+
+  for (const name of ['MARKET_FENCE_LABEL', 'MARKET_FENCE_RULE', 'FENCE_RULE', 'PROMPT_STR_MAX', 'WEB_SNIPPET_MAX']) {
+    assert.equal((src.match(new RegExp(`^(?:export )?const ${name}\\s*=`, 'gm')) || []).length, 0,
+      `api/analyze.js still DECLARES ${name}. The extraction is only worth doing if there is one ` +
+      'definition; a private twin is the divergence this closed.');
+  }
+  // `__mutant__` is accepted because the mutation harness repoints this import
+  // at its scratch copy. Without that, THIS TEST FAILS UNDER EVERY MUTANT and
+  // becomes a universal killer — every mutant would be scored KILLED on the
+  // strength of a path string, and a genuine survivor would be reported dead.
+  // That is the same false-oracle class the harness's own header describes, and
+  // it appeared here within minutes of the extraction.
+  assert.match(src, /from '\.\/_lib\/prompt-trust(?:\.__mutant__)?\.js'/,
+    'api/analyze.js must consume the shared module, not a copy of it');
+});
+
+test('PI-42 webSafe is DEFINED but deliberately NOT WIRED yet', async () => {
   // Phase B does not exist. If this ever fails, market content has started
   // flowing and every control above must be re-verified against a live sink.
   // webSafeBlock calls webSafe — that is the boundary's own internals, not a
   // wiring. What must not exist is a PROMPT SINK that consumes market content.
-  const calls = [...src.matchAll(/(?<![\w.])webSafe\s*\(/g)].length;
+  // HIGH-5 moved the definitions, so the tripwire now spans BOTH files. That is
+  // the correct surface and not a widening: after the extraction a second
+  // endpoint CAN wire this, which is the whole point of extracting it, so
+  // "nothing consumes it" has to be a statement about the codebase rather than
+  // about one file. The re-export in api/analyze.js is a binding, not a call,
+  // and is excluded by the `(` in the pattern.
+  const calls = [...srcAllUses.matchAll(/(?<![\w.])webSafe\s*\(/g)].length;
   // 2 = the declaration itself + the one internal call from webSafeBlock.
   assert.equal(calls, 2,
     `expected the declaration plus one internal call (webSafeBlock -> webSafe), found ${calls} — ` +
     'a new call site means market content may now reach a prompt');
-  assert.equal((src.match(/MARKET_FENCE_RULE/g) || []).length, 1,
+  assert.equal((srcAllUses.match(/MARKET_FENCE_RULE/g) || []).length, 1,
     'the market rule is DECLARED and has no consumer; a second occurrence means a ' +
     'prompt now emits it, so the whole market boundary must be re-verified against a live sink');
-  assert.equal((src.match(/webSafeBlock\s*\(/g) || []).length, 1,
+  assert.equal((srcAllUses.match(/webSafeBlock\s*\(/g) || []).length, 1,
     'webSafeBlock has only its own declaration; a second occurrence is a caller, and Phase B is live');
+
+  // And no OTHER production module may have picked it up either. The extraction
+  // made that possible for the first time, so the tripwire has to look there.
+  const { discoverModules } = await import('./helpers/provider-scan.mjs');
+  for (const mod of discoverModules(new URL('../api/', import.meta.url))) {
+    if (mod.path === '_lib/prompt-trust.js' || mod.path === 'analyze.js') continue;
+    assert.ok(!/(?<![\w.])webSafe(?:Block)?\s*\(/.test(mod.source),
+      `api/${mod.path} calls the market sanitiser. Phase B is live and the whole market ` +
+      'boundary must be re-verified against a real sink.');
+  }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

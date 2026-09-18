@@ -48,6 +48,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 const ANALYZE = join(REPO, 'api/analyze.js');
 const MUTANT = join(REPO, 'api/analyze.__mutant__.js');
+// HIGH-5: the quarantine primitives moved to api/_lib/prompt-trust.js so
+// /api/enrich can import the same implementation. A mutation harness that reads
+// one file would have reported 14 of 18 primitives INVALID — "find matched 0x" —
+// which is the honest failure, but the fix is to follow the code, not to re-pin
+// the strings at whatever they happen to be now.
+const TRUST = join(REPO, 'api/_lib/prompt-trust.js');
+const TRUST_MUTANT = join(REPO, 'api/_lib/prompt-trust.__mutant__.js');
 const SUITE = join(REPO, 'tests/prompt-injection.test.mjs');
 
 const argv = process.argv.slice(2);
@@ -57,6 +64,9 @@ const VERBOSE = has('--verbose');
 const filter = valueOf('--filter');
 
 const source = readFileSync(ANALYZE, 'utf8');
+const trustSource = readFileSync(TRUST, 'utf8');
+// Which file a mutant edits. `file: 'trust'` on a mutant selects the second.
+const SOURCE_OF = { analyze: source, trust: trustSource };
 
 // ── SITE MUTANT GENERATION ──────────────────────────────────────────────────
 
@@ -187,23 +197,28 @@ function applyMutant(m) {
     const at = source.slice(m.index, m.index + m.length);
     if (at !== m.call) return { applied: false, reason: 'source moved under the generated offset' };
     mutated = source.slice(0, m.index) + m.replaceWith + source.slice(m.index + m.length);
-  } else {
-    const occurrences = source.split(m.find).length - 1;
-    if (occurrences !== 1) {
-      return { applied: false, reason: `find matched ${occurrences}x, expected exactly 1 — re-pin it` };
-    }
-    mutated = source.replace(m.find, m.replace);
+    if (mutated === source) return { applied: false, reason: 'replacement is byte-identical to the original' };
+    return { applied: true, file: 'analyze', mutated };
   }
+
+  const file = m.file ?? 'analyze';
+  const base = SOURCE_OF[file];
+  if (base === undefined) return { applied: false, reason: `unknown target file '${file}'` };
+  const occurrences = base.split(m.find).length - 1;
+  if (occurrences !== 1) {
+    return { applied: false, reason: `find matched ${occurrences}x in ${file}, expected exactly 1 — re-pin it` };
+  }
+  mutated = base.replace(m.find, m.replace);
 
   // The proof. A replace that produced identical text changed nothing, and a
   // result read from it would be a lie in whichever direction it landed.
-  if (mutated === source) return { applied: false, reason: 'replacement is byte-identical to the original' };
-  return { applied: true, mutated };
+  if (mutated === base) return { applied: false, reason: 'replacement is byte-identical to the original' };
+  return { applied: true, file, mutated };
 }
 
 // ── RUN ─────────────────────────────────────────────────────────────────────
 
-const sweep = () => rmSync(MUTANT, { force: true });
+const sweep = () => { rmSync(MUTANT, { force: true }); rmSync(TRUST_MUTANT, { force: true }); };
 sweep();
 process.on('exit', sweep);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { sweep(); process.exit(130); });
@@ -224,10 +239,10 @@ if (has('--list')) {
 const selected = filter ? ALL.filter((m) => m.id.includes(filter)) : ALL;
 if (!selected.length) { console.error(`No mutant matches --filter ${filter}`); process.exit(2); }
 
-const runSuite = (analyzePath) =>
+const runSuite = (analyzePath, trustPath) =>
   spawnSync(process.execPath, ['--test', '--test-reporter=tap', SUITE], {
     cwd: REPO,
-    env: { ...process.env, GWPI_ANALYZE_PATH: analyzePath },
+    env: { ...process.env, GWPI_ANALYZE_PATH: analyzePath, GWPI_TRUST_PATH: trustPath },
     encoding: 'utf8',
     timeout: 120000,
   });
@@ -236,7 +251,7 @@ const runSuite = (analyzePath) =>
 // mutant would "die" of a pre-existing failure.
 console.log('GW-PROMPT-INJECTION-001 sanitizer mutation run\n');
 process.stdout.write('  baseline (unmutated) ... ');
-const baseline = runSuite(ANALYZE);
+const baseline = runSuite(ANALYZE, TRUST);
 if (baseline.status !== 0) {
   console.log('FAILED');
   console.error('\nFATAL: tests/prompt-injection.test.mjs is not green before mutation.');
@@ -257,7 +272,19 @@ for (const m of selected) {
     continue;
   }
 
-  writeFileSync(MUTANT, a.mutated, 'utf8');
+  // BOTH mutant copies are written every time, and the analyze copy's import is
+  // repointed at the trust copy — otherwise a mutation of the trust module would
+  // be loaded from the REAL file and scored as if it had been applied.
+  const analyzeSrc = a.file === 'analyze' ? a.mutated : source;
+  const trustSrc = a.file === 'trust' ? a.mutated : trustSource;
+  const repointed = analyzeSrc.replace("from './_lib/prompt-trust.js'", "from './_lib/prompt-trust.__mutant__.js'");
+  if (repointed === analyzeSrc) {
+    invalid.push({ ...m, reason: "api/analyze.js no longer imports './_lib/prompt-trust.js' — the harness " +
+      'cannot guarantee the mutant module is the one under test' });
+    continue;
+  }
+  writeFileSync(TRUST_MUTANT, trustSrc, 'utf8');
+  writeFileSync(MUTANT, repointed, 'utf8');
 
   // An APPLIED mutant that cannot even load is not a killed mutant: it has no
   // observable behaviour to judge, so it is INVALID, and loudly, because it
@@ -281,7 +308,7 @@ for (const m of selected) {
     continue;
   }
 
-  const run = runSuite(MUTANT);
+  const run = runSuite(MUTANT, TRUST_MUTANT);
   const out = (run.stdout || '') + (run.stderr || '');
 
   // The suite must have actually executed. A run that produced no TAP summary
