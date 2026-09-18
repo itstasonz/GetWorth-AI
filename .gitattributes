@@ -4,6 +4,11 @@
 # the same on every platform and in every fresh clone.
 *.js   text eol=lf
 *.mjs  text eol=lf
+*.cjs  text eol=lf
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.mts  text eol=lf
+*.cts  text eol=lf
 *.jsx  text eol=lf
 *.json text eol=lf
 *.css  text eol=lf
