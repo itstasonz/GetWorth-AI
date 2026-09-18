@@ -24,6 +24,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 const G = await import('../api/_lib/valuation-guard.js');
 const {
@@ -586,5 +587,56 @@ describe('ADV nothing buys pricing eligibility except evidence', () => {
       recognition: { category: 'Electronics', category_confidence: 0.9 },
     });
     assert.notEqual(catAnchor.action, 'degrade', 'category_anchor is registered and must price a weak identity');
+  });
+});
+
+// ── THE FAMILY TIER MUST BE REACHABLE ───────────────────────────────────────
+// It was not. The first draft read `product_family`, which lives only inside
+// the OpenAI identity object; both engines put `model_family` on the
+// recognition root (RECOGNITION_SCHEMA declares it; the OpenAI normalizer maps
+// onto it). The tier failed safe — those items fell to BRAND_ONLY, which is
+// stricter — but an unreachable branch is not a rule.
+describe('the FAMILY tier is reachable on the field both engines emit', () => {
+  const brandOnly = { brandOk: true, modelOk: false, identityHigh: false };
+
+  test('model_family reaches FAMILY', () => {
+    assert.equal(resolveIdentityTier({
+      identity: brandOnly,
+      recognition: { category: 'Electronics', category_confidence: 0.9, model_family: 'Logitech G-series gaming mouse' },
+    }), IDENTITY_TIER.FAMILY);
+  });
+
+  test('product_family is tolerated as an alias', () => {
+    assert.equal(resolveIdentityTier({
+      identity: brandOnly,
+      recognition: { category: 'Electronics', category_confidence: 0.9, product_family: 'Logitech G-series' },
+    }), IDENTITY_TIER.FAMILY);
+  });
+
+  test('no family, or an empty one, stays BRAND_ONLY', () => {
+    for (const model_family of [undefined, null, '', '   ', 42, {}]) {
+      assert.equal(resolveIdentityTier({
+        identity: brandOnly,
+        recognition: { category: 'Electronics', category_confidence: 0.9, model_family },
+      }), IDENTITY_TIER.BRAND_ONLY, `family ${JSON.stringify(model_family)} must not promote the tier`);
+    }
+  });
+
+  test('a family without a brand does not promote anything', () => {
+    assert.equal(resolveIdentityTier({
+      identity: { brandOk: false, modelOk: false },
+      recognition: { category: 'Electronics', category_confidence: 0.9, model_family: 'some family' },
+    }), IDENTITY_TIER.CATEGORY_ONLY, 'a family is a refinement of a brand, not a substitute for one');
+  });
+
+  test('the field name matches what the engines actually declare', () => {
+    // Pin the agreement between guard and producers, since the mismatch is the
+    // defect and nothing else would have caught it.
+    const analyze = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
+    const normalize = readFileSync(new URL('../api/_lib/openai-recognition-normalize.js', import.meta.url), 'utf8');
+    assert.match(analyze, /model_family:\s*\{ type: \['string', 'null'\] \}/,
+      'the current engine must still declare model_family in RECOGNITION_SCHEMA');
+    assert.match(normalize, /model_family: family/,
+      'the OpenAI normalizer must still map its product_family onto model_family');
   });
 });

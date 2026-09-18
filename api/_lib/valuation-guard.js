@@ -380,8 +380,18 @@ export function resolveIdentityTier(ctx = {}) {
     && catConf >= CATEGORY_CONFIDENCE_FLOOR
     && catConf <= 1;
 
+  // `model_family` is the field BOTH engines actually put on the recognition
+  // root: the current engine declares it in RECOGNITION_SCHEMA, and the OpenAI
+  // normalizer maps its own `product_family` onto that same name. The first
+  // draft of this function read `product_family` — which exists only inside the
+  // OpenAI identity object, never on the recognition — so the FAMILY tier was
+  // unreachable on every path. It failed safe (those items fell to BRAND_ONLY,
+  // which is stricter), but a branch nothing can enter is not a rule; it is a
+  // comment that looks like one. `product_family` is kept as a tolerated alias
+  // for a caller holding a raw OpenAI identity.
+  const family = ctx.recognition?.model_family ?? ctx.recognition?.product_family;
   if (brandOk && modelOk) return IDENTITY_TIER.EXACT_MODEL;
-  if (brandOk && ctx.recognition?.product_family) return IDENTITY_TIER.FAMILY;
+  if (brandOk && typeof family === 'string' && family.trim()) return IDENTITY_TIER.FAMILY;
   if (brandOk) return IDENTITY_TIER.BRAND_ONLY;
   if (categoryTrusted) return IDENTITY_TIER.CATEGORY_ONLY;
   return IDENTITY_TIER.UNIDENTIFIED;
