@@ -301,6 +301,23 @@ export function resolveEnvelopeKey(recognition = {}) {
   const ocrKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: true });
   if (ocrKey === trustedKey) return trustedKey;
 
+  // OCR MAY NARROW A BUCKET. IT MAY NOT CONJURE ONE.
+  //
+  // The first version compared ceilings and kept the lower, treating a null key
+  // as GLOBAL_ENVELOPE's 500,000 — so ANY real bucket looked narrower and was
+  // accepted. But a null key does not mean "the loosest envelope": for a
+  // non-confirmed identity `resolveEnvelope` maps it to MANUAL_ONLY (2,000),
+  // and the CATEGORY_ONLY rule refuses to price on it at all. So the two
+  // disagreed, and "strictly narrowing" was false exactly where it mattered.
+  //
+  // Reproduced: category "Kitchen", confidence 0.9, no brand, no model. With no
+  // OCR the scan is REFUSED (no bucket, nothing to price from). Print
+  // "DELONGHI ESPRESSO" on it and the same scan resolves to
+  // home:kitchen appliance and is ACCEPTED at ₪2,500 — a refusal converted into
+  // a price by a sticker, which is the whole attack this function exists to
+  // stop, in its purest form.
+  if (trustedKey === null) return null;
+
   const ceiling = (k) => {
     if (!k) return GLOBAL_ENVELOPE.hard_max;      // no bucket -> the loosest
     const e = ENVELOPES[k];

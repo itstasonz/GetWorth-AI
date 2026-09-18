@@ -878,3 +878,48 @@ test('an identified product is NOT capped — the rule is about identity, not ca
   assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
   assert.notEqual(v.metadata.pricing_grade, 'LOW', 'an evidenced identity keeps its earned grade');
 });
+
+test('the _debug allowlist covers every section the pipeline builds', () => {
+  // The first allowlist named five sections while the object builds eight, so
+  // recognition_engine, ocr_context and memory were silently deleted from the
+  // response AND from ai_raw_response — breaking the OpenAI-vs-Claude
+  // benchmark, SCAN-014 shadow memory, and OCE capture. 682 green tests missed
+  // it because nothing asserted a _debug section. This is that assertion.
+  const src = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
+  const block = src.slice(src.indexOf('result._debug = {'), src.indexOf('DEBUG_PUBLIC_SECTIONS'));
+  const built = [...block.matchAll(/^ {6}([a-z_]+):/gm)].map((m) => m[1]);
+  const allowed = (/DEBUG_PUBLIC_SECTIONS = \[([^\]]+)\]/.exec(src)?.[1] ?? '')
+    .split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+
+  // The regex sees the sections declared at this indent; stage1/stage2 are
+  // asserted by name below so a rename cannot slip past the count.
+  assert.ok(built.length >= 6, `expected the debug object's sections, found ${built.length}`);
+  for (const required of ['stage1', 'stage2']) {
+    assert.ok(allowed.includes(required), `${required} must stay allowlisted`);
+  }
+  assert.deepEqual(built.filter((s) => !allowed.includes(s)), [],
+    'a _debug section is built but not allowlisted — it is being silently dropped from both ' +
+    'the client response and ai_raw_response');
+});
+
+test('corroboration comes from an INDEPENDENT reader, not the model itself', () => {
+  // The first version drew corroborating text from recognition.ocr_text.raw_texts
+  // — a transcription THE SAME MODEL produced. Stage 2 claiming "Rolex
+  // Submariner 126610" was corroborated by Stage 1 having written
+  // "ROLEX SUBMARINER 126610": the model grading its own homework, which is
+  // what SCAN-022 exists to refuse and what the comment claimed to avoid.
+  // Found by an independent security review; the claim was false whenever
+  // Vision had not run.
+  const src = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
+  // NOTE: there is an unrelated `const logoNames` far earlier in the file (the
+  // OCE scoring block), so the end of the slice must be searched FORWARD from
+  // the start — the first draft of this test sliced backwards and compared an
+  // empty string, which passes for the wrong reason.
+  const start = src.indexOf('const readTokens = new Set(');
+  const block = src.slice(start, src.indexOf('const logoNames', start));
+  assert.ok(block.length > 40, 'fixture: the corroboration block must be locatable');
+  assert.equal(/recognition\.ocr_text/.test(block), false,
+    'Stage-1 OCR is model output and must never corroborate a Stage-2 claim');
+  assert.match(block, /visionData\?\.text/,
+    'corroboration must come from Vision — a different vendor reading the same pixels');
+});

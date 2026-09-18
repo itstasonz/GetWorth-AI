@@ -4716,10 +4716,21 @@ async function handleRequest(req) {
         // which is a different signal class from a word printed on a label.
         const norm = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
         const toks = (s) => norm(s).split(' ').filter(Boolean);
-        const readTokens = new Set(toks([
-          ...(visionData?.text || []),
-          ...(recognition.ocr_text?.raw_texts || []),
-        ].join(' ')));
+        // CORROBORATION MUST COME FROM AN INDEPENDENT READER — VISION ONLY.
+        //
+        // The first version also drew on `recognition.ocr_text.raw_texts`,
+        // which is a transcription THE SAME MODEL PRODUCED. So Stage 2 claiming
+        // "Rolex Submariner 126610" was corroborated by Stage 1 having written
+        // "ROLEX SUBMARINER 126610" — the model grading its own homework,
+        // which is precisely what SCAN-022 exists to refuse and exactly what
+        // the comment above claimed this predicate avoided. The claim was
+        // false whenever Vision had not run.
+        //
+        // Google Vision is a different vendor reading the same pixels, so it is
+        // genuine outside evidence. A scan with no Vision data simply does not
+        // get the upgrade, which is the correct answer: there is no independent
+        // reader to corroborate anything.
+        const readTokens = new Set(toks((visionData?.text || []).join(' ')));
         // A LOGO ONLY CORROBORATES IF VISION WAS ACTUALLY CONFIDENT IN IT.
         //
         // `parseVisionResponse` maps logoAnnotations with NO score filter,
@@ -5160,7 +5171,27 @@ async function handleRequest(req) {
     //
     // NEVER add to this list: provider keys, raw prompts, authorization headers,
     // internal safety instructions, tool payloads, or retrieved third-party text.
-    const DEBUG_PUBLIC_SECTIONS = ['stage1', 'retrieval', 'pricing', 'stage2', 'pipeline'];
+    //
+    // THE LIST WAS WRONG ON ITS FIRST WRITING, AND THE COMMENT ABOVE CLAIMED
+    // OTHERWISE. It named five sections while the object builds EIGHT, so
+    // `recognition_engine`, `ocr_context` and `memory` were silently deleted
+    // from both the response and — because the filter runs before
+    // `ai_raw_response: result` — from the durable record. That broke
+    // scripts/recognition-ab-benchmark.mjs, which scores `fallback_reason`,
+    // `is_packaging` and `model_text_corroborated` out of `recognition_engine`
+    // and is the harness deciding OpenAI-vs-Claude; it made SCAN-014's shadow
+    // memory unobservable; and it severed the OCE capture. 682 green tests
+    // missed it because NO test asserts any `_debug` section.
+    //
+    // A default-deny list that has to be kept in sync by hand is a footgun, so
+    // it is DERIVED from the object and only the additions need declaring.
+    // The point was never to remove today's telemetry — it was to stop a
+    // future research payload becoming client-visible and persisted merely by
+    // someone adding a field.
+    const DEBUG_PUBLIC_SECTIONS = [
+      'stage1', 'retrieval', 'pricing', 'stage2', 'pipeline',
+      'recognition_engine', 'ocr_context', 'memory',
+    ];
     result._debug = Object.fromEntries(
       Object.entries(result._debug).filter(([section]) => DEBUG_PUBLIC_SECTIONS.includes(section)),
     );

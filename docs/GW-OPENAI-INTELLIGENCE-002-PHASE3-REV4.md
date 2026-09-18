@@ -154,6 +154,26 @@ whole boundary must be re-verified against a real sink.
   `REFUNDABLE_FAILURE_KINDS` need extracting so two endpoints share one policy
   rather than duplicating it.
 
+## 4b. Open findings from the independent reviews — NOT fixed
+
+Four reviews ran against the foundation. These remain open and are the gate.
+
+| Finding | Severity | Where |
+|---|---|---|
+| Provider scanner misses a host built by runtime concatenation or template interpolation, and skips `.cjs`/`.ts` | HIGH | `tests/refund-crossproduct.test.mjs` — lexical scanning cannot see concatenation; the comment must stop implying "a provider cannot hide" |
+| The harness's loud throw on an unknown host is SWALLOWED by production `try/catch`, and nothing asserts `unknownHosts` | HIGH | `tests/helpers/analyze-harness.mjs` — a planted unknown host still passes 50/50 |
+| `ctx.comps` can never reach the guard: `gctx` is an explicit field whitelist with no `comps`, so **V-FX can never fire** | HIGH | `api/analyze.js` gctx builder |
+| Market fence constants are module-private, so Phase B must duplicate the label and rule | HIGH | `api/analyze.js` §0.95 |
+| `final_category` is free-form and reaches the UI verbatim; displayed category can disagree with the priced envelope | HIGH | `api/analyze.js` VERIFICATION_SCHEMA |
+| The E2E identity test reads `r.payload.marketValue`, which is undefined for every scan — a **vacuous oracle** | HIGH | `tests/identity-floor.test.mjs` |
+| Brand/model candidates are themselves OCR-derived, so the narrow-only rule does not cover them (Rolex witness: 6,400 → 250,000 ceiling, bounded by `requiresAnchorAboveSoft`) | HIGH | `resolveEnvelopeKeyFrom` trusted-signal set |
+| `low` has no floor — 8,822 accepted cases below it, worst 0.40× | MEDIUM | `V-ENVELOPE-BAND` was implemented on one side |
+| Unrecognised `stage` still returns `{source:'unknown', grade:'LOW'}` and PRICES | MEDIUM | the sibling hole of V-SOURCE-UNREGISTERED |
+| `variantContradiction` false positive: `27"` vs `27 inch` are different tokens, so the same TV contradicts itself and the envelope WIDENS | MEDIUM | `VARIANT_PATTERNS` normalisation |
+| V-FX coerces money (`Number("3.7")`) and never validates the amount behind an ILS comp | MEDIUM | `V-FX` |
+| Corroboration is token-set based, so unordered tokens from different lines match; and a compatibility label ("Compatible with Apple iPhone 15 Pro, Model A2848") corroborates the accessory as the product | MEDIUM | the Stage-2 upgrade predicate |
+| Recognition floors (a)(b)(c) unchanged | HIGH | `api/analyze.js` |
+
 ## 5. Acceptance criteria before Phase 3
 
 1. The mechanism is chosen and its adapter contract written against §2.
