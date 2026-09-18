@@ -4748,19 +4748,54 @@ async function handleRequest(req) {
           .filter((l) => Number(l?.score) >= VISION_TRIGGER_THRESHOLD)
           .map((l) => norm(l?.description));
 
-        const brandToks = toks(b);
-        const brandCorroborated = logoNames.includes(norm(b))
-          || (brandToks.length > 0 && brandToks.every((t) => readTokens.has(t)));
-        if (!brandCorroborated) return base;
+        // ── PHRASES ON ONE LINE, NOT A BAG OF WORDS ──────────────────────────
+        //
+        // Whole-token matching over a POOLED set replaced substring coincidence
+        // with bag-of-words coincidence, and two reviewers produced the same
+        // CRITICAL from it independently: a ₪20 silicone case whose own
+        // packaging reads "Compatible with Apple iPhone 15 Pro Max" shipped as
+        // "Apple iPhone 15 Pro Max" at ₪3,800 — roughly 190x its value — with
+        // tier exact_model and the narrowest spread band the system has.
+        //
+        // A compatibility label contains exactly the brand and model tokens BY
+        // DESIGN; that is what a compatibility label is for. My previous comment
+        // claimed the logo-score filter had closed this. It had not: this path
+        // needs no logo at all, because the text tokens alone satisfied it.
+        //
+        // Three changes, each closing a verified forgery:
+        //   1. Lines that describe COMPATIBILITY cannot corroborate anything.
+        //   2. Matching is per LINE and CONTIGUOUS, so tokens cannot be pooled
+        //      across lines — "HEUER GARAGE" + "TAG number 1887" + "carrera
+        //      street" no longer corroborates "Tag Heuer Carrera 1887".
+        //   3. A model-shaped token must MIX letters and digits. Bare digits
+        //      let a warranty year ("EXPIRES 2019") and a price tag ("NIS 1299")
+        //      stand in for a model number.
+        const COMPATIBILITY = /\b(compatible|compatibility|for|fits|fit|replacement|suits|suitable|universal|spare)\b/;
+        const lines = (visionData?.text || [])
+          .map(norm)
+          .filter((l) => l && !COMPATIBILITY.test(l));
+        const hasPhrase = (line, phrase) => {
+          const p = toks(phrase);
+          if (!p.length) return false;
+          const l = toks(line);
+          for (let i = 0; i + p.length <= l.length; i++) {
+            if (p.every((t, k) => l[i + k] === t)) return true;
+          }
+          return false;
+        };
 
-        // A model-SHAPED token ("g502", "wh1000xm5") is the strongest signal;
-        // failing that, the whole model name must appear as whole tokens.
-        const modelToks = toks(m);
-        const shaped = modelToks.filter((t) => /[a-z][0-9]|[0-9][a-z]|[0-9]{3,}/.test(t));
-        const modelCorroborated = modelToks.length > 0 && (
-          shaped.some((t) => readTokens.has(t))
-          || modelToks.every((t) => readTokens.has(t))
-        );
+        const brandByLogo = logoNames.includes(norm(b));
+        const brandLines = lines.filter((l) => hasPhrase(l, b));
+        if (!brandByLogo && brandLines.length === 0) return base;
+
+        // Letters AND digits — a real model designator, not a year or a price.
+        const shaped = toks(m).filter((t) => /(?=.*[a-z])(?=.*[0-9])/.test(t));
+        // The model must be read on a line that is not a compatibility claim,
+        // and — when the brand was not established by a logo — on the SAME line
+        // as the brand, so the two are genuinely one printed designation.
+        const modelLines = brandByLogo ? lines : brandLines;
+        const modelCorroborated = modelLines.some((l) =>
+          hasPhrase(l, m) || shaped.some((t) => toks(l).includes(t)));
         if (!modelCorroborated) return base;
 
         const modelOk = !!m && m.toLowerCase() !== 'unidentified';

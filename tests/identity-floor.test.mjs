@@ -788,10 +788,14 @@ describe('E2E a Stage-2 identity corroborated by read text is not refused', () =
     const src = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
     assert.match(src, /if \(verification\?\.identification_method !== 'ocr_confirmed'\) return base;/,
       'the upgrade must require ocr_confirmed');
-    assert.match(src, /if \(!brandCorroborated\) return base;/,
-      'the upgrade must require the brand to be corroborated by text read off the image');
+    assert.match(src, /if \(!brandByLogo && brandLines\.length === 0\) return base;/,
+      'the brand must be corroborated by a logo or by a non-compatibility line');
     assert.match(src, /if \(!modelCorroborated\) return base;/,
       'and the MODEL too — that is what ocr_confirmed actually claims');
+    assert.match(src, /const COMPATIBILITY = /,
+      'a line describing COMPATIBILITY must not corroborate — that is the accessory attack');
+    assert.match(src, /const hasPhrase = /,
+      'matching must be contiguous per line, not a bag of words pooled across lines');
   });
 });
 
@@ -820,8 +824,11 @@ describe('the Stage-2 identity upgrade cannot be satisfied by coincidence', () =
   test('the MODEL must be corroborated, because that is what ocr_confirmed claims', () => {
     assert.match(src, /if \(!modelCorroborated\) return base;/,
       'a brand appearing somewhere is not evidence that the model was read');
-    assert.match(src, /shaped\.some\(\(t\) => readTokens\.has\(t\)\)/,
-      'a model-shaped token is the strongest available corroboration');
+    assert.match(src, /shaped\.some\(\(t\) => toks\(l\)\.includes\(t\)\)/,
+      'a model-shaped token is the strongest available corroboration, matched per line');
+    assert.match(src, /\(\?=\.\*\[a-z\]\)\(\?=\.\*\[0-9\]\)/,
+      'a shaped token must MIX letters and digits — bare digits let a warranty year ' +
+      'or a price tag stand in for a model number');
   });
 
   test('a Vision LOGO is accepted as brand corroboration — a different signal class', () => {
@@ -922,4 +929,84 @@ test('corroboration comes from an INDEPENDENT reader, not the model itself', () 
     'Stage-1 OCR is model output and must never corroborate a Stage-2 claim');
   assert.match(block, /visionData\?\.text/,
     'corroboration must come from Vision — a different vendor reading the same pixels');
+});
+
+// ── A REAL ORACLE FOR THE HANDLER'S RESPONSE ────────────────────────────────
+//
+// The handler returns `{ content: [{ type: 'text', text: JSON.stringify(result) }] }`
+// (api/analyze.js:5619). The first E2E test here read `r.payload.marketValue`,
+// which is undefined for EVERY scan — so its assertion could not fail, and a
+// PRICED result passed it identically to a refused one. That blind oracle is
+// why a suite at 100% mutation score stayed green over a CRITICAL. Found by an
+// independent valuation review.
+const decode = (r) => {
+  assert.ok(r.payload?.content?.[0]?.text, `expected the handler envelope, got ${JSON.stringify(r.payload).slice(0, 200)}`);
+  return JSON.parse(r.payload.content[0].text);
+};
+const midOf = (res) => res?.marketValue?.mid ?? res?.marketValue?.price_estimate_mid ?? null;
+
+describe('E2E the real pipeline, read through a real oracle', () => {
+  const blankStage1 = {
+    category: 'Electronics', category_hebrew: 'אלקטרוניקה', category_confidence: 0.55,
+    subcategory: 'phone case', product_type: 'case',
+    brand_candidates: [], model_candidates: [],
+    ocr_text: { raw_texts: [], logos_detected: [], has_readable_text: false },
+    visual_features: { condition: 'Good', materials: ['silicone'], colors: ['black'] },
+  };
+  const stage2Claim = (brand, model) => ({
+    final_category: 'Electronics', final_category_hebrew: 'אלקטרוניקה',
+    final_brand: brand, final_model: model,
+    match_confidence: 0.92, identification_method: 'ocr_confirmed',
+    brand_confidence: 'confirmed_by_text',
+    price_estimate_low: 3400, price_estimate_mid: 3800, price_estimate_high: 4200,
+    price_method: 'comp_based', currency: 'ILS', condition: 'Good',
+    matched_product_ids: [], comparable_items: [], price_factors: [],
+    selling_tips: '', israeli_market_notes: '', is_sellable: true, market_demand: 'moderate',
+    confidence_reasoning: 'read from the label',
+  });
+
+  test('a compatibility label on an accessory does NOT price it as the product', async () => {
+    // The CRITICAL, produced independently by two reviewers: a ₪20 silicone
+    // case whose own packaging reads "Compatible with Apple iPhone 15 Pro Max"
+    // shipped as an iPhone at ₪3,800 — roughly 190x its value. A compatibility
+    // label contains the brand and model tokens BY DESIGN.
+    const { harness, IMG, anthropicText } = await import('./helpers/analyze-harness.mjs');
+    const h = await harness();
+    try {
+      delete process.env.RECOGNITION_ENGINE;
+      let call = 0;
+      h.anthropic(() => (++call === 1 ? anthropicText(blankStage1) : anthropicText(stage2Claim('Apple', 'iPhone 15 Pro Max'))));
+      h.vision(() => ({ body: { responses: [{
+        textAnnotations: [
+          { description: 'Compatible with Apple iPhone 15 Pro Max Silicone Case' },
+          { description: 'Compatible' }, { description: 'with' }, { description: 'Apple' },
+          { description: 'iPhone' }, { description: '15' }, { description: 'Pro' },
+          { description: 'Max' }, { description: 'Silicone' }, { description: 'Case' },
+        ],
+        logoAnnotations: [],
+        labelAnnotations: [{ description: 'Mobile phone case', score: 0.9 }],
+      }] } }));
+
+      const res = decode(await h.run({ imageData: IMG, lang: 'en' }));
+      const mid = midOf(res);
+      assert.notEqual(mid, 3800,
+        `an accessory was priced as the product it is compatible with (₪${mid})`);
+      assert.ok(mid === null || mid === 0 || mid < 1000,
+        `a ₪20 case must not carry a flagship-phone price, got ₪${mid}`);
+    } finally { h.restore(); }
+  });
+
+  test('the oracle is not blind — a PRICED scan reads back a real number', async () => {
+    // The control that the previous version lacked. Without it, "no price" and
+    // "the test cannot see prices" are indistinguishable.
+    const { harness, IMG, anthropicText, VALID_RECOGNITION } = await import('./helpers/analyze-harness.mjs');
+    const h = await harness();
+    try {
+      delete process.env.RECOGNITION_ENGINE;
+      h.anthropic(() => anthropicText(VALID_RECOGNITION));
+      const res = decode(await h.run({ imageData: IMG, lang: 'en' }));
+      assert.ok(Object.prototype.hasOwnProperty.call(res, 'marketValue'),
+        'the decoded result must actually expose marketValue — otherwise every price assertion is vacuous');
+    } finally { h.restore(); }
+  });
 });
