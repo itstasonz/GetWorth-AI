@@ -26,6 +26,7 @@
 import crypto from 'node:crypto';
 
 const JWT_SECRET = 'test-secret';
+const NL = String.fromCharCode(10);
 
 // Env must be set BEFORE api/analyze.js is imported — it reads these at module
 // scope. `harness()` imports lazily for exactly this reason.
@@ -167,6 +168,13 @@ export async function harness() {
       state.otherLog.push(url.replace('https://fake.supabase.co', ''));
       return jsonRes([], 200);
     }
+    // HIGH-1 — OUT-OF-BAND OBSERVATION.
+    // The throw below is necessary and NOT sufficient. It is raised inside
+    // production's own call stack, so any `try/catch` on the path swallows it
+    // and the test still goes green — which is precisely the shape this project
+    // keeps shipping. The record here is read AFTER the handler has returned,
+    // by `run()`, where production has no reach. Swallow the exception all you
+    // like; the fact of the attempt has already left the building.
     state.unknownHosts.push(url);
     throw new Error(
       `[harness] UNSTUBBED EXTERNAL HOST: ${url}
@@ -186,7 +194,24 @@ export async function harness() {
     charged: (v) => { state.charged = v; },
     restore: () => { globalThis.fetch = realFetch; },
 
-    async run(bodyObj, { headers = {}, quiet = true } = {}) {
+    // HIGH-1. Reads the out-of-band record and FAILS THE TEST. Deliberately
+    // separate from run() so a test can also assert the property at a point of
+    // its own choosing.
+    assertNoUnknownHosts(where = 'this request') {
+      if (state.unknownHosts.length === 0) return;
+      const seen = [...new Set(state.unknownHosts)];
+      const e = new Error(
+        '[harness] UNMODELLED EXTERNAL HOST ATTEMPTED during ' + where + ':' + NL +
+        seen.map((u) => '  - ' + u).join(NL) + NL +
+        'Observed OUT OF BAND, after the handler returned, so a try/catch in ' +
+        'production cannot hide it. Add an explicit responder and a providerCalls ' +
+        'bucket in tests/helpers/analyze-harness.mjs, and an INVENTORY entry in ' +
+        'tests/refund-crossproduct.test.mjs.');
+      e.unknownHosts = seen;
+      throw e;
+    },
+
+    async run(bodyObj, { headers = {}, quiet = true, allowUnknownHosts = false } = {}) {
       state.refunds = 0; state.rpcLog = []; state.otherLog = [];
       state.providerCalls = { anthropic: 0, openai: 0, vision: 0, voyage: 0 };
       state.unknownHosts = [];
@@ -210,6 +235,26 @@ export async function harness() {
           body: JSON.stringify(bodyObj),
         }));
       } catch (e) { err = e; } finally { Object.assign(console, orig); }
+
+      // THE ENFORCEMENT POINT. After the handler has returned and before any
+      // result reaches the caller. Production has already had its chance to
+      // catch the throw from fetch; this is not in its call stack at all.
+      //
+      // `allowUnknownHosts` exists for ONE purpose: the negative control that
+      // proves this mechanism works. It is not a way to quiet a real finding,
+      // and an audit test asserts it appears in exactly one test file.
+      if (!allowUnknownHosts && state.unknownHosts.length > 0) {
+        const seen = [...new Set(state.unknownHosts)];
+        const e = new Error(
+          '[harness] UNMODELLED EXTERNAL HOST ATTEMPTED during the request:' + NL +
+          seen.map((u) => '  - ' + u).join(NL) + NL +
+          'The fetch stub threw, and production SWALLOWED it — which is why this ' +
+          'check is out of band. Add an explicit responder and a providerCalls ' +
+          'bucket in tests/helpers/analyze-harness.mjs, and an INVENTORY entry in ' +
+          'tests/refund-crossproduct.test.mjs.');
+        e.unknownHosts = seen;
+        throw e;
+      }
 
       let payload = null;
       try { payload = res ? await res.clone().json() : null; } catch { /* non-json response */ }

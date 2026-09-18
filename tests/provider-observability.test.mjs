@@ -154,3 +154,123 @@ test('SEC-9 every host in the provider INVENTORY has a harness bucket', () => {
       `the harness must count ${bucket} calls in its own bucket`);
   }
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// HIGH-1 — THE OBSERVABILITY PROPERTY, NOT THE STUB
+//
+// The previous round left this HIGH open with an exact diagnosis: the harness
+// CAN throw for an unknown host, but the throw is raised inside production's own
+// call stack, so `fetchWithRetry`'s catch — or any other — swallows it and the
+// test still reports green. A guard whose only signal is an exception is a guard
+// that the code under test gets to veto.
+//
+//   PROPERTY  If any unmodelled external host is ATTEMPTED during a request, the
+//             test fails — whether or not production catches the error.
+//   PRODUCER  the patched globalThis.fetch, which records before it throws
+//   CONSUMER  run()'s post-handler check, outside production's call stack
+//   EFFECT    the test goes red; the error names every host attempted
+// ══════════════════════════════════════════════════════════════════════════════
+describe('HIGH-1 an attempted unknown host fails the test even when swallowed', () => {
+  test('control — a clean run records no unknown hosts', async () => {
+    delete process.env.RECOGNITION_ENGINE;
+    h.anthropic(() => anthropicText(VALID_RECOGNITION));
+    const r = await h.run({ imageData: IMG, lang: 'en' });
+    assert.deepEqual(r.unknownHosts, [], 'the control must be clean, or the witnesses below prove nothing');
+    assert.doesNotThrow(() => h.assertNoUnknownHosts());
+  });
+
+  test('WITNESS the error PROPAGATES — run() rejects', async () => {
+    delete process.env.RECOGNITION_ENGINE;
+    // The responder runs inside production's Stage-1 fetch. Letting the stub's
+    // error escape is the easy half of the property.
+    h.anthropic(async () => {
+      await globalThis.fetch('https://api.market-research-vendor.example/v1/search?q=ninja');
+      return anthropicText(VALID_RECOGNITION);
+    });
+    await assert.rejects(() => h.run({ imageData: IMG, lang: 'en' }),
+      /UNMODELLED EXTERNAL HOST ATTEMPTED/,
+      'an unmodelled host attempted mid-request must fail the test');
+  });
+
+  test('WITNESS the error is SWALLOWED by a try/catch — run() STILL rejects', async () => {
+    delete process.env.RECOGNITION_ENGINE;
+    // This is the finding, reproduced exactly. The unknown provider is called
+    // inside a catch that discards the error and carries on, which is what
+    // every real fallback path in api/analyze.js does. Before this round the
+    // request completed 200 and the test passed.
+    let swallowed = false;
+    h.anthropic(async () => {
+      try {
+        await globalThis.fetch('https://api.quiet-market-vendor.example/v1/prices', {
+          method: 'POST', body: JSON.stringify({ q: 'ninja blender' }),
+        });
+      } catch { swallowed = true; /* exactly the shape that hid this */ }
+      return anthropicText(VALID_RECOGNITION);
+    });
+
+    let err = null;
+    try { await h.run({ imageData: IMG, lang: 'en' }); } catch (e) { err = e; }
+
+    assert.equal(swallowed, true, 'the negative control must actually have swallowed the throw');
+    assert.ok(err, 'a swallowed unknown-host attempt MUST still fail the test — this is HIGH-1');
+    assert.match(err.message, /UNMODELLED EXTERNAL HOST ATTEMPTED/);
+    assert.deepEqual(err.unknownHosts, ['https://api.quiet-market-vendor.example/v1/prices'],
+      'the error must name the host that was attempted');
+  });
+
+  test('WITNESS a host reached only on a FALLBACK path is still observed', async () => {
+    delete process.env.RECOGNITION_ENGINE;
+    // A provider added to a rescue/fallback branch is the realistic way a new
+    // billable call arrives, and the branch is reached only when something has
+    // already failed — i.e. inside a catch, by construction.
+    h.anthropic(async (body, url) => {
+      if (String(url).includes('messages')) {
+        try { await globalThis.fetch('https://enrich.example/v1/comps'); } catch { /* swallowed */ }
+      }
+      return anthropicText(VALID_RECOGNITION);
+    });
+    await assert.rejects(() => h.run({ imageData: IMG, lang: 'en' }), /enrich\.example/);
+  });
+
+  test('the record survives a request that ends in a THROWN handler error', async () => {
+    delete process.env.RECOGNITION_ENGINE;
+    h.anthropic(async () => {
+      try { await globalThis.fetch('https://api.late-vendor.example/x'); } catch { /* swallowed */ }
+      return { status: 500, body: { error: 'upstream' } };
+    });
+    await assert.rejects(() => h.run({ imageData: IMG, lang: 'en' }),
+      /late-vendor\.example/,
+      'a failed request must not be a way to lose the observation');
+  });
+
+  test('allowUnknownHosts is a negative-control hatch, and is used NOWHERE ELSE', async () => {
+    // A quieting flag that spreads is a quieting flag. Assert that this file is
+    // the only one that can use it, so a future test cannot silence a real
+    // finding by copying a line.
+    const here = new URL('.', import.meta.url);
+    const { readdirSync } = await import('node:fs');
+    const offenders = [];
+    for (const f of readdirSync(here)) {
+      if (!f.endsWith('.mjs') || f === 'provider-observability.test.mjs') continue;
+      const src = readFileSync(new URL(f, here), 'utf8');
+      if (src.includes('allowUnknownHosts')) offenders.push(f);
+    }
+    assert.deepEqual(offenders, [],
+      `allowUnknownHosts appears in ${offenders.join(', ')} — it exists only to prove the ` +
+      'mechanism works, never to accept an unmodelled provider');
+
+    // And it must actually work, or the test above is asserting about nothing.
+    delete process.env.RECOGNITION_ENGINE;
+    h.anthropic(async () => {
+      try { await globalThis.fetch('https://api.hatch-check.example/x'); } catch { /* swallowed */ }
+      return anthropicText(VALID_RECOGNITION);
+    });
+    const r = await h.run({ imageData: IMG, lang: 'en' }, { allowUnknownHosts: true });
+    // Deduped: the responder runs once per Anthropic call, and a scan makes
+    // several. The count is not the property; the RECORD is.
+    assert.deepEqual([...new Set(r.unknownHosts)], ['https://api.hatch-check.example/x'],
+      'the hatch must still RECORD; it only suppresses the throw');
+    assert.ok(r.unknownHosts.length > 0);
+    h.anthropic(() => anthropicText(VALID_RECOGNITION));
+  });
+});

@@ -227,8 +227,9 @@ test('XP control — a request rejected before any provider call refunds nothing
 //      module-level dispatch table resolves to the invocation sites of whatever
 //      reads that table, transitively.
 // ─────────────────────────────────────────────────────────────────────────────
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { discoverModules } from './helpers/provider-scan.mjs';
 
 const ANALYZE = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
 const OPENAI_LIB = readFileSync(new URL('../api/_lib/openai-recognition.js', import.meta.url), 'utf8');
@@ -435,7 +436,17 @@ function reachableCallSites(name, seen = new Set()) {
 // That matters more forward than backward: the right place for new provider
 // code is a new `_lib` module, so the advice that keeps api/analyze.js from
 // growing was exactly the advice that defeated this guard. `file` is part of a
-// site's identity now, so a provider cannot hide by moving.
+// site's identity now, so a provider cannot hide by moving FILE.
+//
+// HIGH-2 — WHAT THIS SCAN DOES NOT DO, STATED RATHER THAN IMPLIED.
+// It searches for the FOUR KNOWN HOSTS above, so its job is ledger attribution
+// for providers already known. It is NOT provider discovery: a fifth vendor
+// with a host nobody listed matches nothing here, and a host assembled at
+// runtime matches nothing anywhere lexical. Those two are covered by
+// tests/provider-discovery.test.mjs (static — finds unknown hosts across every
+// executable extension, and REFUSES construction it cannot resolve) and by the
+// harness's out-of-band unknown-host record (runtime). The earlier wording here
+// claimed a completeness this file has never had.
 const INVENTORY = [
   { file: 'api/analyze.js',                 fn: 'recognize',              host: 'api.anthropic.com',     ledger: 'DIRECT' },
   { file: 'api/analyze.js',                 fn: 'ocrSerialLabel',         host: 'api.anthropic.com',     ledger: 'DIRECT' },
@@ -462,16 +473,13 @@ const DOWNSTREAM = new Set(INVENTORY.filter((e) => e.ledger === 'DOWNSTREAM').ma
  * Mutation scratch copies are excluded — a `__mutant__` beside the original
  * must not read as a second provider.
  */
-function productionModules(dir = new URL('../api/', import.meta.url), acc = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
-    if (entry.isDirectory()) { productionModules(child, acc); continue; }
-    if (!/\.(js|mjs)$/.test(entry.name)) continue;
-    if (entry.name.includes('__mutant__')) continue;
-    const abs = fileURLToPath(child).split(BACKSLASH).join('/');
-    acc.push({ path: 'api/' + abs.slice(abs.lastIndexOf('/api/') + 5), source: readFileSync(child, 'utf8') });
-  }
-  return acc;
+// HIGH-2: discovery is SHARED with tests/provider-discovery.test.mjs so the two
+// scanners cannot disagree about which files exist. The private copy this
+// replaces read only `.js` and `.mjs`, so a provider in a `.cjs` or `.ts` module
+// was absent from the ledger cross-product while every assertion here was green.
+function productionModules() {
+  return discoverModules(new URL('../api/', import.meta.url))
+    .map((m) => ({ path: 'api/' + m.path, source: m.source }));
 }
 
 const MODULES = productionModules();
