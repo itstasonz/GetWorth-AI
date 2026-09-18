@@ -1,0 +1,590 @@
+// ══════════════════════════════════════════════════════════════════════════════
+// IDENTITY FLOOR — no meaningful identity ⇒ no product-specific price.
+//
+// WHY THIS EXISTS
+// A real production scan of a Ninja blender produced:
+//
+//   Stage 1   category "Other" 10% · brand none · model none · OCR EMPTY
+//   Stage 2   unidentified unidentified / Footwear · generic_only · 28%
+//   Pricing   ₪30 / ₪70 / ₪130
+//
+// Every number in that band is plausible for *something*, so every numeric rule
+// in the guard passed. The guard had no rule that asked whether there was a
+// PRODUCT to attach a number to — `validateQuote` never read
+// `category_confidence`, and `resolveEnvelopeKey` reads category STRINGS, which
+// "Footwear" satisfies without being a GetWorth category at all. It then fell
+// through to GLOBAL_ENVELOPE: floor 5 / soft 20,000 / hard 500,000, the loosest
+// bounds in the system, handed to the least-identified item in the system.
+//
+// So this suite asserts the PROPERTY, not the witness:
+//   pricing eligibility is a function of identity EVIDENCE, and no confidence
+//   claim can buy it.
+//
+//   node --test tests/identity-floor.test.mjs
+// ══════════════════════════════════════════════════════════════════════════════
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+
+const G = await import('../api/_lib/valuation-guard.js');
+const {
+  validateQuote, resolveEnvelope, resolveEnvelopeKey, resolveIdentityTier,
+  derivePricingSource, IDENTITY_TIER, CATEGORY_CONFIDENCE_FLOOR, ENVELOPES,
+} = G;
+
+// ── fixtures, written as the four real scans ────────────────────────────────
+const rec = (o = {}) => ({
+  category: 'Electronics', subcategory: '', product_type: '',
+  category_confidence: 0.9,
+  brand_candidates: [], model_candidates: [],
+  ocr_text: { raw_texts: [] }, visual_features: { condition: 'Good' }, ...o,
+});
+const ctx = (o = {}) => ({
+  stage: 'stage2', pre_source: null, anchor: null, model: 'claude-test-model',
+  identity: { brandOk: true, modelOk: true, identityHigh: true },
+  recognition: rec(o.recognition || {}),
+  ...o, ...(o.recognition ? { recognition: rec(o.recognition) } : {}),
+});
+const q = (o = {}) => ({ low: 800, mid: 1200, high: 1800, currency: 'ILS', ...o });
+
+// CASE A — Logitech G Pro X Superlight. Strong identity, text-confirmed.
+const CASE_A = ctx({
+  recognition: {
+    category: 'Electronics', subcategory: 'gaming mouse', product_type: 'mouse',
+    category_confidence: 0.95,
+    brand_candidates: [{ brand: 'Logitech', confidence: 0.95, evidence: 'readable_text' }],
+    model_candidates: [{ model: 'G Pro X Superlight', confidence: 0.9, evidence: 'ocr' }],
+    ocr_text: { raw_texts: ['Logitech G PRO X SUPERLIGHT'] },
+  },
+  identity: { brandOk: true, modelOk: true, identityHigh: true, brandConfLabel: 'confirmed_by_text' },
+});
+
+// CASE B — LG monitor. Brand strong, exact model unknown.
+const CASE_B = ctx({
+  recognition: {
+    category: 'Electronics', subcategory: 'monitor', product_type: 'monitor',
+    category_confidence: 0.92,
+    brand_candidates: [{ brand: 'LG', confidence: 0.9, evidence: 'readable_text' }],
+    model_candidates: [],
+    ocr_text: { raw_texts: ['LG'] },
+  },
+  identity: { brandOk: true, modelOk: false, identityHigh: false, brandConfLabel: 'confirmed_by_text' },
+});
+
+// CASE C — Louis Vuitton Imagination. Identity from visible text, DB miss.
+const CASE_C = ctx({
+  recognition: {
+    category: 'Beauty', subcategory: 'fragrance', product_type: 'perfume',
+    category_confidence: 0.93,
+    brand_candidates: [{ brand: 'Louis Vuitton', confidence: 0.95, evidence: 'readable_text' }],
+    model_candidates: [{ model: 'Imagination', confidence: 0.9, evidence: 'ocr' }],
+    ocr_text: { raw_texts: ['LOUIS VUITTON', 'IMAGINATION'] },
+  },
+  identity: { brandOk: true, modelOk: true, identityHigh: true, brandConfLabel: 'confirmed_by_text' },
+});
+
+// CASE D — the Ninja blender, exactly as production produced it.
+const CASE_D = ctx({
+  recognition: {
+    category: 'Footwear', subcategory: 'ballet shoe', product_type: '',
+    category_confidence: 0.10,
+    brand_candidates: [], model_candidates: [],
+    ocr_text: { raw_texts: [] },
+  },
+  identity: { brandOk: false, modelOk: false, identityHigh: false },
+});
+
+// ── §18 THE NINJA REGRESSION ────────────────────────────────────────────────
+describe('CASE D — the Ninja failure shape must not produce a price', () => {
+  test('the exact production band ₪30/₪70/₪130 is refused', () => {
+    const v = validateQuote(q({ low: 30, mid: 70, high: 130 }), CASE_D);
+    assert.equal(v.action, 'degrade',
+      'an item with no brand, no model, empty OCR and 10% category confidence must not be priced');
+    assert.match(v.metadata.degraded_reason, /V-IDENTITY-FLOOR/);
+    assert.deepEqual(v.prices, { low: 0, mid: 0, high: 0 }, 'a degrade emits the zero state, never a band');
+  });
+
+  test('no price at ANY magnitude — the rule is about identity, not the number', () => {
+    // The witness was ₪70. If the fix only rejected small numbers it would be a
+    // coincidence, not a rule. Cross the whole plausible range.
+    for (const mid of [7, 70, 700, 7000, 70000]) {
+      const v = validateQuote(q({ low: Math.round(mid * 0.5), mid, high: Math.round(mid * 1.5) }), CASE_D);
+      assert.equal(v.action, 'degrade', `mid ${mid} must still be refused on an unidentified item`);
+      assert.match(v.metadata.degraded_reason, /V-IDENTITY-FLOOR/);
+    }
+  });
+
+  test('the identity tier is recorded, so the refusal is reproducible from the record', () => {
+    assert.equal(resolveIdentityTier(CASE_D), IDENTITY_TIER.UNIDENTIFIED);
+    const v = validateQuote(q({ low: 30, mid: 70, high: 130 }), CASE_D);
+    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.UNIDENTIFIED);
+  });
+
+  test('a confident-sounding model cannot buy eligibility', () => {
+    // The stated goal: the LLM must not bypass a constraint by claiming
+    // confidence. It cannot, because the inputs are candidate STRINGS.
+    const loud = ctx({
+      recognition: { ...CASE_D.recognition, category_confidence: 0.99 },
+      identity: { brandOk: false, modelOk: false, identityHigh: true },
+    });
+    const v = validateQuote(q({ low: 30, mid: 70, high: 130 }), loud);
+    assert.equal(v.action, 'degrade',
+      'identityHigh:true with no brand and no model is a claim, not evidence');
+  });
+
+  test('"Footwear" no longer reaches the global envelope', () => {
+    const e = resolveEnvelope(CASE_D);
+    assert.equal(e.basis, 'manual_only',
+      'an unbucketed category on an unidentified item must not receive GLOBAL_ENVELOPE');
+    assert.ok(e.hard_max <= 2000, `expected the manual-only ceiling, got ${e.hard_max}`);
+  });
+});
+
+// ── §19 NON-REGRESSION ──────────────────────────────────────────────────────
+describe('CASE A/B/C — identified items remain priceable', () => {
+  test('CASE A Logitech G Pro X Superlight prices normally', () => {
+    const v = validateQuote(q({ low: 250, mid: 380, high: 520 }), CASE_A);
+    assert.notEqual(v.action, 'degrade', `must remain priceable, got ${v.metadata.degraded_reason}`);
+    assert.equal(v.prices.mid, 380, 'mid is never moved');
+    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
+  });
+
+  test('CASE B LG monitor prices, with identity recorded as brand-only', () => {
+    const v = validateQuote(q({ low: 800, mid: 1400, high: 2200 }), CASE_B);
+    assert.notEqual(v.action, 'degrade', `brand-strong/model-weak must still price, got ${v.metadata.degraded_reason}`);
+    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.BRAND_ONLY,
+      'the limitation must be visible in the record, not hidden inside a number');
+  });
+
+  test('CASE C Louis Vuitton Imagination remains priceable', () => {
+    // Deliberately at the value production produced. The beauty envelope is too
+    // tight for a luxury fragrance — recorded separately as an envelope-table
+    // gap — but the guard must not answer that by refusing to price.
+    const v = validateQuote(q({ low: 350, mid: 520, high: 700 }), CASE_C);
+    assert.notEqual(v.metadata.degraded_reason, 'V-IDENTITY-FLOOR',
+      'a text-confirmed brand+model identity must never hit the identity floor');
+    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
+  });
+
+  test('all three identified cases clear the floor; only D does not', () => {
+    for (const [name, c] of [['A', CASE_A], ['B', CASE_B], ['C', CASE_C]]) {
+      const v = validateQuote(q({ low: 100, mid: 150, high: 220 }), c);
+      assert.notEqual(v.metadata.degraded_reason, 'V-IDENTITY-FLOOR', `CASE ${name} must clear the identity floor`);
+    }
+    const d = validateQuote(q({ low: 100, mid: 150, high: 220 }), CASE_D);
+    assert.equal(d.metadata.degraded_reason?.startsWith('V-IDENTITY-FLOOR'), true);
+  });
+});
+
+// ── §4 CATEGORY CONFIDENCE FLOOR ────────────────────────────────────────────
+describe('category confidence participates in pricing eligibility', () => {
+  test('a weak category with no brand or model cannot price', () => {
+    const weak = ctx({
+      recognition: { category: 'Electronics', category_confidence: CATEGORY_CONFIDENCE_FLOOR - 0.01 },
+      identity: { brandOk: false, modelOk: false, identityHigh: false },
+    });
+    assert.equal(validateQuote(q(), weak).action, 'degrade');
+  });
+
+  test('the same category AT the floor can price', () => {
+    const atFloor = ctx({
+      recognition: { category: 'Electronics', category_confidence: CATEGORY_CONFIDENCE_FLOOR },
+      identity: { brandOk: false, modelOk: false, identityHigh: false },
+    });
+    assert.notEqual(validateQuote(q({ low: 80, mid: 150, high: 300 }), atFloor).action, 'degrade');
+  });
+
+  test('a missing category_confidence is treated as weak, not as permission', () => {
+    const absent = ctx({
+      recognition: { category: 'Electronics', category_confidence: undefined },
+      identity: { brandOk: false, modelOk: false, identityHigh: false },
+    });
+    assert.equal(validateQuote(q(), absent).action, 'degrade', 'absent evidence is not strong evidence');
+  });
+});
+
+// ── §7 V-ENVELOPE-BAND ──────────────────────────────────────────────────────
+describe('the whole displayed distribution fits the envelope, not just mid', () => {
+  test('a displayed high above hard_max is refused', () => {
+    // books: high 60 -> hard_max 480. A mid inside the envelope with a high
+    // outside it used to pass, because only mid was bounded.
+    const books = ctx({
+      recognition: { category: 'Books', category_confidence: 0.95 },
+      identity: { brandOk: false, modelOk: false, identityHigh: false },
+    });
+    const env = resolveEnvelope(books);
+    const v = validateQuote(q({ low: 100, mid: 200, high: env.hard_max + 500 }), books);
+    assert.equal(v.action, 'degrade', 'a high beyond hard_max must not be displayed');
+    assert.match(v.metadata.degraded_reason, /V-ENVELOPE-BAND|V-SPREAD|V-ENVELOPE-HARD/);
+  });
+
+  test('no accepted verdict anywhere in a weak-identity sweep displays high > hard_max', () => {
+    // The property, swept — not one witness. Weak identity is where the spread
+    // ceiling is loosest (SPREAD_MAX_WEAK 6.0) and therefore where `high` could
+    // run furthest past hard_max.
+    for (const key of ['books', 'electronics', 'toys', 'clothing', 'electronics:gaming mouse']) {
+      const env = ENVELOPES[key];
+      if (!env) continue;
+      const c = ctx({
+        recognition: { category: 'Electronics', subcategory: '', category_confidence: 0.9 },
+        envelope_key: key,
+        identity: { brandOk: false, modelOk: false, identityHigh: false },
+      });
+      for (const mult of [0.5, 0.9, 1.0]) {
+        const mid = Math.max(env.floor + 1, Math.round(env.hard_max * mult));
+        const v = validateQuote(q({ low: Math.round(mid / 5), mid, high: mid * 5 }), c);
+        if (v.action === 'degrade') continue;
+        assert.ok(v.prices.high <= env.hard_max,
+          `${key}: accepted a displayed high ${v.prices.high} above hard_max ${env.hard_max}`);
+      }
+    }
+  });
+});
+
+// ── §8 PRE-SOURCE POLICY ────────────────────────────────────────────────────
+describe('pricing source grades follow evidence, and unknown fails closed', () => {
+  test('an unanchored AI estimate does not outrank a compatible catalog row', () => {
+    const haiku = derivePricingSource({ stage: 'pre', pre_source: 'ai_haiku' });
+    const catalog = derivePricingSource({ stage: 'pre', pre_source: 'catalog', anchorModelEvidence: false });
+    const RANK = ['MANUAL_REQUIRED', 'LOW', 'MEDIUM', 'HIGH'];
+    assert.ok(RANK.indexOf(haiku.grade) <= RANK.indexOf(catalog.grade),
+      `an unanchored estimate (${haiku.grade}) must not outrank a real catalog row (${catalog.grade})`);
+  });
+
+  test('an unregistered pricing source does not price', () => {
+    for (const src of ['market_comps', 'some_future_source', 'x', '']) {
+      const d = derivePricingSource({ stage: 'pre', pre_source: src });
+      assert.equal(d.grade, 'MANUAL_REQUIRED',
+        `unregistered source "${src}" must fail closed, got ${d.grade}`);
+    }
+  });
+
+  test('a quote from an unregistered source is refused end to end', () => {
+    const c = ctx({ stage: 'pre', pre_source: 'market_comps_v1' });
+    const v = validateQuote(q(), c);
+    assert.equal(v.metadata.pricing_grade, 'MANUAL_REQUIRED',
+      'a future market source must not ship prices by forgetting to register itself');
+  });
+});
+
+// ── §11 ENVELOPE INPUT TRUST ────────────────────────────────────────────────
+describe('photographed text may narrow the envelope, never widen it', () => {
+  const STICKERS = ['macbook', 'iphone', 'rolex submariner', 'dji', 'playstation 5', 'ipad'];
+
+  test('a sticker cannot raise the ceiling that governs its own price', () => {
+    const clean = rec({ category: 'Electronics' });
+    const ceiling = (k) => (k && ENVELOPES[k] ? ENVELOPES[k].hard_max : 500000);
+    const base = ceiling(resolveEnvelopeKey(clean));
+
+    for (const word of STICKERS) {
+      const attacked = rec({ category: 'Electronics', ocr_text: { raw_texts: [word] } });
+      const got = ceiling(resolveEnvelopeKey(attacked));
+      assert.ok(got <= base,
+        `printing "${word}" on a label raised hard_max from ${base} to ${got} — ` +
+        'the photographed text chose the constraint that governs its own price');
+    }
+  });
+
+  test('OCR that selects a TIGHTER bucket is still honoured', () => {
+    // The fix must not be "ignore OCR" — several buckets are tighter than the
+    // category they sit in and OCR is the only way to reach them.
+    const cordless = rec({ category: 'Electronics', ocr_text: { raw_texts: ['KX-TG6811'] } });
+    assert.equal(resolveEnvelopeKey(cordless), 'electronics:cordless phone');
+    assert.ok(ENVELOPES['electronics:cordless phone'].hard_max < ENVELOPES['electronics'].hard_max,
+      'fixture: the cordless bucket must genuinely be tighter than plain electronics');
+  });
+});
+
+// ── §21 CROSS-PRODUCT ───────────────────────────────────────────────────────
+// identity strength × category confidence × pricing source. Generated, so a
+// new combination cannot appear without being covered.
+describe('XP identity × category confidence × pricing source', () => {
+  const IDENTITIES = {
+    'exact-model': { brandOk: true, modelOk: true, identityHigh: true },
+    'brand-only':  { brandOk: true, modelOk: false, identityHigh: false },
+    'none':        { brandOk: false, modelOk: false, identityHigh: false },
+  };
+  const CONFIDENCES = { 'strong-category': 0.9, 'weak-category': 0.2 };
+  const SOURCES = ['catalog', 'ai_haiku', 'category_anchor', 'unregistered_source'];
+
+  for (const [idName, identity] of Object.entries(IDENTITIES)) {
+    for (const [ccName, cc] of Object.entries(CONFIDENCES)) {
+      for (const src of SOURCES) {
+        test(`XP [${idName}] × [${ccName}] × [${src}]`, () => {
+          const c = ctx({
+            recognition: { category: 'Electronics', subcategory: 'laptop', category_confidence: cc },
+            identity, stage: 'pre', pre_source: src,
+          });
+          const v = validateQuote(q({ low: 400, mid: 900, high: 1600 }), c);
+
+          // Two independent refusals can apply to the same cell — an
+          // unregistered source AND an unidentified item. Assert the PROPERTY
+          // (no price reaches anyone) rather than which rule happened to fire
+          // first; pinning the order would make a future reordering of the
+          // guard look like a regression when nothing had weakened.
+          const identityless = idName === 'none' && ccName === 'weak-category';
+          if (identityless || src === 'unregistered_source') {
+            assert.equal(v.action, 'degrade',
+              `${idName}/${ccName}/${src} must not price (reason: ${v.metadata.degraded_reason})`);
+            assert.deepEqual(v.prices, { low: 0, mid: 0, high: 0 }, 'a refusal emits no band');
+            assert.match(v.metadata.degraded_reason, /V-IDENTITY-FLOOR|V-SOURCE-UNREGISTERED/,
+              'the refusal must name one of the two rules that apply here');
+            return;
+          }
+          // Everything that IS priced keeps the whole band inside the envelope.
+          if (v.action !== 'degrade') {
+            const env = resolveEnvelope(c);
+            assert.ok(v.prices.high <= env.hard_max, 'displayed high must fit the envelope');
+            assert.ok(v.prices.low >= env.floor || v.prices.low > 0, 'low must be a real positive price');
+          }
+        });
+      }
+    }
+  }
+});
+
+// ── END-TO-END: the real handler, not the guard in isolation ────────────────
+// The unit tests above prove the RULE. This proves the PIPELINE honours it —
+// that a Stage-1 result shaped like the Ninja scan cannot reach the client with
+// a product price, through every fallback the handler has.
+describe('E2E the Ninja shape reaches the client with no product price', () => {
+  test('a scan with no brand, no model, empty OCR and a weak category is withheld', async () => {
+    const { harness, IMG, anthropicText } = await import('./helpers/analyze-harness.mjs');
+    const h = await harness();
+    try {
+      delete process.env.RECOGNITION_ENGINE;
+      // Exactly what production Stage 1 returned: category Other at 10%,
+      // nothing identified, no readable text.
+      h.anthropic(() => anthropicText({
+        category: 'Other', category_hebrew: 'אחר', category_confidence: 0.10,
+        subcategory: '', product_type: '',
+        brand_candidates: [], model_candidates: [],
+        ocr_text: { raw_texts: [], logos_detected: [], has_readable_text: false },
+        visual_features: { condition: 'Good', materials: [], colors: ['black'] },
+      }));
+      const r = await h.run({ imageData: IMG, lang: 'en' });
+
+      if (r.status === 200) {
+        const mv = r.payload?.marketValue ?? r.payload;
+        const mid = mv?.price_estimate_mid ?? mv?.mid ?? r.payload?.price_estimate_mid;
+        assert.ok(mid === 0 || mid == null,
+          `an unidentified item returned a product price of ${mid} — the observed failure was ₪70`);
+        const status = JSON.stringify(r.payload);
+        assert.match(status, /manual_required/,
+          'the response must carry the manual-required state so the UI asks for a better photo');
+      }
+      // A non-200 is also an acceptable outcome: no price reached the user.
+      assert.notEqual(r.payload?.price_estimate_mid, 70, 'the exact production number must not recur');
+    } finally {
+      h.restore();
+    }
+  });
+});
+
+// ── §9 VARIANT / CAPACITY CHANNEL ───────────────────────────────────────────
+describe('a variant-contradicting anchor does not set the envelope', () => {
+  const { extractVariantTokens, variantContradiction } = G;
+
+  test('variant tokens are read deterministically', () => {
+    assert.deepEqual(extractVariantTokens('iPhone 15 Pro 256GB'), ['256gb']);
+    assert.deepEqual(extractVariantTokens('LV Imagination 100ml'), ['100ml']);
+    assert.deepEqual(extractVariantTokens('LG 27" monitor'), ['27"']);
+    assert.deepEqual(extractVariantTokens('no variant here'), []);
+  });
+
+  test('absence is never a contradiction', () => {
+    assert.equal(variantContradiction('iPhone 15', 'iPhone 15 Pro 256GB'), null,
+      'a row with no capacity token must still be usable as an anchor');
+  });
+
+  test('same dimension, different value IS a contradiction', () => {
+    assert.ok(variantContradiction('iPhone 15 256GB', 'iPhone 15 1TB'));
+    assert.ok(variantContradiction('perfume 50ml', 'perfume 100ml'));
+    assert.ok(variantContradiction('monitor 27"', 'monitor 32"'));
+  });
+
+  test('a 1TB anchor cannot set the ceiling for a 256GB item', () => {
+    const base = {
+      recognition: {
+        category: 'Electronics', subcategory: 'smartphone', category_confidence: 0.95,
+        brand_candidates: [{ brand: 'Apple', confidence: 0.95 }],
+        model_candidates: [{ model: 'iPhone 15 256GB', confidence: 0.9 }],
+        ocr_text: { raw_texts: ['iPhone 15 256GB'] },
+      },
+      identity: { brandOk: true, modelOk: true, identityHigh: true },
+    };
+    const matching = resolveEnvelope({ ...base, anchor: { id: 1, model: 'iPhone 15 256GB', retail_price_ils: 4000 } });
+    const conflicting = resolveEnvelope({ ...base, anchor: { id: 2, model: 'iPhone 15 1TB', retail_price_ils: 7500 } });
+
+    assert.equal(matching.basis, 'anchor', 'a matching-variant anchor must still be used');
+    assert.notEqual(conflicting.basis, 'anchor',
+      'a 1TB anchor describes a different unit and must not set a 256GB item\'s ceiling');
+    assert.ok(!String(conflicting.key).startsWith('anchor:'),
+      'the rejected anchor must not appear as the envelope key either');
+
+    // Asserted rather than assumed, because it is a real cost: rejecting the
+    // anchor falls back to the CATEGORY envelope, which is BROADER than the
+    // anchor would have been (electronics:iphone hard_max 24000 against the
+    // anchor's 5000). That is the correct trade and it is not free — a tight
+    // bound is lost because it can no longer be shown to describe this unit.
+    // The alternative is a precise bound derived from a different product.
+    assert.equal(conflicting.basis, 'category',
+      'a rejected anchor falls back to the category envelope, not to global');
+  });
+});
+
+// ── §10 CURRENCY BOUNDARY ───────────────────────────────────────────────────
+describe('V-FX — money without a proven conversion never contributes', () => {
+  const priced = (comps) => validateQuote(q({ low: 250, mid: 380, high: 520 }), { ...CASE_A, comps });
+
+  test('$120 cannot silently become ₪120', () => {
+    const v = priced([{ price_amount: 120, currency: 'USD' }]);
+    assert.equal(v.action, 'degrade', 'a USD comparable with no conversion record must not price');
+    assert.match(v.metadata.degraded_reason, /V-FX/);
+  });
+
+  test('a bare symbol is not a currency', () => {
+    for (const cur of ['$', '', null, undefined, 'dollars', 'US$']) {
+      const v = priced([{ price_amount: 120, currency: cur }]);
+      assert.equal(v.action, 'degrade', `currency ${JSON.stringify(cur)} must be refused`);
+      assert.match(v.metadata.degraded_reason, /V-FX/);
+    }
+  });
+
+  test('a conversion record that is not self-consistent is refused', () => {
+    const v = priced([{
+      price_amount: 120, currency: 'USD',
+      fx_rate: 3.7, normalized_amount: 120, normalized_currency: 'ILS',
+      fx_timestamp: '2026-09-18T00:00:00Z', fx_source: 'test',
+    }]);
+    assert.equal(v.action, 'degrade', '120 USD x 3.7 is not 120 ILS');
+    assert.match(v.metadata.degraded_reason, /V-FX/);
+  });
+
+  test('a complete, arithmetically true conversion is accepted', () => {
+    const v = priced([{
+      price_amount: 120, currency: 'USD',
+      fx_rate: 3.7, normalized_amount: 444, normalized_currency: 'ILS',
+      fx_timestamp: '2026-09-18T00:00:00Z', fx_source: 'test',
+    }]);
+    assert.notEqual(v.metadata.degraded_reason, 'V-FX', 'a proven conversion must be allowed through');
+  });
+
+  test('ILS comparables need no conversion record', () => {
+    const v = priced([{ price_amount: 400, currency: 'ILS' }]);
+    assert.notEqual(v.metadata.degraded_reason, 'V-FX');
+  });
+
+  test('no comps at all is unchanged behaviour', () => {
+    assert.notEqual(priced(undefined).action, 'degrade');
+    assert.notEqual(priced([]).action, 'degrade');
+  });
+});
+
+// ── §22 ADVERSARIAL — the vectors that found five defects in this work ──────
+//
+// Every case below PRICED AN UNIDENTIFIED OBJECT when V-IDENTITY-FLOOR was
+// first written. They are kept as tests rather than as a memory, because each
+// is a different way of being wrong about the same thing: trusting a caller's
+// word instead of requiring evidence.
+describe('ADV nothing buys pricing eligibility except evidence', () => {
+  const noId = { brandOk: false, modelOk: false, identityHigh: false };
+  const priceIt = (c) => validateQuote({ low: 100, mid: 200, high: 400, currency: 'ILS' }, c);
+
+  test('a confidence outside [0,1] is malformed, not strong', () => {
+    // `5` and `99` are finite and above the floor. A model emitting a number too
+    // large to be a probability was buying category trust with it.
+    for (const cc of [5, 99, 1.01, -1, Infinity]) {
+      const v = priceIt({ stage: 'stage2', identity: noId, recognition: { category: 'Electronics', category_confidence: cc } });
+      assert.equal(v.action, 'degrade', `category_confidence ${cc} must not establish a category`);
+    }
+  });
+
+  test('a confidence that is not a number is malformed, not strong', () => {
+    // `true` coerces to exactly 1 under Number(). '0.9' parses cleanly. Neither
+    // is a confidence, and the schema declares this field a number.
+    for (const cc of [true, '0.9', '1', [], {}, null, undefined, NaN]) {
+      const v = priceIt({ stage: 'stage2', identity: noId, recognition: { category: 'Electronics', category_confidence: cc } });
+      assert.equal(v.action, 'degrade', `category_confidence ${JSON.stringify(cc)} must not establish a category`);
+    }
+  });
+
+  test('an ABSENT identity is unidentified, not neutral', () => {
+    // Fail-open on the one input the whole rule is about: a caller that simply
+    // forgot to pass identity was getting a price.
+    for (const identity of [undefined, null, 'yes', 42, []]) {
+      const v = priceIt({ stage: 'stage2', identity, recognition: { category: 'Electronics', category_confidence: 0.95 } });
+      assert.equal(v.action, 'degrade', `identity ${JSON.stringify(identity)} must not price`);
+      assert.equal(v.metadata.identity_tier, IDENTITY_TIER.UNIDENTIFIED);
+    }
+  });
+
+  test('a truthy non-boolean does not buy the top tier', () => {
+    // `{ brandOk: 'yes', modelOk: 'yes' }` with a nonsense category reached
+    // EXACT_MODEL and the 500,000 global ceiling.
+    const v = priceIt({
+      stage: 'stage2',
+      identity: { brandOk: 'yes', modelOk: 'yes' },
+      recognition: { category: 'Nonsense', category_confidence: 0.01 },
+    });
+    assert.equal(v.action, 'degrade', 'truthiness is not evidence');
+    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.UNIDENTIFIED);
+  });
+
+  test('a caller-supplied envelope_key cannot answer the identity question', () => {
+    // The caller may choose which envelope BOUNDS a price. It may not choose the
+    // evidence that decides whether there is a price at all — passing
+    // envelope_key:'electronics' for a "Footwear" item used to do exactly that.
+    const v = priceIt({
+      stage: 'stage2', identity: noId, envelope_key: 'electronics',
+      recognition: { category: 'Footwear', category_confidence: 0.99 },
+    });
+    assert.equal(v.action, 'degrade',
+      'the category-bucket check must read the recognition, not the caller-supplied key');
+  });
+
+  test('an anchor does not rescue an unidentified item', () => {
+    const v = priceIt({
+      stage: 'stage2', identity: noId, anchor: { id: 'x', retail_price_ils: 5000 },
+      recognition: { category: 'Footwear', category_confidence: 0.01 },
+    });
+    assert.equal(v.action, 'degrade', 'a catalog anchor is not an identity');
+  });
+
+  test('a MANUAL_REQUIRED grade refuses the NUMBER, not just the label', () => {
+    // The grade was being stapled to an accepted ₪200. A grade nothing enforces
+    // is a caption, and a future market source would have shipped prices under it.
+    for (const src of ['none', 'db_retail', 'market_search', '', null, undefined]) {
+      const v = priceIt({
+        stage: 'pre', pre_source: src,
+        identity: { brandOk: true, modelOk: true, identityHigh: true },
+        recognition: { category: 'Electronics', category_confidence: 0.9 },
+      });
+      assert.equal(v.metadata.pricing_grade, 'MANUAL_REQUIRED', `${src} must grade MANUAL_REQUIRED`);
+      assert.equal(v.action, 'degrade', `${src} graded MANUAL_REQUIRED but still priced`);
+      assert.deepEqual(v.prices, { low: 0, mid: 0, high: 0 });
+    }
+  });
+
+  test('every registered source still prices — the rule is not "refuse everything"', () => {
+    // The control. Without it, a guard that degraded unconditionally would pass
+    // every assertion above.
+    for (const src of ['catalog', 'ai_haiku']) {
+      const v = priceIt({
+        stage: 'pre', pre_source: src,
+        identity: { brandOk: true, modelOk: true, identityHigh: true },
+        recognition: { category: 'Electronics', category_confidence: 0.9 },
+      });
+      assert.notEqual(v.action, 'degrade', `registered source ${src} must still price`);
+    }
+    // `category_anchor` is registered and DOES price — but not for a confidently
+    // identified product, which V-SOURCE-POLICY (B-15) has always forbidden.
+    // Asserted with a weaker identity so the control tests registration rather
+    // than accidentally re-testing B-15.
+    const catAnchor = priceIt({
+      stage: 'pre', pre_source: 'category_anchor',
+      identity: { brandOk: true, modelOk: false, identityHigh: false },
+      recognition: { category: 'Electronics', category_confidence: 0.9 },
+    });
+    assert.notEqual(catAnchor.action, 'degrade', 'category_anchor is registered and must price a weak identity');
+  });
+});

@@ -36,6 +36,12 @@ function setEnv() {
   process.env.SUPABASE_JWT_SECRET = JWT_SECRET;
   process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
   process.env.ALLOWED_ORIGINS = 'https://getworth.ai';
+  // SEC-9: these two were absent, so `generateQueryEmbedding` and
+  // `fallbackVision` both returned null at their key check and NEVER reached
+  // fetch. Two of the four providers in the inventory were unreachable in every
+  // test, which is the other half of why the missing voyage bucket went unseen.
+  process.env.VOYAGE_API_KEY = 'voyage-test-key';
+  process.env.GOOGLE_VISION_API_KEY = 'vision-test-key';
 }
 
 function b64url(o) { return Buffer.from(JSON.stringify(o)).toString('base64url'); }
@@ -84,7 +90,9 @@ export async function harness() {
   const state = {
     refunds: 0, charged: true,
     anthropic: null, openai: null, vision: null,
-    rpcLog: [], otherLog: [], providerCalls: { anthropic: 0, openai: 0, vision: 0 },
+    voyage: null,
+    rpcLog: [], otherLog: [], providerCalls: { anthropic: 0, openai: 0, vision: 0, voyage: 0 },
+    unknownHosts: [],
   };
 
   const realFetch = globalThis.fetch;
@@ -121,6 +129,18 @@ export async function harness() {
       if (r && r.throw) throw r.throw;
       return jsonRes(r?.body ?? { responses: [{}] }, r?.status ?? 200);
     }
+    // SEC-9. Voyage was in the round-9 provider INVENTORY as DOWNSTREAM and had
+    // NO bucket here, so `generateQueryEmbedding` fell through to the catch-all
+    // below and was answered 200 with `[]` — a successful-looking empty
+    // embedding, counted in no `providerCalls` bucket, across all 50 passing
+    // refund tests. The inventory said it was covered; nothing modelled it.
+    if (url.includes('api.voyageai.com')) {
+      state.providerCalls.voyage++;
+      const r = state.voyage ? await state.voyage(body, url, init) : null;
+      if (r instanceof Response) return r;
+      if (r && r.throw) throw r.throw;
+      return jsonRes(r?.body ?? { data: [{ embedding: new Array(8).fill(0) }] }, r?.status ?? 200);
+    }
 
     // ── Supabase ──
     if (url.includes('/rpc/check_and_increment_scan_rate')) {
@@ -132,8 +152,29 @@ export async function harness() {
       state.rpcLog.push('REFUND');
       return jsonRes(0);
     }
-    state.otherLog.push(url.replace('https://fake.supabase.co', ''));
-    return jsonRes([], 200);
+    // ── Anything else ──
+    // Supabase REST/RPC is ours and is answered as an empty result set. ANY
+    // OTHER EXTERNAL HOST IS A FAILURE, LOUDLY.
+    //
+    // SEC-9: this used to be a single catch-all returning 200 `[]` for every
+    // unmatched URL, which meant a provider nobody had modelled was
+    // indistinguishable from a provider that answered successfully. A new
+    // market-data or search host would have inherited that silence and every
+    // refund test would have stayed green against a call the harness never saw.
+    // A test harness that invents a success is worse than one that has no
+    // opinion: it launders an unknown into a pass.
+    if (url.includes('fake.supabase.co')) {
+      state.otherLog.push(url.replace('https://fake.supabase.co', ''));
+      return jsonRes([], 200);
+    }
+    state.unknownHosts.push(url);
+    throw new Error(
+      `[harness] UNSTUBBED EXTERNAL HOST: ${url}
+` +
+      'Add an explicit responder and a providerCalls bucket for it in ' +
+      'tests/helpers/analyze-harness.mjs, and add it to the provider INVENTORY ' +
+      'in tests/refund-crossproduct.test.mjs. An unmodelled provider must never ' +
+      'be answered 200 by default.');
   };
 
   return {
@@ -141,12 +182,14 @@ export async function harness() {
     anthropic: (fn) => { state.anthropic = fn; },
     openai: (fn) => { state.openai = fn; },
     vision: (fn) => { state.vision = fn; },
+    voyage: (fn) => { state.voyage = fn; },
     charged: (v) => { state.charged = v; },
     restore: () => { globalThis.fetch = realFetch; },
 
     async run(bodyObj, { headers = {}, quiet = true } = {}) {
       state.refunds = 0; state.rpcLog = []; state.otherLog = [];
-      state.providerCalls = { anthropic: 0, openai: 0, vision: 0 };
+      state.providerCalls = { anthropic: 0, openai: 0, vision: 0, voyage: 0 };
+      state.unknownHosts = [];
       const logs = [];
       const orig = { log: console.log, warn: console.warn, error: console.error };
       if (quiet) {
@@ -175,6 +218,7 @@ export async function harness() {
         refunds: state.refunds,
         rpcLog: [...state.rpcLog],
         providerCalls: { ...state.providerCalls },
+        unknownHosts: [...state.unknownHosts],
         logs,
         log: logs.join('\n'),
       };

@@ -54,7 +54,12 @@ export const SITE_SCOPES = [
   'handleRequest',
 ];
 
-export const SITE_GUARDS = ['promptSafe', 'promptSafeList', 'promptNum', 'fence'];
+// Newline BUILT rather than escaped, so a CRLF checkout cannot silently change
+// what these multi-line `find` strings match. The VAL-001 harness reported a
+// false 66.7% for four months on exactly that confusion.
+const NL = String.fromCharCode(10);
+
+export const SITE_GUARDS =['promptSafe', 'promptSafeList', 'promptNum', 'fence'];
 
 // ── Declared NON-security sites ─────────────────────────────────────────────
 // Killed, but not because they defend anything. Each needs the evidence written
@@ -105,16 +110,21 @@ export const PRIMITIVE_MUTANTS = [
     property: "'<' and '>' are removed, which is the ONLY reason the fence tokens " +
               '<<<UNTRUSTED_*>>> cannot be forged by quarantined content.',
     security: true,
-    find: "    if (ch === '<' || ch === '>') continue;",
-    replace: "    if (ch === '<' || ch === '>') { out += ch; continue; }",
+    // §0.95's webSafe reuses this exact statement, so it stopped pinning one
+    // site. Paired with the line ABOVE, which webSafe separates from it by the
+    // C1 / TAG / Cf filters — so the PAIR is promptSafe-only.
+    find: '    if (c < 0x20 || c === 0x7F) continue;' + NL + "    if (ch === '<' || ch === '>') continue;",
+    replace: '    if (c < 0x20 || c === 0x7F) continue;' + NL + "    if (ch === '<' || ch === '>') { out += ch; continue; }",
   },
   {
     id: 'P03-promptSafe-control-chars-pass',
     property: 'C0 control characters and DEL are dropped, so a payload cannot smuggle ' +
               'structure the reader of the prompt cannot see.',
     security: true,
-    find: '    if (c < 0x20 || c === 0x7F) continue;',
-    replace: '    if (c < 0x20 || c === 0x7F) { out += ch; continue; }',
+    // webSafe's whitespace branch also tests `c === 0x85`, so this pair exists
+    // only in promptSafe.
+    find: "    if (c === 0x09 || c === 0x0A || c === 0x0D) { out += ' '; continue; }" + NL + '    if (c < 0x20 || c === 0x7F) continue;',
+    replace: "    if (c === 0x09 || c === 0x0A || c === 0x0D) { out += ' '; continue; }" + NL + '    if (c < 0x20 || c === 0x7F) { out += ch; continue; }',
   },
   {
     id: 'P04-promptSafe-no-length-cap',
@@ -122,8 +132,10 @@ export const PRIMITIVE_MUTANTS = [
               'inflates the Stage-2 prompt past its cap, times Stage 2 out, and routes ' +
               'pricing to the rescue engine — the self-triggering attack in §2.',
     security: true,
-    find: "  return out.replace(/\\s+/g, ' ').trim().slice(0, max);",
-    replace: "  return out.replace(/\\s+/g, ' ').trim();",
+    // The same return closes §0.95's webSafe, so this no longer pins one site
+    // alone. The comment that follows promptSafe is unique to it.
+    find: "  return out.replace(/\\s+/g, ' ').trim().slice(0, max);" + NL + '}' + NL + NL + '// Wrap an already-neutralised block',
+    replace: "  return out.replace(/\\s+/g, ' ').trim();" + NL + '}' + NL + NL + '// Wrap an already-neutralised block',
   },
   {
     id: 'P05-promptSafe-total-coercion-removed',
@@ -131,8 +143,9 @@ export const PRIMITIVE_MUTANTS = [
               'with no callable toString/valueOf cannot throw inside the Stage-1 try — ' +
               'the round-3 refund DoS.',
     security: true,
-    find: '  const text = boundaryText(value);',
-    replace: '  const text = String(value ?? \'\');',
+    // webSafe opens with the same line; promptSafe's signature above it is unique.
+    find: 'function promptSafe(value, max = PROMPT_STR_MAX) {' + NL + '  const text = boundaryText(value);',
+    replace: 'function promptSafe(value, max = PROMPT_STR_MAX) {' + NL + "  const text = String(value ?? '');",
   },
   {
     id: 'P06-boundaryText-stringifies-objects',

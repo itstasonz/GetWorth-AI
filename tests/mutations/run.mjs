@@ -51,7 +51,26 @@ if (has('--list')) {
   process.exit(0);
 }
 
-const source = readFileSync(GUARD, 'utf8');
+// LINE ENDINGS ARE NORMALISED BEFORE ANYTHING MATCHES AGAINST THEM.
+//
+// The mutant catalog is written with LF, because that is what the committed
+// blob holds. `core.autocrlf=true` and no `.gitattributes` mean the WORKING
+// TREE is CRLF on Windows, and the apply step below is a literal substring
+// match (`source.split(m.find)`). So every mutant whose `find` spans a newline
+// matched ZERO times and was reported MALFORMED — 9 of 30, which is exactly
+// the 9 multi-line ones. Score 66.7%, "the guard was refactored; re-pin these".
+//
+// None of that was true. The guard had not drifted, the mutants were correct,
+// and the harness's own diagnostic was a false accusation that would have sent
+// someone to rewrite nine correct mutants against correct code. A verification
+// artefact that misreports WHY it failed is worse than one that simply fails.
+//
+// Normalising here fixes the comparison rather than the catalog, and makes the
+// result identical on every platform. `.gitattributes` pins the checkout too,
+// so a fresh clone cannot reintroduce it.
+const CR = String.fromCharCode(13);
+const LF = String.fromCharCode(10);
+const source = readFileSync(GUARD, 'utf8').split(CR + LF).join(LF);
 
 // The suite imports the guard from an arbitrary path, so a guard that grew a
 // relative import would resolve against the temp dir and fail for the wrong
@@ -74,8 +93,9 @@ if (!selected.length) {
 const work = mkdtempSync(join(tmpdir(), 'val001-mut-'));
 const killed = [];
 const survived = [];
-const malformed = [];
+const invalid = [];
 const equivalent = [];
+const applied = [];
 
 console.log(`VAL-001 mutation run — ${selected.length} mutants against tests/valuation-guard.test.mjs\n`);
 
@@ -84,13 +104,24 @@ for (const m of selected) {
   // the mutation is ambiguous and we would not know what we actually broke.
   const occurrences = source.split(m.find).length - 1;
   if (occurrences !== 1) {
-    malformed.push({ ...m, occurrences });
-    console.log(`  MALFORMED  ${m.id}  (find matched ${occurrences}x, expected 1)`);
+    invalid.push({ ...m, reason: `find matched ${occurrences}x, expected exactly 1` });
+    console.log(`  INVALID    ${m.id}  (find matched ${occurrences}x, expected 1)`);
     continue;
   }
 
+  // MUTATION_APPLIED = YES, proved rather than assumed. A replacement that
+  // produced byte-identical text changed nothing, and a result read from it is
+  // a lie in whichever direction it lands. Only APPLIED mutants are scored.
+  const mutated = source.replace(m.find, m.replace);
+  if (mutated === source) {
+    invalid.push({ ...m, reason: 'replacement is byte-identical to the original — nothing was mutated' });
+    console.log(`  INVALID    ${m.id}  (replacement identical to source)`);
+    continue;
+  }
+  applied.push(m);
+
   const mutantPath = join(work, `${m.id}.guard.mjs`);
-  writeFileSync(mutantPath, source.replace(m.find, m.replace), 'utf8');
+  writeFileSync(mutantPath, mutated, 'utf8');
 
   const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', SUITE], {
     cwd: REPO,
@@ -126,20 +157,35 @@ rmSync(work, { recursive: true, force: true });
 // Equivalent mutants are excluded from the denominator: no test can kill them,
 // so counting them would cap the achievable score below 100% and make the number
 // meaningless as a pass/fail signal.
-const scored = selected.length - equivalent.length;
+const scored = applied.length - equivalent.length;
 const score = scored ? ((killed.length / scored) * 100).toFixed(1) : '100.0';
-console.log(`\n──────────────────────────────────────────────────────────────`);
-console.log(`killed ${killed.length}/${scored}   survived ${survived.length}   equivalent ${equivalent.length} (excluded)   malformed ${malformed.length}   score ${score}%`);
+const bar = '─'.repeat(70);
+console.log(`\n${bar}`);
+console.log('MUTATION_APPLIED gate — only APPLIED mutants are scored');
+console.log(`  selected ${selected.length}   APPLIED ${applied.length}   INVALID ${invalid.length}`);
+console.log(bar);
+console.log('Result, over APPLIED only');
+console.log(`  KILLED     ${killed.length}/${scored}`);
+console.log(`  SURVIVED   ${survived.length}/${scored}`);
+console.log(`  EQUIVALENT ${equivalent.length} (excluded from the denominator — unkillable by construction)`);
+console.log(`  score      ${score}%`);
+console.log(bar);
 
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS — the suite does not actually enforce these:');
   for (const m of survived) console.log(`  ${m.id}\n    ${m.invariant}\n    expected to be caught by: ${(m.kills || []).join(', ') || '(unstated)'}`);
 }
-if (malformed.length) {
-  console.log('\nMALFORMED MUTANTS — the guard was refactored; re-pin these in mutants.mjs:');
-  for (const m of malformed) console.log(`  ${m.id} (matched ${m.occurrences}x)\n    find: ${m.find.split('\n')[0].slice(0, 100)}`);
+if (invalid.length) {
+  // Deliberately NOT "the guard was refactored". That message stood for four
+  // months as a false diagnosis — the real cause was a CRLF working tree against
+  // LF `find` strings — and it would have sent a reader to rewrite nine correct
+  // mutants against correct code. State the observation, never a guess at why.
+  console.log('\nINVALID MUTANTS — NOT scored in either direction. Re-pin them, or fix the harness:');
+  for (const m of invalid) console.log(`  ${m.id}\n    ${m.reason}\n    find: ${m.find.split('\n')[0].slice(0, 100)}`);
 }
 
-const ok = survived.length === 0 && malformed.length === 0;
-console.log(ok ? '\nAll mutants killed — the contract suite enforces every listed invariant.' : '\nFAILED.');
+const ok = survived.length === 0 && invalid.length === 0 && applied.length === selected.length;
+console.log(ok
+  ? `\nAll ${killed.length} scored mutants killed (${equivalent.length} equivalent, excluded). The contract suite enforces every listed invariant.`
+  : '\nFAILED.');
 process.exit(ok ? 0 : 1);

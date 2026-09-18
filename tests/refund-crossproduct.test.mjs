@@ -227,7 +227,8 @@ test('XP control — a request rejected before any provider call refunds nothing
 //      module-level dispatch table resolves to the invocation sites of whatever
 //      reads that table, transitively.
 // ─────────────────────────────────────────────────────────────────────────────
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const ANALYZE = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
 const OPENAI_LIB = readFileSync(new URL('../api/_lib/openai-recognition.js', import.meta.url), 'utf8');
@@ -420,13 +421,29 @@ function reachableCallSites(name, seen = new Set()) {
 //   DIRECT     — the helper marks the ledger itself, at the provider's own 2xx.
 //   DOWNSTREAM — the helper is reachable ONLY after Stage 1 marked the ledger,
 //                and that claim is checked by ordering below.
+//
+// SEC-2 — THE SCAN NOW COVERS EVERY PRODUCTION MODULE, NOT ONE FILE.
+//
+// This list used to be derived from `api/analyze.js` alone, so the guarantee
+// stated above — "a newly added provider call cannot ship uncovered" — was true
+// of exactly one file. `api.openai.com` was already in PROVIDER_HOSTS and
+// already live at api/_lib/openai-recognition.js, and appeared in NO inventory
+// entry, because the scanner could not reach the only file containing it. It
+// was invisible to every ordering and vacuity test here while those tests
+// reported green.
+//
+// That matters more forward than backward: the right place for new provider
+// code is a new `_lib` module, so the advice that keeps api/analyze.js from
+// growing was exactly the advice that defeated this guard. `file` is part of a
+// site's identity now, so a provider cannot hide by moving.
 const INVENTORY = [
-  { fn: 'recognize',              host: 'api.anthropic.com',     ledger: 'DIRECT' },
-  { fn: 'ocrSerialLabel',         host: 'api.anthropic.com',     ledger: 'DIRECT' },
-  { fn: 'fallbackVision',         host: 'vision.googleapis.com', ledger: 'DOWNSTREAM' },
-  { fn: 'generateQueryEmbedding', host: 'api.voyageai.com',      ledger: 'DOWNSTREAM' },
-  { fn: 'verifyAndPrice',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
-  { fn: 'preQuoteFromAI',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
+  { file: 'api/analyze.js',                 fn: 'recognize',              host: 'api.anthropic.com',     ledger: 'DIRECT' },
+  { file: 'api/analyze.js',                 fn: 'ocrSerialLabel',         host: 'api.anthropic.com',     ledger: 'DIRECT' },
+  { file: 'api/analyze.js',                 fn: 'fallbackVision',         host: 'vision.googleapis.com', ledger: 'DOWNSTREAM' },
+  { file: 'api/analyze.js',                 fn: 'generateQueryEmbedding', host: 'api.voyageai.com',      ledger: 'DOWNSTREAM' },
+  { file: 'api/analyze.js',                 fn: 'verifyAndPrice',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
+  { file: 'api/analyze.js',                 fn: 'preQuoteFromAI',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
+  { file: 'api/_lib/openai-recognition.js', fn: 'recognizeWithOpenAI',    host: 'api.openai.com',        ledger: 'DIRECT' },
 ];
 
 // Provider helpers deliberately kept with NO reachable caller. Empty, and that
@@ -437,31 +454,83 @@ const DEAD_PROVIDERS = [];
 const DIRECT = new Set(INVENTORY.filter((e) => e.ledger === 'DIRECT').map((e) => e.fn));
 const DOWNSTREAM = new Set(INVENTORY.filter((e) => e.ledger === 'DOWNSTREAM').map((e) => e.fn));
 
-/** Every provider host occurrence in api/analyze.js, with its enclosing function. */
+/**
+ * Every production module under api/, DISCOVERED rather than listed.
+ *
+ * Discovery is the point: a provider added in a brand-new `_lib` module is
+ * found the day it is written, with nobody remembering to extend this file.
+ * Mutation scratch copies are excluded — a `__mutant__` beside the original
+ * must not read as a second provider.
+ */
+function productionModules(dir = new URL('../api/', import.meta.url), acc = []) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
+    if (entry.isDirectory()) { productionModules(child, acc); continue; }
+    if (!/\.(js|mjs)$/.test(entry.name)) continue;
+    if (entry.name.includes('__mutant__')) continue;
+    const abs = fileURLToPath(child).split(BACKSLASH).join('/');
+    acc.push({ path: 'api/' + abs.slice(abs.lastIndexOf('/api/') + 5), source: readFileSync(child, 'utf8') });
+  }
+  return acc;
+}
+
+const MODULES = productionModules();
+
+/**
+ * Every provider host occurrence across ALL production modules.
+ *
+ * Two refinements the single-file version never needed, both discovered the
+ * moment the scan reached api/_lib/openai-recognition.js:
+ *
+ *  1. COMMENTS ARE NOT CALL SITES. That file documents its own endpoint in a
+ *     header comment, which the naive scan counted as a second provider.
+ *  2. A HOST LITERAL IS OFTEN A MODULE-SCOPE CONSTANT. `OPENAI_RESPONSES_URL`
+ *     sits at the top of the file with no enclosing function, so the backward
+ *     search for `function NAME` ran off the start and reported `?`. The site
+ *     that matters is the function that USES the constant, so resolve it.
+ */
 function providerSitesFromSource() {
-  const lines = ANALYZE.split(/\r?\n/);
   const found = [];
-  lines.forEach((l, i) => {
-    for (const host of PROVIDER_HOSTS) {
-      if (!l.includes(host)) continue;
-      let fn = '?';
-      for (let j = i; j >= 0 && j > i - 150; j--) {
-        const m = /^(?:export )?(?:async )?function (\w+)/.exec(lines[j]);
-        if (m) { fn = m[1]; break; }
+  for (const mod of MODULES) {
+    const lines = mod.source.split(/\r?\n/);
+    lines.forEach((l, i) => {
+      const code = l.replace(/^\s*(\/\/|\*|\/\*).*$/, '');   // drop comment lines
+      for (const host of PROVIDER_HOSTS) {
+        if (!code.includes(host)) continue;
+
+        let fn = null;
+        for (let j = i; j >= 0 && j > i - 150; j--) {
+          const m = /^(?:export )?(?:async )?function (\w+)/.exec(lines[j]);
+          if (m) { fn = m[1]; break; }
+        }
+
+        // Module scope: attribute the constant to whoever calls with it.
+        if (!fn) {
+          const decl = /^(?:export\s+)?const\s+(\w+)\s*=/.exec(code);
+          if (decl) {
+            const consumer = new RegExp(String.raw`(?<![\w.])${decl[1]}(?![\w])`, 'g');
+            for (const m of mod.source.matchAll(consumer)) {
+              if (m.index <= mod.source.indexOf(code)) continue;   // the declaration itself
+              const before = mod.source.slice(0, m.index);
+              const owner = [...before.matchAll(/^(?:export )?(?:async )?function (\w+)/gm)].pop();
+              if (owner) { fn = owner[1]; break; }
+            }
+          }
+        }
+        found.push({ file: mod.path, line: i + 1, host, fn: fn || '(module scope)' });
       }
-      found.push({ line: i + 1, host, fn });
-    }
-  });
+    });
+  }
   return found;
 }
 
 test('XP-STRUCT the provider inventory matches the source exactly', () => {
   const found = providerSitesFromSource();
-  const actual = found.map((s) => `${s.fn}@${s.host}`).sort();
-  const declared = INVENTORY.map((e) => `${e.fn}@${e.host}`).sort();
+  const actual = found.map((s) => `${s.file}::${s.fn}@${s.host}`).sort();
+  const declared = INVENTORY.map((e) => `${e.file}::${e.fn}@${e.host}`).sort();
 
   assert.deepEqual(actual, declared,
-    'the set of provider call sites in api/analyze.js has changed. Every one needs an ' +
+    'the set of provider call sites under api/ has changed. Every one needs an ' +
     'explicit ledger disposition — add it to INVENTORY as DIRECT (marks onBilled at ' +
     'res.ok) or DOWNSTREAM (provably unreachable before Stage 1).\n' +
     `  in source, not declared: ${actual.filter((a) => !declared.includes(a)).join(', ') || '(none)'}\n` +
@@ -475,7 +544,7 @@ test('XP-STRUCT every provider host in source is inside a ledger-covered helper'
 
   for (const site of found) {
     assert.ok(DIRECT.has(site.fn) || DOWNSTREAM.has(site.fn),
-      `provider call in ${site.fn}() at api/analyze.js:${site.line} has NO ledger relationship — ` +
+      `provider call in ${site.fn}() at ${site.file}:${site.line} has NO ledger relationship — ` +
       'add onBilled marking at its res.ok, or classify it as downstream-of-Stage-1 here');
   }
 });
@@ -595,13 +664,28 @@ test('XP-STRUCT the comment/string mask preserves indices and blanks only prose'
 
 test('XP-STRUCT the ledger markers and the downstream invariant are present', () => {
   // The direct markers must exist and sit at the provider response.
-  for (const fn of DIRECT) {
-    const body = ANALYZE.slice(ANALYZE.indexOf(`function ${fn}(`));
-    assert.match(body.slice(0, 3000), /if \(res\.ok\) onBilled\?\.\('anthropic'/,
-      `${fn} must mark the ledger at res.ok`);
+  // SEC-2: derived from the INVENTORY entry's own file, not hard-coded to
+  // api/analyze.js and not hard-coded to the 'anthropic' provider label. The
+  // previous form could only check DIRECT helpers that lived in analyze.js and
+  // marked Anthropic, which is why the OpenAI adapter needed a separate,
+  // hand-written line — and why a third DIRECT helper in a third module would
+  // have needed a fourth, that nobody would remember to add.
+  for (const entry of INVENTORY.filter((e) => e.ledger === 'DIRECT')) {
+    const mod = MODULES.find((m) => m.path === entry.file);
+    assert.ok(mod, `INVENTORY names ${entry.file}, which is not a production module`);
+    const at = mod.source.indexOf(`function ${entry.fn}(`);
+    assert.ok(at > -1, `${entry.fn} not found in ${entry.file}`);
+    // The WHOLE function body, bounded by the next top-level declaration — not
+    // a fixed character window. recognizeWithOpenAI marks the ledger ~4,200
+    // characters in, past the 3,000-char window the single-file version used,
+    // so a size guess would have failed this for the wrong reason.
+    const NEXT = /^(?:export\s+)?(?:async\s+)?function\s+\w+\s*\(/gm;
+    NEXT.lastIndex = at + 10;
+    const next = NEXT.exec(mod.source);
+    const body = mod.source.slice(at, next ? next.index : mod.source.length);
+    assert.match(body, /if \(res\.ok\) onBilled\?\.\(/,
+      `${entry.fn} in ${entry.file} is classified DIRECT but does not mark the ledger at res.ok`);
   }
-  assert.match(OPENAI_LIB, /if \(res\.ok\) onBilled\?\.\('openai'/,
-    'the OpenAI adapter must mark the ledger at res.ok');
 
   // And the downstream invariant must actually be asserted in the code.
   assert.match(ANALYZE, /if \(!providerLedger\.consumed\) \{/,

@@ -23,12 +23,24 @@
 // clamping turns "the model is wrong" into a confidently wrong number.
 // ═══════════════════════════════════════════════════════════════════════════
 
-export const VALIDATOR_VERSION = 1;
+// VALIDATOR_VERSION 2 — the rule SET changed shape, not just its constants.
+// Four new rules can now refuse a quote that version 1 accepted
+// (V-IDENTITY-FLOOR, V-SOURCE-UNREGISTERED, V-ENVELOPE-BAND, V-FX) and the
+// metadata gained `identity_tier`. A stored valuation from version 1 is not
+// comparable to one from version 2, and drift is unmeasurable if both claim
+// the same validator.
+export const VALIDATOR_VERSION = 2;
 // bump on ANY envelope/threshold change.
 // 2026-08-05.1 — applyTransform now also rejects a post-multiply low <= 0, so a
 // replica adjustment can no longer emit a band starting at ₪0 (a rule
 // validateQuote already enforced; the transform path was weaker).
-export const RULESET_VERSION = '2026-08-05.1';
+// 2026-09-18.1 — GW-OPENAI-INTELLIGENCE-002 foundation. Thresholds and envelope
+// SELECTION both changed: CATEGORY_CONFIDENCE_FLOOR introduced at 0.60; the
+// no-bucket fallback now resolves to MANUAL_ONLY rather than GLOBAL_ENVELOPE
+// for any non-confirmed identity; `resolveEnvelopeKey` lets photographed OCR
+// narrow but never widen the key; an anchor whose variant contradicts the item
+// no longer sets the envelope; and `pre_haiku` grades LOW rather than MEDIUM.
+export const RULESET_VERSION = '2026-09-18.1';
 
 // ── Condition ladder (VAL-001 D1) ──────────────────────────────────────────
 // Identical to the discounts in src/lib/utils.js:42 — this module is now the
@@ -202,13 +214,13 @@ export const ENVELOPES = buildEnvelopes();
 // taxonomy; analyze.js still carries its own copy for the PRE category
 // fallback and should later delegate to resolveEnvelopeKey() so the envelope
 // and the fallback price can never disagree about what an item is.
-export function resolveEnvelopeKey(recognition = {}) {
+function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
   const cat = (recognition.category || '').toLowerCase();
   const sub = (recognition.subcategory || '').toLowerCase();
   const pt = (recognition.product_type || '').toLowerCase();
   const mdl = (recognition.model_candidates?.[0]?.model || '').toLowerCase();
   const brnd = (recognition.brand_candidates?.[0]?.brand || '').toLowerCase();
-  const ocr = (recognition.ocr_text?.raw_texts || []).join(' ').toLowerCase();
+  const ocr = trustOcr ? (recognition.ocr_text?.raw_texts || []).join(' ').toLowerCase() : '';
   const sig = `${sub} ${pt} ${mdl} ${ocr}`;
   const el = cat.includes('electron');
 
@@ -257,6 +269,48 @@ export function resolveEnvelopeKey(recognition = {}) {
   return null;
 }
 
+/**
+ * Which pricing envelope governs this item — with PHOTOGRAPHED TEXT ALLOWED TO
+ * NARROW THE ANSWER, NEVER TO WIDEN IT.
+ *
+ * `sig` used to include `ocr_text.raw_texts` unconditionally, so a string a
+ * person PRINTS ON A STICKER selected the constraint that governs its own
+ * price. Writing "macbook" on any electronics item moved the ceiling from
+ * electronics (or global) to `electronics:macbook`, hard_max 40,000 — the
+ * attacker choosing the ruler they are measured against. The photographed
+ * label is the least trustworthy input in the pipeline and it had the most
+ * leverage over the guard.
+ *
+ * It is not simply removed, because OCR is genuinely the best evidence for
+ * several buckets: `kx-t`/`dect` is how a cordless phone is recognised at all,
+ * and those buckets are TIGHTER than the category they sit in. Removing OCR
+ * would push real items into looser envelopes, which is the same inversion in
+ * the other direction.
+ *
+ * So both keys are resolved and the SAFER one wins:
+ *   - resolve from trusted signals only (category / subcategory / product_type
+ *     / brand / model — all classifier output, not raw pixels-to-text)
+ *   - resolve again with OCR included
+ *   - take the OCR-influenced key ONLY when it does not raise hard_max
+ *
+ * Same doctrine the rest of this module already applies to comparables and to
+ * anchors: untrusted evidence may tighten a bound, never relax one.
+ */
+export function resolveEnvelopeKey(recognition = {}) {
+  const trustedKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: false });
+  const ocrKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: true });
+  if (ocrKey === trustedKey) return trustedKey;
+
+  const ceiling = (k) => {
+    if (!k) return GLOBAL_ENVELOPE.hard_max;      // no bucket -> the loosest
+    const e = ENVELOPES[k];
+    return e ? e.hard_max : GLOBAL_ENVELOPE.hard_max;
+  };
+  // Strictly narrowing only. Equal ceilings keep the OCR key, because a
+  // same-ceiling bucket is a more specific description at no extra permission.
+  return ceiling(ocrKey) <= ceiling(trustedKey) ? ocrKey : trustedKey;
+}
+
 // ctx.anchor — a catalog row the CALLER has already confirmed compatible via
 // isCompatibleAnchor (analyze.js:3726). This module cannot import that function:
 // it lives in api/analyze.js alongside the Vercel handler and module-level env
@@ -264,9 +318,158 @@ export function resolveEnvelopeKey(recognition = {}) {
 // effects" contract. The caller resolves compatibility; the guard consumes the
 // verdict. Passing an INCOMPATIBLE row here silently widens the envelope to the
 // wrong product — resolve it with isCompatibleAnchor or pass null.
+// ── IDENTITY TIERS (GW-OPENAI-INTELLIGENCE-002 foundation) ─────────────────
+//
+// Pricing eligibility is a function of IDENTITY EVIDENCE, not of the model's
+// stated confidence. The Ninja scan is why: category "Other" at 10%, brand
+// none, model none, OCR empty — and it still received a product-specific
+// ₪30/₪70/₪130. Nothing in the guard asked whether the item had been
+// identified at all, because `validateQuote` never read `category_confidence`
+// and `resolveEnvelopeKey` reads only category STRINGS.
+//
+// The floor mirrors VISION_TRIGGER_THRESHOLD (0.60, api/analyze.js) — the value
+// the pipeline already uses to decide "this identity is too weak to trust".
+// Reusing it keeps one definition of weak rather than inventing a second.
+export const CATEGORY_CONFIDENCE_FLOOR = 0.60;
+
+export const IDENTITY_TIER = Object.freeze({
+  EXACT_MODEL:   'exact_model',
+  FAMILY:        'family',
+  BRAND_ONLY:    'brand_only',
+  CATEGORY_ONLY: 'category_only',
+  UNIDENTIFIED:  'unidentified',
+});
+
+/**
+ * What has actually been established about this item.
+ *
+ * Reads the identity assessment the caller already computed
+ * (assessFallbackIdentity) plus the RAW category confidence. Both, because they
+ * fail in different directions: identity can be empty while a category string
+ * is confidently wrong, which is exactly the Ninja shape.
+ */
+export function resolveIdentityTier(ctx = {}) {
+  // AN ABSENT IDENTITY IS NOT A NEUTRAL IDENTITY. With no `ctx.identity` at all
+  // the tier used to fall through to CATEGORY_ONLY and price — so a caller that
+  // simply forgot to pass identity got pricing, which is fail-OPEN on the one
+  // input this whole rule is about. A caller who has not told us what was
+  // identified has not identified anything.
+  // `Array.isArray` matters: `typeof [] === 'object'`, so an array slipped
+  // through the object check and then read `brandOk` as undefined, landing on
+  // CATEGORY_ONLY and pricing. A malformed identity is an absent one.
+  if (!ctx.identity || typeof ctx.identity !== 'object' || Array.isArray(ctx.identity)) {
+    return IDENTITY_TIER.UNIDENTIFIED;
+  }
+  const id = ctx.identity;
+
+  // STRICT BOOLEANS, not truthiness. `brandOk: 'yes'` — or any non-empty string
+  // a future caller passes by accident — must not buy the top tier. Adversarial
+  // probing found exactly that: `{ brandOk: 'yes', modelOk: 'yes' }` with a
+  // nonsense category reached EXACT_MODEL and the global envelope.
+  const brandOk = id.brandOk === true;
+  const modelOk = id.modelOk === true;
+
+  // A confidence is a PROBABILITY, and it must arrive as a NUMBER. Probing
+  // found two ways past a naive check: `5` and `99` are finite and above the
+  // floor, and `true` coerces to exactly 1. Neither is a confidence; both bought
+  // category trust. Out of [0,1], or not a number at all, is malformed input —
+  // and malformed input must never read as strong.
+  const raw = ctx.recognition?.category_confidence;
+  const catConf = typeof raw === 'number' ? raw : NaN;
+  const categoryTrusted = Number.isFinite(catConf)
+    && catConf >= CATEGORY_CONFIDENCE_FLOOR
+    && catConf <= 1;
+
+  if (brandOk && modelOk) return IDENTITY_TIER.EXACT_MODEL;
+  if (brandOk && ctx.recognition?.product_family) return IDENTITY_TIER.FAMILY;
+  if (brandOk) return IDENTITY_TIER.BRAND_ONLY;
+  if (categoryTrusted) return IDENTITY_TIER.CATEGORY_ONLY;
+  return IDENTITY_TIER.UNIDENTIFIED;
+}
+
+/** Tiers that may carry a product-specific price at all. */
+const PRICEABLE_TIERS = new Set([
+  IDENTITY_TIER.EXACT_MODEL, IDENTITY_TIER.FAMILY,
+  IDENTITY_TIER.BRAND_ONLY, IDENTITY_TIER.CATEGORY_ONLY,
+]);
+
+// ── VARIANT / CAPACITY CHANNEL (GW-OPENAI-INTELLIGENCE-002 foundation) ─────
+//
+// AUDIT RESULT: there is no structured channel for variant, capacity, storage,
+// size or generation ANYWHERE in the pipeline. `variant` appears in this repo
+// only in prose and comments; `capacity`, `storage` and `size_ml` appear
+// nowhere at all. `model_number` exists in the OpenAI identity schema and is
+// dropped by the time anything prices. So a 128 GB and a 1 TB phone, a 50 ml
+// and a 100 ml fragrance, a 27" and a 32" monitor are INDISTINGUISHABLE to the
+// valuation path — and those are the largest single price discriminators in
+// their categories.
+//
+// Making that worse, `normalizeModelKey` (api/analyze.js) deliberately STRIPS
+// variant suffixes — `x`, `plus`, `pro`, `se`, `gen\d`, `mk\d` — so
+// "iPhone 15 Pro" collapses to "iphone 15". That tolerance is CORRECT for
+// finding a sibling anchor and WRONG for deciding the anchor describes this
+// unit.
+//
+// Per the ticket: repair the minimum safe channel, do not invent fields with no
+// consumer. So this adds exactly one thing, with one real consumer today — the
+// anchor, which sets the envelope and is therefore the highest-leverage place a
+// variant confusion turns into a wrong ceiling. The rest of the channel belongs
+// with the Phase-B identity object, where it will have consumers.
+// `\d{1,4}` on storage, not `\d{2,4}`: "1TB" is one digit and is exactly the
+// case that matters most. And the screen-size pattern must not end in `\b`,
+// because `"` is not a word character, so `27"` never matched. Both were caught
+// by the tests below rather than by reading — which is the point of having them.
+const VARIANT_PATTERNS = [
+  /\b(\d{1,4})\s?(gb|tb)\b/gi,          // storage
+  /\b(\d{1,4})\s?(ml|l)\b/gi,           // volume
+  /\b(\d{2,3})\s?(?:"|''|inch\b|in\b)/gi, // screen size
+  /\bgen\s?(\d)\b/gi,                   // generation
+  /\b(mk\s?\d)\b/gi,                    // mark
+];
+
+/** Deterministic variant tokens read out of a free-text product string. */
+export function extractVariantTokens(text) {
+  const s = String(text ?? '').toLowerCase();
+  const out = new Set();
+  for (const re of VARIANT_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of s.matchAll(re)) out.add(m[0].replace(/\s+/g, ''));
+  }
+  return [...out].sort();
+}
+
+/**
+ * Do two product strings CONTRADICT each other on a variant dimension?
+ *
+ * Absence is never a contradiction — most rows carry no variant token at all,
+ * and treating "unknown" as "different" would reject every legitimate anchor.
+ * Only a token of the SAME KIND with a DIFFERENT VALUE contradicts.
+ */
+export function variantContradiction(aText, bText) {
+  const kind = (t) => (/gb|tb/.test(t) ? 'storage' : /ml|l$/.test(t) ? 'volume'
+    : /"|inch|in$/.test(t) ? 'size' : /^gen/.test(t) ? 'generation' : 'mark');
+  const a = extractVariantTokens(aText);
+  const b = extractVariantTokens(bText);
+  for (const ta of a) {
+    for (const tb of b) {
+      if (kind(ta) === kind(tb) && ta !== tb) return { kind: kind(ta), a: ta, b: tb };
+    }
+  }
+  return null;
+}
+
 export function resolveEnvelope(ctx = {}) {
   const retail = Number(ctx.anchor?.retail_price_ils);
-  if (Number.isFinite(retail) && retail > 0) {
+  // A catalog anchor whose VARIANT contradicts the item does not describe this
+  // unit, and an anchor sets the envelope — so the contradiction would hand the
+  // wrong ceiling to the wrong product. Fall through to the category envelope
+  // rather than trusting it. Silent on absence; only a real conflict rejects.
+  const anchorText = `${ctx.anchor?.model ?? ''} ${ctx.anchor?.name ?? ''}`;
+  const itemText = `${ctx.recognition?.model_candidates?.[0]?.model ?? ''} `
+    + `${(ctx.recognition?.ocr_text?.raw_texts || []).join(' ')}`;
+  const variantConflict = ctx.anchor ? variantContradiction(anchorText, itemText) : null;
+
+  if (Number.isFinite(retail) && retail > 0 && !variantConflict) {
     return {
       key: ctx.anchor.id ? `anchor:${ctx.anchor.id}` : 'anchor',
       basis: 'anchor',
@@ -278,7 +481,31 @@ export function resolveEnvelope(ctx = {}) {
   }
   const key = ctx.envelope_key ?? resolveEnvelopeKey(ctx.recognition || {});
   const env = key ? ENVELOPES[key] : null;
-  if (!env) return { key: key || 'global', basis: 'global', ...GLOBAL_ENVELOPE, requiresAnchorAboveSoft: false };
+  if (!env) {
+    // ── THE GLOBAL-ENVELOPE INVERSION, CLOSED ────────────────────────────────
+    //
+    // GLOBAL_ENVELOPE is floor 5 / soft 20,000 / hard 500,000 — by a wide
+    // margin the LOOSEST set of bounds in the system. It was reached by
+    // falling through: no bucket matched the category string. So the item we
+    // knew LEAST about received the WIDEST permission to be priced, while a
+    // confidently-identified gaming mouse was held to 20/1000/3200.
+    //
+    // That is backwards, and it is how "Footwear" (which matches no matcher at
+    // all) let ₪30-130 through without a single violation. Unknown must NARROW
+    // capability, not expand it.
+    //
+    // A confirmed identity still gets the global fallback — a real product in
+    // a category we have not bucketed yet is a gap in BUCKETS, not a reason to
+    // refuse the user. Everything weaker gets MANUAL_ONLY.
+    const tier = resolveIdentityTier(ctx);
+    const identityConfirmed = tier === IDENTITY_TIER.EXACT_MODEL
+      || tier === IDENTITY_TIER.FAMILY
+      || tier === IDENTITY_TIER.BRAND_ONLY;
+    if (!identityConfirmed) {
+      return { key: key || 'global', basis: 'manual_only', ...MANUAL_ONLY, requiresAnchorAboveSoft: false };
+    }
+    return { key: key || 'global', basis: 'global', ...GLOBAL_ENVELOPE, requiresAnchorAboveSoft: false };
+  }
   return {
     key: env.key,
     basis: env.class === 'manual_only' ? 'manual_only' : 'category',
@@ -306,10 +533,28 @@ export function derivePricingSource(ctx = {}) {
       // MEDIUM only when the row's MODEL column was hit by evidence, mirroring
       // the existing PRE grading rule (analyze.js:3795,3806).
       case 'catalog': return { source: 'pre_catalog', grade: ctx.anchorModelEvidence ? 'MEDIUM' : 'LOW' };
-      case 'ai_haiku': return { source: 'pre_haiku', grade: 'MEDIUM' };
+      // GRADE LOWERED MEDIUM -> LOW, and the reason is an ordering defect, not
+      // a taste preference. `pre_haiku` is an UNANCHORED model estimate; it
+      // carries no catalog row, no comparable and no retail reference. It was
+      // graded MEDIUM unconditionally, while `pre_catalog` — a REAL compatible
+      // catalog row — dropped to LOW whenever the row's model column was not
+      // hit by evidence. So a guess outranked an observation, and the pricing
+      // provenance the UI shows was ordered backwards against the evidence.
+      //
+      // B-15 already forbids a category bucket from pricing a confident
+      // identity; nothing forbade the model from simply guessing one instead.
+      // An estimate may still price — it just may not outrank evidence.
+      case 'ai_haiku': return { source: 'pre_haiku', grade: 'LOW' };
       case 'category_anchor': return { source: 'category_bucket', grade: 'LOW' };
       case 'none': return { source: 'manual_required', grade: 'MANUAL_REQUIRED' };
-      default: return { source: 'unknown', grade: 'LOW' };
+      // FAIL CLOSED. This returned { source:'unknown', grade:'LOW' } — a
+      // pricing source nobody registered was PRICED BY DEFAULT, against this
+      // module's own fail-closed doctrine. It also meant a future source could
+      // ship prices silently by forgetting to touch this switch, which is
+      // exactly how an unreviewed market-comparable path would have arrived.
+      // An unregistered source is not a low-confidence source; it is an
+      // unknown one, and unknown does not price.
+      default: return { source: 'unknown', grade: 'MANUAL_REQUIRED' };
     }
   }
   if (ctx.stage === 'stage2') {
@@ -452,6 +697,121 @@ export function validateQuote(rawQuote, ctx = {}) {
     return degrade('V-CURRENCY', `expected ILS, got ${String(q.currency)}`);
   }
 
+  // ── V-FX — THE CURRENCY BOUNDARY (GW-OPENAI-INTELLIGENCE-002 foundation) ──
+  //
+  // V-CURRENCY above checks the FINAL quote's LABEL. It has no visibility into
+  // where the number came from, so a fully USD-derived price labelled "ILS"
+  // passes it cleanly. There is no currency conversion anywhere in this
+  // repository — `currency` is `const: 'ILS'` in the Stage-2 schema and every
+  // write hardcodes ILS — and conversion is currently performed IN THE MODEL'S
+  // HEAD, instructed by prose ("Electronics retail is typically 20-40% above US
+  // prices").
+  //
+  // That is survivable only while every input is already ILS. The moment
+  // international comparables are admitted it stops being survivable, and the
+  // failure is SILENT: a $120 comp read as ₪120 is a 3.7x under-price, and
+  // envelopes span 0.40x-8.00x, so a unit error is indistinguishable from a
+  // plausible price. The user is under-paid, systematically, with a confident
+  // grade attached and nothing to detect it.
+  //
+  // NO LIVE FX IS IMPLEMENTED HERE — that is deliberate and out of scope. What
+  // exists now is the BOUNDARY: any evidence carrying money must declare its
+  // currency and, if not ILS, the exact conversion used. Evidence that cannot
+  // prove its own conversion does not contribute a number. Phase B supplies
+  // `ctx.comps`; until then this loop simply never runs, which is the correct
+  // behaviour for a rule whose job is to refuse unproven money.
+  for (const comp of (Array.isArray(ctx.comps) ? ctx.comps : [])) {
+    const cur = String(comp?.currency ?? '').trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(cur)) {
+      return degrade('V-FX', 'a comparable carries money with no explicit ISO 4217 currency — ' +
+        'a bare "$" is not a currency, and an unlabelled amount may never contribute to a price');
+    }
+    if (cur === 'ILS') continue;
+    const rate = Number(comp?.fx_rate);
+    const normalized = Number(comp?.normalized_amount);
+    if (!Number.isFinite(rate) || rate <= 0
+        || String(comp?.normalized_currency ?? '').toUpperCase() !== 'ILS'
+        || !Number.isFinite(normalized) || normalized <= 0
+        || !comp?.fx_timestamp || !comp?.fx_source) {
+      return degrade('V-FX',
+        `a ${cur} comparable is missing its conversion record (fx_rate / normalized_amount / ` +
+        'normalized_currency / fx_timestamp / fx_source). Conversion happens in GetWorth code ' +
+        'before the guard, never in the model, and never implicitly.');
+    }
+    // The conversion must also be ARITHMETICALLY TRUE, not merely present.
+    const expected = Number(comp.price_amount) * rate;
+    if (!Number.isFinite(expected) || Math.abs(expected - normalized) > Math.max(1, expected * 0.01)) {
+      return degrade('V-FX',
+        `a ${cur} comparable's normalized_amount ${normalized} does not equal ` +
+        `price_amount x fx_rate (${expected}) — the conversion record is not self-consistent`);
+    }
+  }
+
+  // ── V-IDENTITY-FLOOR ───────────────────────────────────────────────────────
+  //
+  // NO MEANINGFUL IDENTITY ⇒ NO PRODUCT-SPECIFIC PRICE.
+  //
+  // This rule exists because the guard had no opinion about whether the item
+  // had been identified. Every other rule asks "is this NUMBER defensible?" —
+  // none asked "is there a PRODUCT to attach a number to?". A scan with no
+  // brand, no model, empty OCR and category "Other" at 10% produced ₪30/₪70/₪130
+  // and passed every check, because 70 is a perfectly plausible number for
+  // something.
+  //
+  // Deliberately NOT a confidence check the model can argue with: the inputs
+  // are `brandOk`/`modelOk` (derived from candidate strings, not self-reported
+  // certainty) and the raw category confidence. A model claiming 0.99 while
+  // returning brand null and model null still lands in UNIDENTIFIED. That is
+  // the point — the LLM must not be able to buy pricing eligibility with an
+  // assertion.
+  // ── V-SOURCE-UNREGISTERED ──────────────────────────────────────────────────
+  //
+  // MANUAL_REQUIRED is a REFUSAL, and it has to refuse the NUMBER, not merely
+  // label it. derivePricingSource was changed so an unregistered `pre_source`
+  // grades MANUAL_REQUIRED instead of LOW — but probing showed the quote was
+  // still ACCEPTED with mid 200 and a MANUAL_REQUIRED grade stapled to it. A
+  // grade nothing enforces is a caption, and a future market source would have
+  // shipped real prices under it.
+  if (derived.grade === 'MANUAL_REQUIRED') {
+    return degrade('V-SOURCE-UNREGISTERED',
+      `pricing source "${ctx.pre_source ?? 'absent'}" resolves to ${derived.source}/MANUAL_REQUIRED — ` +
+      'an unregistered or refusing source may not carry a price. Register it in ' +
+      'derivePricingSource with a deliberate grade before it can price.');
+  }
+
+  const identityTier = resolveIdentityTier(ctx);
+  base.identity_tier = identityTier;
+  if (!PRICEABLE_TIERS.has(identityTier)) {
+    return degrade('V-IDENTITY-FLOOR',
+      `identity tier ${identityTier} cannot carry a product-specific price ` +
+      `(brand=${ctx.identity?.brandOk ? 'ok' : 'none'} model=${ctx.identity?.modelOk ? 'ok' : 'none'} ` +
+      `category_confidence=${ctx.recognition?.category_confidence ?? 'absent'})`);
+  }
+
+  // CATEGORY_ONLY prices FROM A CATEGORY, so the category has to be one we hold
+  // price evidence for. If it matches no bucket there is nothing to price from
+  // — only a confident-sounding string.
+  //
+  // This is the second half of the Ninja case, and it is the half a pure
+  // confidence check would have missed. "Footwear" at 10% fails the tier test
+  // above; "Footwear" at 99% passes it, because the model IS confident — it is
+  // confidently reporting a category GetWorth has no price evidence for. Both
+  // must refuse, and for the same reason: no brand, no model, and no bucket is
+  // not a product, however certain the sentence sounds.
+  //
+  // Resolved from the RECOGNITION, deliberately NOT from `ctx.envelope_key`.
+  // Honouring a caller-supplied key here would let one be handed in to answer a
+  // question about a different category — probing confirmed it:
+  // `envelope_key:'electronics'` with category "Footwear" at 0.99 priced
+  // cleanly. The caller may choose which envelope BOUNDS a price; it may not
+  // choose the evidence that decides whether there is a price at all.
+  if (identityTier === IDENTITY_TIER.CATEGORY_ONLY
+      && resolveEnvelopeKey(ctx.recognition || {}) === null) {
+    return degrade('V-IDENTITY-FLOOR',
+      `category-only identity in "${ctx.recognition?.category ?? 'unknown'}", which matches no priced ` +
+      'category bucket — there is no evidence to price from');
+  }
+
   let mid = Math.round(q.mid);
   if (mid !== q.mid) repairs.push({ rule: 'R-ROUND', field: 'mid', from: q.mid, to: mid });
 
@@ -534,6 +894,30 @@ export function validateQuote(rawQuote, ctx = {}) {
   if (!(low <= mid && mid <= high)) return degrade('V-ORDER', `spread repair broke ordering: ${low}/${mid}/${high}`);
   if (ratio < SPREAD_MIN_RATIO) return degrade('V-SPREAD-MIN', `high/low ${ratio.toFixed(3)} < ${SPREAD_MIN_RATIO} after repair`);
   if (ratio > maxRatio) return degrade('V-SPREAD-MAX', `high/low ${ratio.toFixed(2)} > ${maxRatio} after repair`);
+
+  // ── V-ENVELOPE-BAND ────────────────────────────────────────────────────────
+  //
+  // The hard envelope bounded `mid` and NOTHING ELSE. `low` was checked for
+  // positivity and ordering; `high` only for ordering and the spread ratio. So
+  // high <= low * maxRatio <= mid * maxRatio, and with SPREAD_MAX_WEAK = 6.0 a
+  // DISPLAYED high could legally reach SIX TIMES hard_max.
+  //
+  // That was survivable only while `high` was read as a fuzzy upper edge nobody
+  // quotes. It stops being survivable the moment the band is presented as a
+  // distribution — quick_sale / fair_market / optimistic_listing — because
+  // `optimistic_listing` is then a named, user-facing price that no envelope
+  // ever checked. That is precisely the unguarded-number class VAL-001 exists
+  // to close, re-entering through the presentation layer.
+  //
+  // Checked AFTER the spread repair, because the repair is what moves `high`;
+  // validating before it would bless a number the caller never sees. Degrades
+  // rather than clamps, like every other envelope rule here — clamping would
+  // turn "this band is wrong" into a confidently wrong band.
+  if (high > env.hard_max) {
+    return degrade('V-ENVELOPE-BAND',
+      `displayed high ${high} > hard_max ${env.hard_max} (${env.key}/${env.basis}) — ` +
+      'the whole displayed distribution must fit the envelope, not just mid');
+  }
 
   return verdict({
     action: repairs.length ? 'repair' : 'accept',

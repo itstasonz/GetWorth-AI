@@ -1,0 +1,11 @@
+# The mutation harnesses match multi-line `find` strings against these files
+# literally. A CRLF checkout makes every multi-line mutant miss, which the VAL-001
+# harness then misreports as "the guard was refactored". Pin LF so the result is
+# the same on every platform and in every fresh clone.
+*.js   text eol=lf
+*.mjs  text eol=lf
+*.jsx  text eol=lf
+*.json text eol=lf
+*.css  text eol=lf
+*.md   text eol=lf
+*.sql  text eol=lf

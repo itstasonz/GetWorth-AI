@@ -37,13 +37,27 @@ const GUARD_SRC = readFileSync(GUARD_URL, 'utf8');
 const GRADES = ['HIGH', 'MEDIUM', 'LOW', 'MANUAL_REQUIRED'];
 
 // ── fixtures ──────────────────────────────────────────────────────────────────
+// V-IDENTITY-FLOOR CHANGED THE CONTRACT, AND THESE FIXTURES WERE THE PROOF.
+//
+// Before it, the default fixture carried `brand_candidates: []`,
+// `model_candidates: []`, no `category_confidence`, and an identity of
+// `{ identityHigh: false }`. That is not a neutral fixture — it is EXACTLY the
+// Ninja shape: nothing identified, at any confidence. 34 of these tests were
+// validating numbers for an item the pipeline had failed to recognise, and
+// passing, which is the same blind spot the guard itself had.
+//
+// The default now declares an IDENTIFIED item, because that is the precondition
+// these tests actually mean to assume. Weak identity is asserted deliberately,
+// in its own block, never inherited by accident.
 const rec = (o = {}) => ({
   category: 'Electronics', subcategory: 'Laptop', product_type: '',
+  category_confidence: 0.9,
   model_candidates: [], brand_candidates: [], ocr_text: { raw_texts: [] },
   visual_features: { condition: 'Good' }, ...o,
 });
+const IDENTIFIED = Object.freeze({ identityHigh: false, brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.8 });
 const ctx = (o = {}) => ({
-  recognition: rec(o.recognition || {}), candidates: [], identity: { identityHigh: false },
+  recognition: rec(o.recognition || {}), candidates: [], identity: { ...IDENTIFIED },
   stage: 'stage2', pre_source: null, model: 'claude-test-model', anchor: null,
   ...o, ...(o.recognition ? { recognition: rec(o.recognition) } : {}),
 });
@@ -130,8 +144,13 @@ test('P-04 ENVELOPES and CONDITION_LADDER are frozen', () => {
 });
 
 test('P-05 versions are exported and pinned', () => {
-  assert.equal(VALIDATOR_VERSION, 1);
-  assert.equal(RULESET_VERSION, '2026-08-05.1');
+  // Bumped by the GW-OPENAI-INTELLIGENCE-002 foundation. VALIDATOR_VERSION
+  // moved because the rule SET changed shape — four new rules can refuse a
+  // quote version 1 accepted, and the metadata gained identity_tier — so a
+  // stored valuation from either version is not comparable to the other.
+  // RULESET_VERSION moved because thresholds AND envelope selection changed.
+  assert.equal(VALIDATOR_VERSION, 2);
+  assert.equal(RULESET_VERSION, '2026-09-18.1');
 });
 
 // ══ B. envelope table integrity ═══════════════════════════════════════════════
@@ -298,7 +317,16 @@ const SOURCE_CASES = [
   ['S-01 stage2 + compatible anchor', ctx({ anchor: ANCHOR }), 'stage2_comp_anchored', 'HIGH'],
   ['S-02 stage2, no anchor', ctx(), 'stage2_ai', 'MEDIUM'],
   ['S-03 pre catalog', ctx({ stage: 'pre', pre_source: 'catalog' }), 'pre_catalog', null],
-  ['S-04 pre haiku', ctx({ stage: 'pre', pre_source: 'ai_haiku' }), 'pre_haiku', 'MEDIUM'],
+  // pre_haiku is an UNANCHORED estimate. It graded MEDIUM while pre_catalog —
+  // a real compatible catalog row — graded LOW without model evidence, so a
+  // guess outranked an observation. Now LOW; it may still price, it may not
+  // outrank evidence.
+  ['S-04 pre haiku', ctx({ stage: 'pre', pre_source: 'ai_haiku' }), 'pre_haiku', 'LOW'],
+  // An UNREGISTERED source does not price at all. It used to return
+  // { source:'unknown', grade:'LOW' } — priced by default, against this
+  // module's fail-closed doctrine, and the way a future market source would
+  // have shipped prices by forgetting to touch the switch.
+  ['S-08 unregistered pre_source fails closed', ctx({ stage: 'pre', pre_source: 'some_future_market_source' }), 'unknown', 'MANUAL_REQUIRED'],
   ['S-05 category bucket', ctx({ stage: 'pre', pre_source: 'category_anchor' }), 'category_bucket', 'LOW'],
   ['S-06 no source', ctx({ stage: 'pre', pre_source: 'none' }), 'manual_required', 'MANUAL_REQUIRED'],
 ];
@@ -467,9 +495,14 @@ test('D-02 verdict + metadata shape is exactly the contract', () => {
   //   model — the model string that produced the number. MODEL_VISION is an
   //     unpinnable alias, so recording it per valuation is the only way a
   //     silent alias-repoint is reconstructable after the fact.
+  //   identity_tier — WHAT WAS ESTABLISHED about the item, not how confident
+  //     the model claimed to be. Persisted because a degrade citing
+  //     V-IDENTITY-FLOOR is otherwise unreproducible from the stored record,
+  //     and because it is the field that distinguishes "we priced a known
+  //     product" from "we priced something".
   assert.deepEqual(Object.keys(v.metadata).sort(), [
     'condition_basis', 'degraded', 'degraded_reason', 'envelope_basis', 'envelope_key',
-    'model', 'model_claimed_method',
+    'identity_tier', 'model', 'model_claimed_method',
     'needs_review', 'pricing_grade', 'pricing_source', 'ruleset_version', 'validator_version',
   ].sort());
 });
@@ -603,7 +636,11 @@ test('M-07 (kills M23) a transform may not weaken V-POSITIVE — a low that roun
   // low 0.49 -> 0 while mid 2.03 -> 2 clears the books floor of 2 and the
   // triple stays ordered. Without the low check the guard would emit a band
   // starting at ₪0, which validateQuote itself rejects outright.
-  const c = ctx({ recognition: BOOKS });
+  // Spread 6.0 is SPREAD_MAX_WEAK, which requires a WEAK identity — the
+  // default fixture is now identified, and an identified item is held to the
+  // tighter mainline ratio. Declared explicitly: no brand and no model, but a
+  // confident category, which is CATEGORY_ONLY — priceable, and weak.
+  const c = ctx({ recognition: BOOKS, identity: { identityHigh: false, brandOk: false, modelOk: false } });
   const base = validateQuote(q({ low: 7, mid: 29, high: 42 }), c);
   assert.equal(base.action, 'accept', 'fixture must be accepted before the transform');
 
