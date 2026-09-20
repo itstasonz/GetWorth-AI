@@ -34,11 +34,21 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveEnvelope, validateQuote, ENVELOPES } from '../api/_lib/valuation-guard.js';
+import { resolveEnvelope, validateQuote, ENVELOPES,
+  bucketEntryRequirement, bucketEntryPermitted } from '../api/_lib/valuation-guard.js';
+import { deriveEvidence } from '../api/_lib/pricing-authority.js';
 import { isSpecificTokenMatch, gradeRowEvidence } from '../api/analyze.js';
 
 const CONFIRMED = { brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.9, brandConfLabel: 'confirmed_by_text' };
-const env = (recognition, identity = CONFIRMED) => resolveEnvelope({ recognition, identity });
+// §3. `resolveEnvelope` now reads an evidence set, and a caller that passes none
+// gets DERIVED only — the fail-closed default. These fixtures must therefore
+// COMPOSE the two modules exactly as api/analyze.js does, or they would be
+// measuring the default rather than the recognition in front of them.
+const env = (recognition, identity = CONFIRMED, visionData = null, anchor = null) =>
+  resolveEnvelope({ recognition, identity, anchor,
+    evidence: deriveEvidence({ recognition, visionData, anchor }).classes });
+/** A classifier that saw `what`. The only producer of OBJECT_CLASS. */
+const sawA = (what) => ({ labels: [{ description: what, score: 0.93 }] });
 
 // ── The four physical cases, as recognition objects ─────────────────────────
 const LOGITECH = {
@@ -68,37 +78,66 @@ const ROLEX_STICKER = {
 };
 
 // ════════════════════════════════════════════════════════════════════════════════
-// THE ENVELOPE HALF OF HIGH-4 IS OPEN, AND THESE TESTS SAY SO
+// THE ENVELOPE HALF OF HIGH-4 IS CLOSED  ·  §3 BUCKET AUTHORITY
 //
-// A derived escalation rule was written here and WITHDRAWN. An independent
-// reviewer defeated it twice, and the second version, which closed both
-// defeats, degraded a ₪12,000 laptop — an item V-ENVELOPE-SOFT-01 says in terms
-// is real and must be FLAGGED, not refused.
+// WHAT THESE TESTS USED TO SAY. OI-3 asserted `watches:luxury` for a sticker and
+// called it "the gap, stated". OI-6 enumerated three exposed buckets and called
+// the list "the deliverable". OI-8 pinned a ₪12,000 laptop as ACCEPT and existed
+// to stop anyone re-deriving the withdrawn rule. All three were honest records of
+// an open finding, and all three pinned the defect in place.
 //
-// The reason no third version follows is in api/_lib/valuation-guard.js beside
-// the withdrawal: specific buckets are looser than their category parents by
-// design, four of them sit above their parent's hard ceiling, and `subcategory`
-// is BOTH the legitimate route to a specific bucket AND derived from the image.
-// A laptop legitimately exceeds what "Electronics" allows; a watch with ROLEX
-// printed on it claims to. No field in the recognition separates them, so any
-// threshold that does is a number chosen to make the laptop pass.
+// Two earlier attempts failed because they asked the model how sure it was, in
+// different words: the first read the `evidence` string a candidate writes about
+// itself and inverted under relabelling; the second baselined on the canonical
+// category and degraded the legitimate laptop. The rule that replaced them asks
+// a different question entirely — WHO PRODUCED THIS EVIDENCE — and lets each
+// bucket declare what it costs to enter, because entering `electronics:laptop`
+// wrongly costs a ₪24,000 ceiling and entering `watches:luxury` wrongly costs
+// ₪250,000. One global threshold would have to be set for the worse case.
 //
-// These tests therefore pin THE BOUND THAT ACTUALLY EXISTS, so that nobody
-// reads the section heading and assumes more. If one of them starts failing,
-// the envelope behaviour has moved and the gap needs re-measuring.
+// These tests now measure the closure from both sides. Every case states the
+// evidence it supplies and the bucket that evidence buys, and the negative half
+// — the same recognition with the evidence removed — is asserted beside it. A
+// gate tested only from the permitted side is not a gate.
 // ════════════════════════════════════════════════════════════════════════════════
-describe('the Rolex witness: what bounds it today, measured not assumed', () => {
-  test('OI-3 a sticker DOES still reach watches:luxury — the gap, stated', () => {
+describe('the Rolex witness: what bounds it now, measured not assumed', () => {
+  test('OI-3 the ROLEX STICKER still reaches watches:luxury — and that is the DESIGN', () => {
+    // Worth being blunt about, because it looks like the rule failing. The brand
+    // AND the product name were genuinely read off the object ('ROLEX
+    // SUBMARINER' is in raw_texts), so BRAND_TEXT and PRODUCT_TEXT both hold,
+    // which is exactly what the bucket declares. Printing a brand on a thing IS
+    // the evidence class; pretending otherwise would refuse every real Rolex too.
+    //
+    // What the bucket does NOT accept is a model simply WRITING the brand down.
+    // That is the next test, and it is the half that used to be missing.
     const e = env(ROLEX_STICKER);
     assert.equal(e.key, 'watches:luxury');
-    assert.equal(e.hard_max, 250000,
-      'OCR-derived candidates still select this bucket. That is the open finding, unclosed.');
+    assert.equal(e.hard_max, 250000);
   });
 
-  test('OI-4 the bound is requiresAnchorAboveSoft on the BUCKET, set by hand', () => {
-    // This is what the review meant by "bounded by requiresAnchorAboveSoft",
-    // and it is why the witness is HIGH and not CRITICAL. It is a per-bucket
-    // decision in the ENVELOPES table, not a rule derived from the scan.
+  test('OI-3b THE CLOSURE: the same watch with nothing READ falls back to the parent', () => {
+    // Identical recognition, identical candidate strings, identical confidences
+    // — only the OCR is empty, so the names are ASSERTED rather than read. Under
+    // the old rule this was indistinguishable from the case above and selected
+    // the same ₪250,000 ceiling.
+    const asserted = { ...ROLEX_STICKER, ocr_text: { raw_texts: [] } };
+    const e = env(asserted);
+    assert.equal(e.key, 'watches', 'a written brand must not open the luxury bucket');
+    assert.equal(e.hard_max, ENVELOPES.watches.hard_max);
+    assert.ok(e.hard_max < ENVELOPES['watches:luxury'].hard_max,
+      'the fallback must be the PARENT, never the wider bucket and never GLOBAL');
+
+    // And one class is not two: the bucket declares BRAND_TEXT *and*
+    // PRODUCT_TEXT, so reading only the brand is not enough.
+    const brandOnly = { ...ROLEX_STICKER, model_candidates: [], ocr_text: { raw_texts: ['ROLEX'] } };
+    assert.equal(env(brandOnly).key, 'watches',
+      'BRAND_TEXT alone must not enter a bucket that declares two classes');
+  });
+
+  test('OI-4 requiresAnchorAboveSoft still applies ON TOP, unchanged', () => {
+    // §3 gates ENTRY to the bucket. This flag bounds what you may be quoted once
+    // inside it. They are different questions and both still have to be answered
+    // — closing the first is not an excuse to relax the second.
     const e = env(ROLEX_STICKER);
     assert.equal(e.requiresAnchorAboveSoft, true);
     assert.equal(ENVELOPES['watches:luxury'].requiresAnchorAboveSoft, true,
@@ -106,60 +145,123 @@ describe('the Rolex witness: what bounds it today, measured not assumed', () => 
   });
 
   test('OI-5 so a sticker-only Rolex is refused above soft, and priced below it', () => {
-    // The actual money consequence, both directions, so the bound is a measured
-    // number rather than a claim.
-    const hi = validateQuote({ low: 90000, mid: 120000, high: 160000, currency: 'ILS' },
-      { stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: ROLEX_STICKER, identity: CONFIRMED });
+    const vq = (quote, rec) => validateQuote(quote,
+      { stage: 'pre', pre_source: 'catalog', anchorModelEvidence: true, anchor: null, model: 'm',
+        recognition: rec, identity: CONFIRMED, evidence: deriveEvidence({ recognition: rec }).classes });
+
+    const hi = vq({ low: 90000, mid: 120000, high: 160000, currency: 'ILS' }, ROLEX_STICKER);
     assert.equal(hi.action, 'degrade', 'above soft_max with no catalog anchor');
     assert.match(hi.metadata.degraded_reason, /V-ENVELOPE-SOFT/);
 
-    const lo = validateQuote({ low: 8000, mid: 12000, high: 18000, currency: 'ILS' },
-      { stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: ROLEX_STICKER, identity: CONFIRMED });
+    const lo = vq({ low: 8000, mid: 12000, high: 18000, currency: 'ILS' }, ROLEX_STICKER);
     assert.notEqual(lo.action, 'degrade',
-      'below soft_max a text-confirmed watch is priced — ₪40,000 is the real bound, not ₪250,000');
+      'below soft_max a text-confirmed watch is priced — ₪40,000 is the real bound');
+
+    // The same ₪12,000 with the names merely asserted is now out of range
+    // entirely, because the envelope is `watches` (hard 6,400) rather than
+    // `watches:luxury`. Two refusals for two different reasons, both correct.
+    const asserted = { ...ROLEX_STICKER, ocr_text: { raw_texts: [] } };
+    const lo2 = vq({ low: 8000, mid: 12000, high: 18000, currency: 'ILS' }, asserted);
+    assert.equal(lo2.action, 'degrade');
+    assert.match(lo2.metadata.degraded_reason, /V-ENVELOPE-HARD/);
   });
 
-  test('OI-6 THE BUCKETS WITH NO SUCH FLAG, enumerated — this is the gap', () => {
-    // Four specific buckets sit above their category parent's hard ceiling.
-    // Exactly one of them carries the anchor requirement. The other three are
-    // the unclosed surface, and listing them is the deliverable: the fix is to
-    // decide each one against the real market, which is a pricing change.
-    const parentHard = ENVELOPES.electronics.hard_max;
-    const exposed = Object.entries(ENVELOPES)
-      .filter(([k, e]) => k.startsWith('electronics:') && e.soft_max > parentHard)
-      .filter(([, e]) => !e.requiresAnchorAboveSoft)
-      .map(([k, e]) => `${k} soft=${e.soft_max} hard=${e.hard_max}`);
-    assert.deepEqual(exposed.sort(), [
-      'electronics:iphone soft=7500 hard=24000',
-      'electronics:laptop soft=7500 hard=24000',
-      'electronics:macbook soft=12500 hard=40000',
-    ], 'if this list changes, the open finding has changed shape and must be re-reported');
-  });
-
-  test('OI-7 NON-REGRESSION: the three priceable cases keep their envelopes', () => {
-    for (const [name, rec, key] of [
-      ['Logitech', LOGITECH, 'electronics:gaming mouse'],
-      ['LG', LG, 'electronics:monitor'],
-      ['Louis Vuitton', LV, 'beauty'],
-    ]) {
-      const e = env(rec);
-      assert.equal(e.key, key, `${name} must keep its envelope`);
-      assert.equal(e.requiresAnchorAboveSoft, false,
-        `${name} must not acquire an anchor requirement it did not have`);
+  test('OI-6 EVERY bucket above its parent is declared, or it is unreachable', () => {
+    // WAS: a hand-written list of three "exposed" buckets, which was wrong —
+    // twelve buckets exceed their parent, and the record said four. Counting
+    // them by hand is what produced that error, so nothing is counted here.
+    //
+    // The property is structural and holds over the whole table: a bucket wider
+    // than its parent either declares its entry evidence or CANNOT BE ENTERED AT
+    // ALL. That is what makes a bucket added tomorrow fail closed instead of
+    // silently inheriting permission, which is what the previous round claimed
+    // and did not have.
+    const wider = Object.entries(ENVELOPES)
+      .filter(([k]) => k.includes(':'))
+      .filter(([k, e]) => ENVELOPES[k.split(':')[0]] && e.hard_max > ENVELOPES[k.split(':')[0]].hard_max);
+    assert.ok(wider.length >= 10,
+      `only ${wider.length} buckets exceed their parent — if this collapsed, the test proves nothing`);
+    for (const [k] of wider) {
+      const req = bucketEntryRequirement(k);
+      assert.ok(req.length > 0, `${k} exceeds its parent and must declare entry evidence`);
+      assert.equal(bucketEntryPermitted(k, new Set(['DERIVED'])), false,
+        `${k} exceeds its parent and must not be enterable on DERIVED alone`);
+    }
+    // The mirror half: a bucket at or below its parent needs nothing, because
+    // entering it cannot buy a bigger number than the caller already had.
+    for (const [k, e] of Object.entries(ENVELOPES)) {
+      if (!k.includes(':')) continue;
+      const up = ENVELOPES[k.split(':')[0]];
+      if (!up || e.hard_max > up.hard_max) continue;
+      assert.equal(bucketEntryPermitted(k, new Set(['DERIVED'])), true,
+        `${k} is no wider than its parent and must not have acquired a requirement`);
     }
   });
 
-  test('OI-8 the ₪12,000 laptop — the case that withdrew the rule', () => {
-    // Kept as a live test rather than a comment, because it is the reason the
-    // rule is not here. If a future change makes this degrade, that change has
-    // made the same mistake.
+  test('OI-6b an UNDECLARED wide bucket is unreachable, not permitted', () => {
+    // The fail-closed default, exercised directly rather than inferred from the
+    // table as it happens to stand today. `electronics:headphones` sits BELOW its
+    // parent, so it is undeclared and open; the check below is that the
+    // requirement function keys off the ceiling relationship and not off a
+    // hard-coded list.
+    assert.deepEqual(bucketEntryRequirement('electronics:headphones'), [],
+      'a bucket within its parent needs no declaration');
+    assert.equal(bucketEntryPermitted('electronics:laptop', new Set(['DERIVED', 'BRAND_TEXT', 'PRODUCT_TEXT'])), false,
+      'text classes do not substitute for the OBJECT_CLASS a laptop bucket declares');
+    assert.equal(bucketEntryPermitted('electronics:laptop', new Set(['DERIVED', 'OBJECT_CLASS'])), true);
+    assert.equal(bucketEntryPermitted('electronics:laptop', new Set(['DERIVED', 'ANCHOR'])), true,
+      'a GetWorth catalog row outranks any reading of the photograph');
+  });
+
+  test('OI-7 the priceable cases keep, or correctly lose, their envelopes', () => {
+    // Logitech: `electronics:gaming mouse` sits BELOW the electronics parent, so
+    // nothing is required and nothing changed. This is the non-regression half —
+    // a gate that moved a bucket it had no business moving would show up here.
+    assert.equal(env(LOGITECH).key, 'electronics:gaming mouse');
+    assert.equal(env(LOGITECH).requiresAnchorAboveSoft, false);
+
+    // Louis Vuitton: `beauty` is a top-level bucket, ungated. §7 — the envelope
+    // is NOT widened in this round, and this test does not ask it to be.
+    assert.equal(env(LV).key, 'beauty');
+    assert.equal(env(LV).hard_max, ENVELOPES.beauty.hard_max);
+
+    // LG: `electronics:monitor` is WIDER than electronics (12,000 vs 6,400), so
+    // it declares OBJECT_CLASS. The fixture has a written `subcategory: 'monitor'`
+    // and no classifier, so it correctly falls back to the parent. This is the
+    // change §8 asks for in as many words: recognition succeeding does not
+    // upgrade pricing authority.
+    assert.equal(env(LG).key, 'electronics',
+      'a written subcategory does not open a bucket wider than its parent');
+    // Give it a classifier that actually saw a monitor and the bucket opens.
+    assert.equal(env(LG, CONFIRMED, sawA('Computer monitor')).key, 'electronics:monitor');
+  });
+
+  test('OI-8 the ₪12,000 laptop — the case that withdrew the rule, both directions', () => {
+    // The withdrawn second version degraded this, and that is why it was
+    // withdrawn: V-ENVELOPE-SOFT-01 says in terms that a ₪12,000 laptop is real
+    // and must be FLAGGED, not refused. The rule that replaced it does not have
+    // to choose, because it asks who produced the evidence rather than how
+    // confident anyone was.
     const laptop = { category: 'Electronics', subcategory: 'Laptop', product_type: '', category_confidence: 0.9,
       brand_candidates: [], model_candidates: [], ocr_text: { raw_texts: [] }, visual_features: { condition: 'Good' } };
-    const v = validateQuote({ low: 10000, mid: 12000, high: 14000, currency: 'ILS' },
-      { stage: 'stage2', pre_source: null, anchor: null, model: 'm', recognition: laptop,
-        identity: { brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.8 } });
-    assert.equal(v.action, 'accept', 'a ₪12,000 laptop is real — flag it, do not refuse it');
-    assert.equal(v.metadata.needs_review, true);
+    const vq = (visionData) => validateQuote({ low: 10000, mid: 12000, high: 14000, currency: 'ILS' },
+      { stage: 'pre', pre_source: 'catalog', anchorModelEvidence: true, anchor: null, model: 'm',
+        recognition: laptop, identity: { brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.8 },
+        evidence: deriveEvidence({ recognition: laptop, visionData }).classes });
+
+    // A classifier saw a laptop: priced and flagged, exactly as before.
+    const seen = vq(sawA('Laptop'));
+    assert.equal(seen.action, 'accept', 'a ₪12,000 laptop a classifier SAW is real — flag it, do not refuse it');
+    assert.equal(seen.metadata.needs_review, true);
+    assert.equal(seen.metadata.envelope_key, 'electronics:laptop');
+
+    // Nobody saw anything; the word "Laptop" was written by a stage. The
+    // envelope is electronics and ₪12,000 is out of range. This is the
+    // subcategory-only widening attack, and it is the reason the bucket is gated.
+    const unseen = vq(null);
+    assert.equal(unseen.action, 'degrade');
+    assert.equal(unseen.metadata.envelope_key, 'electronics');
+    assert.match(unseen.metadata.degraded_reason, /V-ENVELOPE-HARD/);
   });
 });
 

@@ -40,6 +40,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { readSource } from './read-source.mjs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PRIMITIVE_MUTANTS, SITE_SCOPES, SITE_GUARDS, NON_SECURITY_SITES } from './sanitizer-mutants.mjs';
@@ -63,8 +64,10 @@ const valueOf = (f) => { const i = argv.indexOf(f); return i === -1 ? null : arg
 const VERBOSE = has('--verbose');
 const filter = valueOf('--filter');
 
-const source = readFileSync(ANALYZE, 'utf8');
-const trustSource = readFileSync(TRUST, 'utf8');
+// N-3. This harness passed on a CRLF checkout only because its two targets
+// happened to be LF on disk — an accident of file history, not a property.
+const source = readSource(ANALYZE);
+const trustSource = readSource(TRUST);
 // Which file a mutant edits. `file: 'trust'` on a mutant selects the second.
 const SOURCE_OF = { analyze: source, trust: trustSource };
 

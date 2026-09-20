@@ -7,7 +7,10 @@
 // are not trusted just because they came from the rescue path.
 //
 // CONTRACT (same as api/_lib/recognition-memory.js): PURE. No I/O, no network,
-// no clock, no process.env, no imports — a function of its arguments only.
+// no clock, no process.env, no IO — a function of its arguments only. The one
+// import below is a PURE sibling holding the category token vocabulary, which
+// api/_lib/category.js must share: two copies of that table agreeing by
+// inspection is the defect this round closed, not a property worth preserving.
 //
 // WHY IT EXISTS (audited 2026-07-30 against api/analyze.js): VERIFICATION_SCHEMA
 // (:452) is declared and never applied — the Stage 2 response is used unchecked
@@ -29,6 +32,8 @@
 // metadata gained `identity_tier`. A stored valuation from version 1 is not
 // comparable to one from version 2, and drift is unmeasurable if both claim
 // the same validator.
+import { names } from './pricing-authority.js';
+
 export const VALIDATOR_VERSION = 2;
 // bump on ANY envelope/threshold change.
 // 2026-08-05.1 — applyTransform now also rejects a post-multiply low <= 0, so a
@@ -208,33 +213,85 @@ function buildEnvelopes() {
 
 export const ENVELOPES = buildEnvelopes();
 
+// ── §6  A CATEGORY IS A WORD, NOT A SUBSTRING  ·  N-4 ──────────────────────
+//
+// THE PROPERTY
+//   A bucket matcher fires because the category NAMES that category, never
+//   because the category happens to CONTAIN those letters.
+//
+// THE FINDING
+// Every matcher below was `cat.includes('…')`. The letters therefore decided
+// the price, and English is full of coincidences:
+//
+//   "Tablet"     contains "table"  -> furniture, hard_max 16,000
+//   "Watchdog"   contains "watch"  -> watches,   hard_max  6,400
+//   "Scorecard"  contains "car"    -> vehicles
+//   "Cardigan"   contains "car"    -> vehicles
+//   "Caravan"    contains "car"    -> vehicles
+//   "Bookcase"   contains "book"   -> books,     hard_max    480
+//
+// An iPad whose category came back "Tablet" was priced under the FURNITURE
+// envelope. CB-12 could not see it, because CB-12 forbids canonicalisation from
+// WIDENING what the raw string already selected — and here the raw string was
+// already wrong, so both sides agreed and the property held over a defect.
+//
+// TOKENS ARE DECLARED, NOT INFERRED. Each token below says how it matches:
+//   'word' — the whole word, tolerating a plural: `table` matches "table" and
+//            "tables", never "tablet"; `watch` matches "watches", never
+//            "watchdog"; `book` matches "books", never "bookcase".
+//   'stem' — a word-INITIAL stem, for the cases where the category name is a
+//            genuine inflection: `electron` must reach "Electronics", `furni`
+//            must reach "Furniture", `jewel` must reach "Jewelry".
+// The mode is written down per token because guessing it is what produced the
+// bug: 'table' and 'electron' look alike and behave completely differently.
+// TOKEN_MODE and `names()` now live in api/_lib/pricing-authority.js, imported
+// below, because api/_lib/category.js needs the SAME predicate. Two tables that
+// agree by inspection is how `/watch/` and `cat.includes(watch)` drifted into
+// disagreeing about "Watchdog" in the first place — and the narrow-only property
+// then reported the disagreement as a safe narrowing rather than as the defect.
+
 // ── Category key matcher ───────────────────────────────────────────────────
 // Ported from getCategoryFallbackPricing (analyze.js:3576-3625), ordered,
 // first match wins. THIS module is the intended single authority for the
 // taxonomy; analyze.js still carries its own copy for the PRE category
 // fallback and should later delegate to resolveEnvelopeKey() so the envelope
 // and the fallback price can never disagree about what an item is.
-function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
-  const cat = (recognition.category || '').toLowerCase();
-  // HIGH-4, RECORDED RATHER THAN FIXED. Every field below except `cat` is Stage
-  // 1 describing the photograph, and ANY of them can carry the identity: a scan
-  // with no candidates at all but `subcategory: 'iphone'` reaches the same
-  // bucket as one naming Apple outright. So the `trustOcr` split below bounds
-  // `raw_texts` and nothing else — the narrow-only guarantee it provides is
-  // narrower than its name suggests, and saying so is the point.
-  const sub = (recognition.subcategory || '').toLowerCase();
-  const pt = (recognition.product_type || '').toLowerCase();
+//
+// `mode` selects how category/subcategory/product_type words are tested:
+//   'token'     — the correct rule (see §6 above).
+//   'substring' — the LEGACY rule, kept solely so resolveEnvelopeKey can prove
+//                 the token rule never WIDENS anything. It is never used on its
+//                 own to choose an envelope.
+// Brand and model patterns (`sig`) are untouched by either mode: those are
+// product names matched by explicit regexes, not category words.
+function resolveEnvelopeKeyFrom(recognition, { trustOcr, mode = 'token' }) {
+  const rawCat = (recognition.category || '').toLowerCase();
+  const rawSub = (recognition.subcategory || '').toLowerCase();
+  const rawPt = (recognition.product_type || '').toLowerCase();
+  const has = mode === 'token'
+    ? (text, token) => names(text, token)
+    : (text, token) => String(text || '').includes(token);
+  const cat = { includes: (t) => has(rawCat, t) };
+  // HIGH-4, RECORDED RATHER THAN FIXED IN ROUND 2 — CLOSED IN ROUND 3 by
+  // BUCKET_AUTHORITY below. Every field here except `cat` is a stage describing
+  // the photograph, and ANY of them can carry the identity: a scan with no
+  // candidates at all but `subcategory: 'iphone'` reaches the same bucket as one
+  // naming Apple outright. The `trustOcr` split bounds `raw_texts` and nothing
+  // else; what bounds the REST is now the evidence requirement each wide bucket
+  // declares, applied in resolveEnvelopeKey.
+  const sub = { includes: (t) => has(rawSub, t) };
+  const pt = { includes: (t) => has(rawPt, t) };
   const mdl = (recognition.model_candidates?.[0]?.model || '').toLowerCase();
   const brnd = (recognition.brand_candidates?.[0]?.brand || '').toLowerCase();
   const ocr = trustOcr ? (recognition.ocr_text?.raw_texts || []).join(' ').toLowerCase() : '';
-  const sig = `${sub} ${pt} ${mdl} ${ocr}`;
+  const sig = `${rawSub} ${rawPt} ${mdl} ${ocr}`;
   const el = cat.includes('electron');
 
   const MATCHERS = [
     ['electronics:iphone',         () => el && (brnd.includes('apple') || sig.includes('iphone'))],
     ['electronics:macbook',        () => el && sig.includes('macbook')],
     ['electronics:ipad',           () => el && sig.includes('ipad')],
-    ['electronics:smartwatch',     () => el && (sig.includes('smartwatch') || /garmin|fitbit|apple watch|galaxy watch/.test(sig))],
+    ['electronics:smartwatch',     () => el && (sub.includes('smartwatch') || /garmin|fitbit|apple watch|galaxy watch/.test(sig))],
     ['electronics:smartphone',     () => el && (sub.includes('phone') || sub.includes('mobile') || sub.includes('smartphone') || pt.includes('smartphone') || /galaxy|pixel|oneplus/.test(sig))],
     ['electronics:cordless phone', () => el && (sig.includes('cordless') || /kx-t|kx-p|dect/.test(sig) || (brnd.includes('panasonic') && sig.includes('phone')))],
     ['electronics:home phone',     () => el && (sig.includes('home phone') || sig.includes('landline') || sig.includes('telephone'))],
@@ -260,8 +317,8 @@ function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
     ['furniture',                  () => cat.includes('furni') || cat.includes('sofa') || cat.includes('chair') || cat.includes('table')],
     ['sports',                     () => cat.includes('sport') || cat.includes('fitness') || cat.includes('outdoor')],
     ['clothing',                   () => cat.includes('cloth') || cat.includes('fashion') || cat.includes('apparel')],
-    ['bags',                       () => cat.includes('bag') || sub.includes('bag') || sub.includes('backpack')],
-    ['jewelry',                    () => cat.includes('jewel') || sub.includes('jewel') || /ring|necklace|bracelet/.test(sub)],
+    ['bags',                       () => cat.includes('bag') || sub.includes('bag') || sub.includes('handbag') || sub.includes('backpack')],
+    ['jewelry',                    () => cat.includes('jewel') || sub.includes('jewel') || /ring|necklace|bracelet/.test(rawSub)],
     ['books',                      () => cat.includes('book')],
     ['toys',                       () => cat.includes('toy') || (cat.includes('game') && !cat.includes('gaming'))],
     ['tools',                      () => cat.includes('tool') || cat.includes('hardware')],
@@ -275,23 +332,198 @@ function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
   return null;
 }
 
+// ── §3  PRICING ENVELOPE AUTHORITY  ·  R2-H2 ───────────────────────────────
+//
+// THE PROPERTY
+//   DERIVED evidence alone may NEVER enter a bucket whose hard_max exceeds its
+//   parent category's hard_max.
+//
+// Twelve buckets exceed their parent. `category` is bounded by an enum;
+// `subcategory`, `product_type` and the candidate arrays are bounded by nothing,
+// and any one of them selects a bucket. So with zero identity evidence:
+//
+//   subcategory: (none)    -> electronics         6,400   ₪20,000 refused
+//   subcategory: 'laptop'  -> electronics:laptop 24,000   ₪20,000 ACCEPTED
+//
+// EACH BUCKET DECLARES WHAT IT COSTS TO ENTER, because the financial
+// consequence differs per bucket: entering `electronics:laptop` wrongly costs a
+// ₪24,000 ceiling, entering `watches:luxury` wrongly costs ₪250,000. A single
+// global threshold would have to be set for the worst case and would then
+// refuse every legitimate laptop — which is precisely how the two previous
+// attempts at this rule failed.
+//
+// WHAT IS NOT HERE. No confidence value, and no reading of the `evidence`
+// string the model writes about itself. The classes are established by
+// provenance in api/_lib/pricing-authority.js: OBJECT_CLASS is a classifier's
+// verdict, BRAND_TEXT/PRODUCT_TEXT require the name to actually OCCUR in the
+// text read off the item. See that module for why each is attacker-reachable or
+// not.
+//
+// ANCHOR SATISFIES EVERY BUCKET. A compatible GetWorth catalog row is data we
+// hold, not an interpretation of the photograph, and it is strictly stronger
+// than any signal in the image. It is also moot in practice: with an anchor
+// present `resolveEnvelope` uses the anchor-relative bounds instead of the
+// bucket's. Declared explicitly so the reason is on the record.
+const BUCKET_AUTHORITY = Object.freeze({
+  // A classifier must have said "laptop"/"television"/"camera" — a written
+  // subcategory is not enough, because a written subcategory is what the attack
+  // consists of.
+  'electronics:laptop':         ['OBJECT_CLASS'],
+  'electronics:tv':             ['OBJECT_CLASS'],
+  'electronics:camera':         ['OBJECT_CLASS'],
+  'electronics:monitor':        ['OBJECT_CLASS'],
+  'electronics:drone':          ['OBJECT_CLASS'],
+  'electronics:gaming console': ['OBJECT_CLASS'],
+  'electronics:smartphone':     ['OBJECT_CLASS'],
+  'electronics:smartwatch':     ['OBJECT_CLASS'],
+  'electronics:tablet':         ['OBJECT_CLASS'],
+  // The Apple buckets carry the highest electronics ceilings (24,000 / 40,000),
+  // and their matchers fire on a single word — `sig.includes('macbook')` is
+  // satisfied by OCR, by a subcategory, or by a model candidate. Object class
+  // AND a brand actually read off the item.
+  'electronics:iphone':         ['OBJECT_CLASS', 'BRAND_TEXT'],
+  'electronics:macbook':        ['OBJECT_CLASS', 'BRAND_TEXT'],
+  'electronics:ipad':           ['OBJECT_CLASS', 'BRAND_TEXT'],
+  // ₪250,000, and the single most-hallucinated category in the system. Both
+  // text classes: the brand AND a product string must have been read off the
+  // item. requiresAnchorAboveSoft still applies on top, unchanged.
+  'watches:luxury':             ['BRAND_TEXT', 'PRODUCT_TEXT'],
+});
+
+/** `'electronics:laptop'` -> `'electronics'`; a top-level key -> null. */
+function parentKey(key) {
+  const i = typeof key === 'string' ? key.indexOf(':') : -1;
+  return i === -1 ? null : key.slice(0, i);
+}
+
+// A requirement no evidence set can satisfy. A distinct ARRAY IDENTITY, not a
+// string anyone could pass in as an evidence class: `req === UNSATISFIABLE` is
+// an identity test, so no caller can construct a value that accidentally
+// satisfies or spoofs it.
+const UNSATISFIABLE = Object.freeze(['<unsatisfiable>']);
+
+/**
+ * What must be true to enter `key`.
+ *
+ * FAIL-CLOSED BY CONSTRUCTION, and this is the part the previous round claimed
+ * and did not have. A bucket that exceeds its parent's ceiling and is NOT
+ * declared above returns UNSATISFIABLE — it can never be entered, so adding a
+ * wide bucket tomorrow without declaring its evidence does not silently inherit
+ * permission; it becomes unreachable and its own test fails. The alternative,
+ * defaulting undeclared buckets to "no requirement", is how every previous
+ * version of this rule leaked.
+ */
+// `table` exists so the UNSATISFIABLE branch is REACHABLE.
+//
+// A mutation run replaced that branch with `return []` and the mutant SURVIVED —
+// because every bucket that currently exceeds its parent is declared in
+// BUCKET_AUTHORITY, so the fail-closed default had no input in the real table.
+// It was the fifth "rule with no reachable input" in this work, and it was the
+// one rule whose entire job is to catch a bucket somebody adds tomorrow.
+//
+// A test can now build a synthetic table containing an undeclared wide bucket
+// and observe the refusal. That is the only honest way to verify a default whose
+// purpose is to handle a case that does not exist yet: the alternative is adding
+// a dead bucket to production so a test has something to look at.
+export function bucketEntryRequirement(key, table = ENVELOPES) {
+  if (!key) return [];
+  if (BUCKET_AUTHORITY[key]) return BUCKET_AUTHORITY[key];
+  const parent = parentKey(key);
+  if (!parent) return [];
+  const self = table[key], up = table[parent];
+  if (!self || !up) return [];
+  return self.hard_max > up.hard_max ? UNSATISFIABLE : [];
+}
+
+const DERIVED_ONLY = Object.freeze(new Set(['DERIVED']));
+
+function asEvidenceSet(evidence) {
+  if (evidence instanceof Set) return evidence;
+  if (Array.isArray(evidence)) return new Set(evidence);
+  return DERIVED_ONLY;
+}
+
+/** An evidence set as a stable, serialisable, sorted array. */
+function evidenceNames(evidence) {
+  const have = asEvidenceSet(evidence);
+  return ['ANCHOR', 'OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT', 'DERIVED'].filter((c) => have.has(c));
+}
+
+/** Does this evidence set satisfy `key`'s entry requirement? */
+export function bucketEntryPermitted(key, evidence, table = ENVELOPES) {
+  const req = bucketEntryRequirement(key, table);
+  if (req === UNSATISFIABLE) return false;
+  if (req.length === 0) return true;
+  const have = asEvidenceSet(evidence);
+  if (have.has('ANCHOR')) return true;
+  return req.every((c) => have.has(c));
+}
+
+/**
+ * The bucket this evidence is actually entitled to.
+ *
+ * FALLS BACK TO THE PARENT, never forward and never to GLOBAL_ENVELOPE. A
+ * laptop the classifier did not see is still electronics; it is not suddenly
+ * unbounded. `null` in, `null` out.
+ */
+function applyBucketAuthority(key, evidence) {
+  let k = key;
+  while (k) {
+    if (bucketEntryPermitted(k, evidence)) return k;
+    k = parentKey(k);
+  }
+  return null;
+}
+
+// A null key is NOT "the loosest envelope": resolveEnvelope maps it to
+// MANUAL_ONLY for a non-confirmed identity, and the CATEGORY_ONLY rule refuses
+// to price on it at all. Using GLOBAL_ENVELOPE's 500,000 here was a real defect
+// in the first version of the OCR comparison — every real bucket looked narrower
+// than "no bucket" and was therefore accepted.
+function ceilingOf(k) {
+  if (!k) return MANUAL_ONLY.hard_max;
+  const e = ENVELOPES[k];
+  return e ? e.hard_max : MANUAL_ONLY.hard_max;
+}
+
+/**
+ * The §6 narrow-only floor: the token rule may correct a bucket, never widen it.
+ *
+ * "Bookcase" names no category under the token rule, and no bucket means
+ * MANUAL_ONLY's 2,000 — ABOVE the books ceiling of 480 the substring rule gave
+ * it. So a pure token swap would have widened three buckets while fixing six.
+ * Resolving both ways and keeping the lower ceiling makes "only narrow or
+ * preserve" true by construction rather than by inspection:
+ *
+ *   Tablet     token electronics:tablet 12,000  legacy furniture 16,000 -> tablet
+ *   Watchdog   token (none)              2,000  legacy watches    6,400 -> none
+ *   Bookcase   token (none)              2,000  legacy books        480 -> books
+ *
+ * Ties keep the TOKEN key: a same-ceiling bucket that names the item correctly
+ * is a better description at no extra permission.
+ */
+function resolveRawKey(recognition, { trustOcr }) {
+  const tokenKey = resolveEnvelopeKeyFrom(recognition, { trustOcr, mode: 'token' });
+  const legacyKey = resolveEnvelopeKeyFrom(recognition, { trustOcr, mode: 'substring' });
+  if (tokenKey === legacyKey) return tokenKey;
+  return ceilingOf(tokenKey) <= ceilingOf(legacyKey) ? tokenKey : legacyKey;
+}
+
 /**
  * Which pricing envelope governs this item — with PHOTOGRAPHED TEXT ALLOWED TO
- * NARROW THE ANSWER, NEVER TO WIDEN IT.
+ * NARROW THE ANSWER, NEVER TO WIDEN IT, and with every bucket above its parent's
+ * ceiling gated on the evidence it declares.
  *
  * `sig` used to include `ocr_text.raw_texts` unconditionally, so a string a
- * person PRINTS ON A STICKER selected the constraint that governs its own
- * price. Writing "macbook" on any electronics item moved the ceiling from
- * electronics (or global) to `electronics:macbook`, hard_max 40,000 — the
- * attacker choosing the ruler they are measured against. The photographed
- * label is the least trustworthy input in the pipeline and it had the most
- * leverage over the guard.
+ * person PRINTS ON A STICKER selected the constraint that governs its own price.
+ * Writing "macbook" on any electronics item moved the ceiling from electronics
+ * (or global) to `electronics:macbook`, hard_max 40,000 — the attacker choosing
+ * the ruler they are measured against.
  *
  * It is not simply removed, because OCR is genuinely the best evidence for
  * several buckets: `kx-t`/`dect` is how a cordless phone is recognised at all,
  * and those buckets are TIGHTER than the category they sit in. Removing OCR
- * would push real items into looser envelopes, which is the same inversion in
- * the other direction.
+ * would push real items into looser envelopes — the same inversion, mirrored.
  *
  * So both keys are resolved and the SAFER one wins:
  *   - resolve from trusted signals only (category / subcategory / product_type
@@ -299,82 +531,43 @@ function resolveEnvelopeKeyFrom(recognition, { trustOcr }) {
  *   - resolve again with OCR included
  *   - take the OCR-influenced key ONLY when it does not raise hard_max
  *
- * Same doctrine the rest of this module already applies to comparables and to
- * anchors: untrusted evidence may tighten a bound, never relax one.
+ * THEN the bucket authority runs, because narrowing-from-OCR and
+ * entitled-to-the-bucket are different questions and answering them in one step
+ * is what the two withdrawn versions of this rule tried to do.
+ *
+ * `evidence` is a Set or array of class names from
+ * api/_lib/pricing-authority.js. THE DEFAULT IS DERIVED ONLY — a caller that
+ * passes nothing gets no access to any bucket above its parent, which is the
+ * fail-closed direction.
  */
-export function resolveEnvelopeKey(recognition = {}) {
-  const trustedKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: false });
-  const ocrKey = resolveEnvelopeKeyFrom(recognition, { trustOcr: true });
-  if (ocrKey === trustedKey) return trustedKey;
+export function resolveEnvelopeKey(recognition = {}, evidence = DERIVED_ONLY) {
+  const trustedKey = resolveRawKey(recognition, { trustOcr: false });
+  const ocrKey = resolveRawKey(recognition, { trustOcr: true });
 
-  // OCR MAY NARROW A BUCKET. IT MAY NOT CONJURE ONE.
-  //
-  // The first version compared ceilings and kept the lower, treating a null key
-  // as GLOBAL_ENVELOPE's 500,000 — so ANY real bucket looked narrower and was
-  // accepted. But a null key does not mean "the loosest envelope": for a
-  // non-confirmed identity `resolveEnvelope` maps it to MANUAL_ONLY (2,000),
-  // and the CATEGORY_ONLY rule refuses to price on it at all. So the two
-  // disagreed, and "strictly narrowing" was false exactly where it mattered.
-  //
-  // Reproduced: category "Kitchen", confidence 0.9, no brand, no model. With no
-  // OCR the scan is REFUSED (no bucket, nothing to price from). Print
-  // "DELONGHI ESPRESSO" on it and the same scan resolves to
-  // home:kitchen appliance and is ACCEPTED at ₪2,500 — a refusal converted into
-  // a price by a sticker, which is the whole attack this function exists to
-  // stop, in its purest form.
-  if (trustedKey === null) return null;
-
-  const ceiling = (k) => {
-    if (!k) return GLOBAL_ENVELOPE.hard_max;      // no bucket -> the loosest
-    const e = ENVELOPES[k];
-    return e ? e.hard_max : GLOBAL_ENVELOPE.hard_max;
-  };
+  // Reproduced, and the reason the null case is special-cased: category
+  // "Kitchen", confidence 0.9, no brand, no model. With no OCR the scan is
+  // REFUSED (no bucket, nothing to price from). Print "DELONGHI ESPRESSO" on it
+  // and the same scan resolves to home:kitchen appliance and is ACCEPTED at
+  // ₪2,500 — a refusal converted into a price by a sticker, which is the whole
+  // attack this function exists to stop, in its purest form.
+  let key;
+  if (trustedKey === null) key = null;
+  else if (ocrKey === trustedKey) key = trustedKey;
   // Strictly narrowing only. Equal ceilings keep the OCR key, because a
   // same-ceiling bucket is a more specific description at no extra permission.
-  return ceiling(ocrKey) <= ceiling(trustedKey) ? ocrKey : trustedKey;
+  else key = ceilingOf(ocrKey) <= ceilingOf(trustedKey) ? ocrKey : trustedKey;
+
+  return applyBucketAuthority(key, evidence);
 }
 
-// ── HIGH-4, ENVELOPE HALF: WITHDRAWN, AND WHY ─────────────────────────
-//
-// This round shipped a derived rule here: a bucket looser than the one some
-// baseline signal selects is an "escalation", and everything above its soft_max
-// then needs a catalog anchor. It was wrong twice, and the second failure is the
-// instructive one.
-//
-// FIRST VERSION — baseline = candidates whose `evidence` string named shape
-// rather than text. Defeated by relabelling: `evidence: 'readable_text'`
-// required an anchor, `evidence: 'shape_only'` did not, on an otherwise
-// identical scan. The rule handed WIDER permission to the WEAKER evidence
-// class, on the strength of a free-form string the model writes about its own
-// reasoning — the exact circularity SCAN-017 in api/analyze.js already rejected
-// for confidence. Also defeated by moving the identity from `brand_candidates`
-// into `subcategory: 'iphone'`, which every pass read unconditionally.
-//
-// SECOND VERSION — baseline = the canonical category alone, the one field that
-// is enum-constrained and not a free-form description of the photograph. That
-// closes both defeats. It also degrades a ₪12,000 laptop, because
-// `electronics:laptop` allows soft 7,500 against `electronics` 2,000/6,400 —
-// and V-ENVELOPE-SOFT-01 says in terms that a ₪12,000 laptop is real and must be
-// FLAGGED, not refused.
-//
-// THE REASON NO THIRD VERSION FOLLOWS. Specific buckets are looser than their
-// category parents by design, and four of them sit above their parent's hard
-// ceiling: iphone 7,500, laptop 7,500, macbook 12,500, watches:luxury 40,000.
-// A laptop legitimately exceeds what "Electronics" alone allows, and a watch
-// with ROLEX printed on it claims to. NOTHING in the recognition distinguishes
-// them: `subcategory` is the legitimate route to a specific bucket AND is
-// itself derived from the image. Any threshold that separates the two is a
-// number chosen to make the laptop pass, which is a pricing decision.
-//
-// So the correct fix is NOT a derived rule. It is `requiresAnchorAboveSoft`
-// set per bucket in ENVELOPES, reviewed one bucket at a time against the real
-// market — exactly as `watches:luxury` already has it, which is why the review
-// rated the Rolex witness HIGH and not CRITICAL: it is bounded at 40,000
-// without a catalog row today. That is a pricing change, this round forbids
-// pricing changes, and shipping a rule that is both defeatable and regressive
-// is worse than recording the gap.
-//
-// RECORDED AS OPEN. See docs/GW-OPENAI-INTELLIGENCE-002-PHASE3-REV4.md §4d.
+/** The bucket the matchers chose, BEFORE authority — provenance, not a price. */
+export function resolveEnvelopeKeyUngated(recognition = {}) {
+  const trustedKey = resolveRawKey(recognition, { trustOcr: false });
+  if (trustedKey === null) return null;
+  const ocrKey = resolveRawKey(recognition, { trustOcr: true });
+  if (ocrKey === trustedKey) return trustedKey;
+  return ceilingOf(ocrKey) <= ceilingOf(trustedKey) ? ocrKey : trustedKey;
+}
 
 
 // ctx.anchor — a catalog row the CALLER has already confirmed compatible via
@@ -621,7 +814,7 @@ export function resolveEnvelope(ctx = {}) {
       requiresAnchorAboveSoft: false,
     };
   }
-  const key = ctx.envelope_key ?? resolveEnvelopeKey(ctx.recognition || {});
+  const key = ctx.envelope_key ?? resolveEnvelopeKey(ctx.recognition || {}, ctx.evidence);
   const env = key ? ENVELOPES[key] : null;
   if (!env) {
     // ── THE GLOBAL-ENVELOPE INVERSION, CLOSED ────────────────────────────────
@@ -714,6 +907,226 @@ export function derivePricingSource(ctx = {}) {
   // An unrecognised stage means the caller is a code path this module has never
   // been reasoned about. That is the definition of unknown.
   return { source: 'unknown', grade: 'MANUAL_REQUIRED' };
+}
+
+
+// ── §4  CATEGORY AUTHORITY  ·  R2-H3 ───────────────────────────────────────
+//
+// THE PROPERTY
+//   A later stage may CORRECT what we believe the item is. It may not, by
+//   returning a different string, choose a larger price ceiling.
+//
+// THE FINDING, AND THE HALF-FIX THAT PRECEDED THIS
+// For one commit `gctx.recognition` read
+//   `{ ...recognition, category: verification.final_category || recognition.category }`
+// so Stage 2 — the stage whose prompt carries OCR raw_texts, Vision labels,
+// catalog rows and the user's refineModel — chose its own envelope:
+//
+//   paperback, Stage 1 Books (hard 480), Stage 2 asking 4,000
+//     final_category Books        -> books        MANUAL_REQUIRED
+//     final_category Electronics  -> electronics  LOW      4,000
+//     final_category Furniture    -> furniture    MEDIUM   4,000
+//
+// That line was reverted, which closed the widening and opened something else:
+// the envelope then came from Stage 1 forever, so a WRONG Stage 1 became
+// permanent, and the client was still shown Stage 2's label. A displayed
+// category that disagrees with the priced one is a lie in the direction nobody
+// checks.
+//
+// FOUR NAMES, BECAUSE THEY ARE FOUR DIFFERENT QUESTIONS
+//   display_category        what the UI may show.
+//   recognition_category    our best current belief about what this is.
+//   pricing_category        the ONLY category allowed to choose an envelope.
+//   pricing_envelope_source why that category has that authority.
+//
+// THE TRANSITION RULE IS MONOTONE IN CEILINGS, NOT IN TRUST
+//   NARROWING     new hard_max <= incumbent  -> always allowed, no evidence
+//                 needed. Being more careful costs nothing.
+//   WIDENING      new hard_max >  incumbent  -> requires a NEW EVIDENCE
+//                 ARTEFACT: ANCHOR or OBJECT_CLASS. A different category STRING
+//                 is not new evidence, which is the entire finding.
+//   DISAGREEMENT  widening without that evidence -> pricing_category is
+//                 UNCHANGED, display_category may still move, the disagreement
+//                 is RECORDED, and the valuation becomes MANUAL_REQUIRED.
+//
+// Rule C is the part that took two rounds to get right. The tempting answers
+// are "trust the later string" (the CRITICAL) and "keep pricing on Stage 1
+// silently" (the reopened finding). Both ship a number. The honest answer is
+// that two stages disagreeing about what an object IS means nobody should be
+// quoted a price for it, so the disagreement is surfaced instead of resolved.
+//
+// WHY BRAND_TEXT AND PRODUCT_TEXT DO NOT WIDEN A CATEGORY. A brand name printed
+// on a book jacket is genuinely read off the item and says nothing whatever
+// about whether the object is a book or a laptop. Only a classifier's verdict
+// about the OBJECT (OBJECT_CLASS) or GetWorth's own catalog row (ANCHOR) speaks
+// to that question. They can still fail to be enough: the widened bucket must
+// ALSO pass its own BUCKET_AUTHORITY check, which is what makes the two rules
+// compose instead of overriding each other.
+export const CATEGORY_WIDENING_EVIDENCE = Object.freeze(['ANCHOR', 'OBJECT_CLASS']);
+
+export const ENVELOPE_SOURCE = Object.freeze({
+  STAGE1: 'stage1',
+  STAGE2_NARROWING: 'stage2_narrowing',
+  STAGE2_EVIDENCED: 'stage2_widening_evidenced',
+  STAGE1_HELD_ON_DISAGREEMENT: 'stage1_held_on_disagreement',
+});
+
+/**
+ * Decide the four categories and the provenance of the pricing one.
+ *
+ * `stage1` and `stage2` are recognition-shaped: only `category` is read from
+ * `stage2`, and every other field used to resolve a bucket keeps coming from
+ * `stage1`. That is deliberate — allowing Stage 2 to also supply `subcategory`
+ * would reopen the widening through a different field, which is exactly how the
+ * first version of the envelope rule was defeated.
+ *
+ * Pure: no throw for any input shape, and `category_disagreement` is the only
+ * output that changes a verdict.
+ */
+export function resolveCategoryAuthority({ stage1 = {}, stage2 = null, evidence = DERIVED_ONLY } = {}) {
+  const s1 = (stage1 && typeof stage1 === 'object' && !Array.isArray(stage1)) ? stage1 : {};
+  const s2cat = (stage2 && typeof stage2 === 'object' && !Array.isArray(stage2))
+    ? stage2.category : null;
+  const have = asEvidenceSet(evidence);
+
+  const incumbentKey = resolveEnvelopeKey(s1, have);
+  const s1cat = s1.category ?? null;
+  const out = {
+    display_category: s1cat,
+    recognition_category: s1cat,
+    pricing_category: s1cat,
+    pricing_envelope_key: incumbentKey,
+    pricing_envelope_source: ENVELOPE_SOURCE.STAGE1,
+    category_disagreement: false,
+  };
+
+  if (typeof s2cat !== 'string' || !s2cat.trim()) return out;
+  out.display_category = s2cat;
+  out.recognition_category = s2cat;
+  if (String(s2cat).toLowerCase() === String(s1cat ?? '').toLowerCase()) return out;
+
+  const laterKey = resolveEnvelopeKey({ ...s1, category: s2cat }, have);
+
+  if (ceilingOf(laterKey) <= ceilingOf(incumbentKey)) {
+    out.pricing_category = s2cat;
+    out.pricing_envelope_key = laterKey;
+    out.pricing_envelope_source = ENVELOPE_SOURCE.STAGE2_NARROWING;
+    return out;
+  }
+
+  if (CATEGORY_WIDENING_EVIDENCE.some((c) => have.has(c))) {
+    out.pricing_category = s2cat;
+    out.pricing_envelope_key = laterKey;
+    out.pricing_envelope_source = ENVELOPE_SOURCE.STAGE2_EVIDENCED;
+    return out;
+  }
+
+  // The paperback. Stage 1 says Books, Stage 2 says Electronics, and nothing
+  // new was seen. We do not price it as Electronics, and we do not quietly
+  // price it as Books under an "Electronics" label either.
+  out.pricing_envelope_source = ENVELOPE_SOURCE.STAGE1_HELD_ON_DISAGREEMENT;
+  out.category_disagreement = true;
+  return out;
+}
+
+// ── §5  RECOGNITION AND VALUATION ARE TWO VERDICTS  ·  R2-H5 ───────────────
+//
+// THE PROPERTY
+//   Knowing WHAT an item is does not establish WHAT IT IS WORTH. A strong
+//   identity must not, by itself, authorise a price.
+//
+// THE FINDING
+// `derivePricingSource` returned `{ source:'stage2_ai', grade:'MEDIUM' }` for
+// any Stage-2 result without a catalog anchor. So a real scan of a real product
+// GetWorth had never seen:
+//
+//   Ninja Detect Power Blender Pro, brand 0.94 read off the item,
+//   model 0.88 read off the item, no catalog row
+//     -> identity EXACT_MODEL, and ACCEPT ₪400 graded MEDIUM, source stage2_ai
+//
+// ₪400 is a number the model wrote down. Nothing measured it, nothing compared
+// it to anything, and the user sees it in the same shape, with a better grade,
+// than a price backed by an actual catalog row. There was no state in the system
+// meaning "we know what this is and we do not yet know what it costs", so the
+// pipeline had nowhere to put the truth and put a guess there instead.
+//
+// THE DATABASE IS EVIDENCE AND MEMORY, NOT A WHITELIST. An item absent from the
+// catalog is not unrecognisable and must not be treated as unrecognised. It is
+// un-PRICED. Those are different sentences and now they are different fields.
+//
+// PENDING_MARKET is the state /api/enrich will resolve. It is deliberately NOT
+// the same as MANUAL: MANUAL means a human has to decide, PENDING_MARKET means
+// market research has to run and we already know exactly what to research.
+// Phase B is NOT built here; this round only makes the state exist so Phase B
+// has something to resolve instead of a price it has to argue with.
+export const RECOGNITION_VERDICT = Object.freeze({
+  IDENTIFIED: 'IDENTIFIED',
+  FAMILY: 'FAMILY',
+  CATEGORY: 'CATEGORY',
+  UNKNOWN: 'UNKNOWN',
+});
+
+export const VALUATION_VERDICT = Object.freeze({
+  ANCHORED: 'ANCHORED',
+  BOUNDED: 'BOUNDED',
+  PENDING_MARKET: 'PENDING_MARKET',
+  MANUAL: 'MANUAL',
+});
+
+// Five identity tiers, four recognition verdicts. BRAND_ONLY folds into FAMILY
+// because both mean "we know the maker and not the product", which is the same
+// thing to say to a user and the same thing to hand to Phase B.
+const TIER_TO_RECOGNITION = Object.freeze({
+  [IDENTITY_TIER.EXACT_MODEL]: RECOGNITION_VERDICT.IDENTIFIED,
+  [IDENTITY_TIER.FAMILY]: RECOGNITION_VERDICT.FAMILY,
+  [IDENTITY_TIER.BRAND_ONLY]: RECOGNITION_VERDICT.FAMILY,
+  [IDENTITY_TIER.CATEGORY_ONLY]: RECOGNITION_VERDICT.CATEGORY,
+  [IDENTITY_TIER.UNIDENTIFIED]: RECOGNITION_VERDICT.UNKNOWN,
+});
+
+/** What we believe this item IS. Reads identity evidence only — never a price. */
+export function resolveRecognitionVerdict(ctx = {}) {
+  return TIER_TO_RECOGNITION[resolveIdentityTier(ctx)] || RECOGNITION_VERDICT.UNKNOWN;
+}
+
+/** Recognition verdicts that name a PRODUCT rather than a kind of thing. */
+const PRODUCT_LEVEL = new Set([RECOGNITION_VERDICT.IDENTIFIED, RECOGNITION_VERDICT.FAMILY]);
+
+/** Pricing sources whose number is GetWorth-held evidence rather than a guess. */
+const ANCHORED_SOURCES = new Set(['pre_catalog', 'stage2_comp_anchored']);
+
+/**
+ * What we are entitled to SAY about the price.
+ *
+ *   ANCHORED        a GetWorth-held catalog/retail reference governs the number.
+ *   BOUNDED         no product-level identity, but the CATEGORY is one we hold
+ *                   price evidence for, and the envelope bounds the answer. An
+ *                   honest "this kind of thing costs about this much".
+ *   PENDING_MARKET  we know what the product is and hold nothing that prices it.
+ *                   Phase B resolves this. NO NUMBER SHIPS.
+ *   MANUAL          neither identified nor bounded; a person decides.
+ *
+ * The asymmetry is intentional and is the point of the whole round: better
+ * recognition moves you from BOUNDED to PENDING_MARKET, i.e. from a category
+ * guess to an honest refusal, not to a better-looking number. A product-level
+ * claim requires product-level evidence.
+ */
+export function resolveValuationVerdict(ctx = {}) {
+  const derived = derivePricingSource(ctx);
+  if (derived.grade === 'MANUAL_REQUIRED') return VALUATION_VERDICT.MANUAL;
+  if (ctx.category_disagreement === true) return VALUATION_VERDICT.MANUAL;
+
+  const have = asEvidenceSet(ctx.evidence);
+  if (ctx.anchor || have.has('ANCHOR') || ANCHORED_SOURCES.has(derived.source)) {
+    return VALUATION_VERDICT.ANCHORED;
+  }
+
+  const rec = resolveRecognitionVerdict(ctx);
+  if (PRODUCT_LEVEL.has(rec)) return VALUATION_VERDICT.PENDING_MARKET;
+  if (rec === RECOGNITION_VERDICT.CATEGORY && resolveEnvelopeKey(ctx.recognition || {}, have) !== null) {
+    return VALUATION_VERDICT.BOUNDED;
+  }
+  return VALUATION_VERDICT.MANUAL;
 }
 
 // ── Spread limits (from the prompt's own rules, analyze.js:680-681) ────────
@@ -810,7 +1223,14 @@ export function validateQuote(rawQuote, ctx = {}) {
       prices: { ...ZERO },
       repairs,
       violations,
-      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true, degraded_reason: `${rule}: ${detail}` },
+      // A DEGRADED SCAN IS NOT BOUNDED. The verdicts are computed on `base`
+      // before the numeric rules run, so a quote that then fails an envelope
+      // or ordering check would otherwise still report valuation_verdict
+      // BOUNDED beside a refusal. Recognition survives a refusal; valuation
+      // authority does not.
+      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,
+        valuation_verdict: VALUATION_VERDICT.MANUAL,
+        degraded_reason: `${rule}: ${detail}` },
     });
   };
 
@@ -932,6 +1352,14 @@ export function validateQuote(rawQuote, ctx = {}) {
 
   const identityTier = resolveIdentityTier(ctx);
   base.identity_tier = identityTier;
+  // TWO VERDICTS, ALWAYS BOTH RECORDED. They are computed here rather than at
+  // each exit so that a refusal still carries what we DID establish: a scan we
+  // cannot price is not a scan we failed to recognise, and the record has to be
+  // able to say so. See RECOGNITION_VERDICT / VALUATION_VERDICT above.
+  base.recognition_verdict = resolveRecognitionVerdict(ctx);
+  base.valuation_verdict = resolveValuationVerdict(ctx);
+  base.evidence = evidenceNames(ctx.evidence);
+  base.pricing_envelope_source = ctx.pricing_envelope_source ?? null;
   if (!PRICEABLE_TIERS.has(identityTier)) {
     return degrade('V-IDENTITY-FLOOR',
       `identity tier ${identityTier} cannot carry a product-specific price ` +
@@ -957,10 +1385,28 @@ export function validateQuote(rawQuote, ctx = {}) {
   // cleanly. The caller may choose which envelope BOUNDS a price; it may not
   // choose the evidence that decides whether there is a price at all.
   if (identityTier === IDENTITY_TIER.CATEGORY_ONLY
-      && resolveEnvelopeKey(ctx.recognition || {}) === null) {
+      && resolveEnvelopeKey(ctx.recognition || {}, ctx.evidence) === null) {
     return degrade('V-IDENTITY-FLOOR',
       `category-only identity in "${ctx.recognition?.category ?? 'unknown'}", which matches no priced ` +
       'category bucket — there is no evidence to price from');
+  }
+
+  // ── V-CATEGORY-DISAGREEMENT  ·  §4 ────────────────────────────────────────
+  //
+  // Two stages disagree about what the object IS, and nothing new was seen that
+  // would settle it. `resolveCategoryAuthority` has already refused to move the
+  // pricing category; this refuses to ship a number under either label.
+  //
+  // Pricing on Stage 1 while DISPLAYING Stage 2 is the failure mode that made
+  // the original defect invisible — the envelope and the caption came from
+  // different sentences and no test compared them. A user shown "Electronics"
+  // and quoted a Books-bounded number has been told two things, one of which is
+  // false, and cannot tell which.
+  if (ctx.category_disagreement === true) {
+    return degrade('V-CATEGORY-DISAGREEMENT',
+      `stage categories disagree (pricing="${ctx.pricing_category ?? 'unknown'}", ` +
+      `display="${ctx.display_category ?? 'unknown'}") and no ANCHOR or OBJECT_CLASS ` +
+      'evidence justifies the wider envelope — the item is not priced under either label');
   }
 
   let mid = Math.round(q.mid);
@@ -1092,6 +1538,50 @@ export function validateQuote(rawQuote, ctx = {}) {
     return degrade('V-ENVELOPE-BAND',
       `displayed high ${high} > hard_max ${env.hard_max} (${env.key}/${env.basis}) — ` +
       'the whole displayed distribution must fit the envelope, not just mid');
+  }
+
+  // ── V-MARKET-EVIDENCE  ·  §5 ─────────────────────────────────────────────
+  //
+  // A PRODUCT-LEVEL IDENTITY REQUIRES PRODUCT-LEVEL PRICE EVIDENCE.
+  //
+  // This is the rule that stops `stage2_ai` from masquerading as a valuation.
+  // The Ninja witness: brand and model both READ OFF THE ITEM, EXACT_MODEL
+  // identity, no catalog row anywhere in GetWorth — and the old code returned
+  // ACCEPT ₪400 graded MEDIUM. The number came from the model. Nothing measured
+  // it, and it was displayed in the same shape as an anchored price.
+  //
+  // PENDING_MARKET IS NOT A FAILURE. `action` is `pending`, not `degrade`, and
+  // the identity survives in the metadata for /api/enrich to research. The
+  // prices are zeroed and `degraded` is set true so that every EXISTING consumer
+  // — all of which test `action === 'accept'` or read `degraded` — refuses the
+  // number without being taught a new state first. A new state that old callers
+  // silently treat as priced would be worse than the defect it replaces.
+  //
+  // Note the direction: this fires BECAUSE recognition succeeded. A weaker,
+  // category-only identity still prices as BOUNDED, because a category estimate
+  // that is labelled a category estimate is honest. What is not honest is a
+  // product-specific number with no product-specific evidence.
+  if (base.valuation_verdict === VALUATION_VERDICT.PENDING_MARKET) {
+    violations.push({
+      rule: 'V-MARKET-EVIDENCE',
+      detail: `recognition_verdict=${base.recognition_verdict} with pricing source ` +
+        `${derived.source} and no anchor — GetWorth holds no market evidence for this ` +
+        'product, so no price is issued. Resolvable by /api/enrich (NOT BUILT).',
+    });
+    return verdict({
+      action: 'pending',
+      prices: { ...ZERO },
+      repairs,
+      violations,
+      meta: {
+        ...base,
+        pricing_grade: 'MANUAL_REQUIRED',
+        pricing_status: MANUAL_REQUIRED_STATUS,
+        degraded: true,
+        degraded_reason: 'V-MARKET-EVIDENCE: market evidence pending',
+        needs_review: false,
+      },
+    });
   }
 
   return verdict({

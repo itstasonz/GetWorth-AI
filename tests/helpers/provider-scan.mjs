@@ -155,6 +155,60 @@ export function lex(src) {
   return { strings, code: out.join('') };
 }
 
+// -- §2  ONE DECLARED SOURCE OF TRUTH FOR "WHAT REACHES THE NETWORK" ---------
+//
+// N-2. The target scan recognised exactly three call shapes, and the RUNTIME
+// layer patches `globalThis.fetch` and nothing else. So a provider reached
+// through any other transport was invisible to BOTH layers, which is the one
+// thing the security invariant forbids outright. Reproduced:
+//
+//   import https from 'node:https';
+//   export function f(o) { https.request(o); }    STATIC: nothing  RUNTIME: nothing
+//
+// A literal host in an options object has no `//` either, so even that case is
+// invisible: `{ host: 'api.vendor.example' }` carries no scheme for the literal
+// scan to anchor on.
+//
+// Static analysis cannot be made complete and this does not pretend to. It makes
+// the INCOMPLETENESS FAIL CLOSED: the entrypoints this scanner can follow are
+// declared, the transports it cannot are declared, and importing one of the
+// latter is a finding REPORTED BY NAME rather than a silent pass. Adding a
+// transport then costs either teaching the scanner to follow it or removing it
+// from the list deliberately -- which is the point. A guard whose blind spots
+// are enumerated is a guard; one whose blind spots are unknown is a decoration.
+export const NETWORK_ENTRYPOINTS = Object.freeze(['fetch', 'fetchWithRetry', 'new URL']);
+
+const ENTRYPOINT_CALL = /\b(?:new\s+URL|fetch|fetchWithRetry)\s*\(/;
+
+// Routes to the network whose DESTINATIONS this verification layer cannot see.
+// Not a judgement about the libraries -- `undici` is what `fetch` is built on.
+export const UNSUPPORTED_TRANSPORTS = Object.freeze([
+  'node:http', 'node:https', 'node:net', 'node:dgram', 'node:dns',
+  'http', 'https', 'net', 'dgram', 'dns',
+  'axios', 'undici', 'got', 'node-fetch', 'request', 'superagent',
+  'needle', 'phin', 'ky', 'bent', 'wreck',
+]);
+
+const TRANSPORT_SET = new Set(UNSUPPORTED_TRANSPORTS);
+
+/**
+ * Every module specifier this file imports or requires.
+ *
+ * Read from the STRING table the lexer already built, so a specifier mentioned
+ * in a comment or inside a prompt is not one. The preceding CODE text decides
+ * whether the string sits in import position -- the same discipline the
+ * request-target scan uses, and for the same reason.
+ */
+function importedSpecifiers(mod, strings, code) {
+  const out = [];
+  for (const s of strings) {
+    const before = code.slice(Math.max(0, s.index - 80), s.index);
+    if (!/(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)$/.test(before)) continue;
+    out.push({ spec: s.text, line: s.line });
+  }
+  return out;
+}
+
 const SCHEME = /(?:https?:)?\/\//;
 const HOST_AFTER_SCHEME = /^(?:https?:)?\/\/([A-Za-z0-9._-]+)/;
 // A hostname, not a fragment: alphanumeric ends, and either a dotted name or
@@ -219,10 +273,28 @@ export function scanModule(mod) {
   // that template's own `${…}` and reported `fetch(apiKey)` at a line whose
   // target is an ordinary literal.
   const literalAt = new Map(strings.map((s) => [s.index, s]));
-  for (const m of code.matchAll(/\b(?:new\s+URL|fetch|fetchWithRetry)\s*\(/g)) {
-    // A function DECLARATION is not a call site. `async function fetchWithRetry(url…`
+  for (const m of code.matchAll(new RegExp(ENTRYPOINT_CALL.source, 'g'))) {
+    // -- N-1. A DECLARATION IS NOT A CALL SITE -- BUT AN ARROW BODY IS. -------
+    //
+    // This read /(?:function|=>)\s*$/. The `=>` was there to skip a declaration
+    // like `const fetchWithRetry = (url) => ...`, and it could never have done
+    // that: in THAT shape the name is followed by ` = `, not by `(`, so the
+    // entrypoint pattern never matches it in the first place. What `=>` actually
+    // matched was the CONCISE ARROW BODY of a real call:
+    //
+    //   export const f = (q) => fetch(H + '/v1');            reported NOTHING
+    //   export function f(q) { return fetch(H + '/v1'); }    non-literal-target
+    //
+    // The same call with the same unresolvable target, and opposite verdicts --
+    // and the first is how a Phase-B adapter would be written. An `await`
+    // between the arrow and the call happened to save that one case, which is
+    // why nothing noticed. The round-2 record claimed the imported-constant
+    // mutant was caught "STATIC -- unresolvable target at the consumer"; for an
+    // arrow body that was simply false.
+    //
+    // Only the `function` KEYWORD immediately before the name is a declaration.
     const head = mod.source.slice(Math.max(0, m.index - 30), m.index);
-    if (/(?:function|=>)\s*$/.test(head) || /function\s+$/.test(head)) continue;
+    if (/\bfunction\s+$/.test(head)) continue;
 
     let k = m.index + m[0].length;
     while (k < mod.source.length && /\s/.test(mod.source[k])) k++;
@@ -245,6 +317,18 @@ export function scanModule(mod) {
     dynamic.push({
       file: mod.path, line: lineAt(m.index),
       shape: 'non-literal-target', snippet: `${m[0].replace(/\s+/g, '')}${ident}`, ident,
+    });
+  }
+
+  // -- UNSUPPORTED TRANSPORT ------------------------------------------------
+  // Reported as a DYNAMIC (unresolvable) site rather than as a literal, because
+  // that is precisely what it is: a route to a host this scanner cannot resolve
+  // and the runtime harness cannot observe. It carries the module name, so the
+  // report says WHICH transport rather than merely that something is wrong.
+  for (const { spec, line } of importedSpecifiers(mod, strings, code)) {
+    if (!TRANSPORT_SET.has(spec)) continue;
+    dynamic.push({
+      file: mod.path, line, shape: 'unsupported-transport', snippet: spec, transport: spec,
     });
   }
 

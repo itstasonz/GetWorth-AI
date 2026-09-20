@@ -25,6 +25,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs';
+import { readSource } from './read-source.mjs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,8 +64,10 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { sweep(); process.exit(130); });
 }
 
+// N-3. Normalised at the READ, in the one shared place. This harness reported
+// 27 MALFORMED mutants on a CRLF checkout and blamed the catalog for it.
 const sources = Object.fromEntries(
-  Object.entries(TARGETS).map(([k, t]) => [k, readFileSync(abs(t.src), 'utf8')])
+  Object.entries(TARGETS).map(([k, t]) => [k, readSource(abs(t.src))])
 );
 
 const runSuite = (suite, env) =>
@@ -208,7 +211,7 @@ const broken = [];
  */
 const assertTreeUnchanged = (why) => {
   for (const [key, t] of Object.entries(TARGETS)) {
-    if (readFileSync(abs(t.src), 'utf8') !== sources[key]) {
+    if (readSource(abs(t.src)) !== sources[key]) {
       console.error(
         `\nFATAL: ${t.src} changed on disk during the run (${why}).\n` +
         'Another mutation run or an editor is writing to this tree. Results up to this\n' +

@@ -49,6 +49,7 @@ import {
   CONDITION_LADDER,
   VALIDATOR_VERSION,
   RULESET_VERSION,
+  resolveCategoryAuthority, RECOGNITION_VERDICT, VALUATION_VERDICT,
 } from './_lib/valuation-guard.js';
 
 // ═══════════════════════════════════════════════════════
@@ -541,6 +542,9 @@ import {
 // may not invent one. See api/_lib/category.js for why this is one module and
 // not four disagreeing lists.
 import { canonicalCategory, CANONICAL_CATEGORIES } from './_lib/category.js';
+// §3/§9. Evidence provenance and the one semantic confidence parser. See the
+// module header for why nothing here reads a model-written `evidence` string.
+import { deriveEvidence, confidence as parseConfidence } from './_lib/pricing-authority.js';
 
 export { webSafe, webSafeBlock };
 
@@ -2638,7 +2642,14 @@ export function calibrateRecognition(recognition) {
   }
   recognition = { ...recognition, category_basis: cat.basis };
 
-  let conf = recognition.category_confidence ?? 0.5;
+  // §9. ONE PARSER. A percent-scale or non-numeric confidence used to be read
+  // here as an ordinary number — `?? 0.5` only catches null/undefined, so `30`,
+  // `true` and `"0.9"` all sailed through and the calibration then clamped a
+  // meaningless value. The guard refused to PRICE on such a value; this is the
+  // read that decided what the guard would even be asked. Malformed now means
+  // ABSENT, which lands on the same 0.5 the field's absence already produced.
+  const rawConf = parseConfidence(recognition.category_confidence);
+  let conf = Number.isNaN(rawConf) ? 0.5 : rawConf;
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
   const ocr = recognition.ocr_text || {};
@@ -3518,7 +3529,25 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
   return {
     name: titles.name,
     nameHebrew: titles.nameHebrew,
+    // §4. THE DISPLAY CATEGORY, and it is named that on purpose.
+    //
+    // This field is what the UI shows, and it may come from Stage 2 — Stage 2
+    // exists in order to disagree, and refusing its label would throw away the
+    // correction it was built to make. What it must NOT do is choose the price
+    // ceiling, which is what it did for one commit: a paperback relabelled
+    // Electronics moved from hard_max 480 to 6,400.
+    //
+    // The three siblings below travel with it so the disagreement is auditable
+    // after the fact rather than inferable from two fields that happen to
+    // differ. A stored row that shows "Electronics" and was priced as Books,
+    // with nothing recording which was which, is the shape of the finding that
+    // stayed open through two rounds.
     category: verification.final_category || recognition.category,
+    display_category: guardCtx.display_category ?? (verification.final_category || recognition.category),
+    recognition_category: verification.final_category || recognition.category,
+    pricing_category: guardCtx.pricing_category ?? recognition.category,
+    pricing_envelope_source: guardCtx.pricing_envelope_source ?? null,
+    category_disagreement: guardCtx.category_disagreement === true,
     confidence: verification.match_confidence,
     isSellable: verification.is_sellable ?? true,
     condition: verification.condition || recognition.visual_features?.condition || 'unknown',
@@ -4385,10 +4414,19 @@ async function handleRequest(req) {
     // model ≥ threshold, incl. user corrections at 0.96) still skip. All cost
     // protections (24h image cache, daily hard cap, per-IP rate limit) are
     // unchanged inside fallbackVision.
-    const topBrandConf = recognition.brand_candidates?.[0]?.confidence || 0;
-    const topModelConf = recognition.model_candidates?.[0]?.confidence || 0;
+    // §9. `|| 0` is not a validator: it rejects 0, null and NaN and accepts `30`,
+    // `true` and `"0.9"`. A model writing confidences on a 0-100 scale therefore
+    // read as STRONG here and SKIPPED Vision — the one stage that could have
+    // corrected it, and the sole producer of OBJECT_CLASS evidence (§3). The
+    // guard's own copy of this rule already refused to price on such a value, so
+    // the two halves of the pipeline disagreed about what the number meant.
+    // Malformed is WEAK, which triggers Vision: the fail-closed direction is to
+    // look harder, not to trust the number.
+    const conf01 = (v) => { const c = parseConfidence(v); return Number.isNaN(c) ? 0 : c; };
+    const topBrandConf = conf01(recognition.brand_candidates?.[0]?.confidence);
+    const topModelConf = conf01(recognition.model_candidates?.[0]?.confidence);
     const identityWeak = topBrandConf < VISION_TRIGGER_THRESHOLD || topModelConf < VISION_TRIGGER_THRESHOLD;
-    const needsVision  = recognition.category_confidence < VISION_TRIGGER_THRESHOLD || identityWeak;
+    const needsVision  = conf01(recognition.category_confidence) < VISION_TRIGGER_THRESHOLD || identityWeak;
     if (needsVision && rem() >= 12_000) {
       const visionCap = Math.min(5_000, rem() - 10_000);
       // F14 (SCAN-005): inspect the NEWEST image, not imageList[0]. In a
@@ -4736,6 +4774,45 @@ async function handleRequest(req) {
       // with the valuation, so a future audit would be reading a fiction.
       model: stage2Status === 'fast_path' ? null : (stage2FallbackUsed ? MODEL_PRICING : MODEL_VISION),
     };
+
+    // ── §3/§4 EVIDENCE AND CATEGORY AUTHORITY ──────────────────────────
+    //
+    // THE COMPOSITION POINT, AND THE ONLY ONE. Both modules are pure and take no
+    // imports; this is where the pipeline's real shapes meet them.
+    //
+    // `deriveEvidence` is given `visionData` because OBJECT_CLASS can come from
+    // nowhere else — it is a CLASSIFIER's verdict about the object, which is the
+    // one thing in this request no stage and no sticker can author. Everything a
+    // stage WROTE is DERIVED, and DERIVED opens no bucket above its parent.
+    //
+    // `resolveCategoryAuthority` is given Stage 1 and Stage 2's category and
+    // NOTHING ELSE from Stage 2. For one commit this line read
+    //   `{ ...recognition, category: verification.final_category || ... }`
+    // and Stage 2 — the stage whose prompt carries OCR, Vision labels, catalog
+    // rows and the user's refineModel — chose its own price ceiling: a paperback
+    // relabelled Electronics moved from hard_max 480 to 6,400. The revert that
+    // followed priced from Stage 1 forever while still DISPLAYING Stage 2, which
+    // is a quieter version of the same lie. Now the ceiling may move only on
+    // ANCHOR or OBJECT_CLASS evidence, a disagreement without it is recorded
+    // rather than resolved, and the guard refuses to price under either label.
+    const evidence = deriveEvidence({ recognition, visionData, anchor: guardAnchor });
+    const catAuthority = resolveCategoryAuthority({
+      stage1: recognition,
+      stage2: { category: verification.final_category },
+      evidence: evidence.classes,
+    });
+    guardCtx.evidence = evidence.classes;
+    guardCtx.pricing_category = catAuthority.pricing_category;
+    guardCtx.display_category = catAuthority.display_category;
+    guardCtx.pricing_envelope_source = catAuthority.pricing_envelope_source;
+    guardCtx.category_disagreement = catAuthority.category_disagreement;
+    // The envelope is resolved from the PRICING category, which is Stage 1's
+    // unless Stage 2 earned the move. Every other field stays Stage 1's, because
+    // allowing Stage 2 to also supply `subcategory` would reopen the widening
+    // through a different field — which is how the first version was defeated.
+    guardCtx.recognition = catAuthority.pricing_category === recognition.category
+      ? recognition
+      : { ...recognition, category: catAuthority.pricing_category };
 
     // ── NORMALIZE + RESPOND ──
     let result = normalizeForUI(recognition, verification, tierInfo, !!visionData, guardCtx);
@@ -5816,12 +5893,17 @@ export function assessFallbackIdentity(recognition) {
   const model = topModel?.model || 'unidentified';
   const brandOk = brand.toLowerCase() !== 'unidentified';
   const modelOk = model.toLowerCase() !== 'unidentified';
-  const brandC = topBrand?.confidence || 0;
-  const modelC = topModel?.confidence || 0;
+  // §9. The SAME parser the guard applies, so the identity this function builds
+  // cannot mean one thing here and another at the pricing boundary. `|| 0`
+  // accepted `30` and `true`; the guard then read the resulting brandC through
+  // its own confidence() and refused. Two readings of one field.
+  const conf01 = (v) => { const c = parseConfidence(v); return Number.isNaN(c) ? 0 : c; };
+  const brandC = conf01(topBrand?.confidence);
+  const modelC = conf01(topModel?.confidence);
   let identityConf;
   if (brandOk && modelOk && modelC > 0) identityConf = Math.min((brandC + modelC) / 2, 0.88);
   else if (brandOk)                     identityConf = Math.min(brandC, 0.70);
-  else                                  identityConf = Math.min(recognition.category_confidence, 0.45);
+  else                                  identityConf = Math.min(conf01(recognition.category_confidence), 0.45);
   const brandEvidence = (topBrand?.evidence || '').toLowerCase();
   const brandTextRead = brandC >= 0.75 && /text|ocr|label|sticker|readable/.test(brandEvidence);
   const brandConfLabel = !brandOk ? 'unidentified'

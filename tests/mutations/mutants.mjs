@@ -59,7 +59,18 @@ export const MUTANTS = [
     // EQUIVALENT: a non-positive low makes high/low non-positive, so V-SPREAD-MIN
     // degrades the quote before it can be emitted. Verified: no probe produces a
     // different verdict from the real guard. Redundant depth, not a test gap.
-    equivalent: 'V-SPREAD-MIN degrades the same inputs (high/low <= 0 < 1.05)',
+    // RESTORED, and the round trip is the record.
+    //
+    // The round-3 run reported this mutant KILLED once the harness also ran the
+    // verdict suites, and the marker was dropped as stale. It was not stale: the
+    // only assertion killing it demanded valuation_verdict MANUAL for EVERY
+    // refusal, and that assertion was itself wrong -- PENDING_MARKET is a refusal
+    // that is allowed to say something about the future. Correcting the assertion
+    // brought the mutant back to life, which is the right answer.
+    //
+    // A mutant killed only by an over-broad assertion is not really killed, and an
+    // equivalence marker removed on that evidence is a score inflated by a bug.
+    equivalent: "V-SPREAD-MIN degrades the same inputs (high/low <= 0 < 1.05)",
     kills: ['V-POSITIVE', 'I-01'],
     find: 'if (low <= 0) return degrade(\'V-POSITIVE\'',
     replace: 'if (false) return degrade(\'V-POSITIVE\'',
@@ -121,10 +132,15 @@ export const MUTANTS = [
   // ── Degrade must not leak the rejected number
   {
     id: 'M14-DEGRADE-LEAKS-PRICE',
+    // RE-PINNED in round 3. §5 added `valuation_verdict: MANUAL` to degrade(),
+    // because the verdicts are computed on `base` before the numeric rules run and
+    // a quote that then failed an envelope check still reported BOUNDED beside its
+    // own refusal. The harness reported this as INVALID (find matched 0x) rather
+    // than scoring it either way, which is the behaviour that makes re-pinning safe.
     invariant: 'A degraded verdict emits 0/0/0 — the rejected price never reaches a caller.',
     kills: ['I-03', 'DEGRADE-NEVER-CLAMP'],
-    find: '      prices: { ...ZERO },\n      repairs,\n      violations,\n      meta: { ...base, pricing_grade: \'MANUAL_REQUIRED\', degraded: true, degraded_reason: `${rule}: ${detail}` },',
-    replace: '      prices: { low: q.low, mid: q.mid, high: q.high },\n      repairs,\n      violations,\n      meta: { ...base, pricing_grade: \'MANUAL_REQUIRED\', degraded: true, degraded_reason: `${rule}: ${detail}` },',
+    find: "      prices: { ...ZERO },\n      repairs,\n      violations,\n      // A DEGRADED SCAN IS NOT BOUNDED. The verdicts are computed on `base`\n      // before the numeric rules run, so a quote that then fails an envelope\n      // or ordering check would otherwise still report valuation_verdict\n      // BOUNDED beside a refusal. Recognition survives a refusal; valuation\n      // authority does not.\n      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,\n        valuation_verdict: VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
+    replace: "      prices: { low: q.low, mid: q.mid, high: q.high },\n      repairs,\n      violations,\n      // A DEGRADED SCAN IS NOT BOUNDED. The verdicts are computed on `base`\n      // before the numeric rules run, so a quote that then fails an envelope\n      // or ordering check would otherwise still report valuation_verdict\n      // BOUNDED beside a refusal. Recognition survives a refusal; valuation\n      // authority does not.\n      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,\n        valuation_verdict: VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
   },
   {
     id: 'M15-ZERO-STATE-TOO-LOOSE',
@@ -141,7 +157,18 @@ export const MUTANTS = [
     // EQUIVALENT: R-SPREAD-CLAMP already guarantees high/low <= maxRatio, so the
     // post-repair re-check is unreachable for any input. It is a backstop against
     // a future clamp bug, and correctly cannot be triggered today.
-    equivalent: 'R-SPREAD-CLAMP mathematically guarantees the ratio the check re-tests',
+    // RESTORED, and the round trip is the record.
+    //
+    // The round-3 run reported this mutant KILLED once the harness also ran the
+    // verdict suites, and the marker was dropped as stale. It was not stale: the
+    // only assertion killing it demanded valuation_verdict MANUAL for EVERY
+    // refusal, and that assertion was itself wrong -- PENDING_MARKET is a refusal
+    // that is allowed to say something about the future. Correcting the assertion
+    // brought the mutant back to life, which is the right answer.
+    //
+    // A mutant killed only by an over-broad assertion is not really killed, and an
+    // equivalence marker removed on that evidence is a score inflated by a bug.
+    equivalent: "R-SPREAD-CLAMP mathematically guarantees the ratio the check re-tests",
     kills: ['V-SPREAD-MAX'],
     find: 'if (ratio > maxRatio) return degrade(\'V-SPREAD-MAX\'',
     replace: 'if (false) return degrade(\'V-SPREAD-MAX\'',
@@ -168,7 +195,18 @@ export const MUTANTS = [
     // EQUIVALENT: a negative multiplier yields a negative mid, which the
     // post-transform `prices.mid <= 0` check degrades anyway. The early return
     // only improves the violation message.
-    equivalent: 'the post-transform envelope check degrades on prices.mid <= 0',
+    // RESTORED, and the round trip is the record.
+    //
+    // The round-3 run reported this mutant KILLED once the harness also ran the
+    // verdict suites, and the marker was dropped as stale. It was not stale: the
+    // only assertion killing it demanded valuation_verdict MANUAL for EVERY
+    // refusal, and that assertion was itself wrong -- PENDING_MARKET is a refusal
+    // that is allowed to say something about the future. Correcting the assertion
+    // brought the mutant back to life, which is the right answer.
+    //
+    // A mutant killed only by an over-broad assertion is not really killed, and an
+    // equivalence marker removed on that evidence is a score inflated by a bug.
+    equivalent: "the post-transform envelope check degrades on prices.mid <= 0",
     kills: ['T-*'],
     find: '  if (m <= 0) {',
     replace: '  if (false) {',
@@ -263,6 +301,137 @@ export const MUTANTS = [
     kills: ['PB-12'],
     find: "  if (v === null || v === undefined || v === '') return null;\n  const n = Number(v);\n  return Number.isFinite(n) && n > 0 ? n : null;",
     replace: "  if (v === null || v === undefined || v === '') return null;\n  return Number(v);",
+  },
+
+  // ==========================================================================
+  // ROUND 3 - §3 bucket authority, §4 category authority, §5 verdicts, §6 tokens
+  //
+  // Each of these breaks ONE rule and names the tests that must notice it.
+  //
+  // `target: 'authority'` mutates api/_lib/pricing-authority.js instead of the
+  // guard. §6 moved the category token predicate there so the guard and
+  // api/_lib/category.js could not hold two copies of it - and that put a rule
+  // the guard DEPENDS ON outside the only file this harness could damage. A
+  // 100% score would then have meant "everything still inside valuation-guard.js
+  // is protected", while the shared predicate underneath it was untested by
+  // construction. A mutation score is only as wide as the files it can break.
+  // ==========================================================================
+  {
+    id: "M31-BUCKET-AUTHORITY-NEVER-REFUSES",
+    invariant: "§3 DERIVED alone may never enter a bucket wider than its parent.",
+    kills: ["EA-1a","EA-1b","EA-2a"],
+    find: "  const req = bucketEntryRequirement(key, table);\n  if (req === UNSATISFIABLE) return false;\n  if (req.length === 0) return true;",
+    replace: "  const req = bucketEntryRequirement(key, table);\n  if (req === UNSATISFIABLE) return false;\n  return true;",
+  },
+  {
+    id: "M32-UNDECLARED-WIDE-BUCKET-OPENS",
+    invariant: "§3 a bucket wider than its parent with no declaration is UNREACHABLE, not permitted.",
+    kills: ["EA-2c"],
+    find: "  return self.hard_max > up.hard_max ? UNSATISFIABLE : [];",
+    replace: "  return [];",
+  },
+  {
+    id: "M33-AUTHORITY-FALLS-TO-NULL",
+    invariant: "§3 a refused bucket falls back to its PARENT, never to no bucket at all.",
+    kills: ["EA-1c","EA-1b"],
+    find: "    if (bucketEntryPermitted(k, evidence)) return k;\n    k = parentKey(k);",
+    replace: "    if (bucketEntryPermitted(k, evidence)) return k;\n    k = null;",
+  },
+  {
+    id: "M34-EVIDENCE-DEFAULTS-TO-EVERYTHING",
+    invariant: "§3 a caller that passes no evidence gets DERIVED only, the fail-closed default.",
+    kills: ["EA-1a"],
+    find: "const DERIVED_ONLY = Object.freeze(new Set(['DERIVED']));",
+    replace: "const DERIVED_ONLY = Object.freeze(new Set(['DERIVED', 'OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT']));",
+  },
+  {
+    id: "M35-STAGE2-CATEGORY-WIDENS-FREELY",
+    invariant: "§4 a later stage may not widen the pricing envelope by returning a different category string.",
+    kills: ["CA-1a","CA-2b"],
+    find: "  if (CATEGORY_WIDENING_EVIDENCE.some((c) => have.has(c))) {",
+    replace: "  if (true) {",
+  },
+  {
+    id: "M36-DISAGREEMENT-NOT-RECORDED",
+    invariant: "§4 a widening without qualifying evidence is RECORDED as a disagreement.",
+    kills: ["CA-1a","CA-2b"],
+    find: "  out.category_disagreement = true;\n  return out;",
+    replace: "  out.category_disagreement = false;\n  return out;",
+  },
+  {
+    id: "M37-DISAGREEMENT-STILL-PRICES",
+    invariant: "§4 a recorded disagreement refuses the NUMBER, under either label.",
+    kills: ["CA-1b"],
+    find: "  if (ctx.category_disagreement === true) {\n    return degrade('V-CATEGORY-DISAGREEMENT',",
+    replace: "  if (false) {\n    return degrade('V-CATEGORY-DISAGREEMENT',",
+  },
+  {
+    id: "M38-PENDING-SHIPS-THE-PRICE",
+    invariant: "§5 PENDING_MARKET emits 0/0/0; the unbacked number never reaches a caller.",
+    kills: ["VV-1b","VV-2b"],
+    find: "    return verdict({\n      action: 'pending',\n      prices: { ...ZERO },",
+    replace: "    return verdict({\n      action: 'pending',\n      prices: { low: q.low, mid: q.mid, high: q.high },",
+  },
+  {
+    id: "M39-PRODUCT-IDENTITY-PRICES-UNBACKED",
+    invariant: "§5 a product-level identity with no market evidence is PENDING_MARKET, not a price.",
+    kills: ["VV-1b","VV-2b","VV-3c"],
+    find: "  if (PRODUCT_LEVEL.has(rec)) return VALUATION_VERDICT.PENDING_MARKET;",
+    replace: "  if (PRODUCT_LEVEL.has(rec)) return VALUATION_VERDICT.BOUNDED;",
+  },
+  {
+    id: "M40-PENDING-NOT-FLAGGED-DEGRADED",
+    invariant: "§5 pending sets degraded:true, so every caller written before it refuses the number.",
+    kills: ["VV-3f"],
+    find: "        degraded: true,\n        degraded_reason: 'V-MARKET-EVIDENCE: market evidence pending',",
+    replace: "        degraded: false,\n        degraded_reason: 'V-MARKET-EVIDENCE: market evidence pending',",
+  },
+  {
+    id: "M41-DEGRADE-KEEPS-BOUNDED-VERDICT",
+    invariant: "§5 a degraded scan reports valuation_verdict MANUAL, never BOUNDED beside its own refusal.",
+    kills: ["VV-3e"],
+    find: "        valuation_verdict: VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
+    replace: "        degraded_reason: `${rule}: ${detail}` },",
+  },
+  {
+    id: "M42-TOKEN-MATCH-BECOMES-SUBSTRING",
+    target: "authority",
+    invariant: "§6 a category matcher fires on a WORD, never on a coincidence of letters.",
+    kills: ["TK-1b","EA-1a"],
+    find: "  for (const w of String(text || '').toLowerCase().split(WORD_SPLIT)) {",
+    replace: "  if (String(text || '').toLowerCase().includes(token)) return true;\n  for (const w of String(text || '').toLowerCase().split(WORD_SPLIT)) {",
+  },
+  {
+    id: "M43-UNDECLARED-TOKEN-MATCHES",
+    target: "authority",
+    invariant: "§6 a token with no declared match mode cannot match; adding a matcher must break loudly.",
+    kills: ["TK-1c"],
+    find: "  if (!mode) return false;",
+    replace: "  if (!mode) return String(text || '').toLowerCase().includes(token);",
+  },
+  {
+    id: "M44-BRAND-TEXT-FROM-A-CLAIM",
+    target: "authority",
+    invariant: "§3 BRAND_TEXT requires the name to OCCUR in text read off the item, not to be asserted.",
+    kills: ["EA-3a","EA-3b"],
+    find: "  if (typeof brand === 'string' && phrasePresent(brand, read)) {",
+    replace: "  if (typeof brand === 'string' && brand) {",
+  },
+  {
+    id: "M45-OBJECT-CLASS-IGNORES-THE-FLOOR",
+    target: "authority",
+    invariant: "§3 OBJECT_CLASS requires a classifier signal at or above the recognition floor.",
+    kills: ["EA-3d"],
+    find: "    if (l && l.description && Number(l.score) >= OBJECT_CLASS_SCORE_FLOOR) out.push(l.description);\n  }\n  for (const l of (visionData?.logos || [])) {",
+    replace: "    if (l && l.description) out.push(l.description);\n  }\n  for (const l of (visionData?.logos || [])) {",
+  },
+  {
+    id: "M46-PHRASE-BECOMES-BAG-OF-WORDS",
+    target: "authority",
+    invariant: "§3 a multi-word product name matches as a CONTIGUOUS phrase, not as pooled tokens.",
+    kills: ["EA-3c"],
+    find: "      if (haystackWords[i + j] !== n[j]) { ok = false; break; }",
+    replace: "      if (!haystackWords.includes(n[j])) { ok = false; break; }",
   },
 ];
 

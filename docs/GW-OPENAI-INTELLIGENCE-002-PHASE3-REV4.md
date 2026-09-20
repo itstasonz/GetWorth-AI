@@ -1,7 +1,7 @@
 # GW-OPENAI-INTELLIGENCE-002 — REV-4 architecture + foundation record
 
-**Status:** foundation round 2 implemented. **PHASE 3 = NOT APPROVED.** No
-OpenAI key requested, no live OpenAI call made, nothing deployed.
+**Status:** foundation round 3 implemented — see §6. **PHASE 3 = NOT APPROVED.**
+No OpenAI key requested, no live OpenAI call made, nothing deployed, no migration.
 
 REV-1, REV-2 and REV-3 contain rejected assumptions and are superseded by this
 document for anything they disagree about. This file records two things: the
@@ -357,3 +357,268 @@ for an unrecognised stage turns SM-3 red.
    allowlist, dedupe-before-quorum, and web comps that may only **narrow** an
    envelope and may never occupy `ctx.anchor`.
 7. All four reviews return no CRITICAL and no HIGH.
+
+---
+
+## 6. FOUNDATION ROUND 3 — the trust model, repaired
+
+Round 2 closed two CRITICALs and left six HIGHs. This round closes all six plus the
+four findings the round-2 recovery added. Each is recorded as property → witness →
+fix → what the fix does NOT do.
+
+### 6.1 The verification system came first (N-3)
+
+`npm run test:mutation` **exited 1**. 27 UI mutants reported MALFORMED, and the
+harness blamed the catalog: "the guard was refactored; re-pin these."
+
+Root cause, two halves, both the same shape as every other finding here — a rule
+stated in general terms and applied to one of the places it names:
+
+```
+tests/mutations/run.mjs            normalised at the source read   OK (round 9)
+tests/mutations/ui-run.mjs         raw                             27 MALFORMED
+tests/mutations/sanitizer-run.mjs  raw                             green by accident
+
+git ls-files --eol   i/lf  w/crlf  attr/text eol=lf   x 385 files
+```
+
+`.gitattributes` declared `eol=lf` and the working tree had never been
+renormalised, so the attribute described a checkout nobody had. `sanitizer-run.mjs`
+passed only because its two targets happened to be LF — an accident of file
+history, not a property.
+
+Fixed by `tests/mutations/read-source.mjs`: one reader, three callers. The tree was
+renormalised (385 files, **0 lines added, 0 removed**), and NO-3c asserts the
+declared policy against the files on disk so the two cannot diverge again.
+
+**The gate also got wider.** `run.mjs` ran one suite; it now runs all three that
+speak for the guard, and mutants may target `api/_lib/pricing-authority.js` as
+well. A mutation score is only as wide as the files it can damage.
+
+### 6.2 Evidence provenance replaces self-assessment (§3, R2-H2)
+
+**Witness.** Zero identity evidence — no brand candidate, no model candidate, no
+OCR, no classifier. One free-form string:
+
+```
+subcategory: (none)     -> electronics          hard  6,400   ILS 20,000 refused
+subcategory: 'laptop'   -> electronics:laptop   hard 24,000   ILS 20,000 ACCEPTED
+```
+
+**Twelve** buckets exceed their parent's ceiling. The round-2 record said four,
+because somebody counted them by hand; nothing counts them by hand now.
+
+Two previous attempts were withdrawn for asking the model how sure it was, in
+different words. This one asks **who produced the evidence**:
+
+| class | established by | forgeable by a sticker? |
+|---|---|---|
+| `ANCHOR` | a compatible GetWorth catalog row | no |
+| `OBJECT_CLASS` | a classifier's verdict, at the recognition floor | no |
+| `BRAND_TEXT` | the brand string **occurring in text read off the item** | yes — by design |
+| `PRODUCT_TEXT` | the model string, same test | yes — by design |
+| `DERIVED` | anything a stage wrote | trivially |
+
+`BRAND_TEXT` being attacker-reachable is the point: printing ROLEX on a watch *is*
+that evidence class. The protection is that no bucket above its parent accepts text
+alone — `watches:luxury` wants both text classes, the electronics buckets want
+`OBJECT_CLASS`, and `requiresAnchorAboveSoft` still applies on top.
+
+**What it does NOT do.** It does not lower any ceiling, and it does not refuse the
+ILS 12,000 laptop that withdrew the previous attempt — a laptop a classifier *saw*
+still prices and still flags. What changed is that a laptop nobody saw gets the
+parent envelope.
+
+**Fail-closed by construction.** A bucket wider than its parent and not declared is
+UNSATISFIABLE — unreachable, not permitted. That branch had **no reachable input**
+in the real table and a mutant proved it; `bucketEntryRequirement` now takes an
+envelope table so a synthetic undeclared bucket can be observed. Fifth "rule with
+no reachable input" in this work, and the first found by a mutation run rather than
+by a reviewer.
+
+### 6.3 Category authority is monotone in ceilings (§4, R2-H3)
+
+The paperback, end to end: Stage 1 `Books` (hard 480), Stage 2 asking ILS 4,000.
+
+```
+final_category Books | Electronics | Furniture | Vehicles | Watches
+  -> envelope books, hard 480, in EVERY case
+```
+
+Four names, because they are four questions: `display_category`,
+`recognition_category`, `pricing_category`, `pricing_envelope_source`.
+
+```
+NARROWING     new hard_max <= incumbent   -> always allowed, no evidence needed
+WIDENING      new hard_max >  incumbent   -> requires ANCHOR or OBJECT_CLASS
+DISAGREEMENT  widening without it         -> pricing_category unchanged,
+                                             display_category may still move,
+                                             category_disagreement recorded,
+                                             V-CATEGORY-DISAGREEMENT refuses the
+                                             number UNDER EITHER LABEL
+```
+
+Rule C is the half the revert missed. Pricing on Stage 1 while displaying Stage 2
+tells the user two things, one of which is false, and they cannot tell which.
+
+**The inverse case works.** A wrong Stage 1 is no longer permanent: with
+`OBJECT_CLASS` or `ANCHOR`, Stage 2's category takes over. Tested in both
+directions over all 225 ordered pairs of canonical categories.
+
+**Why text does not widen a category.** A brand printed on a book jacket is
+genuinely read off the item and says nothing about whether the object is a book or
+a laptop. Only a verdict about the *object* speaks to that question.
+
+### 6.4 Recognition and valuation are two verdicts (§5, R2-H5)
+
+The most important change in the round, and the one Phase B cannot be retrofitted
+onto.
+
+```
+recognition_verdict : IDENTIFIED | FAMILY | CATEGORY | UNKNOWN
+valuation_verdict   : ANCHORED | BOUNDED | PENDING_MARKET | MANUAL
+```
+
+The Ninja witness, before and after:
+
+```
+before  identity EXACT_MODEL -> ACCEPT ILS 400, grade MEDIUM, source stage2_ai
+after   recognition IDENTIFIED - valuation PENDING_MARKET - 0/0/0
+```
+
+ILS 400 was a number the model wrote down. Nothing measured it, and the user saw it
+in the same shape — with a *better* grade — than a price backed by a catalog row.
+
+**The database is evidence and memory, not a whitelist.** An item absent from the
+catalog is not unrecognisable; it is unpriced.
+
+**The direction is deliberately counterintuitive and is asserted, not commented:**
+better recognition moves a scan from `BOUNDED` to `PENDING_MARKET` — from a
+category estimate to an honest refusal, not to a better-looking number. A
+category-level estimate labelled as one is honest; a product-specific number with
+no product-specific evidence is not.
+
+`pending` is **not** `degrade`. It carries the identity forward for `/api/enrich`
+to research, and sets `degraded: true` so every consumer written before it refuses
+the number without being taught a new state first.
+
+**Ordering is load-bearing.** V-MARKET-EVIDENCE runs LAST. Placed before the
+numeric rules it short-circuited a malformed quote into `pending` — telling the
+caller "market research will resolve this" about a quote that violates V-ORDER,
+which is the *softer* of the two refusals. A scan must always fail to the harder
+one.
+
+### 6.5 A category is a word, not a substring (§6, N-4)
+
+```
+"Tablet"    contains "table"  -> FURNITURE, hard_max 16,000
+"Watchdog"  contains "watch"  -> watches
+"Scorecard" contains "car"    -> vehicles
+"Bookcase"  contains "book"   -> books
+```
+
+An iPad categorised "Tablet" was priced under the **furniture** envelope. CB-12
+could not see it: the property compares raw against canonical, and here both were
+wrong in the same direction. A property only observes the disagreement it is
+pointed at.
+
+Tokens now declare their match mode (`word`, plural-tolerant, vs `stem`), and the
+predicate lives in **one** module that both the guard and `category.js` import. The
+one word-anchored alias the table already had (`\bcars?\b`) disagreed with the
+guard's `includes('car')`, and the generated corpus dutifully reported "Caravan" as
+a *safe narrowing* — recording the drift as a feature of the rule.
+
+**The narrow-only floor is what makes it safe.** "Bookcase" names nothing under the
+token rule, and no bucket means MANUAL_ONLY's 2,000 — *above* the 480 it had. So
+both rules are resolved and the lower ceiling wins: six strings corrected, three
+preserved, nothing widened.
+
+**The property caught its own author, in the same commit.** Word-anchoring broke
+"Handbags", so `handbag` was added as an alias — and CB-12 immediately reported 42
+widened pairs, because the guard tests the category for `bag` and not for
+`handbag`. Adding it to the guard too would have closed the gap and been a
+**pricing change**, which does not belong in a normalisation boundary. It is a
+product noun, exactly like `backpack`. Removed. Fifth alias deleted by that
+property rather than by review.
+
+### 6.6 No network destination is invisible to both layers (§2, N-1/N-2)
+
+```
+N-1  export const f = (q) => fetch(H + '/v1');            reported NOTHING
+     export function f(q) { return fetch(H + '/v1'); }    non-literal-target
+```
+
+The declaration filter matched `=>` in order to skip `const f = () => ...`, a shape
+it could never have matched — and skipped every concise arrow **body** instead. An
+`await` between the arrow and the call is the only reason any case survived looking
+correct. The round-2 record claimed this mutant was caught "STATIC — unresolvable
+target at the consumer". For arrow bodies that was false.
+
+```
+N-2  import https from 'node:https'; https.request(o)
+     STATIC: nothing        RUNTIME: nothing (the harness patches fetch only)
+```
+
+`NETWORK_ENTRYPOINTS` and `UNSUPPORTED_TRANSPORTS` are now declared. Static
+analysis is not made complete; its **incompleteness is made fail-closed** — an
+unfollowable transport is reported BY NAME rather than passing silently.
+
+A generated 56-cell matrix (8 target constructions x 7 call shapes) asserts that
+**no cell is silently green**, with negative controls for the two kinds of noise a
+looser scanner would produce: a real `function` declaration, and a transport named
+only in a comment or a prompt.
+
+### 6.7 One confidence parser (§9)
+
+The guard's `confidence()` closed the *pricing* path. `api/analyze.js` still read
+the same three fields through `topBrand?.confidence || 0` and compared
+`category_confidence` against the Vision trigger directly — so a percent-scale
+confidence read as STRONG there and **skipped Vision**, the one stage that could
+have corrected it and the sole producer of `OBJECT_CLASS` evidence. Two halves of
+the pipeline disagreeing about what a number meant.
+
+The parser moved to `pricing-authority.js`; four analyze-side reads now use it.
+Malformed is WEAK, which triggers Vision — the fail-closed direction is to look
+harder, not to trust the number. The guard keeps a byte-identical copy (it may not
+import at will) and CF-1c asserts the two agree over the whole malformed matrix
+rather than trusting that they do.
+
+---
+
+## 7. MARKET CALIBRATION — RECORDED, NOT ACTED ON
+
+**These are PRODUCT/DATA decisions. No envelope was widened in this round, and no
+test was made to pass by widening one.**
+
+| bucket | soft | hard | evidence of mismatch |
+|---|---|---|---|
+| `beauty` | 500 | 1,600 | a real luxury-fragrance market at ILS 1,100+ |
+| `bags` | 1,500 | 4,800 | a used Louis Vuitton Neverfull MM at ~ILS 4,500 is refused by V-ENVELOPE-BAND |
+
+Both are pinned **by value** in `tests/valuation-verdicts.test.mjs` (VV-2e), so
+widening either becomes a deliberate act with a failing test attached rather than a
+quiet edit.
+
+Louis Vuitton Imagination being correctly identified and then bounded by a tight
+beauty envelope is a **calibration** problem, not a recognition failure, and §5 now
+keeps the two apart: LV's `recognition_verdict` is `IDENTIFIED` regardless of what
+the envelope does to its price.
+
+Calibrating these requires real Israeli resale market data. That is not something to
+infer from fixtures, and this round does not.
+
+---
+
+## 8. STILL OPEN AFTER ROUND 3
+
+- `low` has no floor — 8,822 accepted cases below it, worst 0.40x.
+- `variantContradiction` false positive: `27"` and `27 inch` are different tokens.
+- V-FX coerces money (`Number("3.7")`) and never validates the amount behind an ILS
+  comp.
+- Category ambiguity resolves by alias order; a string naming two categories takes
+  the first match. Documented guess, pinned by CB-9b.
+- Dropping `kitchen` (round 2) and `handbag` (round 3) costs those strings their
+  bucket. Safe direction, real cost, enumerated in CB-12b/CB-12c.
+- `api/analyze.js` is ~6,400 lines against the repo's own 500-line rule. The
+  provider ledger still needs extracting before `/api/enrich` exists.
+- **`beauty` / `bags` calibration** — §7 above. Product decision.

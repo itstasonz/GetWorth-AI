@@ -1,3 +1,5 @@
+import { names } from './pricing-authority.js';
+
 // ══════════════════════════════════════════════════════════════════════════════
 // CANONICAL CATEGORY BOUNDARY  ·  api/_lib/category.js
 //
@@ -53,20 +55,13 @@ const CANONICAL_SET = new Set(CANONICAL_CATEGORIES);
 // Deriving it here, from ALIASES itself, means a word added below cannot be
 // left untested by forgetting to add it somewhere else too.
 export function aliasVocabulary() {
-  const words = new Set();
-  const BACKSLASH = String.fromCharCode(92);
-  for (const [pattern] of ALIASES) {
-    for (const alt of pattern.source.split('|')) {
-      // Strip regex syntax to the bare word: `\bcars?\b` -> `cars`, and also
-      // emit the singular so `car` is exercised as well as `cars`.
-      const bare = alt.split(BACKSLASH + 'b').join('').replace(/[()^$]/g, '');
-      const withOptional = bare.replace(/\?/g, '');
-      if (withOptional) words.add(withOptional);
-      const withoutOptional = bare.replace(/(.)\?/g, '');
-      if (withoutOptional && withoutOptional !== withOptional) words.add(withoutOptional);
-    }
-  }
-  return [...words];
+  // Read straight off ALIASES, so a token added below is exercised by the very
+  // word it introduces. The previous version parsed regex SOURCE text and
+  // stripped the syntax back to a bare word — which worked, and which meant the
+  // corpus depended on a parser of the thing it was testing.
+  const out = new Set();
+  for (const [tokens] of ALIASES) for (const t of tokens) out.add(t);
+  return [...out];
 }
 
 // The unknown bucket. It is a real canonical value — an item IS sometimes
@@ -91,14 +86,25 @@ export const UNKNOWN_CATEGORY = 'Other';
 // not already select, and nothing here refuses one it did — verified as a
 // property, not by inspection, in tests/category-boundary.test.mjs.
 //
-// FOUR ALIASES WERE REMOVED BY THAT PROPERTY, not by review: 'backpack',
-// 'automotive', 'kitchen' and 'gadget'. None of those strings selects an
+// FIVE ALIASES WERE REMOVED BY THAT PROPERTY, not by review: 'backpack',
+// 'automotive', 'kitchen', 'gadget' and — this round — 'handbag'. None of those strings selects an
 // envelope today — the guard matches `cat.includes('bag')`, `'motor'`, `'home'`
 // and `'electron'`, and none of the four words contains its match — so mapping
 // them would have HANDED each an envelope it did not have. More correct,
 // probably. Still a pricing change, and a pricing change does not belong inside
 // a normalisation boundary. Each remains reachable through a string that names
 // the category outright ('Home & Kitchen' → Home).
+//
+// 'handbag' is the newest and I added it myself, in the same commit that
+// word-anchored this table. Word anchoring meant "Handbags" stopped matching
+// the token 'bag', so I added 'handbag' to keep the mapping — and the property
+// immediately reported 42 widened pairs: the GUARD's bags matcher tests the
+// category for 'bag' and not for 'handbag', so the raw string had no bucket and
+// the alias would have handed it one. Adding 'handbag' to the guard as well
+// would have closed the gap and been a PRICING change, which does not belong in
+// a normalisation boundary. It is a product noun, exactly like 'backpack'.
+// The property found it in the run that introduced it, which is the first time
+// in this work that a control caught its author in the same commit.
 //
 // 'gadget' was found by an INDEPENDENT REVIEWER, not by the property — because
 // the corpus the property ran against was HAND-LISTED, and a hand-listed corpus
@@ -108,22 +114,51 @@ export const UNKNOWN_CATEGORY = 'Other';
 // crossed with the envelope matchers' own substrings read out of
 // api/_lib/valuation-guard.js, so an alias added below is tested by the very
 // words it introduces.
+// N-4 — EVERY ALTERNATIVE IS WORD-ANCHORED, for the same reason the guard's
+// matchers now are. `\bcars?\b` was already written that way, and the generated
+// corpus used the resulting disagreement with the guard's `cat.includes('car')`
+// to surface "Caravan", "Railcar" and "Scorecard". It reported them as safe
+// NARROWINGS, which they were — and that is how the table kept a substring rule
+// on fourteen of its fifteen rows. `/watch/` mapped "Watchdog" to Watches;
+// `/table/` mapped "Tablet" to FURNITURE, hard_max 16,000, which CB-12 could
+// never surface because the guard agreed with it.
+//
+// Two anchor shapes, matching the guard's two declared modes exactly:
+//   `\bword\b` / `\bwords?\b`  the whole word, plural tolerated
+//   `\bstem`                   a word-initial stem, for the cases where the
+//                              category name is a genuine inflection
+//                              (electron -> Electronics, jewel -> Jewelry)
+// Written as plain alternatives rather than groups so `aliasVocabulary()` keeps
+// generating the corpus from them.
+// N-4 — ONE PREDICATE, SHARED WITH THE GUARD.
+//
+// Every alternative used to be a bare substring: `/watch/` mapped "Watchdog" to
+// Watches, `/table/` mapped "Tablet" to Furniture, hard_max 16,000. The single
+// exception, `\\bcars?\\b`, was word-anchored — and because the GUARD still matched
+// `includes('car')`, the generated corpus reported the disagreement as a safe
+// NARROWING for "Caravan" and "Railcar". A drift between two copies of one rule
+// was recorded as a feature of the rule.
+//
+// So the table no longer carries regexes at all. It names TOKENS from
+// api/_lib/pricing-authority.js and matches them with that module's `names()`,
+// the same function `resolveEnvelopeKeyFrom` uses. The two cannot disagree about
+// a word, because there is no longer a second opinion about what a word is.
 const ALIASES = [
-  [/electron/, 'Electronics'],
-  [/furni|sofa|chair|table/, 'Furniture'],
-  [/vehicle|\bcars?\b|motor/, 'Vehicles'],
-  [/watch/, 'Watches'],
-  [/cloth|fashion|apparel/, 'Clothing'],
-  [/sport|fitness|outdoor/, 'Sports'],
-  [/smoking|tobacco|vape/, 'Smoking'],
-  [/home|household/, 'Home'],
-  [/beauty|cosmetic/, 'Beauty'],
-  [/book/, 'Books'],
-  [/toy|\bgames?\b/, 'Toys'],
-  [/tool|hardware/, 'Tools'],
-  [/food|beverage/, 'Food'],
-  [/bag/, 'Bags'],
-  [/jewel/, 'Jewelry'],
+  [['electron'], 'Electronics'],
+  [['furni', 'sofa', 'chair', 'table'], 'Furniture'],
+  [['vehicle', 'car', 'motor'], 'Vehicles'],
+  [['watch'], 'Watches'],
+  [['cloth', 'fashion', 'apparel'], 'Clothing'],
+  [['sport', 'fitness', 'outdoor'], 'Sports'],
+  [['smoking', 'tobacco', 'vape'], 'Smoking'],
+  [['home', 'household'], 'Home'],
+  [['beauty', 'cosmetic'], 'Beauty'],
+  [['book'], 'Books'],
+  [['toy', 'game'], 'Toys'],
+  [['tool', 'hardware'], 'Tools'],
+  [['food', 'beverage'], 'Food'],
+  [['bag'], 'Bags'],
+  [['jewel'], 'Jewelry'],
 ];
 
 /**
@@ -156,8 +191,8 @@ export function canonicalCategory(raw) {
     if (c.toLowerCase() === lower) return { category: c, basis: 'canonical', raw: trimmed };
   }
 
-  for (const [pattern, canonical] of ALIASES) {
-    if (pattern.test(lower)) return { category: canonical, basis: 'alias', raw: trimmed };
+  for (const [tokens, canonical] of ALIASES) {
+    if (tokens.some((t) => names(lower, t))) return { category: canonical, basis: 'alias', raw: trimmed };
   }
 
   return { category: UNKNOWN_CATEGORY, basis: 'unknown', raw: trimmed };

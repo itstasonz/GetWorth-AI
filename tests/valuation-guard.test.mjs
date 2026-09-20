@@ -56,11 +56,46 @@ const rec = (o = {}) => ({
   visual_features: { condition: 'Good' }, ...o,
 });
 const IDENTIFIED = Object.freeze({ identityHigh: false, brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.8 });
+// §5 CHANGED WHAT A "PRICEABLE CONTEXT" IS, AND THIS FIXTURE HAD TO FOLLOW.
+//
+// Every case below exercises a NUMERIC rule — rounding, band derivation, spread,
+// envelope bounds, currency. A numeric rule can only be observed on a quote the
+// guard is willing to carry, and after V-MARKET-EVIDENCE an EXACT_MODEL identity
+// with no market evidence is PENDING_MARKET: correct, and it masks every one of
+// those rules behind a refusal that has nothing to do with them.
+//
+// So the default context now says a CATALOG ROW priced this item, which is the
+// real production path for "GetWorth holds evidence for this product"
+// (derivePricingSource: pre/catalog -> pre_catalog). It is deliberately NOT
+// `anchor: {...}`: an anchor switches resolveEnvelope to anchor-RELATIVE bounds,
+// and most cases here are about the category BUCKET bounds. `pre_catalog` is
+// anchored for the purposes of market evidence while leaving the bucket in
+// charge of the numbers, which is exactly the separation these tests need.
+//
+// The no-evidence path is not lost; it is asserted directly in
+// tests/valuation-verdicts.test.mjs, where it is the subject rather than a
+// side effect of a fixture.
 const ctx = (o = {}) => ({
   recognition: rec(o.recognition || {}), candidates: [], identity: { ...IDENTIFIED },
-  stage: 'stage2', pre_source: null, model: 'claude-test-model', anchor: null,
+  stage: 'pre', pre_source: 'catalog', anchorModelEvidence: true,
+  model: 'claude-test-model', anchor: null,
+  // §3 LIKEWISE. The default recognition is `subcategory: 'Laptop'`, so these
+  // cases have always been measured against the electronics:laptop envelope
+  // (floor 160 / soft 7,500 / hard 24,000) — V-ENVELOPE-SOFT-01's "₪12,000
+  // laptop is real, flag it" only means anything there. Under BUCKET_AUTHORITY a
+  // written subcategory no longer opens that bucket, so the fixture states the
+  // evidence it was always implicitly assuming: a classifier saw the object and
+  // the names were read off it. ANCHOR is deliberately NOT in the list — it
+  // would make every case ANCHORED and hide the verdict distinctions.
+  //
+  // The gate itself is not tested here. It is the subject of
+  // tests/envelope-authority.test.mjs, which supplies each evidence subset
+  // explicitly and asserts which bucket it buys.
+  evidence: ['DERIVED', 'OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT'],
   ...o, ...(o.recognition ? { recognition: rec(o.recognition) } : {}),
 });
+/** The pre-§5 default: stage 2, no market evidence. PENDING_MARKET by design. */
+const stage2Ctx = (o = {}) => ctx({ stage: 'stage2', pre_source: null, ...o });
 const q = (o = {}) => ({ low: 800, mid: 1200, high: 1800, currency: 'ILS', ...o });
 // price_method is model-declared; the reading site is the module's choice, so
 // offer it on both the quote and the ctx and assert only on what comes back out.
@@ -314,8 +349,8 @@ test('DEGRADE-NEVER-CLAMP absurd values are never rewritten to a bound', () => {
 const ANCHOR = { id: 'p1', retail_price_ils: 2000, similarity: 0.95, brand: 'Dell', model: 'XPS 13' };
 
 const SOURCE_CASES = [
-  ['S-01 stage2 + compatible anchor', ctx({ anchor: ANCHOR }), 'stage2_comp_anchored', 'HIGH'],
-  ['S-02 stage2, no anchor', ctx(), 'stage2_ai', 'MEDIUM'],
+  ['S-01 stage2 + compatible anchor', stage2Ctx({ anchor: ANCHOR }), 'stage2_comp_anchored', 'HIGH'],
+  ['S-02 stage2, no anchor', stage2Ctx(), 'stage2_ai', 'MEDIUM'],
   ['S-03 pre catalog', ctx({ stage: 'pre', pre_source: 'catalog' }), 'pre_catalog', null],
   // pre_haiku is an UNANCHORED estimate. It graded MEDIUM while pre_catalog —
   // a real compatible catalog row — graded LOW without model evidence, so a
@@ -339,10 +374,23 @@ for (const [name, c, source, grade] of SOURCE_CASES) {
   });
 }
 
-test('S-07 model-declared comp_based with no compatible anchor is MEDIUM, and the claim is recorded', () => {
-  const v = validateQuote(qClaiming('comp_based'), claiming('comp_based'));
+test('S-07 a model-declared comp_based buys nothing — not the source, not the grade', () => {
+  // The claim is `price_method: 'comp_based'`, i.e. the model asserting it
+  // compared real market listings. It has none: no anchor, no catalog row.
+  //
+  // WHAT CHANGED IN §5, AND WHY THE TEST IS STRONGER NOW. This used to assert
+  // MEDIUM — "a self-declared comp_based must not buy the TOP grade" — which
+  // conceded that it bought a price at all, at the same grade as any other
+  // unanchored Stage-2 estimate. V-MARKET-EVIDENCE removes that concession: an
+  // identified product with no market evidence is not priced, whatever the model
+  // says it did. The claim is still RECORDED, because drift measurement is the
+  // only reason to keep a field nothing may act on.
+  const v = validateQuote(qClaiming('comp_based'), stage2Ctx({ price_method: 'comp_based', model_claimed_method: 'comp_based' }));
   assert.equal(v.metadata.pricing_source, 'stage2_ai', 'no anchor ⇒ source can never be comp-anchored');
-  assert.equal(v.metadata.pricing_grade, 'MEDIUM', 'a self-declared comp_based must not buy the top grade');
+  assert.equal(derivePricingSource(stage2Ctx()).grade, 'MEDIUM',
+    'the DERIVED grade is unchanged — §5 refuses the price, it does not relabel the source');
+  assert.equal(v.action, 'pending', 'a comp_based claim with no comps is PENDING_MARKET, not a price');
+  assert.deepEqual(v.prices, { low: 0, mid: 0, high: 0 });
   assert.equal(v.metadata.model_claimed_method, 'comp_based', 'the model claim must be recorded for drift measurement');
 });
 
@@ -504,6 +552,14 @@ test('D-02 verdict + metadata shape is exactly the contract', () => {
     'condition_basis', 'degraded', 'degraded_reason', 'envelope_basis', 'envelope_key',
     'identity_tier', 'model', 'model_claimed_method',
     'needs_review', 'pricing_grade', 'pricing_source', 'ruleset_version', 'validator_version',
+    // §3/§4/§5. Every one of these is a REASON rather than a result, and the
+    // record is useless without them: `evidence` says what the envelope
+    // decision was entitled to, `pricing_envelope_source` says which stage's
+    // category chose it, and the two verdicts say what was established about
+    // the item separately from what was established about its price. A stored
+    // PENDING_MARKET row that cannot say WHY is indistinguishable from a
+    // failure, which is the state this round exists to stop shipping.
+    'evidence', 'pricing_envelope_source', 'recognition_verdict', 'valuation_verdict',
   ].sort());
 });
 
@@ -511,12 +567,27 @@ test('I-01 corpus invariants: integers, order, non-negative low, mid never moved
   const REPAIRS = new Set(['R-ROUND', 'R-DERIVE-BAND', 'R-SPREAD-CLAMP', 'R-SPREAD-WIDEN']);
   for (const { id, quote, c } of CORPUS) {
     const v = validateQuote(quote, c);
-    assert.ok(['accept', 'repair', 'degrade'].includes(v.action), `${id}: bad action ${v.action}`);
+    // `pending` joined the action set in §5. It is a REFUSAL like degrade — zero
+    // prices, degraded true — and is listed separately because it means something
+    // a caller may act on differently: /api/enrich can resolve a pending scan and
+    // can do nothing at all with a degraded one. `corpus-pre-haiku` is the witness
+    // in this corpus: an unanchored model estimate for an identified product.
+    assert.ok(['accept', 'repair', 'degrade', 'pending'].includes(v.action), `${id}: bad action ${v.action}`);
     assert.equal(v.currency, 'ILS', `${id}: currency must always be ILS`);
     assert.equal(v.metadata.validator_version, VALIDATOR_VERSION, `${id}`);
     assert.equal(v.metadata.ruleset_version, RULESET_VERSION, `${id}`);
     for (const r of repairIds(v)) assert.ok(REPAIRS.has(r), `${id}: unknown repair ${r}`);
-    if (v.action === 'degrade') continue;
+    // Both refusal actions are skipped for the PRICE invariants below, and
+    // asserted as refusals instead: an unpriced verdict has no band to be
+    // ordered, rounded or preserved, and 'mid was never moved' is meaningless
+    // when mid is deliberately zero. Skipping without asserting would let a
+    // refusal that still carried a number pass unnoticed, which is the exact
+    // shape of the V-SOURCE-UNREGISTERED defect, so the zeros are checked here.
+    if (v.action === 'degrade' || v.action === 'pending') {
+      assert.deepEqual(v.prices, { low: 0, mid: 0, high: 0 }, `${id}: a refusal shipped a number`);
+      assert.equal(v.metadata.degraded, true, `${id}: a refusal must be flagged degraded`);
+      continue;
+    }
     const { low, mid, high } = v.prices;
     for (const [k, n] of Object.entries(v.prices)) assert.ok(Number.isInteger(n), `${id}: ${k}=${n} is not an integer`);
     assert.ok(low >= 0, `${id}: negative low ${low}`);
@@ -696,8 +767,8 @@ test('M-06 (kills M22) the guard applies no condition math via the QUOTE field e
 // Every source derivePricingSource can produce. If ANY of them can escape the
 // boundary, the defect is back.
 const ALL_SOURCE_CTXS = [
-  ['stage2_ai',            ctx()],
-  ['stage2_comp_anchored', ctx({ anchor: ANCHOR })],
+  ['stage2_ai',            stage2Ctx()],
+  ['stage2_comp_anchored', stage2Ctx({ anchor: ANCHOR })],
   ['pre_catalog',          ctx({ stage: 'pre', pre_source: 'catalog' })],
   ['pre_haiku',            ctx({ stage: 'pre', pre_source: 'ai_haiku' })],
   ['category_bucket',      ctx({ stage: 'pre', pre_source: 'category_anchor' })],
@@ -794,7 +865,7 @@ test('PB-03b `degraded` alone is disqualifying — each half of the predicate st
 });
 
 test('PB-04 a healthy verdict is priced, and the candidate label only ever narrows', () => {
-  const v = validateQuote(q(), ctx({ anchor: ANCHOR }));
+  const v = validateQuote(q(), stage2Ctx({ anchor: ANCHOR }));
   assert.equal(isPricedVerdict(v), true);
   assert.equal(resolvePricingStatus(v, 'db_based'), 'db_based');
   assert.equal(resolvePricingStatus(v, 'rescue_estimate'), 'rescue_estimate');

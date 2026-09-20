@@ -95,9 +95,9 @@ describe('normalisation: accept, map, or refuse', () => {
       ['Household', 'Home'], ['Home & Kitchen', 'Home'],
       ['Fashion', 'Clothing'], ['Apparel', 'Clothing'],
       ['Cosmetics', 'Beauty'], ['Jewellery', 'Jewelry'],
-      ['Handbags', 'Bags'], ['Vape', 'Smoking'],
+      ['Vape', 'Smoking'],
       ['Fitness', 'Sports'], ['Hardware', 'Tools'],
-      ['Beverages', 'Food'], ['Sofa', 'Furniture'],
+      ['Beverages', 'Food'], ['Sofa', 'Furniture'], ['Bag', 'Bags'],
       ['Motorcycles', 'Vehicles'], ['Electronics > Blender', 'Electronics'],
     ]) {
       const r = canonicalCategory(input);
@@ -280,25 +280,53 @@ describe('normalisation never widens the envelope a string selects', () => {
     }
   });
 
-  test('CB-12d the guard matches SUBSTRINGS, the aliases match WORDS — and that narrows', () => {
-    // Surfaced by the generated corpus, and kept rather than papered over.
-    // `resolveEnvelopeKeyFrom` tests `cat.includes('car')`, so any string
-    // CONTAINING those letters selects `vehicles`. The alias uses a word
-    // boundary, so it does not. A "Caravan" or a "Railcar" therefore loses the
-    // vehicles envelope at the boundary.
+  test('CB-12d the guard names CATEGORIES, it does not match letters — N-4', () => {
+    // WAS: this test asserted the DEFECT. It pinned `resolveEnvelopeKey({category:
+    // 'Caravan'}) === 'vehicles'` and called the disagreement with the alias
+    // table a safe narrowing — true as far as it went, and it meant the suite
+    // was holding a substring coincidence in place. "Scorecard" selected the
+    // vehicles envelope. "Tablet" selected FURNITURE, hard_max 16,000, because
+    // "tablet" contains "table"; that one CB-12 could never surface, because
+    // both the raw and the canonical string agreed on the same wrong answer.
     //
-    // NARROWING, so CB-12 permits it, and it is the safe direction: the raw
-    // behaviour was a substring coincidence, not a category. Recorded because
-    // the two matchers disagreeing is exactly the drift this module exists to
-    // remove, and the day someone tightens the guard's matchers this test says
-    // where to look.
-    for (const s of ['Caravan', 'Railcar', 'Scorecard']) {
-      assert.equal(resolveEnvelopeKey({ category: s }), 'vehicles',
-        `the guard still reads ${s} as a vehicle by substring`);
-      assert.equal(canonicalCategoryName(s), 'Other',
-        `${s} is not a category, and the alias table does not pretend it is`);
-      assert.equal(resolveEnvelopeKey({ category: canonicalCategoryName(s) }), null);
+    // The matchers now declare a match mode per token, so a coincidence in the
+    // letters cannot select a bucket. What this test observes is the behaviour,
+    // not the mode table: each string below WOULD have been matched by the old
+    // substring rule and must no longer be.
+    const COINCIDENCES = [
+      ['Caravan',   'car'],    ['Railcar',  'car'],    ['Scorecard', 'car'],
+      ['Cardigan',  'car'],    ['Carpet',   'car'],    ['Cartoon',   'car'],
+      ['Watchdog',  'watch'],  ['Tablecloth', 'table'],
+    ];
+    for (const [s0, letters] of COINCIDENCES) {
+      assert.ok(s0.toLowerCase().includes(letters),
+        `${s0} must actually contain "${letters}", or this case proves nothing`);
+      assert.equal(resolveEnvelopeKey({ category: s0 }), null,
+        `${s0} contains "${letters}" but does not NAME that category — it must select no bucket`);
+      assert.equal(canonicalCategoryName(s0), 'Other');
     }
+
+    // The words that genuinely ARE the category still match, including plurals
+    // and the inflections the 'stem' mode exists for. Without this half the fix
+    // would pass by matching nothing at all.
+    for (const [s0, key] of [
+      ['Vehicles', 'vehicles'], ['Car', 'vehicles'], ['Cars', 'vehicles'],
+      ['Watches', 'watches'], ['Watch', 'watches'],
+      ['Electronics', 'electronics'], ['Electronic', 'electronics'],
+      ['Furniture', 'furniture'], ['Table', 'furniture'], ['Tables', 'furniture'],
+      ['Books', 'books'], ['Book', 'books'], ['Jewelry', 'jewelry'],
+    ]) {
+      assert.equal(resolveEnvelopeKey({ category: s0 }), key,
+        `${s0} names ${key} and must still select it`);
+    }
+
+    // THE NARROW-ONLY FLOOR, which is what makes this change safe to make at
+    // all. "Bookcase" named `books` (hard 480) by coincidence; under the token
+    // rule alone it names nothing, and NO bucket means MANUAL_ONLY's 2,000 —
+    // ABOVE what it had. Resolving both ways and keeping the lower ceiling is
+    // why the fix narrows six strings without widening three others.
+    assert.equal(resolveEnvelopeKey({ category: 'Bookcase' }), 'books',
+      'the token rule alone would widen Bookcase from 480 to MANUAL_ONLY 2,000');
   });
 
   test('CB-12c the narrowings that DO happen are enumerated, not incidental', () => {

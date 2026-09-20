@@ -30,6 +30,7 @@ const G = await import('../api/_lib/valuation-guard.js');
 const {
   validateQuote, resolveEnvelope, resolveEnvelopeKey, resolveIdentityTier,
   derivePricingSource, IDENTITY_TIER, CATEGORY_CONFIDENCE_FLOOR, IDENTITY_CONFIDENCE_FLOOR, ENVELOPES,
+  RECOGNITION_VERDICT, VALUATION_VERDICT,
 } = G;
 
 // ── fixtures, written as the four real scans ────────────────────────────────
@@ -141,38 +142,85 @@ describe('CASE D — the Ninja failure shape must not produce a price', () => {
 });
 
 // ── §19 NON-REGRESSION ──────────────────────────────────────────────────────
-describe('CASE A/B/C — identified items remain priceable', () => {
-  test('CASE A Logitech G Pro X Superlight prices normally', () => {
+// §5 SPLIT THIS BLOCK'S PREMISE IN TWO.
+//
+// It was called "identified items remain priceable" and asserted mid === 380 for
+// CASE A. That sentence conflates the two questions this round separates:
+// CASE A is IDENTIFIED, and whether it may be PRICED depends on evidence the
+// identity says nothing about. GetWorth holding no catalog row for a Logitech G
+// Pro X Superlight does not make it unrecognised — it makes it unpriced.
+//
+// So each case is now asserted twice: recognition without market evidence, and
+// the same recognition with a catalog row. The first must keep the identity and
+// refuse the number; the second must price exactly as it always did. CASE D, the
+// Ninja failure shape, is unaffected and still fails the identity floor — which
+// is the control that proves PENDING_MARKET is not just "everything refuses now".
+const withCatalog = (c) => ({ ...c, stage: 'pre', pre_source: 'catalog', anchorModelEvidence: true });
+
+describe('CASE A/B/C — identified items stay identified; pricing needs evidence', () => {
+  test('CASE A Logitech G Pro X Superlight — IDENTIFIED, and PENDING without a row', () => {
     const v = validateQuote(q({ low: 250, mid: 380, high: 520 }), CASE_A);
-    assert.notEqual(v.action, 'degrade', `must remain priceable, got ${v.metadata.degraded_reason}`);
+    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
+    assert.equal(v.metadata.recognition_verdict, RECOGNITION_VERDICT.IDENTIFIED,
+      'recognition succeeded and must be recorded as having succeeded');
+    assert.equal(v.metadata.valuation_verdict, VALUATION_VERDICT.PENDING_MARKET);
+    assert.equal(v.action, 'pending');
+    assert.deepEqual(v.prices, { low: 0, mid: 0, high: 0 },
+      '₪380 was a number the model wrote down; nothing measured it');
+    assert.notEqual(v.metadata.degraded_reason, 'V-IDENTITY-FLOOR',
+      'this is not a recognition failure and must never be recorded as one');
+  });
+
+  test('CASE A with a catalog row prices exactly as before — the non-regression', () => {
+    const v = validateQuote(q({ low: 250, mid: 380, high: 520 }), withCatalog(CASE_A));
+    assert.equal(v.action, 'accept', `must price when evidence exists, got ${v.metadata.degraded_reason}`);
     assert.equal(v.prices.mid, 380, 'mid is never moved');
+    assert.equal(v.metadata.valuation_verdict, VALUATION_VERDICT.ANCHORED);
     assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
   });
 
-  test('CASE B LG monitor prices, with identity recorded as brand-only', () => {
-    const v = validateQuote(q({ low: 800, mid: 1400, high: 2200 }), CASE_B);
-    assert.notEqual(v.action, 'degrade', `brand-strong/model-weak must still price, got ${v.metadata.degraded_reason}`);
-    assert.equal(v.metadata.identity_tier, IDENTITY_TIER.BRAND_ONLY,
+  test('CASE B LG monitor — brand-only identity, and the limitation stays visible', () => {
+    const pending = validateQuote(q({ low: 800, mid: 1400, high: 2200 }), CASE_B);
+    assert.equal(pending.metadata.identity_tier, IDENTITY_TIER.BRAND_ONLY,
       'the limitation must be visible in the record, not hidden inside a number');
+    assert.equal(pending.metadata.recognition_verdict, RECOGNITION_VERDICT.FAMILY,
+      'brand without model is a FAMILY-level belief, not an identification');
+    assert.equal(pending.metadata.valuation_verdict, VALUATION_VERDICT.PENDING_MARKET);
+
+    const priced = validateQuote(q({ low: 800, mid: 1400, high: 2200 }), withCatalog(CASE_B));
+    assert.notEqual(priced.action, 'degrade', `brand-strong/model-weak must still price, got ${priced.metadata.degraded_reason}`);
+    assert.equal(priced.metadata.identity_tier, IDENTITY_TIER.BRAND_ONLY);
   });
 
-  test('CASE C Louis Vuitton Imagination remains priceable', () => {
-    // Deliberately at the value production produced. The beauty envelope is too
-    // tight for a luxury fragrance — recorded separately as an envelope-table
-    // gap — but the guard must not answer that by refusing to price.
+  test('CASE C Louis Vuitton Imagination — recognised, and §7 leaves the envelope alone', () => {
+    // The beauty envelope is too tight for a luxury fragrance. That is an
+    // envelope-CALIBRATION gap, recorded separately, and this round does not
+    // widen it to make this case pass — doing so would be inventing a market
+    // number to satisfy a fixture. What the guard must not do is answer a
+    // calibration question by claiming the item was not recognised.
     const v = validateQuote(q({ low: 350, mid: 520, high: 700 }), CASE_C);
     assert.notEqual(v.metadata.degraded_reason, 'V-IDENTITY-FLOOR',
       'a text-confirmed brand+model identity must never hit the identity floor');
     assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
+    assert.equal(v.metadata.recognition_verdict, RECOGNITION_VERDICT.IDENTIFIED);
+    assert.equal(v.metadata.envelope_key, 'beauty');
+    assert.equal(ENVELOPES.beauty.hard_max, 1600,
+      '§7: the beauty ceiling is UNCHANGED this round. Widening it is a product decision.');
   });
 
   test('all three identified cases clear the floor; only D does not', () => {
     for (const [name, c] of [['A', CASE_A], ['B', CASE_B], ['C', CASE_C]]) {
       const v = validateQuote(q({ low: 100, mid: 150, high: 220 }), c);
       assert.notEqual(v.metadata.degraded_reason, 'V-IDENTITY-FLOOR', `CASE ${name} must clear the identity floor`);
+      assert.notEqual(v.metadata.recognition_verdict, RECOGNITION_VERDICT.UNKNOWN,
+        `CASE ${name} was recognised, whatever happened to its price`);
     }
     const d = validateQuote(q({ low: 100, mid: 150, high: 220 }), CASE_D);
     assert.equal(d.metadata.degraded_reason?.startsWith('V-IDENTITY-FLOOR'), true);
+    assert.equal(d.metadata.recognition_verdict, RECOGNITION_VERDICT.UNKNOWN,
+      'CASE D is the control: a genuine recognition failure, distinguishable from a pricing one');
+    assert.equal(d.action, 'degrade',
+      'and it DEGRADES rather than pending — /api/enrich cannot research an unknown object');
   });
 });
 

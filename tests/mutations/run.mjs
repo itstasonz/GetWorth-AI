@@ -24,16 +24,29 @@
 //   node tests/mutations/run.mjs --verbose      (show the failing suite output)
 // ══════════════════════════════════════════════════════════════════════════════
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { readSource } from './read-source.mjs';
 import { tmpdir } from 'node:os';
-import { join, resolve, dirname } from 'node:path';
+import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MUTANTS } from './mutants.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 const GUARD = join(REPO, 'api/_lib/valuation-guard.js');
-const SUITE = join(REPO, 'tests/valuation-guard.test.mjs');
+// EVERY suite that speaks for the guard, not just the original one.
+//
+// The round-3 rules (§3 bucket authority, §4 category authority, §5 verdicts)
+// are observed by two NEW suites, and a mutant that breaks one of them would
+// have SURVIVED against tests/valuation-guard.test.mjs alone — producing a
+// 100% score that meant "the rules written in 2026-09 are protected" while the
+// ones written this week were not. A mutation score is only as wide as the
+// suites it runs.
+const SUITES = [
+  'tests/valuation-guard.test.mjs',
+  'tests/envelope-authority.test.mjs',
+  'tests/valuation-verdicts.test.mjs',
+];
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(f);
@@ -68,20 +81,74 @@ if (has('--list')) {
 // Normalising here fixes the comparison rather than the catalog, and makes the
 // result identical on every platform. `.gitattributes` pins the checkout too,
 // so a fresh clone cannot reintroduce it.
-const CR = String.fromCharCode(13);
-const LF = String.fromCharCode(10);
-const source = readFileSync(GUARD, 'utf8').split(CR + LF).join(LF);
+// N-3: shared with ui-run.mjs and sanitizer-run.mjs. The normalisation used to
+// live here alone, which is why the other two still reported MALFORMED on a
+// CRLF checkout long after this one was fixed.
+const source = readSource(GUARD);
 
-// The suite imports the guard from an arbitrary path, so a guard that grew a
-// relative import would resolve against the temp dir and fail for the wrong
-// reason — every mutant would "die" of a module error and the score would be a
-// meaningless 100%.
-const relImport = source.match(/^\s*import\s[^\n]*from\s+['"]\.[^\n]*$/m);
-if (relImport) {
-  console.error(`FATAL: valuation-guard.js now has a relative import:\n  ${relImport[0].trim()}\n` +
-    'Copying it to a temp dir would break resolution and every mutant would die spuriously.\n' +
-    'Teach run.mjs to copy the dependency tree before trusting these results.');
-  process.exit(2);
+// A MUTANT MAY TARGET THE GUARD OR ITS PURE SIBLING.
+//
+// §6 moved the category token vocabulary into api/_lib/pricing-authority.js so
+// the guard and api/_lib/category.js could not hold two copies of it. That put a
+// rule the guard DEPENDS ON outside the only file this harness could break -- so
+// "100% killed" would have meant "every rule still inside valuation-guard.js is
+// protected", while the shared predicate underneath it was untested. A mutation
+// score is only as wide as the files it can damage.
+const AUTHORITY = join(REPO, 'api/_lib/pricing-authority.js');
+const SOURCES = { guard: source, authority: readSource(AUTHORITY) };
+
+// THE MUTANT IS COPIED TO A TEMP DIR, SO ITS DEPENDENCIES MUST COME WITH IT.
+//
+// This used to be a FATAL: "valuation-guard.js now has a relative import ...
+// Teach run.mjs to copy the dependency tree before trusting these results." The
+// reasoning was right -- an unresolvable import makes every mutant die of a
+// module error and the score becomes a meaningless 100% -- and the refusal was
+// the correct thing to do until somebody did the work.
+//
+// §6 is what forced it. The category token vocabulary has to be ONE table shared
+// by the guard and api/_lib/category.js, because two tables agreeing by
+// inspection is exactly how `/watch/` and `cat.includes('watch')` drifted into
+// disagreeing about "Watchdog". So the guard now imports a pure sibling, and the
+// harness copies the closure of relative imports beside the mutant.
+//
+// The FATAL is kept for the case it was written for: an import this walk cannot
+// resolve still stops the run rather than producing a number nobody can trust.
+const RELATIVE_IMPORT = /(?:^|\n)\s*(?:import|export)[^\n]*?from\s+['"](\.[^'"\n]*)['"]/g;
+
+function copyDependencyClosure(entryPath, entrySource, destDir) {
+  const copied = [];
+  const seen = new Set();
+  const walk = (fromPath, text) => {
+    for (const m of text.matchAll(RELATIVE_IMPORT)) {
+      const spec = m[1];
+      const abs = resolve(dirname(fromPath), spec);
+      if (seen.has(abs)) continue;
+      seen.add(abs);
+      let dep;
+      try {
+        dep = readSource(abs);
+      } catch {
+        console.error(`FATAL: cannot resolve ${spec} imported by ${fromPath}.\n` +
+          'The mutant copy would fail to load and every mutant would die spuriously.');
+        process.exit(2);
+      }
+      // Windows separators, normalised so the copied layout matches the import path.
+      const rel = relative(dirname(entryPath), abs).split(String.fromCharCode(92)).join("/");
+      if (rel.startsWith('..')) {
+        console.error(`FATAL: ${spec} resolves outside the module's directory (${rel}).\n` +
+          'Copying it would change its own relative imports. Flatten the dependency or ' +
+          'teach this walk to mirror the directory layout.');
+        process.exit(2);
+      }
+      const target = join(destDir, rel);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, dep);
+      copied.push(rel);
+      walk(abs, dep);
+    }
+  };
+  walk(entryPath, entrySource);
+  return copied;
 }
 
 const selected = filter ? MUTANTS.filter((m) => m.id.includes(filter)) : MUTANTS;
@@ -91,6 +158,10 @@ if (!selected.length) {
 }
 
 const work = mkdtempSync(join(tmpdir(), 'val001-mut-'));
+// Copied ONCE, before any mutant runs: the sibling is not the thing under test,
+// and re-copying it per mutant would invite the two to drift within a run.
+const deps = copyDependencyClosure(GUARD, source, work);
+if (deps.length) console.log(`  dependency closure copied: ${deps.join(', ')}`);
 const killed = [];
 const survived = [];
 const invalid = [];
@@ -102,7 +173,14 @@ console.log(`VAL-001 mutation run — ${selected.length} mutants against tests/v
 for (const m of selected) {
   // A mutant must pin exactly one site. Zero means the code moved; many means
   // the mutation is ambiguous and we would not know what we actually broke.
-  const occurrences = source.split(m.find).length - 1;
+  const target = m.target || 'guard';
+  const targetSource = SOURCES[target];
+  if (!targetSource) {
+    invalid.push({ ...m, reason: `unknown target "${target}"` });
+    console.log(`  INVALID    ${m.id}  (unknown target "${target}")`);
+    continue;
+  }
+  const occurrences = targetSource.split(m.find).length - 1;
   if (occurrences !== 1) {
     invalid.push({ ...m, reason: `find matched ${occurrences}x, expected exactly 1` });
     console.log(`  INVALID    ${m.id}  (find matched ${occurrences}x, expected 1)`);
@@ -112,8 +190,8 @@ for (const m of selected) {
   // MUTATION_APPLIED = YES, proved rather than assumed. A replacement that
   // produced byte-identical text changed nothing, and a result read from it is
   // a lie in whichever direction it lands. Only APPLIED mutants are scored.
-  const mutated = source.replace(m.find, m.replace);
-  if (mutated === source) {
+  const mutated = targetSource.replace(m.find, m.replace);
+  if (mutated === targetSource) {
     invalid.push({ ...m, reason: 'replacement is byte-identical to the original — nothing was mutated' });
     console.log(`  INVALID    ${m.id}  (replacement identical to source)`);
     continue;
@@ -121,11 +199,15 @@ for (const m of selected) {
   applied.push(m);
 
   const mutantPath = join(work, `${m.id}.guard.mjs`);
-  writeFileSync(mutantPath, mutated, 'utf8');
+  // The guard copy is always written -- unmutated when the mutant targets the
+  // sibling -- so the two are never mixed between runs.
+  writeFileSync(mutantPath, target === 'guard' ? mutated : SOURCES.guard, 'utf8');
+  const authorityPath = join(work, 'pricing-authority.js');
+  writeFileSync(authorityPath, target === 'authority' ? mutated : SOURCES.authority, 'utf8');
 
-  const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', SUITE], {
+  const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...SUITES], {
     cwd: REPO,
-    env: { ...process.env, VAL001_GUARD_PATH: mutantPath },
+    env: { ...process.env, VAL001_GUARD_PATH: mutantPath, VAL001_AUTHORITY_PATH: authorityPath },
     encoding: 'utf8',
     timeout: 120000,
   });
