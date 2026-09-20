@@ -61,7 +61,25 @@
 
 /** The five evidence classes. Declaration order is documentation, not precedence. */
 export const EVIDENCE = Object.freeze({
+  // C-1. ANCHOR IS MARKET-PRICE EVIDENCE. CATALOG_IDENTITY IS NOT.
+  //
+  // These were one class, and the conflation was the round-3 CRITICAL. A row
+  // that merely LOOKS LIKE the same product was granted ANCHOR, which
+  //   - satisfied every bucket entry requirement,
+  //   - made derivePricingSource return stage2_comp_anchored / HIGH,
+  //   - made resolveValuationVerdict return ANCHORED,
+  //   - and therefore switched V-MARKET-EVIDENCE off entirely.
+  //
+  // So the model's own invented number shipped at the system's TOP grade
+  // because somebody had once submitted a matching name. The entry point is
+  // community-writable: api/analyze.js selects approved `product_candidates`
+  // with no price column at all and pads `retail_price_ils: null`.
+  //
+  // A catalog row tells GetWorth "this looks like the same product". That is a
+  // statement about IDENTITY. It says nothing whatever about what the product
+  // is WORTH, and the two must not be spellable with the same word.
   ANCHOR: 'ANCHOR',
+  CATALOG_IDENTITY: 'CATALOG_IDENTITY',
   OBJECT_CLASS: 'OBJECT_CLASS',
   BRAND_TEXT: 'BRAND_TEXT',
   PRODUCT_TEXT: 'PRODUCT_TEXT',
@@ -75,6 +93,35 @@ export const EVIDENCE_CLASSES = Object.freeze(Object.values(EVIDENCE));
 // because this module takes no imports; the two values are asserted equal in
 // tests/envelope-authority.test.mjs so they cannot drift.
 export const OBJECT_CLASS_SCORE_FLOOR = 0.5;
+
+/**
+ * The price an anchor may be trusted to carry, or null.
+ *
+ * C-1. Deliberately the SAME semantics as `positivePriceOrNull` in the guard,
+ * and deliberately strict where the old code was not: `Number()` alone accepted
+ * `"900"`, and `!!ctx.anchor` accepted `{}`, `[]`, a Date and `{retail_price_ils:
+ * null}`. A price is a finite number strictly greater than zero; everything else
+ * — null, 0, negative, NaN, Infinity, a numeric string, a missing field, an
+ * object — is ABSENT, not small.
+ *
+ * Reads `retail_price_ils` then `avg_used_price_ils`, the two columns
+ * api/analyze.js already treats as an anchor's price, in that order.
+ */
+export function anchorPrice(anchor) {
+  if (!anchor || typeof anchor !== 'object' || Array.isArray(anchor)) return null;
+  for (const key of ['retail_price_ils', 'avg_used_price_ils']) {
+    const v = anchor[key];
+    if (typeof v !== 'number') continue;       // no coercion: "900" is not a price
+    if (!Number.isFinite(v) || v <= 0) continue;
+    return v;
+  }
+  return null;
+}
+
+/** Does this row carry usable market-price evidence? */
+export function isPricedAnchor(anchor) {
+  return anchorPrice(anchor) !== null;
+}
 
 // ── A CONFIDENCE IS A PROBABILITY  ·  the canonical parser, and the only one ──
 //
@@ -126,13 +173,94 @@ function phrasePresent(needle, haystackWords) {
   return false;
 }
 
-/** Every string Vision or OCR actually READ off the item, as one word list. */
-function readText(recognition, visionData) {
-  return words([
-    ...(recognition?.ocr_text?.raw_texts || []),
-    ...(visionData?.text || []),
-    ...((visionData?.logos || []).map((l) => (l && l.description) || '')),
-  ].join(' '));
+// ── H-5 / H-6. WHO READ THE TEXT, AND WAS IT SAYING THIS IS THE PRODUCT? ─────
+//
+// `readText` used to pool THREE sources into one flat word list:
+//   recognition.ocr_text.raw_texts   <- STAGE 1. The model's own transcription.
+//   visionData.text                  <- Google Vision. An independent reader.
+//   visionData.logos                 <- Google Vision.
+//
+// Two defects fell out of that, both reported independently.
+//
+// H-5 SELF-CORROBORATION. `raw_texts` is model output — RECOGNITION_SCHEMA
+// declares it, the Stage-1 prompt asks for "exact text found", and the schema is
+// never applied. So ONE model call wrote both the brand candidate AND the
+// transcription that corroborated it, and BRAND_TEXT meant "the model said it
+// twice". DERIVED + DERIVED is not independent corroboration. The bucket that
+// falls to text alone is `watches:luxury`, so the class that was easiest to forge
+// governed the ₪250,000 ceiling.
+//
+// api/analyze.js already had the right rule for its own identity upgrade and
+// stated the reason: "the model grading its own homework, which is precisely what
+// SCAN-022 exists to refuse". Two standards for one question is the defect §6
+// removed for category tokens; this is the same move for text corroboration.
+//
+// H-6 COMPATIBILITY TEXT. Pooling also erased line boundaries, so tokens
+// combined across separate detections: `['TAG','HEUER']` established "Tag Heuer".
+// And a compatibility label contains the brand and model BY DESIGN — that is what
+// it is for. "Compatible with Apple iPhone 15 Pro Max" on a ₪20 silicone case
+// yielded BRAND_TEXT + PRODUCT_TEXT and, with the Vision label a case genuinely
+// gets, `electronics:iphone` at 24,000 instead of `electronics` at 6,400.
+//
+// FOUR RULES, matching the predicate analyze.js already applies:
+//   1. INDEPENDENT READER ONLY. Vision text and Vision logos. Not raw_texts.
+//   2. PER LINE, CONTIGUOUS. Tokens may not pool across detections.
+//   3. NO COMPATIBILITY LINES. A line saying "for X" is not a claim to be X.
+//   4. A SINGLE-TOKEN MODEL NAME MUST MIX LETTERS AND DIGITS, so a warranty year
+//      or a price tag cannot stand in for a model number. Multi-word names are
+//      inherently specific and are exempt.
+const COMPATIBILITY = /\b(compatible|compatibility|compatibles|for|fits|fit|replacement|replaces|suits|suitable|universal|spare|works)\b/;
+
+/**
+ * The lines an INDEPENDENT reader returned, each already rejected if it is
+ * describing compatibility rather than identity.
+ *
+ * `recognition.ocr_text.raw_texts` is deliberately absent. It remains available
+ * to the pipeline as a signal — it just cannot corroborate the same model's own
+ * candidate, which is the only thing this function is used for.
+ */
+function independentLines(visionData) {
+  const out = [];
+  for (const t of (visionData?.text || [])) {
+    if (typeof t !== 'string') continue;
+    const w = words(t);
+    if (w.length && !COMPATIBILITY.test(w.join(' '))) out.push(w);
+  }
+  for (const l of (visionData?.logos || [])) {
+    const d = l && l.description;
+    if (typeof d !== 'string') continue;
+    const w = words(d);
+    if (w.length) out.push(w);          // a logo is a mark, not a sentence
+  }
+  return out;
+}
+
+/** Is `needle` a contiguous run of whole words within ANY single line? */
+function presentOnSomeLine(needle, lines) {
+  const n = words(needle);
+  if (n.length === 0) return false;
+  return lines.some((line) => phrasePresent(needle, line));
+}
+
+/**
+ * Is this model string specific enough that reading it off the item means
+ * anything?
+ *
+ * NARROWED FROM ITS FIRST DRAFT, which required a single-token name to MIX
+ * letters and digits. That rejected "Submariner", "Neverfull" and "Imagination"
+ * — real product names that happen to be one word — and the Rolex witness went
+ * from watches:luxury to watches for the wrong reason. The rule's actual purpose
+ * in api/analyze.js is narrower and is stated there: bare digits let a warranty
+ * year ("EXPIRES 2019") or a price tag ("NIS 1299") stand in for a model number.
+ *
+ * So: a single ALL-DIGIT token is not a model name. Anything else is, and the
+ * question of whether it was genuinely READ is answered by provenance instead.
+ */
+function modelTokenIsSpecific(model) {
+  const n = words(model);
+  if (n.length === 0) return false;
+  if (n.length > 1) return true;                  // "Detect Power Blender Pro"
+  return !/^[0-9]+$/.test(n[0]);                  // "submariner" and "g502" yes, "126610" no
 }
 
 /**
@@ -171,11 +299,20 @@ function objectClassTokens(visionData) {
  */
 export function deriveEvidence({ recognition = null, visionData = null, anchor = null } = {}) {
   const classes = new Set([EVIDENCE.DERIVED]);
-  const detail = { brand_text: null, product_text: null, anchor_id: null };
+  const detail = { brand_text: null, product_text: null, anchor_id: null, anchor_price: null };
 
+  // C-1. A compatible row earns CATALOG_IDENTITY. It earns ANCHOR only if it
+  // carries a usable price. `{}`, `{id:'x'}`, a Date, and every approved
+  // product_candidate (padded `retail_price_ils: null`) land in the first
+  // bucket and stop there.
   if (anchor && typeof anchor === 'object' && !Array.isArray(anchor)) {
-    classes.add(EVIDENCE.ANCHOR);
+    classes.add(EVIDENCE.CATALOG_IDENTITY);
     detail.anchor_id = anchor.id ?? null;
+    const price = anchorPrice(anchor);
+    if (price !== null) {
+      classes.add(EVIDENCE.ANCHOR);
+      detail.anchor_price = price;
+    }
   }
 
   const objectTokens = objectClassTokens(visionData);
@@ -186,14 +323,14 @@ export function deriveEvidence({ recognition = null, visionData = null, anchor =
   // was the first withdrawn version of this rule, and it inverted under
   // relabelling. The test here is whether the name OCCURS in the text that came
   // off the item, which is an artefact rather than an assertion.
-  const read = readText(recognition, visionData);
+  const lines = independentLines(visionData);
   const brand = recognition?.brand_candidates?.[0]?.brand;
   const model = recognition?.model_candidates?.[0]?.model;
-  if (typeof brand === 'string' && phrasePresent(brand, read)) {
+  if (typeof brand === 'string' && presentOnSomeLine(brand, lines)) {
     classes.add(EVIDENCE.BRAND_TEXT);
     detail.brand_text = brand;
   }
-  if (typeof model === 'string' && phrasePresent(model, read)) {
+  if (typeof model === 'string' && modelTokenIsSpecific(model) && presentOnSomeLine(model, lines)) {
     classes.add(EVIDENCE.PRODUCT_TEXT);
     detail.product_text = model;
   }

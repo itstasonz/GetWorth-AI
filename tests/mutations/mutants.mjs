@@ -139,8 +139,8 @@ export const MUTANTS = [
     // than scoring it either way, which is the behaviour that makes re-pinning safe.
     invariant: 'A degraded verdict emits 0/0/0 — the rejected price never reaches a caller.',
     kills: ['I-03', 'DEGRADE-NEVER-CLAMP'],
-    find: "      prices: { ...ZERO },\n      repairs,\n      violations,\n      // A DEGRADED SCAN IS NOT BOUNDED. The verdicts are computed on `base`\n      // before the numeric rules run, so a quote that then fails an envelope\n      // or ordering check would otherwise still report valuation_verdict\n      // BOUNDED beside a refusal. Recognition survives a refusal; valuation\n      // authority does not.\n      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,\n        valuation_verdict: VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
-    replace: "      prices: { low: q.low, mid: q.mid, high: q.high },\n      repairs,\n      violations,\n      // A DEGRADED SCAN IS NOT BOUNDED. The verdicts are computed on `base`\n      // before the numeric rules run, so a quote that then fails an envelope\n      // or ordering check would otherwise still report valuation_verdict\n      // BOUNDED beside a refusal. Recognition survives a refusal; valuation\n      // authority does not.\n      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,\n        valuation_verdict: VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
+    find: "      prices: { ...ZERO },\n      repairs,\n      violations,\n      // A DEGRADED SCAN IS NOT BOUNDED, AND IT IS NOT ANCHORED. A quote that\n      // fails an envelope or ordering check must not keep a verdict that claims\n      // the number was backed. Recognition survives a refusal; valuation\n      // authority does not.\n      //\n      // PENDING_MARKET is the one verdict a refusal may KEEP, because it is\n      // itself a refusal and it is the only one /api/enrich can act on. Flattening\n      // it to MANUAL here is what made a pending scan indistinguishable from an\n      // unrecognisable one.\n      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,\n        valuation_verdict: base.valuation_verdict === VALUATION_VERDICT.PENDING_MARKET\n          ? VALUATION_VERDICT.PENDING_MARKET : VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
+    replace: "      prices: { low: q.low, mid: q.mid, high: q.high },\n      repairs,\n      violations,\n      // A DEGRADED SCAN IS NOT BOUNDED, AND IT IS NOT ANCHORED. A quote that\n      // fails an envelope or ordering check must not keep a verdict that claims\n      // the number was backed. Recognition survives a refusal; valuation\n      // authority does not.\n      //\n      // PENDING_MARKET is the one verdict a refusal may KEEP, because it is\n      // itself a refusal and it is the only one /api/enrich can act on. Flattening\n      // it to MANUAL here is what made a pending scan indistinguishable from an\n      // unrecognisable one.\n      meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,\n        valuation_verdict: base.valuation_verdict === VALUATION_VERDICT.PENDING_MARKET\n          ? VALUATION_VERDICT.PENDING_MARKET : VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
   },
   {
     id: 'M15-ZERO-STATE-TOO-LOOSE',
@@ -390,8 +390,8 @@ export const MUTANTS = [
     id: "M41-DEGRADE-KEEPS-BOUNDED-VERDICT",
     invariant: "§5 a degraded scan reports valuation_verdict MANUAL, never BOUNDED beside its own refusal.",
     kills: ["VV-3e"],
-    find: "        valuation_verdict: VALUATION_VERDICT.MANUAL,\n        degraded_reason: `${rule}: ${detail}` },",
-    replace: "        degraded_reason: `${rule}: ${detail}` },",
+    find: "        valuation_verdict: base.valuation_verdict === VALUATION_VERDICT.PENDING_MARKET\n          ? VALUATION_VERDICT.PENDING_MARKET : VALUATION_VERDICT.MANUAL,",
+    replace: "        valuation_verdict: base.valuation_verdict,",
   },
   {
     id: "M42-TOKEN-MATCH-BECOMES-SUBSTRING",
@@ -414,7 +414,7 @@ export const MUTANTS = [
     target: "authority",
     invariant: "§3 BRAND_TEXT requires the name to OCCUR in text read off the item, not to be asserted.",
     kills: ["EA-3a","EA-3b"],
-    find: "  if (typeof brand === 'string' && phrasePresent(brand, read)) {",
+    find: "  if (typeof brand === 'string' && presentOnSomeLine(brand, lines)) {",
     replace: "  if (typeof brand === 'string' && brand) {",
   },
   {
@@ -432,6 +432,110 @@ export const MUTANTS = [
     kills: ["EA-3c"],
     find: "      if (haystackWords[i + j] !== n[j]) { ok = false; break; }",
     replace: "      if (!haystackWords.includes(n[j])) { ok = false; break; }",
+  },
+
+  // ==========================================================================
+  // ROUND 4 - C-1 anchor price, C-3 fail-closed envelope, H-1 verdict timing,
+  // H-5 provenance, H-6 compatibility text.
+  //
+  // Every one of these restores a defect an INDEPENDENT REVIEW found against a
+  // suite that was green, with a 100% mutation score, on a clean build. That
+  // score was honest about the properties it covered and silent about the ones
+  // nobody had written down, which is the only kind of dishonesty a mutation
+  // score is capable of.
+  // ==========================================================================
+  {
+    id: "M47-ANCHOR-WITHOUT-A-PRICE",
+    target: "authority",
+    invariant: "C-1 a catalog row must carry a usable price to be MARKET evidence.",
+    kills: ["C1-a","C1-b","C1-d"],
+    find: "    const price = anchorPrice(anchor);\n    if (price !== null) {",
+    replace: "    const price = anchorPrice(anchor);\n    if (true) {",
+  },
+  {
+    id: "M48-ANCHOR-PRICE-COERCED",
+    // RE-POINTED. The first version dropped the `typeof` guard and SURVIVED, and it
+    // survived because it was equivalent: Number.isFinite does not coerce, so "900",
+    // true, {} and [900] fail it either way. A mutant that cannot change behaviour
+    // measures nothing. This one restores the coercion that was actually there —
+    // `Number(ctx.anchor?.retail_price_ils)` — which accepted the STRING "900" and,
+    // as this round’s own property test found, turned `retail_price_ils: true` into a
+    // one-shekel anchor-relative ceiling.
+    target: "authority",
+    invariant: "C-1 a price is a finite NUMBER above zero; the string \"900\" is not a price.",
+    kills: ["C1-a","C1-b"],
+    find: "    if (typeof v !== 'number') continue;",
+    replace: "    const n = Number(v);\n    if (Number.isFinite(n) && n > 0) return n;\n    continue;",
+  },
+  {
+    id: "M49-GUARD-ANCHOR-IS-TRUTHINESS",
+    invariant: "C-1 the guard derives ANCHORED from a PRICED anchor, not from any object.",
+    kills: ["C1-b","C1-c","C1-f"],
+    find: "function hasMarketAnchor(ctx) {\n  return anchorPriceOf(ctx?.anchor) !== null;\n}",
+    replace: "function hasMarketAnchor(ctx) {\n  return !!ctx?.anchor;\n}",
+  },
+  {
+    id: "M50-CALLER-ASSERTS-ANCHOR",
+    invariant: "C-1 a caller may not assert the ANCHOR class it has not earned.",
+    kills: ["C1-e"],
+    find: "  if (hasMarketAnchor(ctx) || ANCHORED_SOURCES.has(derived.source)) {",
+    replace: "  if (hasMarketAnchor(ctx) || asEvidenceSet(ctx.evidence).has('ANCHOR') || ANCHORED_SOURCES.has(derived.source)) {",
+  },
+  {
+    id: "M51-UNRESOLVED-GETS-GLOBAL",
+    invariant: "C-3 an unresolved bucket fails closed; no identity tier buys the global ceiling.",
+    kills: ["C3-a","C3-b"],
+    find: "    return { key: key || 'unresolved', basis: 'manual_only', ...MANUAL_ONLY, requiresAnchorAboveSoft: false };",
+    replace: "    return { key: key || 'unresolved', basis: 'global', ...GLOBAL_ENVELOPE, requiresAnchorAboveSoft: false };",
+  },
+  {
+    id: "M52-ENVELOPE-LOOKUP-WALKS-PROTOTYPE",
+    invariant: "C-3 an envelope lookup is an OWN-property lookup.",
+    kills: ["C3-c","C3-e"],
+    find: "  return Object.prototype.hasOwnProperty.call(ENVELOPES, key) ? ENVELOPES[key] : null;",
+    replace: "  return ENVELOPES[key] || null;",
+  },
+  {
+    id: "M53-CALLER-KEY-SKIPS-AUTHORITY",
+    invariant: "C-3 / VAL-5 a caller-supplied envelope key is subject to bucket authority.",
+    kills: ["C3-d"],
+    find: "  const key = ctx.envelope_key != null\n    ? applyBucketAuthority(envelopeFor(ctx.envelope_key) ? ctx.envelope_key : null, ctx.evidence)\n    : requestedKey;",
+    replace: "  const key = ctx.envelope_key != null ? ctx.envelope_key : requestedKey;",
+  },
+  {
+    id: "M54-VERDICTS-ASSIGNED-TOO-LATE",
+    invariant: "H-1 what was established is recorded before any exit can refuse.",
+    kills: ["VV-3e"],
+    find: "  const identityTier = resolveIdentityTier(ctx);\n  base.identity_tier = identityTier;\n  base.recognition_verdict = resolveRecognitionVerdict(ctx);",
+    replace: "  const identityTier = resolveIdentityTier(ctx);\n  base.identity_tier = identityTier;\n  if (false) base.recognition_verdict = resolveRecognitionVerdict(ctx);",
+  },
+  {
+    id: "M55-SELF-WRITTEN-OCR-CORROBORATES",
+    // RE-POINTED. The first version changed the FUNCTION SIGNATURE and survived,
+    // because the call site still passed one argument — so the injected loop read an
+    // undefined `recognition` and iterated nothing. A mutant must damage a path the
+    // code actually takes; editing a parameter no caller supplies damages nothing.
+    target: "authority",
+    invariant: "H-5 a model may not corroborate its own candidate with its own transcription.",
+    kills: ["EA-3b"],
+    find: "  const lines = independentLines(visionData);",
+    replace: "  const lines = independentLines(visionData)\n    .concat((recognition?.ocr_text?.raw_texts || []).map((t) => words(t)).filter((w) => w.length));",
+  },
+  {
+    id: "M56-COMPATIBILITY-TEXT-CORROBORATES",
+    target: "authority",
+    invariant: "H-6 a compatibility label does not establish that the item IS the named product.",
+    kills: ["EA-3b"],
+    find: "    if (w.length && !COMPATIBILITY.test(w.join(' '))) out.push(w);",
+    replace: "    if (w.length) out.push(w);",
+  },
+  {
+    id: "M57-TOKENS-POOL-ACROSS-LINES",
+    target: "authority",
+    invariant: "H-6 text matching is per detection; tokens may not pool across separate lines.",
+    kills: ["EA-3b","EA-3c"],
+    find: "  return lines.some((line) => phrasePresent(needle, line));",
+    replace: "  return phrasePresent(needle, lines.flat());",
   },
 ];
 

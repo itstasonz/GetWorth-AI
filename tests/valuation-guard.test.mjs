@@ -241,9 +241,30 @@ test('E-06 resolveEnvelope reuses the analyze.js taxonomy', () => {
   assert.equal(resolveEnvelope(ctx({ recognition: BOOKS })).key, 'books');
   assert.equal(resolveEnvelope(ctx({ recognition: JEWELRY })).key, 'jewelry');
   assert.equal(resolveEnvelope(ctx({ recognition: ROLEX })).key, 'watches:luxury');
+  // C-3. THIS ASSERTED THE DEFECT. It required an unresolved category to receive
+  // GLOBAL_ENVELOPE's ₪500,000 — the loosest bound in the system — on the
+  // reasoning that a real product in an unbucketed category should not be
+  // refused. That makes FAILING TO RESOLVE the most permissive outcome there is,
+  // and the §6 token matcher then made unresolved far more common: "Tablet",
+  // "Watchdog" and "Caravan" went from a wrong-but-tight bucket to 500,000.
+  //
+  // Uncertainty must reduce authority. The user is not refused — an identified
+  // item in an unbucketed category is PENDING_MARKET, which is a better answer
+  // than a number bounded only by half a million shekels.
   const g = resolveEnvelope(ctx({ recognition: UNKNOWN }));
-  assert.ok(!(g.key in FALLBACK), 'unknown category must fall to the global envelope');
-  assert.equal(g.hard_max, 500000, 'global ceiling is the ported ₪500,000');
+  assert.ok(!(g.key in FALLBACK), 'an unknown category still matches no priced bucket');
+  assert.equal(g.basis, 'manual_only', 'an unresolved bucket must fail CLOSED');
+  assert.equal(g.hard_max, 2000, 'MANUAL_ONLY, not the ₪500,000 global ceiling');
+  // And no identity tier buys its way back to the old ceiling.
+  for (const identity of [
+    { brandOk: true, modelOk: true, brandC: 0.95, modelC: 0.95, brandConfLabel: 'confirmed_by_text' },
+    { brandOk: true, modelOk: false, brandC: 0.95 },
+    { brandOk: false, modelOk: false },
+  ]) {
+    const e = resolveEnvelope(ctx({ recognition: UNKNOWN, identity }));
+    assert.equal(e.hard_max, 2000,
+      'strengthening the identity does not make the bucket better known');
+  }
 });
 
 // ══ C. rule set ═══════════════════════════════════════════════════════════════

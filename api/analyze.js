@@ -2650,6 +2650,36 @@ export function calibrateRecognition(recognition) {
   // ABSENT, which lands on the same 0.5 the field's absence already produced.
   const rawConf = parseConfidence(recognition.category_confidence);
   let conf = Number.isNaN(rawConf) ? 0.5 : rawConf;
+  // ── H-4. THE PARSER GUARDED THE FIELD, NOT THE FIELDS THAT WRITE IT ────────
+  //
+  // §9 routed `category_confidence` through parseConfidence and left the BRAND
+  // and MODEL confidences raw, three lines below. Those decide what
+  // category_confidence becomes:
+  //
+  //   topBrand.confidence >= 0.85 && topModel.confidence >= 0.75  ->  conf = 0.80
+  //
+  // `30`, `99`, `"0.95"`, `"1"`, `1.01`, `Infinity`, `true`, `[0.9]` and
+  // `{valueOf:()=>1}` all satisfy those comparisons, lifting conf from 0.10 to
+  // 0.80, clearing CATEGORY_CONFIDENCE_FLOOR, and turning a V-IDENTITY-FLOOR
+  // refusal into an accepted BOUNDED price — while the WELL-FORMED 0.6 and 1.0
+  // do not reach 0.85 and ship nothing. Malformed input strictly outperformed
+  // well-formed input, which is the signature of a missing validator.
+  //
+  // Normalised ONCE, here, rather than at each comparison: patching the seven sites
+  // individually is what produced this defect in the first place. A candidate
+  // whose confidence is malformed keeps its NAME and loses its NUMBER — the name
+  // is still evidence of what the model saw, the number is not evidence of
+  // anything.
+  const normConf = (c) => {
+    if (!c || typeof c !== 'object') return c;
+    const p = parseConfidence(c.confidence);
+    return Number.isNaN(p) ? { ...c, confidence: 0 } : c;
+  };
+  recognition = {
+    ...recognition,
+    brand_candidates: (recognition.brand_candidates || []).map(normConf),
+    model_candidates: (recognition.model_candidates || []).map(normConf),
+  };
   const topBrand = recognition.brand_candidates?.[0];
   const topModel = recognition.model_candidates?.[0];
   const ocr = recognition.ocr_text || {};
@@ -3423,56 +3453,59 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
   // try/catch: a bug in the guard must never take a scan down. On an internal
   // error we fall back to the pre-VAL-001 arithmetic and mark the record so the
   // failure is countable rather than invisible.
+  // ── C-2. THE GUARD RECEIVES THE CONTEXT THAT WAS ACTUALLY ESTABLISHED ──────
+  //
+  // This was an explicit field WHITELIST:
+  //   { stage, pre_source, anchor, anchorModelEvidence, identity,
+  //     recognition, model, condition, comps }
+  //
+  // The composition point above computes six more — `evidence`,
+  // `pricing_category`, `display_category`, `pricing_envelope_source`,
+  // `category_disagreement`, and a pricing-corrected `recognition` — and NONE of
+  // them arrived. So §3 and §4 were dead in production while their unit tests
+  // passed, and the block's own comment had already recorded the identical defect
+  // for `comps` ("a rule with no reachable input, the fourth time that shape has
+  // appeared in this work") without anyone checking the other keys.
+  //
+  // Two measured consequences. §4: a Books/Electronics disagreement shipped ₪300
+  // as `ai_estimate` with no V-CATEGORY-DISAGREEMENT. §3: a MacBook Pro with a
+  // 0.97 Vision "Laptop" label, a 0.93 Apple logo and "MacBook Pro" read off it
+  // reached the guard as `evidence: ['DERIVED']`, resolved to `electronics`
+  // instead of `electronics:macbook`, and a ₪12,000 machine was refused and
+  // rewritten to a ₪1,200 category fallback.
+  //
+  // SPREAD, THEN OVERRIDE ONLY WHAT THIS FUNCTION OWNS. A whitelist that
+  // silently drops a caller's field is the wrong default for a trust boundary:
+  // the failure is invisible, and it fails OPEN on authority (§4) while failing
+  // CLOSED on value (§3), so neither direction is safe.
+  //
+  // This is NOT "copy Stage-1/Stage-2 output into the guard". `guardCtx` is
+  // assembled at one composition point from verified sources — `deriveEvidence`
+  // reads provenance, `resolveCategoryAuthority` applies the widening rule — and
+  // the fields below are the ones only this function can know. Anything the
+  // caller did not establish is still absent, and `ctx.evidence` still defaults
+  // to DERIVED-only inside the guard.
+  //
+  // GUARD-CTX-KEYS in tests/identity-floor.test.mjs asserts the key set against
+  // every `ctx.<name>` the guard actually reads, so the next field added at the
+  // composition point cannot go missing in silence.
   const gctx = {
+    ...guardCtx,
     stage: guardCtx.stage || 'stage2',
+    // `_pricing_meta` is written by the rescue/PRE path INSIDE this function's
+    // caller chain, so it is fresher than whatever guardCtx was built with.
     pre_source: verification._pricing_meta?.pre_source || guardCtx.pre_source || null,
     anchor: guardCtx.anchor || null,
     anchorModelEvidence: guardCtx.anchorModelEvidence || false,
     identity: guardCtx.identity || null,
-    // ── REVERTED. THIS LINE WAS A CRITICAL, AND IT WAS MINE. ────────────────
-    //
-    // For one commit this read
-    //   `{ ...recognition, category: verification.final_category || recognition.category }`
-    // on the reasoning that the price and the displayed label must come from
-    // the same string. They must — but I made that true by taking BOTH from the
-    // LESS trusted one. Stage 2 is the stage whose prompt carries OCR
-    // raw_texts, Vision labels, catalog rows and the user's refineModel: the
-    // entire GW-PROMPT-INJECTION-001 attack surface. One line turned "Stage 2
-    // may suggest a label" into "Stage 2 may choose its own price ceiling".
-    //
-    // Witness, found independently by the security and valuation reviews. A
-    // paperback, Stage 1 correctly `Books` (hard_max 480), Stage 2 asked 4,000:
-    //   final_category Books       -> books        mid 0     MANUAL_REQUIRED
-    //   final_category Electronics -> electronics  mid 4000  LOW
-    //   final_category Furniture   -> furniture    mid 4000  MEDIUM
-    // The enum bounds the NAMES. It does not bound the ceilings, which run from
-    // 480 to 250,000.
-    //
-    // Worse than the bug: `envelopeAgreesWithCategory` — written in the same
-    // ticket to detect exactly this disagreement — was imported here and never
-    // called. `grep -c` returned 1: the import line. I shipped the detector for
-    // this defect, dead, in the commit that introduced the defect. That is the
-    // ninth instance of this project's recurring pattern and the most direct.
-    //
-    // The envelope is resolved from Stage 1's category again. The underlying
-    // finding — a displayed category that disagrees with the priced envelope —
-    // is REOPENED and recorded, because the fix for it is not "trust the later
-    // string", and I am not inventing a third derived rule in this round.
-    recognition,
+    // The pricing-corrected recognition when §4 produced one, else Stage 1's.
+    // Never Stage 2's: allowing Stage 2 to supply `subcategory` would reopen the
+    // widening through a different field, which is how the first version fell.
+    recognition: guardCtx.recognition || recognition,
     model: guardCtx.model || null,
     condition: verification.condition || recognition.visual_features?.condition,
-    // V-FX READS THIS, AND NOTHING WAS PASSING IT.
-    //
-    // `gctx` is an explicit field WHITELIST, so the currency boundary built in
-    // this ticket could never fire: the guard read `ctx.comps`, no caller set
-    // it, and no test noticed — a rule with no reachable input, which is the
-    // fourth time that shape has appeared in this work. Wired now so V-FX is
-    // live the day Phase B produces its first comparable, rather than
-    // discovering then that the boundary was decorative.
-    //
-    // Phase A produces none, so this is `[]` today and V-FX iterates nothing.
-    // That is the correct behaviour, not a placeholder: a scan with no market
-    // evidence has no money to validate.
+    // V-FX reads this. Phase A produces no comparables, so it is [] today and
+    // V-FX iterates nothing — the correct behaviour, not a placeholder.
     comps: guardCtx.comps || [],
   };
 
@@ -3548,6 +3581,17 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     pricing_category: guardCtx.pricing_category ?? recognition.category,
     pricing_envelope_source: guardCtx.pricing_envelope_source ?? null,
     category_disagreement: guardCtx.category_disagreement === true,
+    // H-1. THE TWO VERDICTS, AT THE TOP LEVEL, WHERE A CLIENT CAN SEE THEM.
+    //
+    // They existed only inside `marketValue.validation`, which is a provenance
+    // blob that lands in a jsonb column. A caller asking the only question that
+    // matters — "did recognition succeed, and is a price owed?" — had to parse it,
+    // and on the paths that lost the fields there was nothing to parse. Phase B
+    // reads these by scan_uuid; they are part of the contract, not diagnostics.
+    recognition_verdict: verdict?.metadata?.recognition_verdict ?? null,
+    valuation_verdict: verdict?.metadata?.valuation_verdict ?? null,
+    identity_tier: verdict?.metadata?.identity_tier ?? null,
+    evidence: verdict?.metadata?.evidence ?? null,
     confidence: verification.match_confidence,
     isSellable: verification.is_sellable ?? true,
     condition: verification.condition || recognition.visual_features?.condition || 'unknown',
@@ -4829,7 +4873,24 @@ async function handleRequest(req) {
     // The `manual_required` exclusion keeps the guard's own deliberate zero
     // state out of here: it is degraded BY DESIGN and already terminal, so
     // rescuing it would re-price something the pipeline correctly refused.
+    // H-1. PENDING_MARKET IS NOT A REJECTED PRICE, SO IT IS NOT RESCUED.
+    //
+    // The gate below fires on `degraded`, and `pending` sets `degraded: true` so
+    // that consumers written before it refuse the number. That made every pending
+    // scan look like a rejected quote: it was routed into runPricingRescue, the
+    // rescue produced nothing better, and it terminated as a generic
+    // manual_required_zero_state. End to end, a perfectly recognised Ninja and an
+    // unrecognisable object came back byte-identical.
+    //
+    // The exclusion beside it already states the principle for the guard's own
+    // zero state — "degraded BY DESIGN and already terminal, so rescuing it would
+    // re-price something the pipeline correctly refused". PENDING_MARKET is
+    // exactly such a state: the guard is not saying the number is wrong, it is
+    // saying no number is owed yet. Re-pricing it would substitute the same
+    // unbacked estimate the verdict exists to refuse.
+    const pendingMarket = result.marketValue?.validation?.valuation_verdict === 'PENDING_MARKET';
     if (result.marketValue?.validation?.degraded
+        && !pendingMarket
         && result.marketValue.validation.pricing_source !== 'manual_required') {
       const rule = result.marketValue.validation.degraded_reason || 'unknown';
 

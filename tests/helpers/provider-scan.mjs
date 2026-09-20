@@ -34,6 +34,12 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const NL = String.fromCharCode(10);
+
+// Keywords after which a `/` begins a REGEX, not a division. H-9.
+const REGEX_KEYWORDS = new Set([
+  'return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void',
+  'case', 'do', 'else', 'yield', 'await', 'throw',
+]);
 const BACKSLASH = String.fromCharCode(92);
 const BACKTICK = String.fromCharCode(96);
 
@@ -81,6 +87,7 @@ export function lex(src) {
   // stack, and a quoted string that may not cross a newline.
   const modes = [{ kind: 'code', depth: 0, interp: false }];
   let prev = '';
+  let prevWord = '';
   let i = 0;
 
   while (i < src.length) {
@@ -130,7 +137,21 @@ export function lex(src) {
       modes.push({ kind: 'template', start: i, text: '', hasExpr: false });
       blank(i); i++; continue;
     }
-    if (c === '/' && /[(,=:[!&|?{};+\-*%~^<>]/.test(prev)) {
+    // H-9. REGEX-VS-DIVISION, AND WHY THE KEYWORD CASE MATTERS.
+    //
+    // This decided `/` was a regex only after an operator character. After a
+    // KEYWORD it read as division, so `return /[`]{3}/.test(s)` was lexed as
+    // arithmetic -- and the backtick inside that char class then OPENED a
+    // template that never closed, blanking every literal to the next backtick.
+    // A security reviewer inserted one plausible sanitizer helper into a copy of
+    // api/analyze.js and a planted provider went invisible while PD-9 passed all
+    // four of its own assertions. That is the round-9 runaway exactly, in the
+    // guard written to catch the round-9 runaway.
+    //
+    // `prevWord` carries the last identifier so a keyword can be recognised;
+    // after `)` we stay with division, which is right for `(a+b)/c` and wrong
+    // only for `if (x) /re/.test(y)`, a shape nothing in this repo uses.
+    if (c === '/' && (/[(,=:[!&|?{};+\-*%~^<>]/.test(prev) || REGEX_KEYWORDS.has(prevWord))) {
       let j = i + 1, inClass = false;
       while (j < src.length && src[j] !== NL) {
         if (src[j] === BACKSLASH) { j += 2; continue; }
@@ -149,10 +170,30 @@ export function lex(src) {
       if (m.interp) { modes.pop(); blank(i); i++; continue; }   // end of ${…}
       prev = c; i++; continue;
     }
-    if (!/\s/.test(c)) prev = c;
+    if (/[A-Za-z_$]/.test(c)) {
+      let j = i;
+      while (j < src.length && /[\w$]/.test(src[j])) j++;
+      prevWord = src.slice(i, j);
+      prev = src[j - 1];
+      i = j;
+      continue;
+    }
+    if (!/\s/.test(c)) { prev = c; prevWord = ''; }
     i++;
   }
-  return { strings, code: out.join('') };
+  // H-9b. A NON-EMPTY MODE STACK AT EOF MEANS A CONSTRUCT NEVER CLOSED.
+  //
+  // The keyword-position fix above removes the known trigger. This is the
+  // layer that does not depend on having predicted the trigger: if ANY string
+  // or template is still open when the source runs out, the lexer has blanked
+  // a region it should not have, and everything after that point is a lie. The
+  // round-9 runaway blanked from line 1010 to EOF and reported zero provider
+  // hosts in analyze.js while passing.
+  //
+  // Reported, not thrown: a fixture may legitimately contain a truncated
+  // construct, and scanModule turns it into a finding so the caller decides.
+  const unterminated = modes.length > 1 ? modes[modes.length - 1].kind : null;
+  return { strings, code: out.join(''), unterminated };
 }
 
 // -- §2  ONE DECLARED SOURCE OF TRUTH FOR "WHAT REACHES THE NETWORK" ---------
@@ -191,6 +232,42 @@ export const UNSUPPORTED_TRANSPORTS = Object.freeze([
 
 const TRANSPORT_SET = new Set(UNSUPPORTED_TRANSPORTS);
 
+// ── H-8. AN ALLOWLIST, BECAUSE A DENYLIST ANSWERS THE WRONG QUESTION ─────────
+//
+// UNSUPPORTED_TRANSPORTS above enumerates 21 names, and the header called that
+// "a guard whose blind spots are enumerated". It enumerated the blind spots we
+// had thought of. A reviewer planted four adapters that the gate passed at 43/43:
+// `node:http2` and `node:tls` (core-module siblings of five listed core modules),
+// `ws`, and `createRequire` ALIASED to another binding — which slipped past the
+// import scan because it anchors on the identifier `require`, defeating the very
+// case NO-1d claims to cover. Also both-blind: socket.io-client, follow-redirects,
+// node:child_process + curl, Deno.connect, Bun.connect, require('node:'+'https').
+//
+// So the question is inverted. Every NON-RELATIVE specifier imported under api/
+// must carry an explicit disposition here. A dependency nobody has classified is
+// a finding by default, which means the next transport added to package.json
+// fails the gate by NAME without anyone having predicted its name.
+//
+//   'no-network'    cannot reach a host.
+//   'fetch-based'   reaches hosts, but through globalThis.fetch, so the runtime
+//                   layer observes it. Its DESTINATIONS remain statically
+//                   invisible — that is a known, accepted, and here RECORDED gap.
+//   'unsupported'   reaches hosts by a route neither layer can follow.
+export const SPECIFIER_DISPOSITION = Object.freeze({
+  // The one bare dependency api/ imports today. It is observable only because
+  // that SDK happens to use globalThis.fetch internally — an accident of its
+  // implementation that nothing asserts, so it is written down rather than
+  // relied upon silently.
+  '@supabase/supabase-js': 'fetch-based',
+});
+
+/** Bare (non-relative, non-builtin-prefixed) specifier? */
+function isBareSpecifier(spec) {
+  return typeof spec === 'string' && spec.length > 0
+    && !spec.startsWith('.') && !spec.startsWith('/')
+    && !spec.startsWith('file:') && !spec.startsWith('data:');
+}
+
 /**
  * Every module specifier this file imports or requires.
  *
@@ -225,7 +302,7 @@ const AUTHORITY_TAIL = /(?:https?:)?\/\/[A-Za-z0-9._-]*$/;
  *   dynamic  — { file, line, shape, snippet }  UNRESOLVABLE; must be registered
  */
 export function scanModule(mod) {
-  const { strings, code } = lex(mod.source);
+  const { strings, code, unterminated } = lex(mod.source);
   const literals = [];
   const dynamic = [];
   const lineAt = (i) => mod.source.slice(0, i).split(NL).length;
@@ -326,9 +403,53 @@ export function scanModule(mod) {
   // and the runtime harness cannot observe. It carries the module name, so the
   // report says WHICH transport rather than merely that something is wrong.
   for (const { spec, line } of importedSpecifiers(mod, strings, code)) {
-    if (!TRANSPORT_SET.has(spec)) continue;
+    if (TRANSPORT_SET.has(spec)) {
+      dynamic.push({
+        file: mod.path, line, shape: 'unsupported-transport', snippet: spec, transport: spec,
+      });
+      continue;
+    }
+    // H-8. Undeclared bare dependency: not known-bad, and not known-anything.
+    if (!isBareSpecifier(spec)) continue;
+    const disposition = Object.prototype.hasOwnProperty.call(SPECIFIER_DISPOSITION, spec)
+      ? SPECIFIER_DISPOSITION[spec] : null;
+    if (disposition === null) {
+      dynamic.push({
+        file: mod.path, line, shape: 'undeclared-dependency', snippet: spec, transport: spec,
+      });
+    } else if (disposition === 'unsupported') {
+      dynamic.push({
+        file: mod.path, line, shape: 'unsupported-transport', snippet: spec, transport: spec,
+      });
+    }
+  }
+
+  // ── H-7. A CAPTURED ENTRYPOINT IS A CALL SITE WE CANNOT SEE ────────────────
+  //
+  // `ENTRYPOINT_CALL` matches a name followed by `(`. `const F = globalThis.fetch`
+  // has no `(` after `fetch`, and the later `F(url)` is not a name this scanner
+  // knows — so 30 of 342 matrix cells were silently green in BOTH layers. Every
+  // one was a module-scope capture crossed with a non-literal destination.
+  //
+  // Reading `fetch` OUT of call position is therefore itself the finding. The
+  // runtime half is fixed separately, in analyze-harness.mjs, by installing the
+  // dispatcher before the handler is imported.
+  for (const m of code.matchAll(/(?:globalThis|window|self)\s*\.\s*fetch\b(?!\s*\()/g)) {
     dynamic.push({
-      file: mod.path, line, shape: 'unsupported-transport', snippet: spec, transport: spec,
+      file: mod.path, line: lineAt(m.index), shape: 'captured-entrypoint',
+      snippet: m[0].replace(/\s+/g, ''),
+    });
+  }
+  for (const m of code.matchAll(/\b(?:const|let|var)\s+\w+\s*=\s*fetch\b(?!\s*\()/g)) {
+    dynamic.push({
+      file: mod.path, line: lineAt(m.index), shape: 'captured-entrypoint',
+      snippet: m[0].replace(/\s+/g, ' '),
+    });
+  }
+
+  if (unterminated) {
+    dynamic.push({
+      file: mod.path, line: 0, shape: 'lexer-unterminated', snippet: unterminated,
     });
   }
 

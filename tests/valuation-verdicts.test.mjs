@@ -133,7 +133,19 @@ describe('VV-1 the Ninja witness — IDENTIFIED and PENDING_MARKET', () => {
     // A PENDING_MARKET row that cannot say WHAT is pending is indistinguishable
     // from a failure, and Phase B would have nothing to take as input.
     const v = validateQuote(q(400), ctx);
-    assert.deepEqual(v.metadata.evidence, ['BRAND_TEXT', 'PRODUCT_TEXT', 'DERIVED']);
+    // H-5. The fixture carries no Vision, and `ocr_text.raw_texts` is Stage 1's
+    // own transcription, so it corroborates nothing. The IDENTITY is unaffected —
+    // it comes from `ctx.identity`, which analyze.js builds from the candidate
+    // strings — which is the separation this round is about: what was RECOGNISED
+    // and what was independently WITNESSED are different records.
+    assert.deepEqual(v.metadata.evidence, ['DERIVED']);
+    // With an independent reader, the text classes appear and the verdict does not move.
+    const witnessed = scan({ recognition: NINJA, identity: readIdentity(),
+      visionData: { text: ['NINJA', 'Detect Power Blender Pro'] } });
+    const w = validateQuote(q(400), witnessed);
+    assert.deepEqual(w.metadata.evidence, ['BRAND_TEXT', 'PRODUCT_TEXT', 'DERIVED']);
+    assert.equal(w.metadata.valuation_verdict, VALUATION_VERDICT.PENDING_MARKET,
+      'independent text evidence is not MARKET evidence');
     assert.equal(v.metadata.envelope_key, 'home:kitchen appliance',
       'the envelope is still resolved — Phase B needs the bound it will validate against');
     assert.equal(v.metadata.identity_tier, IDENTITY_TIER.EXACT_MODEL);
@@ -257,7 +269,12 @@ describe('VV-3 the verdict lattice is total and not collapsed', () => {
     const rec = { category: 'Electronics', category_confidence: 0.9 };
     const id = { brandOk: true, modelOk: true, brandC: 0.9, modelC: 0.9 };
     const got = new Set([
-      resolveValuationVerdict({ stage: 'stage2', identity: id, recognition: rec, anchor: { id: 'x' } }),
+      // C-1/H-2. THIS LINE CERTIFIED THE CRITICAL. `{ id: 'x' }` carries no price,
+      // and it produced ANCHORED — so the suite asserted, as the contract, that a
+      // lookalike row with no price is market evidence. An anchor must carry a
+      // usable price to be one.
+      resolveValuationVerdict({ stage: 'stage2', identity: id, recognition: rec,
+        anchor: { id: 'x', retail_price_ils: 900 } }),
       resolveValuationVerdict({ stage: 'stage2', identity: id, recognition: rec }),
       resolveValuationVerdict({ stage: 'stage2', identity: { brandOk: false, modelOk: false },
         recognition: { category: 'Electronics', category_confidence: 0.55 } }),

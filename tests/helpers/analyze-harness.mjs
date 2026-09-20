@@ -83,8 +83,34 @@ export const anthropicText = (obj) => ({
           stop_reason: 'end_turn', usage: { input_tokens: 1200, output_tokens: 400 } },
 });
 
+// ── H-7. THE PATCH IS INSTALLED BEFORE THE HANDLER IS IMPORTED ──────────────
+//
+// `harness()` used to import api/analyze.js and THEN replace globalThis.fetch.
+// Anything evaluated at MODULE SCOPE therefore captured the REAL fetch:
+//
+//   const F = globalThis.fetch;        // module scope -> the real one
+//   export const send = (u) => F(u);   // never observed by this harness
+//
+// A security reviewer planted five such adapters into api/ and the release gate
+// stayed green on all five while a plain-`fetch` control was caught. The call
+// reached the network; `state.unknownHosts` stayed empty. That is the SEC-9
+// class again — coverage asserted, not delivered.
+//
+// The dispatcher is installed ONCE, at module load, and reads `active` at call
+// time. So a module-scope capture captures the dispatcher, and every later
+// `harness()` still gets its own responder table.
+const realFetch = globalThis.fetch;
+let active = null;
+
+globalThis.fetch = async (input, init = {}) => {
+  if (!active) return realFetch(input, init);
+  return active(input, init);
+};
+
 export async function harness() {
   setEnv();
+  // Imported AFTER the dispatcher above is in place, so module-scope reads of
+  // globalThis.fetch inside api/ capture something this harness can observe.
   const mod = await import('../../api/analyze.js');
   const handler = mod.default;
 
@@ -96,9 +122,7 @@ export async function harness() {
     unknownHosts: [],
   };
 
-  const realFetch = globalThis.fetch;
-
-  globalThis.fetch = async (input, init = {}) => {
+  active = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input?.url ?? String(input));
     let body = {};
     try { body = init.body ? JSON.parse(init.body) : {}; } catch { /* non-json body */ }
@@ -192,7 +216,9 @@ export async function harness() {
     vision: (fn) => { state.vision = fn; },
     voyage: (fn) => { state.voyage = fn; },
     charged: (v) => { state.charged = v; },
-    restore: () => { globalThis.fetch = realFetch; },
+    // Clears the responder, leaving the module-scope dispatcher in place so a
+    // module-scope capture taken by an ALREADY-IMPORTED module stays observable.
+    restore: () => { active = null; },
 
     // HIGH-1. Reads the out-of-band record and FAILS THE TEST. Deliberately
     // separate from run() so a test can also assert the property at a point of

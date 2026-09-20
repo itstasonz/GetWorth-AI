@@ -101,7 +101,22 @@ const ROLEX_STICKER = {
 // gate tested only from the permitted side is not a gate.
 // ════════════════════════════════════════════════════════════════════════════════
 describe('the Rolex witness: what bounds it now, measured not assumed', () => {
-  test('OI-3 the ROLEX STICKER still reaches watches:luxury — and that is the DESIGN', () => {
+  // H-5. The sticker fixture carries its text in `ocr_text.raw_texts`, which is
+  // STAGE-1 MODEL OUTPUT. That no longer corroborates the model's own candidate,
+  // so these cases now supply what production supplies when it matters: an
+  // INDEPENDENT reader. `sawText` is Google Vision reading the same object.
+  const sawText = (...lines) => ({ text: lines });
+
+  test('OI-3a self-written text alone does NOT reach watches:luxury', () => {
+    // The strongest single improvement in this round for this witness. The
+    // sticker fixture's `raw_texts` is the same model call that produced the
+    // "Rolex"/"Submariner" candidates, so it is the model saying it twice.
+    // ₪250,000 was reachable on that alone.
+    assert.equal(env(ROLEX_STICKER).key, 'watches');
+    assert.equal(env(ROLEX_STICKER).hard_max, ENVELOPES.watches.hard_max);
+  });
+
+  test('OI-3 an INDEPENDENTLY READ sticker reaches watches:luxury — and that is the DESIGN', () => {
     // Worth being blunt about, because it looks like the rule failing. The brand
     // AND the product name were genuinely read off the object ('ROLEX
     // SUBMARINER' is in raw_texts), so BRAND_TEXT and PRODUCT_TEXT both hold,
@@ -110,7 +125,7 @@ describe('the Rolex witness: what bounds it now, measured not assumed', () => {
     //
     // What the bucket does NOT accept is a model simply WRITING the brand down.
     // That is the next test, and it is the half that used to be missing.
-    const e = env(ROLEX_STICKER);
+    const e = env(ROLEX_STICKER, CONFIRMED, sawText('ROLEX', 'SUBMARINER'));
     assert.equal(e.key, 'watches:luxury');
     assert.equal(e.hard_max, 250000);
   });
@@ -129,8 +144,8 @@ describe('the Rolex witness: what bounds it now, measured not assumed', () => {
 
     // And one class is not two: the bucket declares BRAND_TEXT *and*
     // PRODUCT_TEXT, so reading only the brand is not enough.
-    const brandOnly = { ...ROLEX_STICKER, model_candidates: [], ocr_text: { raw_texts: ['ROLEX'] } };
-    assert.equal(env(brandOnly).key, 'watches',
+    const brandOnly = { ...ROLEX_STICKER, model_candidates: [], ocr_text: { raw_texts: [] } };
+    assert.equal(env(brandOnly, CONFIRMED, sawText('ROLEX')).key, 'watches',
       'BRAND_TEXT alone must not enter a bucket that declares two classes');
   });
 
@@ -138,16 +153,17 @@ describe('the Rolex witness: what bounds it now, measured not assumed', () => {
     // §3 gates ENTRY to the bucket. This flag bounds what you may be quoted once
     // inside it. They are different questions and both still have to be answered
     // — closing the first is not an excuse to relax the second.
-    const e = env(ROLEX_STICKER);
+    const e = env(ROLEX_STICKER, CONFIRMED, sawText('ROLEX', 'SUBMARINER'));
     assert.equal(e.requiresAnchorAboveSoft, true);
     assert.equal(ENVELOPES['watches:luxury'].requiresAnchorAboveSoft, true,
       'the flag lives on the table row — a bucket added without it inherits nothing');
   });
 
   test('OI-5 so a sticker-only Rolex is refused above soft, and priced below it', () => {
-    const vq = (quote, rec) => validateQuote(quote,
+    const vq = (quote, rec, visionData = sawText('ROLEX', 'SUBMARINER')) => validateQuote(quote,
       { stage: 'pre', pre_source: 'catalog', anchorModelEvidence: true, anchor: null, model: 'm',
-        recognition: rec, identity: CONFIRMED, evidence: deriveEvidence({ recognition: rec }).classes });
+        recognition: rec, identity: CONFIRMED,
+        evidence: deriveEvidence({ recognition: rec, visionData }).classes });
 
     const hi = vq({ low: 90000, mid: 120000, high: 160000, currency: 'ILS' }, ROLEX_STICKER);
     assert.equal(hi.action, 'degrade', 'above soft_max with no catalog anchor');
@@ -161,7 +177,7 @@ describe('the Rolex witness: what bounds it now, measured not assumed', () => {
     // entirely, because the envelope is `watches` (hard 6,400) rather than
     // `watches:luxury`. Two refusals for two different reasons, both correct.
     const asserted = { ...ROLEX_STICKER, ocr_text: { raw_texts: [] } };
-    const lo2 = vq({ low: 8000, mid: 12000, high: 18000, currency: 'ILS' }, asserted);
+    const lo2 = vq({ low: 8000, mid: 12000, high: 18000, currency: 'ILS' }, asserted, null);
     assert.equal(lo2.action, 'degrade');
     assert.match(lo2.metadata.degraded_reason, /V-ENVELOPE-HARD/);
   });

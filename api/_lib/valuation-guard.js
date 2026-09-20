@@ -183,6 +183,26 @@ const MANUAL_ONLY = Object.freeze({ floor: 5, soft_max: 1000, hard_max: 2000 });
 // No bucket matched. Ceiling ported verbatim from the ONE existing sanity gate
 // in the codebase (analyze.js:3876, `mid > 500_000` rejects a rescue quote);
 // floor 5 is the smallest bucket floor (books 5 x 0.40 = 2) rounded up.
+// C-3. RETAINED AS A NAMED CEILING, NO LONGER REACHABLE AS A FALLBACK.
+//
+// This was the envelope an UNRESOLVED bucket fell through to whenever the
+// identity was confirmed, on the reasoning that "a real product in a category we
+// have not bucketed yet is a gap in BUCKETS, not a reason to refuse the user."
+// That reasoning is wrong in the one direction that matters: it makes FAILING TO
+// RESOLVE the most permissive outcome in the system, 500,000 against a books
+// ceiling of 480.
+//
+// The §6 token matcher then made unresolved MUCH more common — 'Other', and
+// every category word the matcher declines to place — so strings the N-4 fix was
+// written to CORRECT ("Tablet", "Watchdog", "Caravan") went from a wrong-but-tight
+// bucket to the loosest bounds in the system. The fix for a widening defect
+// widened by 31x-250x. It also re-opened the global-envelope inversion this
+// module had already closed once for the unidentified case.
+//
+// Uncertainty must reduce authority. An unresolved bucket is now MANUAL_ONLY
+// whatever the identity is worth — and a confirmed identity in an unbucketed
+// category is not refused, it is PENDING_MARKET, which is exactly the state that
+// now exists to hold it.
 const GLOBAL_ENVELOPE = Object.freeze({ floor: 5, soft_max: 20000, hard_max: 500000 });
 
 // Anchor-relative envelope, used whenever the caller resolved a COMPATIBLE
@@ -212,6 +232,23 @@ function buildEnvelopes() {
 }
 
 export const ENVELOPES = buildEnvelopes();
+
+/**
+ * An envelope by key, or null — OWN PROPERTIES ONLY.
+ *
+ * VAL-6. `ENVELOPES[key]` walks the prototype chain, so `'__proto__'` returned
+ * `Object.prototype` and `'constructor'` returned `Object`. Both are truthy, so
+ * the `!env` guard passed, and floor / soft_max / hard_max were all `undefined`.
+ * Every comparison against undefined is false, so ₪999,999,999 was ACCEPTED with
+ * zero violations and the envelope reported as `undefined`.
+ *
+ * Latent today because no caller supplies `envelope_key` — but Phase B builds its
+ * own ctx, and this is a total bypass of the entire envelope system.
+ */
+function envelopeFor(key) {
+  if (typeof key !== 'string' || !key) return null;
+  return Object.prototype.hasOwnProperty.call(ENVELOPES, key) ? ENVELOPES[key] : null;
+}
 
 // ── §6  A CATEGORY IS A WORD, NOT A SUBSTRING  ·  N-4 ──────────────────────
 //
@@ -430,9 +467,32 @@ export function bucketEntryRequirement(key, table = ENVELOPES) {
   if (BUCKET_AUTHORITY[key]) return BUCKET_AUTHORITY[key];
   const parent = parentKey(key);
   if (!parent) return [];
-  const self = table[key], up = table[parent];
+  const own = (t, k) => (Object.prototype.hasOwnProperty.call(t, k) ? t[k] : undefined);
+  const self = own(table, key), up = own(table, parent);
   if (!self || !up) return [];
   return self.hard_max > up.hard_max ? UNSATISFIABLE : [];
+}
+
+// C-1. The guard may not import at will, so this mirrors `anchorPrice` in
+// api/_lib/pricing-authority.js. tests/anchor-authority.test.mjs asserts the two
+// agree over the whole malformed-price matrix rather than trusting that they do.
+//
+// NO COERCION. `Number()` accepted the string "900"; `!!ctx.anchor` accepted
+// `{}`. A price is a finite number strictly above zero, and everything else is
+// ABSENT rather than small.
+function anchorPriceOf(anchor) {
+  if (!anchor || typeof anchor !== 'object' || Array.isArray(anchor)) return null;
+  for (const key of ['retail_price_ils', 'avg_used_price_ils']) {
+    const v = anchor[key];
+    if (typeof v !== 'number' || !Number.isFinite(v) || v <= 0) continue;
+    return v;
+  }
+  return null;
+}
+
+/** Does this context carry MARKET-PRICE evidence, as opposed to a lookalike row? */
+function hasMarketAnchor(ctx) {
+  return anchorPriceOf(ctx?.anchor) !== null;
 }
 
 const DERIVED_ONLY = Object.freeze(new Set(['DERIVED']));
@@ -455,6 +515,13 @@ export function bucketEntryPermitted(key, evidence, table = ENVELOPES) {
   if (req === UNSATISFIABLE) return false;
   if (req.length === 0) return true;
   const have = asEvidenceSet(evidence);
+  // C-1. ANCHOR now means "a row carrying a usable price", so this short-circuit
+  // is sound again. It was not: the class was granted to any object, and its
+  // justification — "moot in practice, because resolveEnvelope uses
+  // anchor-relative bounds" — is false for a priceless row, which falls through
+  // to the BUCKET envelope. An empty object opened all 13 gated buckets and
+  // moved a watch from 6,400 to 250,000. CATALOG_IDENTITY deliberately does NOT
+  // appear here: looking like a product is not evidence of its price class.
   if (have.has('ANCHOR')) return true;
   return req.every((c) => have.has(c));
 }
@@ -482,7 +549,7 @@ function applyBucketAuthority(key, evidence) {
 // than "no bucket" and was therefore accepted.
 function ceilingOf(k) {
   if (!k) return MANUAL_ONLY.hard_max;
-  const e = ENVELOPES[k];
+  const e = envelopeFor(k);
   return e ? e.hard_max : MANUAL_ONLY.hard_max;
 }
 
@@ -794,7 +861,12 @@ export function variantContradiction(aText, bText) {
 }
 
 export function resolveEnvelope(ctx = {}) {
-  const retail = Number(ctx.anchor?.retail_price_ils);
+  // C-1 / VAL-9. Was `Number(ctx.anchor?.retail_price_ils)`, which accepted the
+  // STRING "900" and — found by this round's own property test — coerced
+  // `retail_price_ils: true` to 1, producing an anchor-relative envelope of
+  // floor 0.08 / soft 1 / hard 1.25. A boolean became a one-shekel ceiling.
+  // One predicate for what a price is, shared with the evidence class.
+  const retail = anchorPriceOf(ctx.anchor);
   // A catalog anchor whose VARIANT contradicts the item does not describe this
   // unit, and an anchor sets the envelope — so the contradiction would hand the
   // wrong ceiling to the wrong product. Fall through to the category envelope
@@ -804,7 +876,7 @@ export function resolveEnvelope(ctx = {}) {
     + `${(ctx.recognition?.ocr_text?.raw_texts || []).join(' ')}`;
   const variantConflict = ctx.anchor ? variantContradiction(anchorText, itemText) : null;
 
-  if (Number.isFinite(retail) && retail > 0 && !variantConflict) {
+  if (retail !== null && !variantConflict) {
     return {
       key: ctx.anchor.id ? `anchor:${ctx.anchor.id}` : 'anchor',
       basis: 'anchor',
@@ -814,8 +886,17 @@ export function resolveEnvelope(ctx = {}) {
       requiresAnchorAboveSoft: false,
     };
   }
-  const key = ctx.envelope_key ?? resolveEnvelopeKey(ctx.recognition || {}, ctx.evidence);
-  const env = key ? ENVELOPES[key] : null;
+  // VAL-5. A caller-supplied key is a request, not an authority. It goes through
+  // the SAME bucket gate as a resolved one — otherwise `envelope_key:
+  // 'watches:luxury'` with DERIVED-only evidence hands over floor 200 / soft
+  // 40,000 / hard 250,000, which is precisely what BUCKET_AUTHORITY exists to
+  // refuse. §3 stated the rule unconditionally and checked it in one of the two
+  // places a key can come from.
+  const requestedKey = ctx.envelope_key ?? resolveEnvelopeKey(ctx.recognition || {}, ctx.evidence);
+  const key = ctx.envelope_key != null
+    ? applyBucketAuthority(envelopeFor(ctx.envelope_key) ? ctx.envelope_key : null, ctx.evidence)
+    : requestedKey;
+  const env = envelopeFor(key);
   if (!env) {
     // ── THE GLOBAL-ENVELOPE INVERSION, CLOSED ────────────────────────────────
     //
@@ -832,14 +913,18 @@ export function resolveEnvelope(ctx = {}) {
     // A confirmed identity still gets the global fallback — a real product in
     // a category we have not bucketed yet is a gap in BUCKETS, not a reason to
     // refuse the user. Everything weaker gets MANUAL_ONLY.
-    const tier = resolveIdentityTier(ctx);
-    const identityConfirmed = tier === IDENTITY_TIER.EXACT_MODEL
-      || tier === IDENTITY_TIER.FAMILY
-      || tier === IDENTITY_TIER.BRAND_ONLY;
-    if (!identityConfirmed) {
-      return { key: key || 'global', basis: 'manual_only', ...MANUAL_ONLY, requiresAnchorAboveSoft: false };
-    }
-    return { key: key || 'global', basis: 'global', ...GLOBAL_ENVELOPE, requiresAnchorAboveSoft: false };
+    // C-3. NO IDENTITY TIER EARNS THE GLOBAL CEILING ANY MORE.
+    //
+    // This used to branch: a confirmed identity got GLOBAL_ENVELOPE (500,000), a
+    // weak one got MANUAL_ONLY (2,000). The branch is gone, because "we could not
+    // work out which bucket this is" is a statement about OUR knowledge, and
+    // strengthening the identity does not make the bucket any better known.
+    //
+    // This does NOT refuse the user. A confirmed identity in an unbucketed
+    // category resolves to PENDING_MARKET — we know what it is and hold no price
+    // evidence for its class — which is a better answer than a number bounded
+    // only by 500,000, and it is the state /api/enrich will resolve.
+    return { key: key || 'unresolved', basis: 'manual_only', ...MANUAL_ONLY, requiresAnchorAboveSoft: false };
   }
   return {
     key: env.key,
@@ -862,7 +947,11 @@ const gradeDown = (g) => {
 // `anchor` present ⇒ the caller found a compatible catalog row; that — not the
 // model's self-declared "comp_based" — is what earns the HIGH grade.
 export function derivePricingSource(ctx = {}) {
-  const anchored = !!ctx.anchor;
+  // C-1. Was `!!ctx.anchor`. A lookalike row with no price graded HIGH —
+  // stage2_comp_anchored — a BETTER grade than a real priced catalog row whose
+  // model column was not hit (pre_catalog -> LOW). The model's unmeasured number
+  // outranked a measured one because somebody had submitted a matching name.
+  const anchored = hasMarketAnchor(ctx);
   if (ctx.stage === 'pre') {
     switch (ctx.pre_source) {
       // MEDIUM only when the row's MODEL column was hit by evidence, mirroring
@@ -1117,7 +1206,12 @@ export function resolveValuationVerdict(ctx = {}) {
   if (ctx.category_disagreement === true) return VALUATION_VERDICT.MANUAL;
 
   const have = asEvidenceSet(ctx.evidence);
-  if (ctx.anchor || have.has('ANCHOR') || ANCHORED_SOURCES.has(derived.source)) {
+  // C-1. Was `ctx.anchor || have.has('ANCHOR') || ...`. Two defects in one
+  // line: the bare `ctx.anchor` accepted any object, and `have.has('ANCHOR')`
+  // accepted the CALLER'S ASSERTION of the class rather than the anchor itself.
+  // ANCHORED is derived from the anchor OBJECT now, so a caller cannot assert
+  // its way past V-MARKET-EVIDENCE by passing evidence: ['ANCHOR'].
+  if (hasMarketAnchor(ctx) || ANCHORED_SOURCES.has(derived.source)) {
     return VALUATION_VERDICT.ANCHORED;
   }
 
@@ -1214,6 +1308,32 @@ export function validateQuote(rawQuote, ctx = {}) {
     model: ctx.model ?? null,
   };
 
+  // ── H-1. WHAT WE ESTABLISHED IS RECORDED BEFORE ANYTHING CAN REFUSE ────────
+  //
+  // These five used to be assigned two hundred lines below, just before the
+  // identity-floor check — and the comment there claimed they were "computed
+  // here rather than at each exit so that a refusal still carries what we DID
+  // establish". Every exit ABOVE that point contradicted it:
+  //
+  //   V-ZERO-STATE   accept    all five ABSENT
+  //   V-FINITE       degrade   four absent, valuation_verdict FABRICATED
+  //   V-CURRENCY     degrade   same
+  //   V-POSITIVE     degrade   same
+  //
+  // Fabricated, not merely missing: degrade() force-sets valuation_verdict to
+  // MANUAL, so a scan that was IDENTIFIED + PENDING_MARKET reported MANUAL for a
+  // verdict that had never been computed, beside an undefined recognition_verdict.
+  // A record that invents a field is worse than one that omits it.
+  //
+  // They are pure functions of ctx, so computing them first costs nothing and
+  // makes the comment true. `identityTier` is reused below rather than recomputed.
+  const identityTier = resolveIdentityTier(ctx);
+  base.identity_tier = identityTier;
+  base.recognition_verdict = resolveRecognitionVerdict(ctx);
+  base.valuation_verdict = resolveValuationVerdict(ctx);
+  base.evidence = evidenceNames(ctx.evidence);
+  base.pricing_envelope_source = ctx.pricing_envelope_source ?? null;
+
   const degrade = (rule, detail) => {
     violations.push({ rule, detail });
     return verdict({
@@ -1223,13 +1343,18 @@ export function validateQuote(rawQuote, ctx = {}) {
       prices: { ...ZERO },
       repairs,
       violations,
-      // A DEGRADED SCAN IS NOT BOUNDED. The verdicts are computed on `base`
-      // before the numeric rules run, so a quote that then fails an envelope
-      // or ordering check would otherwise still report valuation_verdict
-      // BOUNDED beside a refusal. Recognition survives a refusal; valuation
+      // A DEGRADED SCAN IS NOT BOUNDED, AND IT IS NOT ANCHORED. A quote that
+      // fails an envelope or ordering check must not keep a verdict that claims
+      // the number was backed. Recognition survives a refusal; valuation
       // authority does not.
+      //
+      // PENDING_MARKET is the one verdict a refusal may KEEP, because it is
+      // itself a refusal and it is the only one /api/enrich can act on. Flattening
+      // it to MANUAL here is what made a pending scan indistinguishable from an
+      // unrecognisable one.
       meta: { ...base, pricing_grade: 'MANUAL_REQUIRED', degraded: true,
-        valuation_verdict: VALUATION_VERDICT.MANUAL,
+        valuation_verdict: base.valuation_verdict === VALUATION_VERDICT.PENDING_MARKET
+          ? VALUATION_VERDICT.PENDING_MARKET : VALUATION_VERDICT.MANUAL,
         degraded_reason: `${rule}: ${detail}` },
     });
   };
@@ -1350,16 +1475,7 @@ export function validateQuote(rawQuote, ctx = {}) {
       'derivePricingSource with a deliberate grade before it can price.');
   }
 
-  const identityTier = resolveIdentityTier(ctx);
-  base.identity_tier = identityTier;
-  // TWO VERDICTS, ALWAYS BOTH RECORDED. They are computed here rather than at
-  // each exit so that a refusal still carries what we DID establish: a scan we
-  // cannot price is not a scan we failed to recognise, and the record has to be
-  // able to say so. See RECOGNITION_VERDICT / VALUATION_VERDICT above.
-  base.recognition_verdict = resolveRecognitionVerdict(ctx);
-  base.valuation_verdict = resolveValuationVerdict(ctx);
-  base.evidence = evidenceNames(ctx.evidence);
-  base.pricing_envelope_source = ctx.pricing_envelope_source ?? null;
+  // identity_tier and the two verdicts are already on `base` — see H-1 above.
   if (!PRICEABLE_TIERS.has(identityTier)) {
     return degrade('V-IDENTITY-FLOOR',
       `identity tier ${identityTier} cannot carry a product-specific price ` +

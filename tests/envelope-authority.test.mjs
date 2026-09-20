@@ -246,27 +246,48 @@ describe('EA-3 evidence is established by PROVENANCE, not by assertion', () => {
     const claimed = { brand_candidates: [{ brand: 'Rolex' }], ocr_text: { raw_texts: ['WARRANTY 2019'] } };
     assert.deepEqual(evidenceList({ recognition: claimed }), ['DERIVED']);
 
-    const read = { brand_candidates: [{ brand: 'Rolex' }], ocr_text: { raw_texts: ['ROLEX OYSTER'] } };
-    assert.deepEqual(evidenceList({ recognition: read }), ['BRAND_TEXT', 'DERIVED']);
+    // H-5. THIS ASSERTED SELF-CORROBORATION AS VALID. `ocr_text.raw_texts` is
+    // STAGE-1 MODEL OUTPUT — the schema declares it, the prompt asks for "exact
+    // text found", and the schema is never applied. So one model call wrote both
+    // the candidate and the transcription that "confirmed" it, and BRAND_TEXT
+    // meant the model had said it twice. DERIVED + DERIVED is not corroboration.
+    const selfWritten = { brand_candidates: [{ brand: 'Rolex' }], ocr_text: { raw_texts: ['ROLEX OYSTER'] } };
+    assert.deepEqual(evidenceList({ recognition: selfWritten }), ['DERIVED'],
+      'a model may not corroborate its own claim with its own transcription');
 
-    // Vision text counts too — it is an independent reader of the same object.
+    // An INDEPENDENT reader does establish it. This is the half that must keep
+    // working, or the class would be unreachable rather than merely honest.
     const viaVision = { brand_candidates: [{ brand: 'Rolex' }], ocr_text: { raw_texts: [] } };
     assert.deepEqual(evidenceList({ recognition: viaVision, visionData: { text: ['ROLEX'] } }),
       ['BRAND_TEXT', 'DERIVED']);
+
+    // H-6. A compatibility label contains the brand BY DESIGN — that is what it
+    // is for. A ₪20 case must not inherit the phone's bucket.
+    assert.deepEqual(evidenceList({ recognition: viaVision,
+      visionData: { text: ['Compatible with Rolex'] } }), ['DERIVED']);
+    // And tokens may not pool across separate detections.
+    assert.deepEqual(evidenceList({
+      recognition: { brand_candidates: [{ brand: 'Tag Heuer' }], ocr_text: { raw_texts: [] } },
+      visionData: { text: ['TAG', 'HEUER'] } }), ['DERIVED'],
+      'two detections are not one line');
   });
 
   test('EA-3c WHOLE WORDS: a longer word does not establish a shorter name', () => {
     // 'G502' must not be established by 'G5020'; 'LG' must not be established by
     // the word 'ALGAE'. Substring matching here would hand BRAND_TEXT to any
     // scan whose OCR happened to contain the letters.
+    // Read by VISION, not self-written — see H-5 in EA-3b. The property under
+    // test here is whole-word matching, not provenance.
     const near = (raw, brand) => evidenceList({
-      recognition: { brand_candidates: [{ brand }], ocr_text: { raw_texts: [raw] } } });
+      recognition: { brand_candidates: [{ brand }], ocr_text: { raw_texts: [] } },
+      visionData: { text: [raw] } });
     assert.deepEqual(near('G5020 SERIAL', 'G502'), ['DERIVED']);
     assert.deepEqual(near('ALGAE EXTRACT', 'LG'), ['DERIVED']);
     assert.deepEqual(near('LG OLED', 'LG'), ['BRAND_TEXT', 'DERIVED']);
     // A multi-word product name matches as a contiguous phrase, not a bag.
     const phrase = (raw) => evidenceList({
-      recognition: { model_candidates: [{ model: 'Detect Power Blender' }], ocr_text: { raw_texts: [raw] } } });
+      recognition: { model_candidates: [{ model: 'Detect Power Blender' }], ocr_text: { raw_texts: [] } },
+      visionData: { text: [raw] } });
     assert.deepEqual(phrase('DETECT POWER BLENDER PRO'), ['PRODUCT_TEXT', 'DERIVED']);
     assert.deepEqual(phrase('POWER SUPPLY / DETECT MODE / BLENDER'), ['DERIVED'],
       'tokens pooled across the line must not assemble the product name');
