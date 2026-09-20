@@ -150,7 +150,25 @@ export function confidence(value) {
 
 /** Lower-cased alphanumeric words. The unit both sides of a text match use. */
 function words(text) {
-  return String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  // R5-H1. THIS ERASED EVERY NON-LATIN SCRIPT.
+  //
+  // Splitting on /[^a-z0-9]+/ after lowercasing treats every Hebrew, Arabic,
+  // Cyrillic or CJK character as a SEPARATOR, so it is deleted rather than seen.
+  // "תואם ל Apple iPhone" — "compatible with Apple iPhone", the ordinary wording
+  // on accessory packaging in this product's primary market — tokenised to
+  // ["apple","iphone"], a clean product label. The compatibility filter was not
+  // merely English-only; the text it was supposed to read did not survive to it.
+  //
+  // NFKC first, so fullwidth "ｆｏｒ" and other compatibility forms fold to their
+  // ASCII equivalents before anything looks at them. Unicode letter/number
+  // classes so a script the author did not think of is TOKENISED rather than
+  // deleted — a word in a language we cannot read is still a word, and the rules
+  // below fail closed on words they do not recognise.
+  return String(text ?? '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
 }
 
 /**
@@ -209,7 +227,76 @@ function phrasePresent(needle, haystackWords) {
 //   4. A SINGLE-TOKEN MODEL NAME MUST MIX LETTERS AND DIGITS, so a warranty year
 //      or a price tag cannot stand in for a model number. Multi-word names are
 //      inherently specific and are exempt.
-const COMPATIBILITY = /\b(compatible|compatibility|compatibles|for|fits|fit|replacement|replaces|suits|suitable|universal|spare|works)\b/;
+// ── R5-H1. COMPATIBILITY MARKERS, IN THE LANGUAGES THIS MARKET USES ──────────
+//
+// The previous version was an English-only regex, in a product whose primary
+// market writes its accessory packaging in Hebrew. Every one of these passed
+// straight through and yielded BRAND_TEXT + PRODUCT_TEXT:
+//
+//   תואם ל Apple iPhone     pour Apple iPhone     für Apple iPhone
+//   מתאים ל Apple iPhone    para Apple iPhone     ｆｏｒ Apple iPhone
+//
+// A SET OF WHOLE TOKENS, not a regex over a joined string. The tokeniser has
+// already applied NFKC and split on Unicode letter boundaries, so a marker is
+// matched as a word: "for" matches, "form" and "forest" do not, and no
+// backslash-escaped boundary is needed to say so.
+//
+// Hebrew writes the preposition as a PREFIX (ל + word), so לאייפון is one
+// token meaning "for iPhone". `relationOf` handles that separately by prefix,
+// because a set of whole words cannot.
+//
+// NOT A COMPLETE LIST, and it does not need to be: an unrecognised line is
+// SUBJECT, and subject lines only ever establish that the NAMED brand was read
+// off the item. The classes they grant are bounded by BUCKET_AUTHORITY, which
+// requires OBJECT_CLASS from a classifier for every electronics bucket above its
+// parent. This is one layer of several, not the only one.
+const COMPATIBILITY = new Set([
+  // English
+  'compatible', 'compatibility', 'compatibles', 'for', 'fits', 'fit', 'fitting',
+  'replacement', 'replaces', 'replace', 'suits', 'suitable', 'universal', 'spare',
+  'works', 'accessory', 'accessories', 'aftermarket', 'adapter', 'adaptor',
+  // Hebrew  (תואם = compatible, מתאים = suitable, ל = for, עבור = for,
+  //          חלוף = spare/replacement, מתאימה/תואמת = feminine forms)
+  'תואם', 'תואמת', 'תואמים', 'מתאים', 'מתאימה', 'ל', 'עבור',
+  'חלוף', 'חליפי', 'אבזר', 'אבזרים', 'מתאימים',
+  // Arabic  (متوافق = compatible, ل = for, بديل = replacement)
+  'متوافق', 'ل', 'بديل', 'ملحق',
+  // European
+  'pour', 'para', 'per', 'für', 'fur', 'voor', 'til', 'för', 'forå', 'kompatibel',
+  'compatibile', 'compatibé', 'ricambio', 'repuesto', 'ersatz', 'zubehör',
+  // Cyrillic
+  'для', 'совместимый', 'запасной',
+]);
+
+// Hebrew and Arabic attach the "for" preposition as a PREFIX to the next word,
+// so לאייפון ("for iPhone") is a single token that no whole-word set can
+// match. Two letters minimum after the prefix, so the bare preposition and a
+// one-letter fragment do not sweep in ordinary words.
+// NARROWED after probing: the first draft also matched כ and מ, which mean
+// "as/like" and "from", not "for". That suppressed any Hebrew line whose first
+// word merely began with one of them — fail-closed, but it would have thrown
+// away legitimate Hebrew product labels. ל and ل are the prepositions that
+// actually mean "for/to".
+const RTL_FOR_PREFIX = /^[לل][א-תء-ي]{2,}$/u;
+
+// An ACCESSORY NOUN names what the photographed thing IS, and an accessory is
+// defined by the product it attaches to — so a line whose subject is one of
+// these is describing a relationship even with no preposition at all.
+// "מטען MacBook Pro" and "Charger MacBook Pro" carry no marker word, and the
+// host product is still not what was photographed.
+//
+// This is a REFUSAL list, so an accessory we have not named is treated as a
+// subject — the bounded direction. BUCKET_AUTHORITY is the layer behind it: a
+// charger cannot reach electronics:macbook without a classifier calling the
+// object a laptop, whatever its label says.
+const ACCESSORY_NOUN = new Set([
+  'charger', 'chargers', 'cable', 'cables', 'adapter', 'adaptor', 'case', 'cases',
+  'cover', 'covers', 'strap', 'straps', 'band', 'bands', 'filter', 'filters',
+  'blade', 'blades', 'protector', 'protectors', 'ink', 'toner', 'cartridge',
+  'sleeve', 'mount', 'holder', 'stand', 'dock', 'lens', 'battery', 'screen',
+  'מטען', 'כבל', 'מתאם', 'כיסוי', 'רצועה', 'פילטר', 'להב', 'מגן',
+  'סוללה', 'מעמד', 'מחסנית', 'עדשה',
+]);
 
 /**
  * The lines an INDEPENDENT reader returned, each already rejected if it is
@@ -219,20 +306,76 @@ const COMPATIBILITY = /\b(compatible|compatibility|compatibles|for|fits|fit|repl
  * to the pipeline as a signal — it just cannot corroborate the same model's own
  * candidate, which is the only thing this function is used for.
  */
-function independentLines(visionData) {
+// ── R5-C1. THE FLAT `text` ARRAY IS PER-WORD, AND THAT DEFEATED EVERYTHING ────
+//
+// `parseVisionResponse` builds `visionData.text` as
+// `textAnnotations.slice(1).map(t => t.description)`, and Vision's
+// textAnnotations[1..] are INDIVIDUAL WORDS. The repo says so in two places. So
+// round 4's "per line, contiguous" rule was applied to a list in which every
+// "line" was one word:
+//
+//   ["Replacement","strap","for","ROLEX","SUBMARINER"]
+//
+// The compatibility token lands in its OWN detection, is dropped alone, and
+// every other word survives as a clean single-word line. A replacement strap
+// established BRAND_TEXT + PRODUCT_TEXT and entered watches:luxury — hard_max
+// 250,000 — off a label that says it is a strap. Round 4's tests passed whole
+// phrases as single detections, a shape the parser cannot emit, so they proved
+// nothing about production.
+//
+// `ocr_context.full_text` is textAnnotations[0]: the block Vision returns with
+// its reading order and newlines intact. The repo already captures it, and
+// already says the flat array "loses" that structure. Lines come from there now.
+//
+// FAIL CLOSED WITHOUT IT. If full_text is absent the relationship between a
+// marker and the words around it cannot be established at ALL, so the flat array
+// establishes nothing. It may still refute (a contradiction is safe); it may not
+// corroborate. Logos survive either way: a logo is a mark on the object, not a
+// sentence about another product.
+const RELATION = Object.freeze({
+  SUBJECT: 'SUBJECT',
+  REFERENCE: 'REFERENCE',      // compatible-with / for / replacement-for / accessory-for
+});
+
+/**
+ * Split the OCR block into lines, classify each line's RELATIONSHIP to the
+ * photographed object, and return only the SUBJECT lines as word arrays.
+ *
+ * A line carrying a compatibility marker in ANY language is a REFERENCE: it
+ * describes what the item works WITH, not what it IS. The whole line is dropped
+ * rather than the marker alone, because accessory packaging writes the host
+ * product beside the marker and splitting the difference is how the per-word
+ * shape defeated the previous attempt.
+ */
+function classifiedLines(visionData) {
   const out = [];
-  for (const t of (visionData?.text || [])) {
-    if (typeof t !== 'string') continue;
-    const w = words(t);
-    if (w.length && !COMPATIBILITY.test(w.join(' '))) out.push(w);
+  const full = visionData?.ocr_context?.full_text;
+  if (typeof full === 'string' && full.length) {
+    for (const raw of full.split(/[\r\n]+/)) {
+      const w = words(raw);
+      if (!w.length) continue;
+      if (relationOf(w) === RELATION.REFERENCE) continue;
+      out.push(w);
+    }
   }
   for (const l of (visionData?.logos || [])) {
     const d = l && l.description;
     if (typeof d !== 'string') continue;
     const w = words(d);
-    if (w.length) out.push(w);          // a logo is a mark, not a sentence
+    if (w.length) out.push(w);
   }
   return out;
+}
+
+/** Does this line describe the object, or something the object works with? */
+function relationOf(lineWords) {
+  for (const w of lineWords) {
+    if (COMPATIBILITY.has(w)) return RELATION.REFERENCE;
+    if (ACCESSORY_NOUN.has(w)) return RELATION.REFERENCE;
+    // Hebrew/Arabic attach the preposition to the following word.
+    if (RTL_FOR_PREFIX.test(w)) return RELATION.REFERENCE;
+  }
+  return RELATION.SUBJECT;
 }
 
 /** Is `needle` a contiguous run of whole words within ANY single line? */
@@ -323,7 +466,7 @@ export function deriveEvidence({ recognition = null, visionData = null, anchor =
   // was the first withdrawn version of this rule, and it inverted under
   // relabelling. The test here is whether the name OCCURS in the text that came
   // off the item, which is an artefact rather than an assertion.
-  const lines = independentLines(visionData);
+  const lines = classifiedLines(visionData);
   const brand = recognition?.brand_candidates?.[0]?.brand;
   const model = recognition?.model_candidates?.[0]?.model;
   if (typeof brand === 'string' && presentOnSomeLine(brand, lines)) {

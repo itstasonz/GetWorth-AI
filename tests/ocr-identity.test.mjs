@@ -34,6 +34,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+// R5-C1. Vision fixtures are built by the PARSER, from text as printed on the
+// item, so a test can no longer describe a shape production cannot emit.
+import { visionData } from './helpers/vision-fixture.mjs';
+const { parseVisionResponse } = await import('../api/analyze.js');
+const vd = (block, opts) => visionData(parseVisionResponse, block, opts);
 import { resolveEnvelope, validateQuote, ENVELOPES,
   bucketEntryRequirement, bucketEntryPermitted } from '../api/_lib/valuation-guard.js';
 import { deriveEvidence } from '../api/_lib/pricing-authority.js';
@@ -105,7 +110,13 @@ describe('the Rolex witness: what bounds it now, measured not assumed', () => {
   // STAGE-1 MODEL OUTPUT. That no longer corroborates the model's own candidate,
   // so these cases now supply what production supplies when it matters: an
   // INDEPENDENT reader. `sawText` is Google Vision reading the same object.
-  const sawText = (...lines) => ({ text: lines });
+  // R5-C1. WAS `({ text: lines })` — one phrase per entry, a shape
+  // parseVisionResponse cannot emit. Its `text` array is per-WORD and the line
+  // structure lives in ocr_context.full_text, which this fixture had no notion
+  // of. The tests passed against data production never produces.
+  //
+  // Built by the parser itself now, from the text as PRINTED on the item.
+  const sawText = (...lines) => visionData(parseVisionResponse, lines.join('\n'));
 
   test('OI-3a self-written text alone does NOT reach watches:luxury', () => {
     // The strongest single improvement in this round for this witness. The

@@ -24,6 +24,9 @@
 //   assert.equal(r.refunds, 0);
 // ══════════════════════════════════════════════════════════════════════════════
 import crypto from 'node:crypto';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const JWT_SECRET = 'test-secret';
 const NL = String.fromCharCode(10);
@@ -106,6 +109,70 @@ globalThis.fetch = async (input, init = {}) => {
   if (!active) return realFetch(input, init);
   return active(input, init);
 };
+
+// ── S-2. RUNTIME OBSERVATION IS NOT A PROPERTY OF ONE FILE ──────────────────
+//
+// This harness drove api/analyze.js and nothing else, so api/submit-candidate.js
+// and api/confirm-identity.js had ZERO runtime observation. A security reviewer
+// appended a literal-free adapter to submit-candidate.js — a destructured
+// `globalThis.fetch`, an env-var destination — and the whole gate stayed at
+// 876 pass / 0 fail. Any static-silent shape in those files was both-blind by
+// construction, and the static layer is explicitly incomplete by design.
+//
+// Endpoints are DISCOVERED from the filesystem rather than listed, so a sixth
+// one added tomorrow is covered without anyone editing this file. `driveEndpoint`
+// invokes a handler's default export under the same dispatcher, so the
+// out-of-band unknown-host record applies to it exactly as it does to analyze.
+//
+// A handler that throws or 4xx's is FINE: the point is not that the request
+// succeeds, it is that any host it touches on the way is observed.
+export function discoverEndpoints() {
+  const dir = fileURLToPath(new URL('../../api/', import.meta.url));
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    if (!/\.(js|mjs|cjs|ts)$/.test(name)) continue;
+    const src = readFileSync(join(dir, name), 'utf8');
+    if (/export\s+default\s/.test(src)) out.push(name);
+  }
+  return out.sort();
+}
+
+/**
+ * Invoke one endpoint's default export under the active dispatcher.
+ *
+ * Returns { status, unknownHosts, err } — `unknownHosts` read OUT OF BAND after
+ * the handler returns, so a try/catch inside it cannot hide an attempt.
+ */
+export async function driveEndpoint(name, { method = 'POST', body = {}, headers = {} } = {}) {
+  setEnv();
+  const mod = await import(`../../api/${name}`);
+  const handler = mod.default;
+  if (typeof handler !== 'function') throw new Error(`${name} has no default export`);
+  endpointHosts.length = 0;
+  const prev = active;
+  active = async (input, init = {}) => {
+    const url = typeof input === 'string' ? input : (input?.url ?? String(input));
+    if (url.includes('fake.supabase.co')) return jsonRes([], 200);
+    // Same doctrine as run(): an unmodelled host is recorded OUT OF BAND first,
+    // then refused. A harness that invents a success launders an unknown into a pass.
+    endpointHosts.push(url);
+    throw new Error(`[harness] UNSTUBBED EXTERNAL HOST: ${url}`);
+  };
+  let status = null; let err = null;
+  try {
+    const req = new Request(`https://getworth.ai/api/${name.replace(/\.[^.]+$/, '')}`, {
+      method,
+      headers: { 'content-type': 'application/json', origin: 'https://getworth.ai', ...headers },
+      body: method === 'GET' ? undefined : JSON.stringify(body),
+    });
+    const res = await handler(req, { status: () => ({ json: () => {} }) });
+    status = res?.status ?? null;
+  } catch (e) { err = e; }
+  active = prev;
+  return { status, err, unknownHosts: [...endpointHosts] };
+}
+
+const endpointHosts = [];
 
 export async function harness() {
   setEnv();

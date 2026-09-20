@@ -32,7 +32,7 @@
 // metadata gained `identity_tier`. A stored valuation from version 1 is not
 // comparable to one from version 2, and drift is unmeasurable if both claim
 // the same validator.
-import { names } from './pricing-authority.js';
+import { names, EVIDENCE_CLASSES } from './pricing-authority.js';
 
 export const VALIDATOR_VERSION = 2;
 // bump on ANY envelope/threshold change.
@@ -506,7 +506,19 @@ function asEvidenceSet(evidence) {
 /** An evidence set as a stable, serialisable, sorted array. */
 function evidenceNames(evidence) {
   const have = asEvidenceSet(evidence);
-  return ['ANCHOR', 'OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT', 'DERIVED'].filter((c) => have.has(c));
+  // A5-1. THIS LIST WAS HAND-WRITTEN AND ALREADY WRONG.
+  //
+  // Round 4 added CATALOG_IDENTITY in api/_lib/pricing-authority.js and left this
+  // copy untouched, so `evidenceList` returned CATALOG_IDENTITY+DERIVED and this
+  // function returned DERIVED — two serialisers for one set, silently disagreeing,
+  // and THIS is the copy that reaches the client, valuations.ai_raw_response and
+  // the ledger. A scan where GetWorth holds a compatible row with no price is the
+  // single best /api/enrich input, because it already carries a row id; it was
+  // indistinguishable from a scan with no row at all.
+  //
+  // Imported from the producer now. A class added there appears here without
+  // anyone remembering to add it, which is the only arrangement that survives.
+  return EVIDENCE_CLASSES.filter((c) => have.has(c));
 }
 
 /** Does this evidence set satisfy `key`'s entry requirement? */
@@ -956,7 +968,18 @@ export function derivePricingSource(ctx = {}) {
     switch (ctx.pre_source) {
       // MEDIUM only when the row's MODEL column was hit by evidence, mirroring
       // the existing PRE grading rule (analyze.js:3795,3806).
-      case 'catalog': return { source: 'pre_catalog', grade: ctx.anchorModelEvidence ? 'MEDIUM' : 'LOW' };
+      // V5-1b. FOUND BY THE MECHANICAL INVENTORY, not by a reviewer.
+      // `anchorModelEvidence` is set by the caller as `!!guardAnchor?.model`, so a
+      // PRICELESS row that merely carries a model column lifted pre_catalog from
+      // LOW to MEDIUM. The brief forbids a priceless row increasing the valuation
+      // grade, and this did exactly that through a second field.
+      //
+      // The model column is evidence about IDENTITY — it says the row names the
+      // same product. Grading the PRICE on it requires the row to have a price.
+      case 'catalog': return {
+        source: 'pre_catalog',
+        grade: (ctx.anchorModelEvidence && hasMarketAnchor(ctx)) ? 'MEDIUM' : 'LOW',
+      };
       // GRADE LOWERED MEDIUM -> LOW, and the reason is an ordering defect, not
       // a taste preference. `pre_haiku` is an UNANCHORED model estimate; it
       // carries no catalog row, no comparable and no retail reference. It was
@@ -1597,7 +1620,20 @@ export function validateQuote(rawQuote, ctx = {}) {
   // down one step. For the buckets flagged requiresAnchorAboveSoft, an
   // exceptional price with no corroborating anchor is not priced at all.
   if (mid > env.soft_max) {
-    if (env.requiresAnchorAboveSoft && !ctx.anchor) {
+    // V5-1. THIS WAS THE ONE CONSUMER C-1 MISSED, twelve lines below where
+    // hasMarketAnchor is defined. It read `!ctx.anchor` — the old truthiness
+    // test — so a community-submitted row with no price satisfied the gate that
+    // exists to police a 6.25x ceiling lift, in the category this module itself
+    // calls the single most-hallucinated:
+    //
+    //   no anchor                 degrade  0
+    //   PRICELESS community row   accept   240,000
+    //   genuinely priced row      degrade  0        <- the real anchor refuses it
+    //
+    // My own comment in BUCKET_AUTHORITY said this rule "still applies on top,
+    // unchanged". It was unchanged in the worst sense: unchanged means it still
+    // applied to any object at all.
+    if (env.requiresAnchorAboveSoft && !hasMarketAnchor(ctx)) {
       return degrade('V-ENVELOPE-SOFT', `mid ${mid} > soft_max ${env.soft_max} for ${env.key} with no compatible anchor`);
     }
     needsReview = true;

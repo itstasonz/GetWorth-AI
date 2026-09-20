@@ -31,6 +31,27 @@ import { join, resolve, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UI_MUTANTS, TARGETS } from './ui-mutants.mjs';
 
+// ── §10. TWO RUNS AT ONCE MUST NOT CORRUPT EACH OTHER ──────────────────────
+//
+// `TARGETS[k].mutant` is a FIXED path beside the source — src/components/
+// ui.__mutant__.jsx and so on. Two harnesses running at the same time write the
+// same file, and the second one's mutant is judged against the first one's code.
+// The harness already detects tree corruption and says the results are
+// unreliable, which is honest but only after the fact.
+//
+// It happened for real: four independent reviewers ran the gate simultaneously
+// and one reported U16-NO-ACCESSIBLE-NAME as SURVIVED — a mutant a serial run
+// kills. The number was honestly measured; the harness was unsound under the
+// conditions a multi-reviewer round actually creates.
+//
+// A per-process suffix makes the runs independent without serialising anyone's
+// workflow. The suffix is derived from the pid and a random word, so two runs on
+// the same machine in the same second still differ.
+const RUN_ID = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+for (const t of Object.values(TARGETS)) {
+  t.mutant = t.mutant.replace('__mutant__', `__mutant__.${RUN_ID}`);
+}
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 const abs = (p) => join(REPO, p);

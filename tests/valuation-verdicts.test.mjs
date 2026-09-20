@@ -34,6 +34,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+// R5-C1. Vision fixtures are built by the PARSER, from text as printed on the
+// item, so a test can no longer describe a shape production cannot emit.
+import { visionData } from './helpers/vision-fixture.mjs';
+const { parseVisionResponse } = await import('../api/analyze.js');
+const vd = (block, opts) => visionData(parseVisionResponse, block, opts);
 // VAL001_GUARD_PATH points this suite at a MUTATED COPY of the guard, exactly as
 // tests/valuation-guard.test.mjs is pointed. Without the indirection the mutation
 // harness would load the real module and every mutant here would survive -- a
@@ -141,7 +146,7 @@ describe('VV-1 the Ninja witness — IDENTIFIED and PENDING_MARKET', () => {
     assert.deepEqual(v.metadata.evidence, ['DERIVED']);
     // With an independent reader, the text classes appear and the verdict does not move.
     const witnessed = scan({ recognition: NINJA, identity: readIdentity(),
-      visionData: { text: ['NINJA', 'Detect Power Blender Pro'] } });
+      visionData: vd('NINJA\nDetect Power Blender Pro') });
     const w = validateQuote(q(400), witnessed);
     assert.deepEqual(w.metadata.evidence, ['BRAND_TEXT', 'PRODUCT_TEXT', 'DERIVED']);
     assert.equal(w.metadata.valuation_verdict, VALUATION_VERDICT.PENDING_MARKET,

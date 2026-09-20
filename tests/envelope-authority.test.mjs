@@ -29,6 +29,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+// R5-C1. Vision fixtures are built by the PARSER, from text as printed on the
+// item, so a test can no longer describe a shape production cannot emit.
+import { visionData } from './helpers/vision-fixture.mjs';
+const { parseVisionResponse } = await import('../api/analyze.js');
+const vd = (block, opts) => visionData(parseVisionResponse, block, opts);
 import { readFileSync } from 'node:fs';
 // VAL001_GUARD_PATH points this suite at a MUTATED COPY of the guard, exactly as
 // tests/valuation-guard.test.mjs is pointed. Without the indirection the mutation
@@ -258,17 +263,17 @@ describe('EA-3 evidence is established by PROVENANCE, not by assertion', () => {
     // An INDEPENDENT reader does establish it. This is the half that must keep
     // working, or the class would be unreachable rather than merely honest.
     const viaVision = { brand_candidates: [{ brand: 'Rolex' }], ocr_text: { raw_texts: [] } };
-    assert.deepEqual(evidenceList({ recognition: viaVision, visionData: { text: ['ROLEX'] } }),
+    assert.deepEqual(evidenceList({ recognition: viaVision, visionData: vd('ROLEX') }),
       ['BRAND_TEXT', 'DERIVED']);
 
     // H-6. A compatibility label contains the brand BY DESIGN — that is what it
     // is for. A ₪20 case must not inherit the phone's bucket.
     assert.deepEqual(evidenceList({ recognition: viaVision,
-      visionData: { text: ['Compatible with Rolex'] } }), ['DERIVED']);
+      visionData: vd('Compatible with Rolex') }), ['DERIVED']);
     // And tokens may not pool across separate detections.
     assert.deepEqual(evidenceList({
       recognition: { brand_candidates: [{ brand: 'Tag Heuer' }], ocr_text: { raw_texts: [] } },
-      visionData: { text: ['TAG', 'HEUER'] } }), ['DERIVED'],
+      visionData: vd('TAG\nHEUER') }), ['DERIVED'],
       'two detections are not one line');
   });
 
@@ -280,14 +285,14 @@ describe('EA-3 evidence is established by PROVENANCE, not by assertion', () => {
     // test here is whole-word matching, not provenance.
     const near = (raw, brand) => evidenceList({
       recognition: { brand_candidates: [{ brand }], ocr_text: { raw_texts: [] } },
-      visionData: { text: [raw] } });
+      visionData: vd(raw) });
     assert.deepEqual(near('G5020 SERIAL', 'G502'), ['DERIVED']);
     assert.deepEqual(near('ALGAE EXTRACT', 'LG'), ['DERIVED']);
     assert.deepEqual(near('LG OLED', 'LG'), ['BRAND_TEXT', 'DERIVED']);
     // A multi-word product name matches as a contiguous phrase, not a bag.
     const phrase = (raw) => evidenceList({
       recognition: { model_candidates: [{ model: 'Detect Power Blender' }], ocr_text: { raw_texts: [] } },
-      visionData: { text: [raw] } });
+      visionData: vd(raw) });
     assert.deepEqual(phrase('DETECT POWER BLENDER PRO'), ['PRODUCT_TEXT', 'DERIVED']);
     assert.deepEqual(phrase('POWER SUPPLY / DETECT MODE / BLENDER'), ['DERIVED'],
       'tokens pooled across the line must not assemble the product name');

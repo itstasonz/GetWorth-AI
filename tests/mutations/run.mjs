@@ -51,6 +51,7 @@ const SUITES = [
   // was not in this list. A mutation score measures the suites it runs and says
   // nothing whatever about the ones it does not.
   'tests/round4-properties.test.mjs',
+  'tests/round5-properties.test.mjs',
 ];
 
 const argv = process.argv.slice(2);

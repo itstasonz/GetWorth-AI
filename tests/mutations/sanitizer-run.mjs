@@ -48,14 +48,16 @@ import { PRIMITIVE_MUTANTS, SITE_SCOPES, SITE_GUARDS, NON_SECURITY_SITES } from 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
 const ANALYZE = join(REPO, 'api/analyze.js');
-const MUTANT = join(REPO, 'api/analyze.__mutant__.js');
+// §10. Process-unique, so concurrent runs cannot judge each other's mutants.
+const RUN_ID = `${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+const MUTANT = join(REPO, `api/analyze.__mutant__.${RUN_ID}.js`);
 // HIGH-5: the quarantine primitives moved to api/_lib/prompt-trust.js so
 // /api/enrich can import the same implementation. A mutation harness that reads
 // one file would have reported 14 of 18 primitives INVALID — "find matched 0x" —
 // which is the honest failure, but the fix is to follow the code, not to re-pin
 // the strings at whatever they happen to be now.
 const TRUST = join(REPO, 'api/_lib/prompt-trust.js');
-const TRUST_MUTANT = join(REPO, 'api/_lib/prompt-trust.__mutant__.js');
+const TRUST_MUTANT = join(REPO, `api/_lib/prompt-trust.__mutant__.${RUN_ID}.js`);
 const SUITE = join(REPO, 'tests/prompt-injection.test.mjs');
 
 const argv = process.argv.slice(2);
@@ -280,7 +282,7 @@ for (const m of selected) {
   // be loaded from the REAL file and scored as if it had been applied.
   const analyzeSrc = a.file === 'analyze' ? a.mutated : source;
   const trustSrc = a.file === 'trust' ? a.mutated : trustSource;
-  const repointed = analyzeSrc.replace("from './_lib/prompt-trust.js'", "from './_lib/prompt-trust.__mutant__.js'");
+  const repointed = analyzeSrc.replace("from './_lib/prompt-trust.js'", `from './_lib/prompt-trust.__mutant__.${RUN_ID}.js'`);
   if (repointed === analyzeSrc) {
     invalid.push({ ...m, reason: "api/analyze.js no longer imports './_lib/prompt-trust.js' — the harness " +
       'cannot guarantee the mutant module is the one under test' });

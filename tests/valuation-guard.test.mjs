@@ -344,15 +344,23 @@ test('V-ZERO-01b zero state carries the MANUAL_REQUIRED grade and degraded flag'
 });
 
 test('V-ENVELOPE-SOFT-02 soft breach flags needs_review and steps the grade down exactly one', () => {
-  const anchored = ctx({ anchor: { retail_price_ils: 20000, similarity: 0.95 } });
-  const base = validateQuote(q({ low: 4000, mid: 5000, high: 6000 }), anchored);
-  const soft = validateQuote(q({ low: 10000, mid: 12000, high: 14000 }), ctx());
+  // REBUILT ON AN ANCHORED CONTEXT. The unanchored default now grades LOW, and
+  // gradeDown() never demotes below LOW — so measuring "exactly one step" from
+  // LOW measured nothing at all. An anchored stage-2 quote grades HIGH, which
+  // leaves room for the step to be observed, and is a real production shape.
+  //
+  // retail 10,000 -> floor 800 / soft 10,000 / hard 12,500.
+  const ANCHOR_10K = { id: 'a', retail_price_ils: 10000, similarity: 0.95 };
+  const inside = stage2Ctx({ anchor: ANCHOR_10K });
+  const base = validateQuote(q({ low: 5000, mid: 6000, high: 7000 }), inside);
+  const soft = validateQuote(q({ low: 9000, mid: 11000, high: 12000 }), inside);
   assert.equal(soft.action, 'accept', 'a legitimate high-value item must be priced, not degraded');
-  assert.equal(soft.metadata.needs_review, true);
-  assert.equal(base.metadata.needs_review, false);
-  const plain = validateQuote(q(), ctx());
-  assert.equal(GRADES.indexOf(soft.metadata.pricing_grade) - GRADES.indexOf(plain.metadata.pricing_grade), 1,
+  assert.equal(soft.metadata.needs_review, true, 'mid 11,000 breaches soft 10,000');
+  assert.equal(base.metadata.needs_review, false, 'mid 6,000 does not');
+  assert.equal(GRADES.indexOf(soft.metadata.pricing_grade) - GRADES.indexOf(base.metadata.pricing_grade), 1,
     'soft breach must step the grade down exactly one');
+  assert.notEqual(base.metadata.pricing_grade, 'LOW',
+    'the baseline must sit above the floor, or the step is unobservable');
 });
 
 test('DEGRADE-NEVER-CLAMP absurd values are never rewritten to a bound', () => {
@@ -666,10 +674,24 @@ test('M-01 (kills M07) an unordered triple DEGRADES — it is never silently rep
 test('M-02 (kills M12) a PRE catalog row earns MEDIUM only when its MODEL column was hit', () => {
   // S-03 asserted the source but passed `null` for the grade, so grade inflation
   // on the unevidenced branch went unnoticed.
-  const base = { stage: 'pre', pre_source: 'catalog' };
+  // V5-1b EXTENDED THIS RULE. `anchorModelEvidence` is set by the caller as
+  // `!!guardAnchor?.model`, so a PRICELESS row that merely carries a model column
+  // lifted pre_catalog from LOW to MEDIUM — a priceless row increasing the
+  // valuation grade through a second field. Found by the mechanical consumer
+  // inventory, not by a reviewer. The model column is evidence about IDENTITY;
+  // grading the PRICE on it requires the row to have a price.
+  const PRICED = { id: 'r', model: 'X', retail_price_ils: 900 };
+  const PRICELESS = { id: 'pc', model: 'X', retail_price_ils: null };
+  const base = { stage: 'pre', pre_source: 'catalog', anchor: PRICED };
   assert.equal(derivePricingSource({ ...base, anchorModelEvidence: false }).grade, 'LOW');
   assert.equal(derivePricingSource({ ...base }).grade, 'LOW', 'absent evidence must grade as absent, not assumed');
   assert.equal(derivePricingSource({ ...base, anchorModelEvidence: true }).grade, 'MEDIUM');
+  assert.equal(derivePricingSource({ stage: 'pre', pre_source: 'catalog', anchor: PRICELESS,
+    anchorModelEvidence: true }).grade, 'LOW',
+    'a priceless row may not buy the MEDIUM grade with its model column');
+  assert.equal(derivePricingSource({ stage: 'pre', pre_source: 'catalog',
+    anchorModelEvidence: true }).grade, 'LOW',
+    'nor may a caller assert the flag with no row at all');
 });
 
 test('M-03 (kills M14) a degraded verdict emits 0/0/0 — the rejected number never leaves the guard', () => {

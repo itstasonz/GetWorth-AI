@@ -118,8 +118,8 @@ export const MUTANTS = [
     id: 'M12-PRE-CATALOG-ALWAYS-MEDIUM',
     invariant: 'A PRE catalog row grades MEDIUM only when its MODEL column was hit.',
     kills: ['S-03'],
-    find: 'case \'catalog\': return { source: \'pre_catalog\', grade: ctx.anchorModelEvidence ? \'MEDIUM\' : \'LOW\' };',
-    replace: 'case \'catalog\': return { source: \'pre_catalog\', grade: \'MEDIUM\' };',
+    find: "        grade: (ctx.anchorModelEvidence && hasMarketAnchor(ctx)) ? 'MEDIUM' : 'LOW',",
+    replace: "        grade: 'MEDIUM',",
   },
   {
     id: 'M13-SOURCE-POLICY-OFF',
@@ -518,16 +518,16 @@ export const MUTANTS = [
     target: "authority",
     invariant: "H-5 a model may not corroborate its own candidate with its own transcription.",
     kills: ["EA-3b"],
-    find: "  const lines = independentLines(visionData);",
-    replace: "  const lines = independentLines(visionData)\n    .concat((recognition?.ocr_text?.raw_texts || []).map((t) => words(t)).filter((w) => w.length));",
+    find: "  const lines = classifiedLines(visionData);",
+    replace: "  const lines = classifiedLines(visionData)\n    .concat((recognition?.ocr_text?.raw_texts || []).map((t) => words(t)).filter((w) => w.length));",
   },
   {
     id: "M56-COMPATIBILITY-TEXT-CORROBORATES",
     target: "authority",
     invariant: "H-6 a compatibility label does not establish that the item IS the named product.",
     kills: ["EA-3b"],
-    find: "    if (w.length && !COMPATIBILITY.test(w.join(' '))) out.push(w);",
-    replace: "    if (w.length) out.push(w);",
+    find: "      if (relationOf(w) === RELATION.REFERENCE) continue;",
+    replace: "      if (false) continue;",
   },
   {
     id: "M57-TOKENS-POOL-ACROSS-LINES",
@@ -536,6 +536,76 @@ export const MUTANTS = [
     kills: ["EA-3b","EA-3c"],
     find: "  return lines.some((line) => phrasePresent(needle, line));",
     replace: "  return phrasePresent(needle, lines.flat());",
+  },
+
+  // ==========================================================================
+  // ROUND 5 - V5-1 the consumer C-1 missed, A5-1 the forked serialiser,
+  // R5-C1 the per-word Vision shape, R5-H1 the erased scripts.
+  //
+  // Each restores a defect an independent review found against round 4, which
+  // was itself green with a 100% mutation score. Three rounds running, the
+  // score was true and the coverage was narrower than the claim.
+  // ==========================================================================
+  {
+    id: "M58-SOFT-GATE-TAKES-ANY-ANCHOR",
+    invariant: "V5-1 requiresAnchorAboveSoft needs MARKET evidence, not any object.",
+    kills: ["R5-1a"],
+    find: "    if (env.requiresAnchorAboveSoft && !hasMarketAnchor(ctx)) {",
+    replace: "    if (env.requiresAnchorAboveSoft && !ctx.anchor) {",
+  },
+  {
+    id: "M59-MODEL-COLUMN-LIFTS-GRADE-UNPRICED",
+    invariant: "V5-1b a priceless row may not lift the pre_catalog grade with its model column.",
+    kills: ["M-02"],
+    find: "        grade: (ctx.anchorModelEvidence && hasMarketAnchor(ctx)) ? 'MEDIUM' : 'LOW',",
+    replace: "        grade: ctx.anchorModelEvidence ? 'MEDIUM' : 'LOW',",
+  },
+  {
+    id: "M60-EVIDENCE-SERIALISER-FORKS",
+    invariant: "A5-1 one canonical evidence-class list, shared by producer and guard.",
+    kills: ["R5-6a"],
+    find: "  return EVIDENCE_CLASSES.filter((c) => have.has(c));",
+    replace: "  return ['ANCHOR', 'OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT', 'DERIVED'].filter((c) => have.has(c));",
+  },
+  {
+    id: "M61-FLAT-PER-WORD-TEXT-CORROBORATES",
+    target: "authority",
+    invariant: "R5-C1 lines come from the line-structured block, never the per-word array.",
+    kills: ["R5-2a","R5-2b"],
+    find: "  const full = visionData?.ocr_context?.full_text;",
+    replace: "  const full = visionData?.ocr_context?.full_text || (visionData?.text || []).join(' ');",
+  },
+  {
+    id: "M62-REFERENCE-LINES-CORROBORATE",
+    target: "authority",
+    invariant: "R5-C1 a line describing compatibility does not establish subject identity.",
+    kills: ["R5-2a","R5-3a"],
+    find: "      if (relationOf(w) === RELATION.REFERENCE) continue;",
+    replace: "      if (false) continue;",
+  },
+  {
+    id: "M63-COMPATIBILITY-IS-ENGLISH-ONLY",
+    target: "authority",
+    invariant: "R5-H1 compatibility markers are recognised in the languages this market uses.",
+    kills: ["R5-3a"],
+    find: "    if (RTL_FOR_PREFIX.test(w)) return RELATION.REFERENCE;",
+    replace: "    if (false) return RELATION.REFERENCE;",
+  },
+  {
+    id: "M64-TOKENISER-ERASES-NON-LATIN",
+    target: "authority",
+    invariant: "R5-H1 a word in a script the author did not think of is tokenised, not deleted.",
+    kills: ["R5-3a","R5-3c"],
+    find: "    .split(/[^\\p{L}\\p{N}]+/u)",
+    replace: "    .split(/[^a-z0-9]+/)",
+  },
+  {
+    id: "M65-ACCESSORY-NOUN-IGNORED",
+    target: "authority",
+    invariant: "R5-C1 an accessory noun names a relationship even with no preposition.",
+    kills: ["R5-3b"],
+    find: "    if (ACCESSORY_NOUN.has(w)) return RELATION.REFERENCE;",
+    replace: "    if (false) return RELATION.REFERENCE;",
   },
 ];
 

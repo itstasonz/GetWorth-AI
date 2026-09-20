@@ -927,6 +927,10 @@ test('a category-only price cannot claim more than category-level confidence', (
 test('an identified product is NOT capped — the rule is about identity, not caution', () => {
   const v = validateQuote({ low: 250, mid: 380, high: 520, currency: 'ILS' }, {
     stage: 'pre', pre_source: 'catalog', anchorModelEvidence: true,
+    // V5-1b. `anchorModelEvidence` is derived in production as `!!guardAnchor?.model`,
+    // so asserting it with NO anchor is a shape the pipeline cannot produce — and it
+    // was how a priceless row lifted this grade. The row is here, and it has a price.
+    anchor: { id: 'r', model: 'G Pro X Superlight', retail_price_ils: 900 },
     identity: { brandOk: true, modelOk: true, identityHigh: true, brandC: 0.95, modelC: 0.9 },
     recognition: { category: 'Electronics', subcategory: 'gaming mouse', category_confidence: 0.95 },
   });

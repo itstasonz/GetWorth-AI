@@ -2780,6 +2780,53 @@ export function calibrateRecognition(recognition) {
   return { ...recognition, raw_category_confidence: recognition.category_confidence, category_confidence: round(conf), confidence_calibrated: true };
 }
 
+// ── V5-2. PRICING PROVENANCE IS SERVER STATE, NOT A MODEL FIELD ──────────────
+//
+// `verification` is raw `JSON.parse` of the Stage-2 response. VERIFICATION_SCHEMA
+// is documentation — this file says so — so any key the model invents is spread
+// straight through `calibrateVerification` and read downstream. `_pricing_meta`
+// is one of those keys, and it is the one that tells the CLIENT why a price was
+// trusted:
+//
+//   pricing_status      -> the user-facing label ("db_based" reads as evidenced)
+//   pricing_confidence  -> the grade
+//   pre_source          -> which evidence channel priced it, and it reaches gctx
+//   pricing_reason / pricing_warning / fallback_key -> read with NO predicate
+//
+// The VAL-001 header states the opposite as the contract: "provenance is DERIVED
+// here and the model's claim kept only as model_claimed_method". A model that
+// emits `_pricing_meta: { pricing_status: 'db_based', pre_source: 'catalog' }`
+// was writing the answer to the question the guard exists to answer.
+//
+// `_pricing_meta` is written by exactly two SERVER paths — buildFastPathVerification
+// and the PRE/rescue quote — after the model has spoken. So the model's copy is
+// removed at the boundary, with the claim preserved under a name nothing acts on
+// (the same treatment `price_method` already gets via `model_claimed_method`).
+//
+// Deletes rather than sanitises: there is no subset of these fields the model is
+// entitled to set, so there is nothing to validate.
+const MODEL_FORBIDDEN_KEYS = Object.freeze([
+  '_pricing_meta', '_fast_path', '_db_retail', 'validation', 'pricing_status',
+  'pricing_confidence', 'pricing_warning', 'pricing_reason', 'pre_source',
+  'fallback_key', 'recognition_verdict', 'valuation_verdict', 'identity_tier',
+  'evidence', 'pricing_envelope_source', 'category_disagreement', 'envelope_key',
+]);
+
+export function stripModelPricingProvenance(verification) {
+  if (!verification || typeof verification !== 'object' || Array.isArray(verification)) return verification;
+  const out = {};
+  const claimed = {};
+  for (const [k, v] of Object.entries(verification)) {
+    if (MODEL_FORBIDDEN_KEYS.includes(k)) { claimed[k] = v; continue; }
+    out[k] = v;
+  }
+  // Kept for drift measurement only. Nothing downstream reads it, which is the
+  // same discipline model_claimed_method already has: a claim worth counting is
+  // not a claim worth acting on.
+  if (Object.keys(claimed).length) out.model_claimed_pricing_meta = claimed;
+  return out;
+}
+
 export function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
   // ── HIGH-3: THE SAME BOUNDARY, ON THE WAY OUT ────────────────────────────
   // Every verification — Stage 2, the fast path, the rescue engine and the
@@ -4642,11 +4689,11 @@ async function handleRequest(req) {
       const stage2Cap = Math.max(8_000, Math.min(24_000, rem() - STAGE2_RESERVE_MS));
       plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
       try {
-        verification = await timed('stage2_verify', withTimeout(
+        verification = stripModelPricingProvenance(await timed('stage2_verify', withTimeout(
           verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData, stage2Cap),
           stage2Cap,
           'Stage 2 verification'
-        ));
+        )));
       } catch (err) {
         stage2FallbackUsed = true;
         stage2Status = 'pre';

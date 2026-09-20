@@ -39,10 +39,17 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import {
+// S-1. Pointed at the MUTATED copy when tests/mutations/provider-run.mjs is
+// driving, exactly as VAL001_GUARD_PATH already works. Without this the
+// provider mutants are written to a file this suite never loads, and they
+// SURVIVE for a reason that has nothing to do with the property.
+const SCAN_URL = process.env.PROVIDER_SCAN_PATH
+  ? new URL(`file://${process.env.PROVIDER_SCAN_PATH}`)
+  : new URL('./helpers/provider-scan.mjs', import.meta.url);
+const {
   scanModule, discoverModules, SCANNED_EXTENSIONS,
   NETWORK_ENTRYPOINTS, UNSUPPORTED_TRANSPORTS,
-} from './helpers/provider-scan.mjs';
+} = await import(SCAN_URL.href);
 import { readSource, normalizeEol } from './mutations/read-source.mjs';
 
 const mod = (source, path = 't.mjs') => scanModule({ path, source });
@@ -169,14 +176,30 @@ describe('NO-1 the generated construction matrix', () => {
   });
 
   test('NO-1g every executable extension is discovered', () => {
+    // WAS SELF-REFERENTIAL, and a mutation proved it. The fixture wrote one file
+    // per SCANNED_EXTENSIONS entry and then asserted the discovered count equalled
+    // SCANNED_EXTENSIONS.length — so narrowing the set to ['.js','.mjs'] wrote two
+    // files, found two, and passed. A test that derives its input from the value
+    // under test cannot observe that value changing.
+    //
+    // The list below is INDEPENDENT: these are extensions the Vercel runtime will
+    // execute, so a provider in one of them is a provider in production whatever
+    // the scanner's own constant happens to say.
+    const MUST_COVER = ['.js', '.mjs', '.cjs', '.jsx', '.ts', '.mts', '.cts', '.tsx'];
+    for (const ext of MUST_COVER) {
+      assert.ok(SCANNED_EXTENSIONS.includes(ext),
+        `${ext} is executable in production and must be scanned`);
+    }
     const dir = mkdtempSync(join(tmpdir(), 'no-ext-'));
     try {
-      for (const ext of SCANNED_EXTENSIONS) {
+      for (const ext of MUST_COVER) {
         writeFileSync(join(dir, `v${ext.replace('.', '_')}${ext}`),
-          `export const f = () => fetch('https://api.ext${ext.replace('.', '-')}.example/v1');\n`);
+          `export const f = () => fetch('https://api.ext${ext.replace('.', '-')}.example/v1');
+`);
       }
       const mods = discoverModules(pathToFileURL(dir + '/'));
-      assert.equal(mods.length, SCANNED_EXTENSIONS.length, 'every declared extension must be opened');
+      assert.equal(mods.length, MUST_COVER.length,
+        'every executable extension must be opened, not just the ones the constant lists');
       for (const m of mods) {
         assert.ok(scanModule(m).literals.length > 0, `${m.path}: a literal host in it was not found`);
       }
