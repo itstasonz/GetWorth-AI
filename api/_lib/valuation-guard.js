@@ -33,6 +33,7 @@
 // comparable to one from version 2, and drift is unmeasurable if both claim
 // the same validator.
 import { names, EVIDENCE_CLASSES } from './pricing-authority.js';
+import { hasVerifiedMarket, readMarketEvidence, VERIFIED_MARKET } from './market-evidence.js';
 
 export const VALIDATOR_VERSION = 2;
 // bump on ANY envelope/threshold change.
@@ -989,6 +990,9 @@ export function derivePricingSource(ctx = {}) {
   // model column was not hit (pre_catalog -> LOW). The model's unmeasured number
   // outranked a measured one because somebody had submitted a matching name.
   const anchored = hasMarketAnchor(ctx);
+  // Read through the mint, never from a field. `ctx.market_evidence = {...}`
+  // written by any caller is an ordinary object and reads as absent.
+  const verifiedMarket = hasVerifiedMarket(ctx);
   if (ctx.stage === 'pre') {
     switch (ctx.pre_source) {
       // MEDIUM only when the row's MODEL column was hit by evidence, mirroring
@@ -1030,9 +1034,23 @@ export function derivePricingSource(ctx = {}) {
     }
   }
   if (ctx.stage === 'stage2') {
-    return anchored
-      ? { source: 'stage2_comp_anchored', grade: 'HIGH' }
-      : { source: 'stage2_ai', grade: 'MEDIUM' };
+    if (anchored) return { source: 'stage2_comp_anchored', grade: 'HIGH' };
+    // QUESTION A, NOT WIDENED: the HIGH grade above says "GetWorth holds a
+    // priced row for this". Verified market evidence does not make that
+    // sentence true, so it gets its own source and stops one rung below.
+    //
+    // MEDIUM is the ceiling the ladder can express, and it is the same grade an
+    // unanchored `stage2_ai` estimate carries — which is an ordering this
+    // module would normally refuse, having already been caught once letting a
+    // guess outrank an observation. It is tolerable ONLY because the two can
+    // never describe the same scan: stage2_ai reaches a price exclusively
+    // through BOUNDED, i.e. category-level recognition, and verified market
+    // requires product-level recognition. They are disjoint by construction,
+    // not by luck. Recorded as a follow-up in the Phase-B blockers: the four
+    // grades cannot rank measured evidence above an unmeasured estimate, and
+    // adding a fifth is a UI change this task is not authorized to make.
+    if (verifiedMarket) return { source: 'verified_market', grade: 'MEDIUM' };
+    return { source: 'stage2_ai', grade: 'MEDIUM' };
   }
   // THE SIBLING HOLE, CLOSED. The `default:` inside the PRE switch was changed
   // to MANUAL_REQUIRED on the reasoning that an unregistered source is not a
@@ -1205,6 +1223,19 @@ export const RECOGNITION_VERDICT = Object.freeze({
 
 export const VALUATION_VERDICT = Object.freeze({
   ANCHORED: 'ANCHORED',
+  // ── THE VERDICT THAT RESOLVES PENDING_MARKET ─────────────────────────────
+  //
+  // PENDING_MARKET has always meant "we know the product and hold nothing that
+  // prices it; market research resolves this". This is what resolution looks
+  // like when it arrives. It is DELIBERATELY NOT ANCHORED: an anchor is a
+  // GetWorth-held priced row and satisfies every bucket entry requirement in
+  // the envelope table, so spelling researched comparables with the same word
+  // would let four marketplace listings open the 250,000 watches:luxury bucket.
+  //
+  // Weaker than ANCHORED, stronger than a guess, and its own word — which is
+  // the entire lesson of the ANCHOR/CATALOG_IDENTITY split in
+  // pricing-authority.js: two different facts must not be spellable the same.
+  VERIFIED_MARKET: 'VERIFIED_MARKET',
   BOUNDED: 'BOUNDED',
   PENDING_MARKET: 'PENDING_MARKET',
   MANUAL: 'MANUAL',
@@ -1264,6 +1295,26 @@ export function resolveValuationVerdict(ctx = {}) {
   }
 
   const rec = resolveRecognitionVerdict(ctx);
+
+  // ── QUESTION B: DO WE HAVE SUFFICIENT MARKET-PRICE EVIDENCE? ─────────────
+  //
+  // The one decision in this module whose real question was never "do we hold a
+  // catalog row" but "has anything measured this product's price". A qualified
+  // VERIFIED_MARKET token answers it: a quorum of deduplicated, source-diverse,
+  // identity-compatible used listings that GetWorth validated itself.
+  //
+  // GATED ON PRODUCT-LEVEL RECOGNITION, and the gate is not redundant. The
+  // token already requires a known brand and model to be minted at all, but
+  // that is Phase B's view of identity; this is the GUARD'S view, derived from
+  // ctx.identity by the same tier rules every other caller obeys. If the two
+  // disagree, the weaker one wins and the scan stays PENDING_MARKET. Market
+  // evidence may corroborate an identity the guard already holds; it may never
+  // be the reason the guard believes one, which is how a set of listings would
+  // otherwise promote "an LG monitor" into a specific LG monitor.
+  if (readMarketEvidence(ctx?.market_evidence) !== null && PRODUCT_LEVEL.has(rec)) {
+    return VALUATION_VERDICT.VERIFIED_MARKET;
+  }
+
   if (PRODUCT_LEVEL.has(rec)) return VALUATION_VERDICT.PENDING_MARKET;
   if (rec === RECOGNITION_VERDICT.CATEGORY && resolveEnvelopeKey(ctx.recognition || {}, have) !== null) {
     return VALUATION_VERDICT.BOUNDED;
@@ -1335,11 +1386,24 @@ export function validateQuote(rawQuote, ctx = {}) {
   const violations = [];
   const env = resolveEnvelope(ctx);
   const derived = derivePricingSource(ctx);
+  const marketToken = readMarketEvidence(ctx?.market_evidence);
+  const verifiedMarket = marketToken !== null;
   const base = {
     pricing_source: derived.source,
     pricing_grade: derived.grade,
     envelope_key: env.key,
     envelope_basis: env.basis,
+    // What the authority rested on, in a form a reader can check. Null when
+    // nothing was minted — including when a caller supplied a forgery, because
+    // a forgery reads as absent rather than as an error.
+    market_evidence: marketToken
+      ? Object.freeze({
+        class: VERIFIED_MARKET,
+        observation_count: marketToken.observation_count,
+        distinct_sources: marketToken.distinct_sources,
+        sources: marketToken.sources,
+      })
+      : null,
     degraded: false,
     degraded_reason: null,
     needs_review: false,
@@ -1658,7 +1722,22 @@ export function validateQuote(rawQuote, ctx = {}) {
     // My own comment in BUCKET_AUTHORITY said this rule "still applies on top,
     // unchanged". It was unchanged in the worst sense: unchanged means it still
     // applied to any object at all.
-    if (env.requiresAnchorAboveSoft && !hasMarketAnchor(ctx)) {
+    // QUESTION B, WIDENED. Read the rule's own sentence: "an exceptional price
+    // with no CORROBORATING anchor is not priced at all". What it wants is
+    // corroboration for an unusual number, and a quorum of independently
+    // validated, source-diverse used listings for this exact model is
+    // corroboration of precisely that kind — arguably better than one catalog
+    // row, since it cannot be created by a single submission.
+    //
+    // THE RESIDUAL RISK, STATED. These are the buckets this module calls the
+    // most-hallucinated, and the attack is the Rolex strap: listings for the
+    // host product corroborating an accessory's price. That attack is defeated
+    // in qualification, not here — a subject whose object class is an accessory
+    // admits only listings that name the accessory — and if that check were
+    // ever weakened, THIS is the line where the money leaves. It is also why
+    // the hard ceiling below is NOT widened: V-ENVELOPE-BAND still refuses any
+    // distribution that leaves the envelope, whatever corroborates it.
+    if (env.requiresAnchorAboveSoft && !hasMarketAnchor(ctx) && !verifiedMarket) {
       return degrade('V-ENVELOPE-SOFT', `mid ${mid} > soft_max ${env.soft_max} for ${env.key} with no compatible anchor`);
     }
     needsReview = true;
@@ -1742,8 +1821,10 @@ export function validateQuote(rawQuote, ctx = {}) {
     violations.push({
       rule: 'V-MARKET-EVIDENCE',
       detail: `recognition_verdict=${base.recognition_verdict} with pricing source ` +
-        `${derived.source} and no anchor — GetWorth holds no market evidence for this ` +
-        'product, so no price is issued. Resolvable by /api/enrich (NOT BUILT).',
+        `${derived.source}, no anchor and no qualified market evidence — GetWorth holds ` +
+        'nothing that prices this product, so no price is issued. Resolvable by ' +
+        '/api/enrich, whose observations become VERIFIED_MARKET once they pass ' +
+        'qualifyMarketEvidence in api/_lib/market-evidence.js.',
     });
     return verdict({
       action: 'pending',

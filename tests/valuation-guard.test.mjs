@@ -589,6 +589,13 @@ test('D-02 verdict + metadata shape is exactly the contract', () => {
     // PENDING_MARKET row that cannot say WHY is indistinguishable from a
     // failure, which is the state this round exists to stop shipping.
     'evidence', 'pricing_envelope_source', 'recognition_verdict', 'valuation_verdict',
+    // `market_evidence` — WHAT the price was allowed to rest on, when it did
+    // not rest on a catalog row. Null on every scan that has none, including
+    // one where a caller supplied a forgery, because a forgery reads as absent
+    // rather than as an error. It is here for the same reason as the fields
+    // above: a stored VERIFIED_MARKET row that cannot say how many listings,
+    // from how many sources, is a verdict nobody can audit afterwards.
+    'market_evidence',
   ].sort());
 });
 

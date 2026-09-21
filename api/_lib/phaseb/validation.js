@@ -131,7 +131,9 @@ export function corroborateSubject({ identity, ocrText = null, catalogCandidates
  * contributes ANCHOR: §1 forbids OpenAI output becoming a trusted catalog
  * anchor, and ANCHOR satisfies every bucket requirement in the guard.
  */
-export function applyGuard({ valuationCandidate, identity, corroboration, recognition = null } = {}) {
+export function applyGuard({
+  valuationCandidate, identity, corroboration, recognition = null, marketEvidence = null,
+} = {}) {
   if (!valuationCandidate || valuationCandidate.status !== VALUATION_STATUS.PRICED) {
     return {
       applied: false,
@@ -139,8 +141,14 @@ export function applyGuard({ valuationCandidate, identity, corroboration, recogn
       action: null,
       prices: { low: 0, mid: 0, high: 0 },
       violations: [],
+      market_evidence: null,
     };
   }
+
+  // The report was produced upstream, by qualifyMarketEvidence, from the RAW
+  // observations — see the pipeline. Its `token` is the only thing that grants,
+  // and it is null unless the whole set qualified.
+  const market = marketEvidence ?? { token: null, qualified: false, counts: { admitted: 0, considered: 0 }, distinct_sources: 0, set_failures: [], disqualified: [] };
 
   const evidence = new Set(['DERIVED']);
   if (corroboration?.brand_read_off_item) evidence.add('BRAND_TEXT');
@@ -176,6 +184,9 @@ export function applyGuard({ valuationCandidate, identity, corroboration, recogn
     anchor: null,              // §1: never a trusted catalog anchor
     anchorModelEvidence: false,
     comps: [],
+    // Null unless qualification minted one. §3: OpenAI cannot put a value here
+    // that means anything — the guard reads through the mint, not the field.
+    market_evidence: market.token,
   };
 
   let envelope = null;
@@ -210,5 +221,17 @@ export function applyGuard({ valuationCandidate, identity, corroboration, recogn
     degraded_reason: verdict?.metadata?.degraded_reason ?? null,
     guard_error: error,
     evidence: [...evidence],
+    market_evidence: {
+      qualified: market.qualified,
+      admitted: market.counts.admitted,
+      considered: market.counts.considered,
+      distinct_sources: market.distinct_sources,
+      set_failures: market.set_failures,
+      disqualified: market.disqualified.map((d) => ({
+        title: d.observation?.title ?? null,
+        source_domain: d.observation?.source_domain ?? null,
+        reason: d.reason,
+      })),
+    },
   };
 }

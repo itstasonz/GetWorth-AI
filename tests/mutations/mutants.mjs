@@ -73,6 +73,34 @@ export const GUARD_CONTROLS = [
     find: 'const MAX_BLOCK_LINES = 80;',
     replace: 'const MAX_BLOCK_LINES = 79;',
   },
+  // ── AND THE MARKET CHANNEL, ADDED WITH IT RATHER THAN AFTER IT ───────────
+  //
+  // The authority channel above was added uncalibrated and ran that way until a
+  // reviewer noticed the harness printing PROVEN over a channel no control had
+  // ever touched. A third mutable module is exactly the same mistake waiting to
+  // be repeated, so its two controls ship in the same commit as its mutants.
+  {
+    id: 'CTL-MARKET-SENSITIVITY-MUST-DIE',
+    control: 'kill',
+    target: 'market',
+    invariant: 'The harness reaches api/_lib/market-evidence.js at all.',
+    find: 'export function qualifyMarketEvidence({ observations = [], subject = {}, fxProofs = null } = {}) {',
+    replace: 'export function qualifyMarketEvidence({ observations = [], subject = {}, fxProofs = null } = {}) {\n  throw new Error("[control] market sensitivity probe");',
+  },
+  {
+    id: 'CTL-MARKET-SPECIFICITY-MUST-LIVE',
+    control: 'survive',
+    target: 'market',
+    invariant: 'A real change no suite asserts anything about is NOT killed, on the market side too.',
+    // The floating-point slack in the FX proof check: a genuine behavioural
+    // change, on an input no test supplies. Every FX fixture is either exact or
+    // wrong by a factor of ten, so a tenth of an agora either way is invisible.
+    // If a test ever pins this tolerance, the control starts being killed and
+    // the gate says so — which is correct, because at that point it is no
+    // longer unobserved.
+    find: '  if (Math.abs(amount * rate - normalized) > 0.001) return null;',
+    replace: '  if (Math.abs(amount * rate - normalized) > 0.002) return null;',
+  },
 ];
 
 export const MUTANTS = [
@@ -172,8 +200,10 @@ export const MUTANTS = [
     id: 'M11-UNANCHORED-EARNS-HIGH',
     invariant: 'Only a compatible catalog anchor earns HIGH. Unanchored Stage 2 is MEDIUM.',
     kills: ['S-02', 'S-07', 'S-08'],
-    find: '      : { source: \'stage2_ai\', grade: \'MEDIUM\' };',
-    replace: '      : { source: \'stage2_comp_anchored\', grade: \'HIGH\' };',
+    // RE-PINNED when VERIFIED_MARKET split this ternary into three branches.
+    // The invariant is unchanged; only the shape of the line it lives on moved.
+    find: "    return { source: 'stage2_ai', grade: 'MEDIUM' };",
+    replace: "    return { source: 'stage2_comp_anchored', grade: 'HIGH' };",
   },
   {
     id: 'M12-PRE-CATALOG-ALWAYS-MEDIUM',
@@ -615,8 +645,11 @@ export const MUTANTS = [
     id: "M58-SOFT-GATE-TAKES-ANY-ANCHOR",
     invariant: "V5-1 requiresAnchorAboveSoft needs MARKET evidence, not any object.",
     kills: ["R5-1a"],
-    find: "    if (env.requiresAnchorAboveSoft && !hasMarketAnchor(ctx)) {",
-    replace: "    if (env.requiresAnchorAboveSoft && !ctx.anchor) {",
+    // RE-PINNED when the soft gate was widened to accept VERIFIED_MARKET. The
+    // mutation still says the same thing — "any object satisfies the gate" — and
+    // the widening did not change that it must not.
+    find: "    if (env.requiresAnchorAboveSoft && !hasMarketAnchor(ctx) && !verifiedMarket) {",
+    replace: "    if (env.requiresAnchorAboveSoft && !ctx.anchor && !verifiedMarket) {",
   },
   {
     id: "M59-MODEL-COLUMN-LIFTS-GRADE-UNPRICED",
@@ -748,6 +781,234 @@ export const MUTANTS = [
     kills: ["R6-3b"],
     find: "  SERVER_AUTHORITY.add(sealed);",
     replace: "  if (false) SERVER_AUTHORITY.add(sealed);",
+  },
+  // ══════════════════════════════════════════════════════════════════════════
+  // VERIFIED_MARKET — THE AUTHORITY MECHANISM (§17)
+  //
+  // Every mutation below is a way somebody could make the class easier to
+  // obtain: drop the quorum, skip a compatibility check, believe the model's
+  // own field, or hand the new class the old one's powers. They are the shapes
+  // the order names, written as the smallest edit that would actually produce
+  // them rather than as a comment describing them.
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    id: "M74-QUORUM-REMOVED",
+    target: "market",
+    invariant: "§5 VERIFIED_MARKET represents a SET; a quorum is required, never assumed.",
+    kills: ["MA-3a", "MA-3b"],
+    find: "  if (admitted.length < VERIFIED_MARKET_QUORUM) setFailures.push(SET_FAILURE.QUORUM);",
+    replace: "  if (false) setFailures.push(SET_FAILURE.QUORUM);",
+  },
+  {
+    id: "M75-QUORUM-OF-ONE",
+    target: "market",
+    invariant: "§5 one marketplace listing is one seller's hope, not a market.",
+    kills: ["MA-3a", "MA-3b"],
+    find: "export const VERIFIED_MARKET_QUORUM = 3;",
+    replace: "export const VERIFIED_MARKET_QUORUM = 1;",
+  },
+  {
+    id: "M76-DIVERSITY-REMOVED",
+    target: "market",
+    invariant: "§6 three listings from one site is one site's opinion sampled three times.",
+    kills: ["MA-3c", "MA-3d"],
+    find: "  if (sources.size < MIN_DISTINCT_SOURCES) setFailures.push(SET_FAILURE.DIVERSITY);",
+    replace: "  if (false) setFailures.push(SET_FAILURE.DIVERSITY);",
+  },
+  {
+    id: "M77-DEDUPE-SKIPPED",
+    target: "market",
+    invariant: "§6 one advert repeated cannot become a quorum.",
+    kills: ["MA-4a", "MA-4b"],
+    find: "    if (keys.some((k) => seen.has(k))) { reject(o, DISQUALIFIER.DUPLICATE); continue; }",
+    replace: "    if (false) { reject(o, DISQUALIFIER.DUPLICATE); continue; }",
+  },
+  {
+    id: "M78-DEDUPE-LOSES-THE-RETITLE-KEY",
+    target: "market",
+    invariant: "§15 the same listing under a different title is still the same listing.",
+    kills: ["MA-4b"],
+    find: "      `p:${domain}|${ils}`,",
+    replace: "      `p:${domain}|${reference}|${ils}`,",
+  },
+  {
+    id: "M79-IDENTITY-COMPATIBILITY-SKIPPED",
+    target: "market",
+    invariant: "§7 a listing must be about THIS product; compatibility is not optional.",
+    kills: ["MA-2a", "MA-5c", "MA-7a"],
+    find: "    if (verdict !== null) { reject(o, verdict); continue; }",
+    replace: "    if (false) { reject(o, verdict); continue; }",
+  },
+  {
+    id: "M80-BRAND-ALONE-IS-ENOUGH",
+    target: "market",
+    invariant: "§7 generic brand comps must not obtain exact-model authority.",
+    kills: ["MA-5c"],
+    find: "  if (modelHits.length === 0) return DISQUALIFIER.MODEL_ABSENT;",
+    replace: "  if (false) return DISQUALIFIER.MODEL_ABSENT;",
+  },
+  {
+    id: "M81-IDENTITY-FLOOR-LOWERED",
+    target: "market",
+    invariant: "§7 one distinctive token with no brand is below the floor.",
+    kills: ["MA-5d"],
+    find: "  if (score < 2) return DISQUALIFIER.IDENTITY_TOO_WEAK;",
+    replace: "  if (score < 1) return DISQUALIFIER.IDENTITY_TOO_WEAK;",
+  },
+  {
+    id: "M82-WEAK-IDENTITY-STILL-QUALIFIES",
+    target: "market",
+    invariant: "§7 market authority never repairs an identity below product level.",
+    kills: ["MA-5a"],
+    find: "  if (!vocab.brand || !vocab.model) setFailures.push(SET_FAILURE.IDENTITY_INSUFFICIENT);",
+    replace: "  if (false) setFailures.push(SET_FAILURE.IDENTITY_INSUFFICIENT);",
+  },
+  {
+    id: "M83-VARIANT-COMPATIBILITY-SKIPPED",
+    target: "market",
+    invariant: "§4 a stated different size is a different product.",
+    kills: ["MA-6a"],
+    find: "    if (![...got].some((v) => wanted.has(v))) return DISQUALIFIER.VARIANT_MISMATCH;",
+    replace: "    if (false) return DISQUALIFIER.VARIANT_MISMATCH;",
+  },
+  {
+    id: "M84-QUALIFIER-CONFLICT-IGNORED",
+    target: "market",
+    invariant: "§4 Air is not Pro; the words that earn no points still separate siblings.",
+    kills: ["MA-6c"],
+    find: "    return DISQUALIFIER.QUALIFIER_MISMATCH;",
+    replace: "    return null;",
+  },
+  {
+    id: "M85-HOST-PRODUCT-COMPS-ACCEPTED",
+    target: "market",
+    invariant: "§8 a replacement strap does not become the Rolex it fits.",
+    kills: ["MA-7a"],
+    find: "    if (!namesTheAccessory) return DISQUALIFIER.HOST_PRODUCT_LISTING;",
+    replace: "    if (false) return DISQUALIFIER.HOST_PRODUCT_LISTING;",
+  },
+  {
+    id: "M86-ACCESSORY-COMPS-PRICE-THE-PRODUCT",
+    target: "market",
+    invariant: "§8 a spare blade does not price the blender.",
+    kills: ["MA-7c"],
+    find: "      return DISQUALIFIER.ACCESSORY_LISTING;",
+    replace: "      return null;",
+  },
+  {
+    id: "M87-MISSING-CURRENCY-ACCEPTED",
+    target: "market",
+    invariant: "§9 currency ambiguity is a rejection, never a default.",
+    kills: ["MA-8c"],
+    find: "    if (!currency) { reject(o, DISQUALIFIER.NO_CURRENCY); continue; }",
+    replace: "    if (false) { reject(o, DISQUALIFIER.NO_CURRENCY); continue; }",
+  },
+  {
+    id: "M88-FOREIGN-CURRENCY-PASSES-THROUGH",
+    target: "market",
+    invariant: "§9 a foreign amount must not become shekels by way of a missing branch.",
+    kills: ["MA-8a", "MA-8b"],
+    find: "      if (!proof) { reject(o, DISQUALIFIER.UNVERIFIED_FX); continue; }",
+    replace: "      if (!proof) { ils = price; }",
+  },
+  {
+    id: "M89-FX-PROOF-ARITHMETIC-UNCHECKED",
+    target: "market",
+    invariant: "§9 a proof whose own numbers disagree is a fabricated proof.",
+    kills: ["MA-8e"],
+    find: "  if (Math.abs(amount * rate - normalized) > 0.001) return null;",
+    replace: "  if (false) return null;",
+  },
+  {
+    id: "M90-MODEL-AUTHORITY-FIELD-ALLOWED",
+    target: "market",
+    invariant: "§16 a listing that claims authority is an injection attempt, not evidence.",
+    kills: ["MA-1c"],
+    find: "    if (assertsAuthority(o)) { reject(o, DISQUALIFIER.ASSERTED_AUTHORITY); continue; }",
+    replace: "    if (false) { reject(o, DISQUALIFIER.ASSERTED_AUTHORITY); continue; }",
+  },
+  {
+    id: "M91-TOKEN-NOT-MINTED",
+    target: "market",
+    invariant: "§3 authority is WeakSet membership; without the record nothing is authoritative.",
+    kills: ["MA-0a", "MG-1b"],
+    find: "  MARKET_AUTHORITY.add(token);",
+    replace: "  if (false) MARKET_AUTHORITY.add(token);",
+  },
+  {
+    id: "M92-FORGERY-ACCEPTED",
+    target: "market",
+    invariant: "§16 a plain object claiming to be the token is not the token.",
+    kills: ["MA-1a", "MG-2a"],
+    find: "  return typeof value === 'object' && value !== null && MARKET_AUTHORITY.has(value);",
+    replace: "  return typeof value === 'object' && value !== null && value.class === VERIFIED_MARKET;",
+  },
+  {
+    id: "M93-MODEL-SELF-REPORT-CAN-ADMIT",
+    target: "market",
+    invariant: "§3 the model's own match score may subtract, never add.",
+    kills: ["MA-2a"],
+    find: "    const verdict = identityCompatibility(toks, vocab);",
+    replace: "    const verdict = (selfMatch !== null && selfMatch >= 0.9) ? null : identityCompatibility(toks, vocab);",
+  },
+  {
+    id: "M94-NEW-RETAIL-TITLE-IGNORED",
+    target: "market",
+    invariant: "§4 the title is the server's word; a new listing is not used-market evidence.",
+    kills: ["MA-9d"],
+    find: "    if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
+    replace: "    if (false) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
+  },
+  {
+    id: "M95-LIKE-NEW-READ-AS-NEW",
+    target: "market",
+    invariant: "like new is a USED listing; reading it as new silently starves every Hebrew quorum.",
+    kills: ["MA-9e"],
+    find: "    if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
+    replace: "    if (namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
+  },
+  {
+    id: "M96-PROVENANCE-NOT-REQUIRED",
+    target: "market",
+    invariant: "§4 an observation with no source is not evidence.",
+    kills: ["MA-9b"],
+    find: "    if (!domain || !reference) { reject(o, DISQUALIFIER.NO_PROVENANCE); continue; }",
+    replace: "    if (false) { reject(o, DISQUALIFIER.NO_PROVENANCE); continue; }",
+  },
+  {
+    id: "M97-VERIFIED-MARKET-IS-ANCHORED",
+    invariant: "§11 verified market is NOT a catalog anchor, and must not report as one.",
+    kills: ["MG-1c"],
+    find: "    return VALUATION_VERDICT.VERIFIED_MARKET;",
+    replace: "    return VALUATION_VERDICT.ANCHORED;",
+  },
+  {
+    id: "M98-VERIFIED-MARKET-OPENS-EVERY-BUCKET",
+    invariant: "§11 only CATALOG authority short-circuits a bucket entry requirement.",
+    kills: ["MG-3a"],
+    find: "  if (have.has('ANCHOR')) return true;",
+    replace: "  if (have.has('ANCHOR') || have.has('VERIFIED_MARKET')) return true;",
+  },
+  {
+    id: "M99-VERIFIED-MARKET-EARNS-HIGH",
+    invariant: "§11 the HIGH grade says GetWorth holds a priced row; market research does not.",
+    kills: ["MG-3c"],
+    find: "    if (verifiedMarket) return { source: 'verified_market', grade: 'MEDIUM' };",
+    replace: "    if (verifiedMarket) return { source: 'stage2_comp_anchored', grade: 'HIGH' };",
+  },
+  {
+    id: "M100-GUARD-READS-THE-FIELD-NOT-THE-MINT",
+    invariant: "§16 the guard must derive authority from the mint, never from a caller's field.",
+    kills: ["MG-2a", "MG-2b"],
+    find: "  if (readMarketEvidence(ctx?.market_evidence) !== null && PRODUCT_LEVEL.has(rec)) {",
+    replace: "  if (ctx?.market_evidence && PRODUCT_LEVEL.has(rec)) {",
+  },
+  {
+    id: "M101-MARKET-EVIDENCE-PROMOTES-IDENTITY",
+    invariant: "§7 market evidence may corroborate an identity, never be the reason for one.",
+    kills: ["MG-4a"],
+    find: "  if (readMarketEvidence(ctx?.market_evidence) !== null && PRODUCT_LEVEL.has(rec)) {",
+    replace: "  if (readMarketEvidence(ctx?.market_evidence) !== null) {",
   },
 ];
 

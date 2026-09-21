@@ -24,70 +24,98 @@ listed against activation rather than against development.
 
 ---
 
-## The central architectural finding of this phase
+## The central architectural finding of this phase — CLOSED
 
-**No Phase-B valuation can be accepted by the GetWorth guard. Not one — and not
-because of a defect.**
+**The blocker.** Phase B could obtain genuine market evidence and compute a
+deterministic valuation from it, and `validateQuote` could not recognise that
+evidence as market authority. Every priced benchmark was refused with
+`V-MARKET-EVIDENCE: market evidence pending`.
 
-Every benchmark that produced a price was declined:
+That violation never meant "the evidence is weak". It meant **the evidence is
+of no class the guard recognises**. The guard's only market-evidence class was
+`ANCHOR` — a GetWorth catalog row carrying a price — and §1 forbids OpenAI
+output from ever becoming one. Two correct rules composed into a closed door: a
+*correct* Phase-B result was unacceptable by construction.
 
-| Benchmark | Candidate (₪ low/mid/high) | Guard | Violation |
+**The fix was not to trust OpenAI more.** It was to give GetWorth a word for
+the thing it actually has.
+
+### VERIFIED_MARKET
+
+`api/_lib/market-evidence.js`. A third class, between the two that existed:
+
+| Class | Means |
+|---|---|
+| `ANCHOR` | GetWorth holds a priced row for this product. |
+| `VERIFIED_MARKET` | GetWorth independently validated a quorum of diverse, identity-compatible, priced used listings for it. |
+| neither | we are guessing. |
+
+Authority is minted by a private `WeakSet`, exactly as `sealServerAuthority`
+mints pricing provenance. A model response containing
+`{"evidence_class":"VERIFIED_MARKET"}` is an ordinary object that is not in the
+set, so it reads as absent; a real token that is serialised loses its authority,
+which is correct, because a value that has crossed the wire is no longer the
+object this server minted.
+
+Every qualification check reads data the server can verify for itself — price,
+currency, source domain, and the listing **title**. None of it consults the
+model's opinion of its own work. `match.confidence` can still *reject* a listing
+and can never *admit* one, because an architecture that qualifies on a
+model-authored decimal has only moved "trust the model" behind a decimal point.
+
+### What the guard was, and was not, allowed to widen
+
+§11 required an audit rather than a widening. Five decisions ask "do we have an
+anchor?"; only two of them were really asking about price evidence.
+
+| Decision | Real question | Widened? |
+|---|---|---|
+| `resolveValuationVerdict` → PENDING_MARKET | **B** — has anything measured this product's price? | **Yes**, to a new `VERIFIED_MARKET` verdict — never to `ANCHORED` |
+| `requiresAnchorAboveSoft` | **B** — is there corroboration for an exceptional number? | **Yes** |
+| `bucketEntryPermitted` | A — does GetWorth hold a row for this? | **No** |
+| `CATEGORY_WIDENING_EVIDENCE` | A — and about identity, not price | **No** |
+| `derivePricingSource` HIGH grade | A — "we hold a priced row" | **No**; own source `verified_market`, grade MEDIUM |
+
+The bucket gate is the one that matters most. `ANCHOR` short-circuits every
+entry requirement in the envelope table, so granting it to marketplace listings
+would let four Rolex listings open the ₪250,000 `watches:luxury` bucket for a
+photographed watch **strap**. `MG-3a` pins that it does not.
+
+### Benchmark outcome
+
+| Benchmark | Admitted / sources | Guard | Status |
 |---|---|---|---|
-| NINJA | 603 / 660 / 755 | `pending` | `V-MARKET-EVIDENCE` |
-| LOGITECH | 401 / 437 / 488 | `pending` | `V-MARKET-EVIDENCE` |
-| LOUIS VUITTON | 1299 / 1427 / 1618 | `degrade` | `V-ENVELOPE-SOFT`, `V-ENVELOPE-BAND` |
+| NINJA | 3 across 2 | `accept` | COMPLETE |
+| LOGITECH | 4 across 2 | `accept` | COMPLETE |
+| LG | — (no model on the subject) | — | IDENTIFIED_PENDING_MARKET |
+| LOUIS VUITTON | 4 across 2 | `degrade` | PRICED_GUARD_WITHHELD |
+| UNKNOWN | — | — | IDENTIFIED_PENDING_MARKET |
+| NINJA_BLADE | — (query skipped) | — | IDENTIFIED_PENDING_MARKET |
 
-In each case the guard zeroes the displayed prices and returns
-`grade: MANUAL_REQUIRED`.
+Louis Vuitton is the §34 envelope conflict, **not** an evidence failure: the
+second-hand market for that fragrance genuinely exceeds the beauty `hard_max` of
+₪1,600. `V-ENVELOPE-BAND` still refuses it and the envelope was not widened. The
+conflict remains visible, which is the point.
 
-### Why
+### Limitations, recorded rather than faked
 
-`V-MARKET-EVIDENCE: market evidence pending` is not saying the evidence is
-weak. It is saying the evidence **is of no class the guard recognises**. The
-guard's only market-evidence class is `ANCHOR` — a GetWorth catalog row that
-carries a price. Phase B never grants `ANCHOR`, by deliberate construction,
-because §1 forbids OpenAI output from becoming a trusted catalog anchor.
-
-So the two rules compose into a closed door:
-
-- §1: research-derived comparables may not become an anchor.
-- The guard: without an anchor there is no market evidence.
-- Therefore: **a correct Phase-B result is, by definition, unacceptable to the
-  guard.**
-
-This is the authority boundary working, not failing. Four genuine filtered
-used-ILS comparables for the Ninja produced ₪660, and the system still refused
-to present it as a value — which is exactly what should happen to a number no
-one has yet granted authority to.
-
-### What it means for whoever builds promotion
-
-It cannot be closed by granting `ANCHOR` to Phase-B observations. That is
-precisely the move §1 exists to prevent, and doing it would let a single
-model-authored listing set a price ceiling.
-
-The real question it forces, and which this phase deliberately does not answer:
-
-> **What evidence class do verified market observations belong to, and what
-> does membership in it entitle you to?**
-
-A plausible shape — recorded as a starting point, not a decision:
-
-- a new class (`RESEARCHED_MARKET`) that is weaker than `ANCHOR`
-- admissible only with retained source provenance, a verified currency, and a
-  GetWorth-side re-fetch that confirms the listing still exists at that price
-- entitling a *band*, never a point estimate, and never an envelope override
-
-Until that class exists, `PRICED_GUARD_WITHHELD` is the honest terminal state
-for a successful Phase-B scan, and the pipeline reports it by that name rather
-than collapsing it into "identity only".
-
-### The Louis Vuitton case is a different failure, and also correct
-
-`V-ENVELOPE-BAND: displayed high 1618 > hard_max 1600 (beauty/category)` is the
-§34 conflict arriving on schedule. The second-hand market for that fragrance is
-genuinely around ₪1,300–1,600; the beauty envelope caps at ₪1,600. Phase B did
-not widen the envelope and must not. Recorded for calibration review.
+- **Seller identity** is not exposed by the hosted research mechanism, so
+  "same seller, two listings" is undetectable. Domain diversity is the weaker
+  property that *can* be verified, and is what is claimed.
+- **Transliterated brands** are not matched. A yad2 title reading
+  `בלנדר נינג׳ה` names Ninja in Hebrew letters and no deterministic rule here
+  recognises it; such listings are held out of the quorum rather than guessed
+  at. This costs real evidence — one of the four Ninja comps — and keeps the
+  claim true.
+- **Used-ness** is not deterministically verifiable from a title. New-retail and
+  parts markers subtract; nothing grants "used", and `listing_kind` can only
+  reject.
+- **The grade ladder has four rungs** and cannot express "measured market
+  evidence, but not a catalog row". `verified_market` shares MEDIUM with an
+  unanchored `stage2_ai` estimate. They are disjoint by construction —
+  `stage2_ai` reaches a price only through category-level BOUNDED, and verified
+  market requires product-level recognition — so no scan can be graded by both.
+  A fifth rung is a UI change, and is not in scope here.
 
 ---
 
@@ -190,7 +218,7 @@ refusal and wants the same polarity inversion.
 |---|---|---|
 | `identity_candidate.subject` | `recognition_memory` | User confirmation **or** `corroboration.level === READ_OFF_ITEM` **and** a catalog row agreeing |
 | `identity_candidate.identifiers` | `product_candidates` | Human review — an MPN is a durable claim |
-| `market_evidence.accepted` | `price_observations` | Source provenance retained, currency verified, and a GetWorth-side re-fetch |
+| `market_evidence.accepted` | `price_observations` | Source provenance retained, currency verified, and a GetWorth-side re-fetch. Qualification under `VERIFIED_MARKET` is necessary and **not** sufficient: it establishes the listing is about this product, not that the listing still exists. |
 | `condition_candidate` | nothing | Per-scan, not per-product; never a durable fact |
 | `valuation_candidate` | nothing | A derived number, recomputable from the observations |
 
@@ -208,9 +236,10 @@ Production activation requires **all** of:
 - [ ] B-a: server-side scan-context reconstruction
 - [ ] B-b: verified FX, or international evidence permanently context-only
 - [ ] Live latency measured; synchronous vs async contract decided (§25)
-- [ ] An evidence class for researched market observations (see "The central
-architectural finding") — without it no Phase-B result can ever be shown
+- [x] An evidence class for researched market observations — `VERIFIED_MARKET`
+- [ ] B-f: seller-level diversity, or a documented acceptance that domain
+      diversity is the ceiling
 - [ ] A promotion policy that does not exist yet
 - [ ] Explicit human authorization
 
-*Last updated: Phase B implementation, from base `500ddcd`.*
+*Last updated: VERIFIED_MARKET authority, from base `500ddcd`.*

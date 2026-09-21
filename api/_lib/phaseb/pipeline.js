@@ -32,33 +32,32 @@ import {
 } from './market-research.js';
 import { computeValuationCandidate, VALUATION_STATUS } from './valuation.js';
 import { corroborateSubject, applyGuard, CORROBORATION } from './validation.js';
+import { qualifyMarketEvidence } from '../market-evidence.js';
 
 export const PHASE_B_STATUS = Object.freeze({
   COMPLETE: 'COMPLETE',
   IDENTIFIED_PENDING_MARKET: 'IDENTIFIED_PENDING_MARKET',
-  // ── THE STATUS THAT THE FIRST BENCHMARK RUN FORCED INTO EXISTENCE ─────────
+  // ── A PRICED CANDIDATE THE GUARD DECLINED ────────────────────────────────
   //
-  // A candidate that IS priced, from genuine filtered comparables, and that the
-  // GetWorth guard declined to accept. Collapsing it into IDENTITY_ONLY — which
-  // is what the first version did — reads as "Phase B found no price", and that
-  // is false in a way that matters: it hides the single most important result
-  // of this phase.
+  // Collapsing this into IDENTITY_ONLY would read as "Phase B found no price",
+  // which is the opposite of what happened and hides the interesting half of
+  // the result: the evidence was found, and GetWorth policy refused it anyway.
   //
-  // Every priced benchmark lands here, and the reason is always the same:
+  // HISTORY WORTH KEEPING, because the comment that used to sit here said
+  // something that is no longer true. Before VERIFIED_MARKET existed, EVERY
+  // priced candidate landed here with `V-MARKET-EVIDENCE: market evidence
+  // pending` — not because the evidence was weak, but because the guard's only
+  // class of market evidence was ANCHOR, a GetWorth-held priced row, which §1
+  // forbids Phase B from ever producing. A correct Phase-B result was
+  // unacceptable by construction.
   //
-  //   V-MARKET-EVIDENCE: market evidence pending
-  //
-  // The guard's only class of market evidence is ANCHOR — a GetWorth catalog
-  // row carrying a price. Research-derived comparables are not that class and
-  // cannot be, because §1 forbids OpenAI output from becoming a trusted anchor.
-  // So NO Phase-B valuation can be accepted by the current guard, by
-  // construction. That is the correct outcome of the authority boundary, not a
-  // defect in it, and working around it would mean granting exactly the
-  // authority §1 exists to withhold.
-  //
-  // It is also the concrete question a promotion layer has to answer: what
-  // evidence class do verified market observations belong to, and what does it
-  // entitle you to? Recorded in docs/PHASE_B_PRODUCTION_BLOCKERS.md.
+  // That is now resolved by giving GetWorth a word for the thing it actually
+  // has (api/_lib/market-evidence.js), rather than by letting Phase B claim the
+  // word it must not have. What still reaches this status is the honest
+  // remainder: a qualified distribution that fails some OTHER policy — the
+  // luxury-fragrance envelope conflict being the live example, where the
+  // second-hand market genuinely exceeds the beauty ceiling and neither side is
+  // wrong. Recorded in docs/PHASE_B_PRODUCTION_BLOCKERS.md.
   PRICED_GUARD_WITHHELD: 'PRICED_GUARD_WITHHELD',
   IDENTITY_ONLY: 'IDENTITY_ONLY',
   UNKNOWN: 'UNKNOWN',
@@ -251,10 +250,46 @@ export async function runPhaseB({
     },
   };
 
+  // ── B6b · MARKET-EVIDENCE QUALIFICATION ──────────────────────────────────
+  //
+  // A SECOND, INDEPENDENT READING OF THE SAME EVIDENCE. The input is the RAW
+  // observations, deliberately not the `kept` set the stage above produced:
+  // qualification re-derives price, currency, provenance and identity
+  // compatibility from each listing itself, so an upstream filter that becomes
+  // wrong or is bypassed cannot make this permissive. Authority requires both
+  // readings to agree, and only this one mints anything.
+  const sq = now();
+  const market = qualifyMarketEvidence({
+    observations: research?.observations ?? [],
+    subject: identity?.subject || {},
+  });
+  // STATUS 'ok' EVEN WHEN NOTHING QUALIFIED, and the distinction lives in the
+  // detail. The stage vocabulary is closed — ok / failed / skipped — because a
+  // status that grows a new word per stage is how a consumer's switch acquires
+  // a silent fall-through. "Ran, and granted nothing" is a successful stage.
+  record('market_qualification', 'ok', now() - sq,
+    market.qualified
+      ? `qualified: ${market.counts.admitted} admitted across ${market.distinct_sources} sources`
+      : `unqualified: ${market.set_failures.join(', ') || 'no admissible observation'}`);
+
   // ── B6 · DETERMINISTIC VALUATION CANDIDATE ───────────────────────────────
+  //
+  // PRICED FROM THE OBSERVATIONS THAT GRANTED THE AUTHORITY. When the set
+  // qualified, the distribution is computed from exactly the admitted listings
+  // — otherwise GetWorth would be saying "these N observations imply this
+  // price" about two different sets of listings, and the sentence in §21 would
+  // be false in the one place it is supposed to be exactly true. Outlier
+  // rejection still runs on top; qualification proves compatibility, not that
+  // no admitted seller mistyped a zero.
+  //
+  // Unqualified sets still get a candidate, from Phase B's own accepted set,
+  // because §12 requires "market found but guard rejected" to stay
+  // distinguishable from "no market found". That candidate is simply never
+  // granted anything.
   const s7 = now();
+  const priceFrom = market.qualified ? rejectOutliers(market.token.observations).kept : kept;
   const valuation = computeValuationCandidate({
-    accepted: kept,
+    accepted: priceFrom,
     condition: condition?.grade ?? null,
     identityConfidence: identity?.confidence?.overall ?? 0,
     specificity: query?.specificity ?? null,
@@ -268,6 +303,7 @@ export async function runPhaseB({
     identity,
     corroboration,
     recognition: existingRecognition,
+    marketEvidence: market,
   });
   record('guard', guard.applied ? 'ok' : 'skipped', now() - s8, guard.action ?? guard.reason);
 

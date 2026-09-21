@@ -374,6 +374,10 @@ function cjkRelation(word) {
 // subject — the bounded direction. BUCKET_AUTHORITY is the layer behind it: a
 // charger cannot reach electronics:macbook without a classifier calling the
 // object a laptop, whatever its label says.
+// EXPORTED as ACCESSORY_NOUNS for api/_lib/market-evidence.js, which asks the same
+// question of a marketplace listing title that this asks of an OCR line: is this
+// naming the thing, or something that attaches to the thing? One vocabulary, so
+// a noun added for OCR is understood by market qualification on the same day.
 const ACCESSORY_NOUN = new Set([
   'charger', 'chargers', 'cable', 'cables', 'adapter', 'adaptor', 'case', 'cases',
   'cover', 'covers', 'strap', 'straps', 'band', 'bands', 'filter', 'filters',
@@ -385,6 +389,9 @@ const ACCESSORY_NOUN = new Set([
   'מטען', 'כבל', 'מתאם', 'כיסוי', 'רצועה', 'פילטר', 'להב', 'מגן',
   'סוללה', 'מעמד', 'מחסנית', 'עדשה', 'חלק', 'חלקים',
 ]);
+
+/** The accessory vocabulary, for consumers that classify text other than OCR. */
+export const ACCESSORY_NOUNS = ACCESSORY_NOUN;
 
 /**
  * The lines an INDEPENDENT reader returned, each already rejected if it is

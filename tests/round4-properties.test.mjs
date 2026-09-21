@@ -267,6 +267,14 @@ describe('C2 no field established upstream may be silently dropped', () => {
     const WITHHELD = {
       envelope_key: 'the caller may choose which envelope BOUNDS a price, never the '
         + 'evidence that decides whether there is a price at all',
+      // WITHHELD BY THE PHASE-B ISOLATION, not by oversight. Market evidence is
+      // minted on the /api/enrich path and handed to the guard there; §2
+      // forbids the scan path from routing through Phase B, so gctx must NOT
+      // acquire this field. The day it does, this declaration has to be deleted
+      // and the isolation argued again — which is exactly the conversation the
+      // deliberate/accidental distinction exists to force.
+      market_evidence: 'minted only on the /api/enrich path; §2 forbids the scan path '
+        + 'from routing through Phase B, so the production caller must not set it',
     };
     // Tokenised rather than regex-escaped: every attempt to write a word-boundary
     // escape through this toolchain produced a literal control character instead.

@@ -57,6 +57,13 @@ const SUITES = [
   // a mutant of a rule whose only observer is a suite NOT in this list survives
   // for a reason that has nothing to do with the property.
   'tests/round6-authority.test.mjs',
+  // VERIFIED_MARKET. Two suites, because the class is observed from two sides:
+  // market-authority.test.mjs watches qualification (what earns the token) and
+  // market-guard-authority.test.mjs watches consumption (what the token buys).
+  // A mutant that loosened qualification while the guard kept behaving would
+  // survive against either one alone.
+  'tests/market-authority.test.mjs',
+  'tests/market-guard-authority.test.mjs',
 ];
 
 const argv = process.argv.slice(2);
@@ -106,7 +113,13 @@ const source = readSource(GUARD);
 // protected", while the shared predicate underneath it was untested. A mutation
 // score is only as wide as the files it can damage.
 const AUTHORITY = join(REPO, 'api/_lib/pricing-authority.js');
-const SOURCES = { guard: source, authority: readSource(AUTHORITY) };
+// A THIRD MUTABLE CHANNEL. api/_lib/market-evidence.js decides what earns
+// VERIFIED_MARKET, and it sits outside both files above — so without this, a
+// run reporting 100% would mean "every rule inside the guard and its pure
+// sibling is protected" while the module that mints market authority was never
+// damaged once. Same reasoning that added `authority`, one module later.
+const MARKET = join(REPO, 'api/_lib/market-evidence.js');
+const SOURCES = { guard: source, authority: readSource(AUTHORITY), market: readSource(MARKET) };
 
 // THE MUTANT IS COPIED TO A TEMP DIR, SO ITS DEPENDENCIES MUST COME WITH IT.
 //
@@ -217,10 +230,21 @@ for (const m of [...selected, ...GUARD_CONTROLS]) {
   writeFileSync(mutantPath, target === 'guard' ? mutated : SOURCES.guard, 'utf8');
   const authorityPath = join(work, 'pricing-authority.js');
   writeFileSync(authorityPath, target === 'authority' ? mutated : SOURCES.authority, 'utf8');
+  // The guard copy imports './market-evidence.js', so this path is also what
+  // the guard itself loads. The suites are pointed at the SAME file for a
+  // reason that is not tidiness: market authority is WeakSet membership, and
+  // two copies of this module would be two disjoint WeakSets.
+  const marketPath = join(work, 'market-evidence.js');
+  writeFileSync(marketPath, target === 'market' ? mutated : SOURCES.market, 'utf8');
 
   const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...SUITES], {
     cwd: REPO,
-    env: { ...process.env, VAL001_GUARD_PATH: mutantPath, VAL001_AUTHORITY_PATH: authorityPath },
+    env: {
+      ...process.env,
+      VAL001_GUARD_PATH: mutantPath,
+      VAL001_AUTHORITY_PATH: authorityPath,
+      VAL001_MARKET_PATH: marketPath,
+    },
     encoding: 'utf8',
     timeout: 120000,
   });
