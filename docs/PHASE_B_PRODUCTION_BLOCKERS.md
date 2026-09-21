@@ -142,6 +142,33 @@ CJK containment rule names.
 strap photo labelled `['Strap','Watch accessory']` still reaches ₪250,000,
 because of REC7-H1 below. **The two findings compose.**
 
+### C-2b · C-2 COMPOSES WITH VERIFIED_MARKET, and bounds what it can protect
+**Measured, not inferred.** The accessory protection in
+`api/_lib/market-evidence.js` keys off the SUBJECT's object class:
+
+| subject `object_class` | 3 perfect "Rolex Submariner" listings |
+|---|---|
+| `strap` (identity correct) | qualified **false**, 0 admitted |
+| `watch` (identity wrong) | qualified **true**, 3 admitted |
+
+C-2 is exactly the defect that produces the second row: an unlisted-language
+compatibility marker (`ile uyumlu`, `για`, `สายสำรองสำหรับ`) is not recognised,
+the OCR block is therefore not classified as a reference, and identity names the
+HOST product. From that point the listings really are compatible with the
+subject as stated, and qualification is correct to admit them.
+
+**This does not block VERIFIED_MARKET, and is not a defect in it.** The
+mechanism is sound given a sound identity; nothing inside it can repair an
+identity error upstream without guessing, which is the failure mode the whole
+class exists to avoid. What it means is narrower and worth stating plainly:
+
+> the accessory protection is only ever as strong as the object class, and C-2
+> is a way to get the object class wrong.
+
+Phase B's own `corroborateSubject` catches the cases the block rule DOES fire on
+— the Ninja-blade control is CONTRADICTED and its market query is skipped
+entirely. C-2 is the residue where it does not fire. Closing C-2 closes this.
+
 ### C-3 · S1-H2 — a rule below module scope is unobservable
 **Where:** `tests/helpers/authority-inventory.mjs`; recorded live as `PC-6f`.
 **Witness:** a rule installed lazily from inside a function body (`a8`) changes
