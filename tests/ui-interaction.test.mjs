@@ -19,12 +19,29 @@
 import { test, describe, before, after, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const OUT_DIR = join(ROOT, 'node_modules/.cache/ui-002a');
+// ── §13. A SHARED BUILD DIRECTORY IS A SHARED VERDICT ───────────────────────
+//
+// This was `node_modules/.cache/ui-002a` — one fixed path — and every run of
+// this suite compiled `UI002A_UI_PATH` into the SAME `ui.mjs`. Two mutation
+// runs at once therefore imported whichever of them had written last, and the
+// harness reported the WRONG MUTANT AS KILLED:
+//
+//   run A  --filter U66 (Card onClick)  -> "killed (2 failing: … TextArea 16px floor)"
+//   run B  --filter U45 (TextArea)      -> "killed (2 failing: … TextArea 16px floor)"
+//
+// Both said 100%. A's invariant was never observed at all; it was scored
+// against B's mutant. That is the universal killer in its most dangerous form —
+// not a run that fails, a run that PASSES about the wrong thing.
+//
+// Per-process, and removed afterwards, so two runs cannot share a compiled
+// artefact. The name keeps the `ui-002a` prefix so the cache stays recognisable.
+const OUT_DIR = join(ROOT, 'node_modules/.cache',
+  `ui-002a-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
 
 // The mutation harness (tests/mutations/ui-run.mjs) redirects these to broken
 // COPIES so it can ask "would this suite notice?" without ever writing to the
@@ -75,7 +92,12 @@ before(async () => {
   utils = await import(pathToFileURL(UTILS_SRC).href);
 });
 
-after(() => { mock.timers.reset(); });
+after(() => {
+  mock.timers.reset();
+  // The per-run build directory is removed, or the next run inherits a tree
+  // full of other runs' compiled mutants.
+  try { rmSync(OUT_DIR, { recursive: true, force: true }); } catch { /* best effort */ }
+});
 
 const h = (...args) => React.createElement(...args);
 

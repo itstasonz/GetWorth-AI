@@ -14,6 +14,67 @@
 // the reader, not something the runner enforces.
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ── §13. HARNESS CALIBRATION — JUDGED, NEVER SCORED ─────────────────────────
+//
+// A mutation harness that kills EVERYTHING is exactly as uninformative as one
+// that kills nothing, and it is harder to notice because the number looks
+// perfect. These two entries measure the INSTRUMENT rather than the suite, so
+// they sit outside both the numerator and the denominator.
+//
+//   SENSITIVITY  must be KILLED. If it survives, the harness is not reaching
+//                the module under test and every other result is unexplained.
+//   SPECIFICITY  must SURVIVE. A real, applied change that no suite asserts
+//                anything about. If it is killed, the suites are going red for
+//                reasons unrelated to the mutation, and every "killed" in the
+//                run is unearned.
+//
+// The specificity control edits the human-readable `detail` of an EXISTING
+// V-ENVELOPE-SOFT violation. The rule still fires, the violation is still
+// pushed, the verdict is unchanged — only the prose differs, and no assertion
+// reads that prose. If one ever does, this control starts being killed and the
+// gate says so, which is correct: at that point it is no longer a control.
+export const GUARD_CONTROLS = [
+  {
+    id: 'CTL-SENSITIVITY-MUST-DIE',
+    control: 'kill',
+    target: 'guard',
+    invariant: 'The harness reaches the module under test at all.',
+    find: 'export function resolveEnvelope(ctx = {}) {',
+    replace: 'export function resolveEnvelope(ctx = {}) {\n  if (ctx) throw new Error("[control] sensitivity probe");',
+  },
+  {
+    id: 'CTL-SPECIFICITY-MUST-LIVE',
+    control: 'survive',
+    target: 'guard',
+    invariant: 'A real change no suite asserts anything about is NOT killed.',
+    find: "    violations.push({ rule: 'V-ENVELOPE-SOFT', detail: `mid ${mid} > soft_max ${env.soft_max} (${env.key}) — priced, flagged` });",
+    replace: "    violations.push({ rule: 'V-ENVELOPE-SOFT', detail: `mid ${mid} exceeds soft_max ${env.soft_max} for ${env.key}; priced and flagged` });",
+  },
+  // ── AND THE AUTHORITY CHANNEL, WHICH WAS EQUALLY UNCALIBRATED ─────────────
+  // A reviewer found the provider harness printing PROVEN over a channel no
+  // control had touched. This harness had the same shape: mutants target both
+  // `guard` and `authority`, and both controls targeted only `guard`.
+  {
+    id: 'CTL-AUTHORITY-SENSITIVITY-MUST-DIE',
+    control: 'kill',
+    target: 'authority',
+    invariant: 'The harness reaches api/_lib/pricing-authority.js at all.',
+    find: 'export function deriveEvidence({ recognition = null, visionData = null, anchor = null } = {}) {',
+    replace: 'export function deriveEvidence({ recognition = null, visionData = null, anchor = null } = {}) {\n  throw new Error("[control] authority sensitivity probe");',
+  },
+  {
+    id: 'CTL-AUTHORITY-SPECIFICITY-MUST-LIVE',
+    control: 'survive',
+    target: 'authority',
+    invariant: 'A real change no suite asserts anything about is NOT killed, on the authority side too.',
+    // A genuine behavioural change — the bound on how many lines the provenance
+    // record keeps — for an input no test supplies. That is what a specificity
+    // control has to be: real, and unobserved.
+    find: 'const MAX_BLOCK_LINES = 80;',
+    replace: 'const MAX_BLOCK_LINES = 79;',
+  },
+];
+
 export const MUTANTS = [
   // ── The cardinal rule: out-of-envelope prices DEGRADE, they are never clamped
   {
@@ -526,8 +587,12 @@ export const MUTANTS = [
     target: "authority",
     invariant: "H-6 a compatibility label does not establish that the item IS the named product.",
     kills: ["EA-3b"],
-    find: "      if (relationOf(w) === RELATION.REFERENCE) continue;",
-    replace: "      if (false) continue;",
+    // RE-PINNED IN ROUND 6. The old site was the per-LINE drop inside
+    // classifiedLines; the judgement now happens at BLOCK scope, because a line
+    // is not a semantic scope (REC7-C1). Deleting the block verdict restores
+    // exactly the behaviour this mutant has always described.
+    find: "    if (relation !== RELATION.SUBJECT) referenceBearing = true;",
+    replace: "    if (false) referenceBearing = true;",
   },
   {
     id: "M57-TOKENS-POOL-ACROSS-LINES",
@@ -571,25 +636,33 @@ export const MUTANTS = [
     id: "M61-FLAT-PER-WORD-TEXT-CORROBORATES",
     target: "authority",
     invariant: "R5-C1 lines come from the line-structured block, never the per-word array.",
-    kills: ["R5-2a","R5-2b"],
-    find: "  const full = visionData?.ocr_context?.full_text;",
-    replace: "  const full = visionData?.ocr_context?.full_text || (visionData?.text || []).join(' ');",
+    kills: ["R5-2d"],
+    // RE-PINNED IN ROUND 6. The fallback moved into `blockProvenance`; the
+    // mutation is the same one — let a per-word array with no line structure
+    // stand in for the block.
+    find: "  if (!ctx || typeof ctx !== 'object') return null;",
+    replace: "  if (!ctx || typeof ctx !== 'object') return classifyOcrBlock((visionData?.text || []).join(' '));",
   },
   {
     id: "M62-REFERENCE-LINES-CORROBORATE",
     target: "authority",
-    invariant: "R5-C1 a line describing compatibility does not establish subject identity.",
-    kills: ["R5-2a","R5-3a"],
-    find: "      if (relationOf(w) === RELATION.REFERENCE) continue;",
-    replace: "      if (false) continue;",
+    invariant: "R6 a provenance record is re-derived, not believed — a flag beside a contradicting line is refused.",
+    kills: ["R6-1f"],
+    // RE-PINNED IN ROUND 6, onto the OTHER half of the block rule. M56 deletes
+    // the verdict as it is COMPUTED; this deletes the check as it is CONSUMED.
+    // They are distinct because the record round-trips through `vision_cache`
+    // as plain JSON, so the flag and the lines can disagree by the time a
+    // consumer sees them.
+    find: "    if (!line || line.relation !== RELATION.SUBJECT) return false;",
+    replace: "    if (false) return false;",
   },
   {
     id: "M63-COMPATIBILITY-IS-ENGLISH-ONLY",
     target: "authority",
     invariant: "R5-H1 compatibility markers are recognised in the languages this market uses.",
     kills: ["R5-3a"],
-    find: "    if (RTL_FOR_PREFIX.test(w)) return RELATION.REFERENCE;",
-    replace: "    if (false) return RELATION.REFERENCE;",
+    find: "    if (RTL_FOR_PREFIX.test(w)) return RELATION.COMPATIBILITY_TARGET;",
+    replace: "    if (false) return RELATION.COMPATIBILITY_TARGET;",
   },
   {
     id: "M64-TOKENISER-ERASES-NON-LATIN",
@@ -604,8 +677,77 @@ export const MUTANTS = [
     target: "authority",
     invariant: "R5-C1 an accessory noun names a relationship even with no preposition.",
     kills: ["R5-3b"],
-    find: "    if (ACCESSORY_NOUN.has(w)) return RELATION.REFERENCE;",
-    replace: "    if (false) return RELATION.REFERENCE;",
+    find: "    if (ACCESSORY_NOUN.has(w)) return RELATION.ACCESSORY_TARGET;",
+    replace: "    if (false) return RELATION.ACCESSORY_TARGET;",
+  },
+
+  // ==========================================================================
+  // ROUND 6 - REC7-C1 the block is the semantic scope, and the truncation that
+  // made the safety cap a source of authority. V5-2 the sealed server record.
+  // ==========================================================================
+  {
+    id: "M66-UNPROVEN-BLOCK-CORROBORATES",
+    target: "authority",
+    invariant: "REC7-C1 a block we cannot prove complete establishes nothing — truncation may not add authority.",
+    kills: ["R6-2a"],
+    find: "  return classifyOcrBlock(full, { truncated: true });",
+    replace: "  return classifyOcrBlock(full, { truncated: false });",
+  },
+  {
+    id: "M67-TRUNCATED-BLOCK-IS-SUBJECT",
+    target: "authority",
+    invariant: "REC7-C1 a truncated block is UNKNOWN, and UNKNOWN permits nothing.",
+    kills: ["R6-2b"],
+    find: "  const block_relation = truncated",
+    replace: "  const block_relation = false",
+  },
+  {
+    id: "M68-PACKAGING-REFERENCE-IGNORED",
+    target: "authority",
+    invariant: "REC7-C1 'device not included' / 'sold separately' name something that is NOT the subject.",
+    kills: ["R6-1d"],
+    find: "  if ((negation && inclusion) || (sold && separately)) return RELATION.PACKAGING_REFERENCE;",
+    replace: "  if (false) return RELATION.PACKAGING_REFERENCE;",
+  },
+  {
+    id: "M69-MODEL-FORGERY-IS-SERVER-AUTHORITY",
+    target: "authority",
+    invariant: "V5-2 an authoritative pricing record is one this module MINTED, not one that has the right shape.",
+    kills: ["R6-3a"],
+    find: "  return isServerAuthority(value) ? value : null;",
+    replace: "  return (value && typeof value === 'object') ? value : null;",
+  },
+  {
+    id: "M71-CJK-IS-MATCHED-AS-WHOLE-WORDS",
+    target: "authority",
+    invariant: "REC7-C1 a script written without word separators is matched by CONTAINMENT, not equality.",
+    kills: ["R6-5a"],
+    find: "    if (cjkRelation(w) === RELATION.COMPATIBILITY_TARGET) return RELATION.COMPATIBILITY_TARGET;",
+    replace: "    if (false) return RELATION.COMPATIBILITY_TARGET;",
+  },
+  {
+    id: "M72-COMBINING-MARKS-ARE-LETTERS",
+    target: "authority",
+    invariant: "REC7-C1 a combining mark, a tatweel and a zero-width joiner are decoration, not part of the word.",
+    kills: ["R6-5a"],
+    find: "    .replace(DECORATION, '')",
+    replace: "    .replace(/__never_matches__/gu, '')",
+  },
+  {
+    id: "M73-CJK-ACCESSORY-NOUN-IGNORED",
+    target: "authority",
+    invariant: "REC7-C1 a CJK accessory noun names a relationship, exactly as its English counterpart does.",
+    kills: ["R6-5a"],
+    find: "    if (cjkRelation(w) === RELATION.ACCESSORY_TARGET) return RELATION.ACCESSORY_TARGET;",
+    replace: "    if (false) return RELATION.ACCESSORY_TARGET;",
+  },
+  {
+    id: "M70-SEAL-IS-NOT-RECORDED",
+    target: "authority",
+    invariant: "V5-2 sealing records the object's IDENTITY; without the record nothing is authoritative.",
+    kills: ["R6-3b"],
+    find: "  SERVER_AUTHORITY.add(sealed);",
+    replace: "  if (false) SERVER_AUTHORITY.add(sealed);",
   },
 ];
 

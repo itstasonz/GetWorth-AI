@@ -31,7 +31,18 @@ const A = await import(AUTH_URL.href);
 const { deriveEvidence, evidenceList } = A;
 
 const { parseVisionResponse } = await import('../api/analyze.js');
-const vd = (block, opts) => visionData(parseVisionResponse, block, opts);
+// REC7-C1. The provenance record is now computed AT THE PARSE, and
+// `parseVisionResponse` lives in api/analyze.js, which imports the REAL
+// pricing-authority. Left alone, the parser would hand every fixture an
+// UNMUTATED subject/reference verdict and every block-rule mutant would
+// survive untouched — which is exactly what M63 did on its first run after the
+// change. So the one field the module under test owns is recomputed with the
+// module under test. R6-0 in tests/round6-authority.test.mjs asserts the two
+// agree when they are the same module.
+const vd = (block, opts) => {
+  const parsed = visionData(parseVisionResponse, block, opts);
+  return { ...parsed, ocr_context: { ...parsed.ocr_context, provenance: A.classifyOcrBlock(block) } };
+};
 
 const WATCH = {
   category: 'Watches', subcategory: 'watch', category_confidence: 0.9,
@@ -70,8 +81,26 @@ describe('R5-1 identity evidence buys no pricing authority, at EVERY consumer', 
     // shipped. `hasMarketAnchor` existed twelve lines above it and was not used;
     // the BUCKET_AUTHORITY comment said the rule "still applies on top,
     // unchanged" — unchanged meaning it still applied to any object at all.
-    const seen = vd('ROLEX\nSUBMARINER');
+    // ROUND 6: the label is load-bearing NOW. `watches:luxury` gained an
+    // OBJECT_CLASS requirement, and without a classifier signal this fixture
+    // falls back to plain `watches` — where `requiresAnchorAboveSoft` is not set
+    // at all. The test kept passing (₪240,000 is refused by the 6,400 ceiling
+    // too) while no longer exercising the gate it names, and the mutation
+    // harness caught it: M58 deletes `hasMarketAnchor` from the soft gate and
+    // SURVIVED. A test that passes for a different reason than the one it
+    // claims is the failure mode this whole project keeps recording.
+    const seen = vd('ROLEX\nSUBMARINER', { labels: ['Watch', 'Analog watch'] });
     const quote = { low: 200000, mid: 240000, high: 250000, currency: 'ILS' };
+
+    // Asserted, not assumed, so this can never silently stop testing the gate
+    // again: the fixture must actually be in the bucket that carries the rule.
+    const env = resolveEnvelope({ recognition: WATCH, identity: WEAK_ID,
+      evidence: deriveEvidence({ recognition: WATCH, visionData: seen }).classes });
+    assert.equal(env.key, 'watches:luxury',
+      'this witness is about requiresAnchorAboveSoft, which only watches:luxury sets — ' +
+      `the fixture resolved to ${env.key}, so the gate below is not being exercised`);
+    assert.equal(env.requiresAnchorAboveSoft, true);
+
     for (const [label, anchor] of PRICELESS) {
       const v = validateQuote(quote, { stage: 'stage2', identity: WEAK_ID, recognition: WATCH,
         anchor, evidence: deriveEvidence({ recognition: WATCH, visionData: seen, anchor }).classes });
@@ -181,7 +210,10 @@ describe('R5-2 an accessory does not become the product it fits', () => {
       brand_candidates: [{ brand: 'Rolex', confidence: 0.9 }],
       model_candidates: [{ model: 'Submariner', confidence: 0.9 }], ocr_text: { raw_texts: [] } };
     const accessory = vd('Replacement strap compatible with Rolex Submariner');
-    const genuine = vd('ROLEX\nSUBMARINER');
+    // ROUND 6: watches:luxury now also requires OBJECT_CLASS, so the genuine arm
+    // carries the classifier label a real watch photograph carries. Without it
+    // the compatibility-marker vocabulary was this bucket's only layer.
+    const genuine = vd('ROLEX\nSUBMARINER', { labels: ['Watch', 'Analog watch'] });
     const key = (v) => resolveEnvelope({ recognition: strap, identity: WEAK_ID,
       evidence: deriveEvidence({ recognition: strap, visionData: v }).classes }).key;
     assert.equal(key(accessory), 'watches', 'a strap is bounded by the ordinary watches bucket');

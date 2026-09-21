@@ -424,7 +424,32 @@ const BUCKET_AUTHORITY = Object.freeze({
   // ₪250,000, and the single most-hallucinated category in the system. Both
   // text classes: the brand AND a product string must have been read off the
   // item. requiresAnchorAboveSoft still applies on top, unchanged.
-  'watches:luxury':             ['BRAND_TEXT', 'PRODUCT_TEXT'],
+  //
+  // ── AND OBJECT_CLASS, ADDED IN ROUND 6 ───────────────────────────────────
+  //
+  // An independent recognition reviewer pointed out that the defence written
+  // down in api/_lib/pricing-authority.js — "an unrecognised line is SUBJECT,
+  // and the classes they grant are bounded by BUCKET_AUTHORITY, which requires
+  // OBJECT_CLASS from a classifier for every electronics bucket above its
+  // parent" — is TRUE FOR ELECTRONICS AND FALSE FOR THIS BUCKET. Here the two
+  // text classes were the whole requirement, so the compatibility-marker
+  // vocabulary was the ONLY layer, and every gap in it was a ₪250,000 gap:
+  //
+  //   "Replacement strap for\nROLEX SUBMARINER"   refused
+  //   "για\nROLEX SUBMARINER"                     watches:luxury GRANTED
+  //   "ile uyumlu\nROLEX SUBMARINER"              watches:luxury GRANTED
+  //   "สายสำรองสำหรับ\nROLEX SUBMARINER"            watches:luxury GRANTED
+  //
+  // Twelve unlisted languages did it, and so did every scriptio-continua script
+  // outside the four the containment rule happens to name. A marker list cannot
+  // be finished, which is exactly why this round's contract says phrase
+  // recognition is EVIDENCE and the authority requirement is the PROTECTION.
+  // This bucket had no protection, only evidence.
+  //
+  // A classifier saying "watch" is not something a printed sentence can forge,
+  // and a genuine watch photograph has one. The cost of the gap is now the
+  // ordinary `watches` ceiling rather than the luxury one.
+  'watches:luxury':             ['OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT'],
 });
 
 /** `'electronics:laptop'` -> `'electronics'`; a top-level key -> null. */

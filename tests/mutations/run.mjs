@@ -29,7 +29,7 @@ import { readSource } from './read-source.mjs';
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MUTANTS } from './mutants.mjs';
+import { MUTANTS, GUARD_CONTROLS } from './mutants.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '../..');
@@ -52,6 +52,11 @@ const SUITES = [
   // nothing whatever about the ones it does not.
   'tests/round4-properties.test.mjs',
   'tests/round5-properties.test.mjs',
+  // ROUND 6. The block-provenance and server-authority rules live in
+  // api/_lib/pricing-authority.js, which this harness can already mutate — but
+  // a mutant of a rule whose only observer is a suite NOT in this list survives
+  // for a reason that has nothing to do with the property.
+  'tests/round6-authority.test.mjs',
 ];
 
 const argv = process.argv.slice(2);
@@ -173,10 +178,12 @@ const survived = [];
 const invalid = [];
 const equivalent = [];
 const applied = [];
+// §13. Harness calibration. Judged, never scored — see GUARD_CONTROLS.
+const controls = [];
 
-console.log(`VAL-001 mutation run — ${selected.length} mutants against tests/valuation-guard.test.mjs\n`);
+console.log(`VAL-001 mutation run — ${selected.length} mutants + ${GUARD_CONTROLS.length} controls against tests/valuation-guard.test.mjs\n`);
 
-for (const m of selected) {
+for (const m of [...selected, ...GUARD_CONTROLS]) {
   // A mutant must pin exactly one site. Zero means the code moved; many means
   // the mutation is ambiguous and we would not know what we actually broke.
   const target = m.target || 'guard';
@@ -202,7 +209,7 @@ for (const m of selected) {
     console.log(`  INVALID    ${m.id}  (replacement identical to source)`);
     continue;
   }
-  applied.push(m);
+  if (!m.control) applied.push(m);
 
   const mutantPath = join(work, `${m.id}.guard.mjs`);
   // The guard copy is always written -- unmutated when the mutant targets the
@@ -217,6 +224,16 @@ for (const m of selected) {
     encoding: 'utf8',
     timeout: 120000,
   });
+
+  // §13. A control measures the instrument, so it is neither a kill nor a gap.
+  if (m.control) {
+    const wanted = m.control === 'kill';
+    const got = run.status !== 0;
+    controls.push({ ...m, wanted, got, ok: wanted === got });
+    console.log(`  ${wanted === got ? 'control ok ' : 'CONTROL BAD'} ${m.id}  ` +
+      `(wanted ${m.control.toUpperCase()}, got ${got ? 'KILLED' : 'SURVIVED'})`);
+    continue;
+  }
 
   // Exit 0 = the whole contract suite passed against deliberately broken code.
   if (run.status === 0) {
@@ -258,6 +275,24 @@ console.log(`  SURVIVED   ${survived.length}/${scored}`);
 console.log(`  EQUIVALENT ${equivalent.length} (excluded from the denominator — unkillable by construction)`);
 console.log(`  score      ${score}%`);
 console.log(bar);
+console.log('HARNESS CALIBRATION — judged, never scored');
+for (const c of controls) {
+  console.log(`  ${c.ok ? 'ok  ' : 'BAD '} ${c.id.padEnd(28)} wanted ${c.control.toUpperCase().padEnd(8)} ` +
+    `got ${c.got ? 'KILLED' : 'SURVIVED'}`);
+}
+const sensitivityOk = controls.some((c) => c.control === 'kill' && c.ok);
+const specificityOk = controls.some((c) => c.control === 'survive' && c.ok);
+console.log(`  SENSITIVITY ${sensitivityOk ? 'PROVEN' : 'NOT PROVEN'}   SPECIFICITY ${specificityOk ? 'PROVEN' : 'NOT PROVEN'}`);
+console.log(bar);
+if (!sensitivityOk || !specificityOk) {
+  console.log('\nHARNESS INVALID — the instrument failed its own calibration.');
+  for (const c of controls.filter((x) => !x.ok)) {
+    console.log(`  ${c.id}\n    ${c.invariant}\n    wanted ${c.control.toUpperCase()}, got ${c.got ? 'KILLED' : 'SURVIVED'}`);
+  }
+  console.log('\nA harness that kills everything is as invalid as one that kills nothing.');
+  console.log('\nFAILED.');
+  process.exit(1);
+}
 
 if (survived.length) {
   console.log('\nSURVIVING MUTANTS — the suite does not actually enforce these:');

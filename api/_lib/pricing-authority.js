@@ -148,6 +148,20 @@ export function confidence(value) {
   return value;
 }
 
+// DECORATION IS NOT PART OF A WORD.
+//
+// Combining marks (Hebrew niqqud, Arabic harakat), the Arabic TATWEEL stretch
+// mark and the zero-width joiners are all ornament on a letter, and none of
+// them changes which word was written. Stripping them is a rule about WRITING
+// SYSTEMS rather than about any particular phrase, which is why a marker list
+// could never have enumerated its way past the witness that found it:
+//
+//   مناسب لـ   ->  the preposition ل followed by U+0640, matching no marker
+//
+// Built from an escape STRING rather than written as a regex literal, so the
+// code points stay legible in the source instead of being invisible characters
+// a reader has to hex-dump.
+const DECORATION = new RegExp("[\\p{M}\\u0640\\u200B-\\u200F\\u2060\\uFEFF]", "gu");
 /** Lower-cased alphanumeric words. The unit both sides of a text match use. */
 function words(text) {
   // R5-H1. THIS ERASED EVERY NON-LATIN SCRIPT.
@@ -164,7 +178,23 @@ function words(text) {
   // classes so a script the author did not think of is TOKENISED rather than
   // deleted — a word in a language we cannot read is still a word, and the rules
   // below fail closed on words they do not recognise.
+  // REC7-C1. AND COMBINING MARKS ARE NOT LETTERS.
+  //
+  // Found by this round's own negative-space pass, not by a reviewer: the
+  // Arabic "مناسب لـ" ("suitable for") survived every rule, because `لـ` is the
+  // preposition ل followed by TATWEEL (U+0640) — a typographic stretch mark
+  // that carries no sound and no meaning. NFKC does not remove it, so the token
+  // was `لـ`, which matches no marker, and a reference line was read as a
+  // product label.
+  //
+  // Stripping \p{M} and the joiners is a rule about WRITING SYSTEMS rather than
+  // about any particular phrase: Hebrew niqqud, Arabic harakat and tatweel,
+  // zero-width joiners and Latin combining accents are all decoration on a
+  // letter, and none of them changes which word was written. A marker list can
+  // never enumerate its way past this, because the variants are not words.
   return String(text ?? '')
+    .normalize('NFKD')
+    .replace(DECORATION, '')
     .normalize('NFKC')
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
@@ -256,11 +286,19 @@ const COMPATIBILITY = new Set([
   'replacement', 'replaces', 'replace', 'suits', 'suitable', 'universal', 'spare',
   'works', 'accessory', 'accessories', 'aftermarket', 'adapter', 'adaptor',
   // Hebrew  (תואם = compatible, מתאים = suitable, ל = for, עבור = for,
-  //          חלוף = spare/replacement, מתאימה/תואמת = feminine forms)
+  //          חלוף/חילוף = spare/replacement, מיועד = intended for,
+  //          מתאימה/תואמת = feminine forms)
+  //
+  // BOTH SPELLINGS OF חלוף. Hebrew writes the same word with or without the
+  // optional yod (ktiv male / ktiv haser), so חלוף and חילוף are one word and a
+  // set of exact strings sees two. "חלק חילוף" — the ordinary phrase for a
+  // spare part, and one this round's §5 names outright — was read as a product
+  // label because only the shorter spelling was listed.
   'תואם', 'תואמת', 'תואמים', 'מתאים', 'מתאימה', 'ל', 'עבור',
-  'חלוף', 'חליפי', 'אבזר', 'אבזרים', 'מתאימים',
-  // Arabic  (متوافق = compatible, ل = for, بديل = replacement)
-  'متوافق', 'ل', 'بديل', 'ملحق',
+  'חלוף', 'חילוף', 'חליפי', 'חליפית', 'אבזר', 'אבזרים', 'מתאימים',
+  'מיועד', 'מיועדת', 'מיועדים',
+  // Arabic  (متوافق = compatible, مناسب = suitable, ل = for, بديل = replacement)
+  'متوافق', 'مناسب', 'يناسب', 'ل', 'بديل', 'ملحق',
   // European
   'pour', 'para', 'per', 'für', 'fur', 'voor', 'til', 'för', 'forå', 'kompatibel',
   'compatibile', 'compatibé', 'ricambio', 'repuesto', 'ersatz', 'zubehör',
@@ -279,6 +317,53 @@ const COMPATIBILITY = new Set([
 // actually mean "for/to".
 const RTL_FOR_PREFIX = /^[לل][א-תء-ي]{2,}$/u;
 
+// ── A SCRIPT WITHOUT SPACES HAS NO WHOLE WORDS TO MATCH ─────────────────────
+//
+// Found by this round's own adversarial pass. Japanese, Chinese and Korean
+// accessory packaging is ordinary in this market — imported goods carry their
+// origin labelling — and every one of these defeated the rule outright:
+//
+//   対応 \n ROLEX SUBMARINER          -> BRAND_TEXT + PRODUCT_TEXT
+//   适用于 \n ROLEX SUBMARINER         -> BRAND_TEXT + PRODUCT_TEXT
+//   交換用フィルター \n DYSON V15        -> BRAND_TEXT + PRODUCT_TEXT
+//
+// Two reasons, and only one of them is vocabulary. Han, Kana and Hangul are
+// written WITHOUT word separators, so `交換用フィルター` ("replacement filter")
+// tokenises to ONE token and a set of whole words cannot match any part of it.
+// Adding words to COMPATIBILITY would not have helped; the matching mode is
+// what is wrong.
+//
+// So a token containing CJK is tested by CONTAINMENT rather than by equality —
+// which is the correct rule for scriptio continua and the WRONG rule for a
+// spaced script, where it would make "form" match "for". The containment test
+// is therefore gated on the script, not applied generally.
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+// Kept in the same two kinds as their spaced-script counterparts, so the
+// retained record says WHICH relation a line carries rather than only that it
+// carries one — §3 asks for the referenced product to stay available as
+// structured metadata, and "it was one of the non-subject kinds" is not that.
+const CJK_COMPATIBILITY = [
+  // Japanese: 対応/互換 compatible, 交換 replacement, 予備 spare, 専用 dedicated-to
+  '対応', '互換', '交換', '予備', '専用',
+  // Chinese: 适用/適用 suitable for, 兼容 compatible, 替换/更换 replacement, 备用 spare
+  '适用', '適用', '兼容', '替换', '替換', '更换', '备用', '備用',
+  // Korean: 호환 compatible, 교체 replacement
+  '호환', '교체',
+];
+const CJK_ACCESSORY = [
+  'アクセサリ', 'ケース', 'ストラップ', 'フィルター', '充電器', 'カバー', 'バンド', 'ケーブル',
+  '配件', '保护套', '手机壳', '表带', '滤芯', '充电器',
+  '액세서리', '케이스', '스트랩', '필터', '충전기',
+];
+
+/** The relation a CJK token carries by CONTAINMENT, or null. */
+function cjkRelation(word) {
+  if (!CJK.test(word)) return null;
+  if (CJK_COMPATIBILITY.some((m) => word.includes(m))) return RELATION.COMPATIBILITY_TARGET;
+  if (CJK_ACCESSORY.some((m) => word.includes(m))) return RELATION.ACCESSORY_TARGET;
+  return null;
+}
+
 // An ACCESSORY NOUN names what the photographed thing IS, and an accessory is
 // defined by the product it attaches to — so a line whose subject is one of
 // these is describing a relationship even with no preposition at all.
@@ -294,8 +379,11 @@ const ACCESSORY_NOUN = new Set([
   'cover', 'covers', 'strap', 'straps', 'band', 'bands', 'filter', 'filters',
   'blade', 'blades', 'protector', 'protectors', 'ink', 'toner', 'cartridge',
   'sleeve', 'mount', 'holder', 'stand', 'dock', 'lens', 'battery', 'screen',
+  // "Replacement Blade" already carries a marker; "Spare part" and "חלק חילוף"
+  // name the RELATIONSHIP in the noun itself, which is what this list is for.
+  'part', 'parts',
   'מטען', 'כבל', 'מתאם', 'כיסוי', 'רצועה', 'פילטר', 'להב', 'מגן',
-  'סוללה', 'מעמד', 'מחסנית', 'עדשה',
+  'סוללה', 'מעמד', 'מחסנית', 'עדשה', 'חלק', 'חלקים',
 ]);
 
 /**
@@ -332,30 +420,218 @@ const ACCESSORY_NOUN = new Set([
 // establishes nothing. It may still refute (a contradiction is safe); it may not
 // corroborate. Logos survive either way: a logo is a mark on the object, not a
 // sentence about another product.
-const RELATION = Object.freeze({
+// ── REC7-C1. A LINE IS NOT A SEMANTIC SCOPE. THE BLOCK IS. ──────────────────
+//
+// THE VERIFIED FAILURE. Round 5 classified each OCR line on its own, so a
+// relation marker protected only the line it happened to land on:
+//
+//   Replacement strap for ROLEX SUBMARINER      -> DERIVED           refused
+//   Replacement strap for \n ROLEX SUBMARINER   -> BRAND+PRODUCT_TEXT  ACCEPTED
+//
+// Identical packaging, identical words, one newline apart — and the second one
+// bought `watches:luxury` and a ₪250,000 ceiling. Every reverse layout did the
+// same: the host name printed ABOVE its own relation marker was a clean subject
+// line by construction. So did every Hebrew equivalent.
+//
+// The answer is NOT a newline regex and NOT a longer phrase list. Both of those
+// are the same move that failed: enumerate the layouts we happened to think of.
+//
+// THE AUTHORITY CONTRACT, stated as a property:
+//
+//   OCR BODY TEXT ALONE MUST NOT UPGRADE A REFERENCED PRODUCT INTO SUBJECT
+//   IDENTITY WHEN THE OCR BLOCK CONTAINS ACCESSORY / REFERENCE SEMANTICS.
+//
+// The unit of judgement is therefore the BLOCK, not the line. A marker anywhere
+// in the block says the printed matter is about a relationship, and NOTHING
+// printed in that block is permitted to establish subject identity — whichever
+// line it sits on, in whichever order, in whichever script. A referenced product
+// may still be RETAINED (the per-line relations below are kept in the record so
+// a consumer can carry `compatible_with` as structured metadata); it may not
+// become the subject.
+//
+// WHAT STILL CAN ESTABLISH IDENTITY IS AN INDEPENDENT SUBJECT SIGNAL — a
+// classifier's verdict about the OBJECT rather than about the writing on it.
+// `logos` survive a reference-bearing block for exactly that reason, and they
+// are the only thing that does; see `classifiedLines`. The model cannot declare
+// its own text to be a visual signal, because no model output reaches this
+// function at all: `ocr_text.raw_texts` was removed in round 4 and is still
+// absent.
+//
+// FAIL CLOSED ON AMBIGUITY. A block we could not see in full (see
+// `blockProvenance`) is UNKNOWN, and UNKNOWN permits nothing. Authority may
+// fall because provenance is uncertain; it may never rise.
+export const RELATION = Object.freeze({
   SUBJECT: 'SUBJECT',
-  REFERENCE: 'REFERENCE',      // compatible-with / for / replacement-for / accessory-for
+  REFERENCE: 'REFERENCE',                     // the block as a whole is about a relationship
+  COMPATIBILITY_TARGET: 'COMPATIBILITY_TARGET', // "compatible with X" / "for X" / תואם ל-X
+  ACCESSORY_TARGET: 'ACCESSORY_TARGET',       // the line's own subject is an accessory noun
+  PACKAGING_REFERENCE: 'PACKAGING_REFERENCE', // "device not included" / "sold separately"
+  UNKNOWN: 'UNKNOWN',                         // provenance could not be established
 });
 
+/** Bumped when the shape of the provenance record changes. */
+export const OCR_PROVENANCE_VERSION = 1;
+
+// The record is BOUNDED, because it is carried in `ocr_context`, serialised into
+// `_debug`, and read by code that must not be handed an unbounded structure. The
+// caps discard SUBJECT lines only: `block_relation` is decided over every line
+// before any capping, so a reference marker in line 900 still governs.
+const MAX_BLOCK_LINES = 80;
+const MAX_LINE_WORDS = 40;
+
+// PACKAGING_REFERENCE is a PHRASE rule, not a word set, and deliberately tiny.
+// "included" and "separately" are ordinary words; "not included" and "sold
+// separately" are statements that the thing named is NOT what you are buying —
+// which is reference semantics in its purest form. A word-level list here would
+// suppress legitimate product labels ("Includes 3 blades"), and suppression is
+// not free: it costs real recognition.
+const PACKAGING_NEGATION = new Set(['not', 'without', 'excluding', 'excl', 'לא', 'ללא', 'אינו', 'אינה', 'בלי']);
+const PACKAGING_INCLUSION = new Set(['included', 'includes', 'include', 'כלול', 'כלולה', 'כלולים']);
+const PACKAGING_SOLD = new Set(['sold', 'available', 'נמכר', 'נמכרת']);
+const PACKAGING_SEPARATELY = new Set(['separately', 'separate', 'בנפרד']);
+
 /**
- * Split the OCR block into lines, classify each line's RELATIONSHIP to the
- * photographed object, and return only the SUBJECT lines as word arrays.
+ * What is this ONE line doing — describing the object, or naming something the
+ * object relates to?
  *
- * A line carrying a compatibility marker in ANY language is a REFERENCE: it
- * describes what the item works WITH, not what it IS. The whole line is dropped
- * rather than the marker alone, because accessory packaging writes the host
- * product beside the marker and splitting the difference is how the per-word
- * shape defeated the previous attempt.
+ * Returns a member of RELATION. `SUBJECT` is the default, so a construction we
+ * do not recognise is treated as ordinary product text; the protection against
+ * an unrecognised marker is the BLOCK rule above plus BUCKET_AUTHORITY, not an
+ * ever-growing phrase list.
+ */
+function relationOfLine(lineWords) {
+  let negation = false, inclusion = false, sold = false, separately = false;
+  for (const w of lineWords) {
+    if (PACKAGING_NEGATION.has(w)) negation = true;
+    if (PACKAGING_INCLUSION.has(w)) inclusion = true;
+    if (PACKAGING_SOLD.has(w)) sold = true;
+    if (PACKAGING_SEPARATELY.has(w)) separately = true;
+  }
+  if ((negation && inclusion) || (sold && separately)) return RELATION.PACKAGING_REFERENCE;
+  for (const w of lineWords) {
+    if (COMPATIBILITY.has(w)) return RELATION.COMPATIBILITY_TARGET;
+    // Hebrew/Arabic attach the preposition to the following word.
+    if (RTL_FOR_PREFIX.test(w)) return RELATION.COMPATIBILITY_TARGET;
+    // Han/Kana/Hangul have no word separators, so the token IS the phrase.
+    if (cjkRelation(w) === RELATION.COMPATIBILITY_TARGET) return RELATION.COMPATIBILITY_TARGET;
+  }
+  for (const w of lineWords) {
+    if (ACCESSORY_NOUN.has(w)) return RELATION.ACCESSORY_TARGET;
+    if (cjkRelation(w) === RELATION.ACCESSORY_TARGET) return RELATION.ACCESSORY_TARGET;
+  }
+  return RELATION.SUBJECT;
+}
+
+/**
+ * The BOUNDED, block-level provenance record for one OCR block.
+ *
+ * `truncated` means "this string may not be the whole block". It is the one
+ * input that cannot be recovered by looking harder at the text, so it is passed
+ * in by the producer rather than guessed at here — and it forces UNKNOWN, which
+ * permits nothing. See §4 (TRUNCATION MONOTONICITY): `parseVisionResponse`
+ * calls this on the FULL annotation and caps `full_text` afterwards, so the
+ * display cap cannot change what the text is entitled to.
+ *
+ * Returns `null` for a block with no words at all — there is nothing to say
+ * about it, and `null` is distinguishable from "a block that permits nothing".
+ */
+export function classifyOcrBlock(text, { truncated = false } = {}) {
+  const src = typeof text === 'string' ? text : '';
+  const lines = [];
+  let lineCount = 0;
+  let referenceBearing = false;
+  for (const raw of src.split(/[\r\n]+/)) {
+    const w = words(raw);
+    if (!w.length) continue;
+    lineCount++;
+    const relation = relationOfLine(w);
+    if (relation !== RELATION.SUBJECT) referenceBearing = true;
+    if (lines.length < MAX_BLOCK_LINES) {
+      lines.push(Object.freeze({ words: Object.freeze(w.slice(0, MAX_LINE_WORDS)), relation }));
+    }
+  }
+  if (lineCount === 0) return null;
+  const block_relation = truncated
+    ? RELATION.UNKNOWN
+    : (referenceBearing ? RELATION.REFERENCE : RELATION.SUBJECT);
+  return Object.freeze({
+    version: OCR_PROVENANCE_VERSION,
+    truncated: !!truncated,
+    line_count: lineCount,
+    block_relation,
+    // THE ONE BIT THE EVIDENCE RULE READS. Named for what it authorises rather
+    // than for what it observed, so a consumer cannot mistake "we saw a
+    // relation" for "you may use this text".
+    subject_text_permitted: block_relation === RELATION.SUBJECT,
+    lines: Object.freeze(lines),
+  });
+}
+
+/**
+ * The provenance record for this scan's OCR block, or null.
+ *
+ * PREFERS THE PRODUCER'S RECORD. `parseVisionResponse` computes it from the
+ * untruncated annotation, so when it is present the display cap is irrelevant.
+ *
+ * WITHOUT IT, FAIL CLOSED. A `visionData` assembled by hand — a test, a stale
+ * cache row written before this record existed, a future Phase-B path — carries
+ * a `full_text` we cannot prove is complete, so it is classified as TRUNCATED
+ * and permits nothing. That is the bounded direction, and it is the direction
+ * §4 requires: uncertainty may only ever cost authority.
+ */
+function blockProvenance(visionData) {
+  const ctx = visionData?.ocr_context;
+  if (!ctx || typeof ctx !== 'object') return null;
+  const pre = ctx.provenance;
+  if (pre && typeof pre === 'object' && pre.version === OCR_PROVENANCE_VERSION && Array.isArray(pre.lines)) {
+    return pre;
+  }
+  const full = ctx.full_text;
+  if (typeof full !== 'string' || !full.length) return null;
+  return classifyOcrBlock(full, { truncated: true });
+}
+
+/**
+ * May the SUBJECT lines of this record be used as identity evidence?
+ *
+ * THE FLAG IS CHECKED AND THEN RE-DERIVED, because the record does not always
+ * come from this process. `parseVisionResponse` writes it, but the parsed
+ * result is CACHED in `vision_cache` and comes back as plain JSON — so by the
+ * time it reaches here it is a row from a database, and a row is data, not a
+ * verdict. `subject_text_permitted: true` sitting beside a line whose relation
+ * is COMPATIBILITY_TARGET is a contradiction, and the fail-closed reading of a
+ * contradiction is to refuse.
+ *
+ * This is the same doctrine as everywhere else in this module: a claim about
+ * evidence is not evidence. The producer's flag is necessary and not sufficient.
+ */
+function subjectLinesPermitted(prov) {
+  if (!prov || prov.subject_text_permitted !== true) return false;
+  if (prov.truncated === true) return false;
+  if (!Array.isArray(prov.lines)) return false;
+  for (const line of prov.lines) {
+    if (!line || line.relation !== RELATION.SUBJECT) return false;
+  }
+  return true;
+}
+
+/**
+ * The word arrays a name may be looked for in.
+ *
+ * TWO SOURCES, AND ONLY ONE OF THEM IS TEXT.
+ *   · BODY TEXT — the OCR block's lines, and ONLY when block provenance says
+ *     the block is about its own subject. A reference-bearing or UNKNOWN block
+ *     contributes nothing at all, whichever line the name sits on.
+ *   · LOGOS — a classifier's verdict that a mark is ON the object. This is the
+ *     independent subject signal the contract permits, and it survives a
+ *     reference-bearing block precisely because it is not body text.
  */
 function classifiedLines(visionData) {
   const out = [];
-  const full = visionData?.ocr_context?.full_text;
-  if (typeof full === 'string' && full.length) {
-    for (const raw of full.split(/[\r\n]+/)) {
-      const w = words(raw);
-      if (!w.length) continue;
-      if (relationOf(w) === RELATION.REFERENCE) continue;
-      out.push(w);
+  const prov = blockProvenance(visionData);
+  if (prov && subjectLinesPermitted(prov)) {
+    for (const line of prov.lines) {
+      if (Array.isArray(line.words) && line.words.length) out.push(line.words);
     }
   }
   for (const l of (visionData?.logos || [])) {
@@ -367,15 +643,22 @@ function classifiedLines(visionData) {
   return out;
 }
 
-/** Does this line describe the object, or something the object works with? */
-function relationOf(lineWords) {
-  for (const w of lineWords) {
-    if (COMPATIBILITY.has(w)) return RELATION.REFERENCE;
-    if (ACCESSORY_NOUN.has(w)) return RELATION.REFERENCE;
-    // Hebrew/Arabic attach the preposition to the following word.
-    if (RTL_FOR_PREFIX.test(w)) return RELATION.REFERENCE;
-  }
-  return RELATION.SUBJECT;
+/**
+ * Was this scan's OCR block permitted to speak about its own subject?
+ *
+ * Exported for api/analyze.js, whose Stage-2 identity upgrade asks the SAME
+ * question about the SAME block and must not answer it a second way. Two
+ * predicates for one question is the defect this file has closed twice already.
+ */
+export function subjectTextPermitted(visionData) {
+  const prov = blockProvenance(visionData);
+  return subjectLinesPermitted(prov);
+}
+
+/** The block-level relation for the record: SUBJECT, REFERENCE or UNKNOWN. */
+export function blockRelation(visionData) {
+  const prov = blockProvenance(visionData);
+  return prov ? prov.block_relation : RELATION.UNKNOWN;
 }
 
 /** Is `needle` a contiguous run of whole words within ANY single line? */
@@ -479,6 +762,80 @@ export function deriveEvidence({ recognition = null, visionData = null, anchor =
   }
 
   return { classes, object_class_tokens: objectTokens, detail };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// V5-2  ·  MODEL_OUTPUT ∩ SERVER_AUTHORITY = ∅
+//
+// THE DEFECT THE BLACKLIST COULD NOT CLOSE
+// `verification` is raw `JSON.parse` of a model response, and the pipeline read
+// `verification._pricing_meta.pricing_status` — the field that tells the client
+// WHY a price was trusted. Round 5 answered with `MODEL_FORBIDDEN_KEYS`, a list
+// of eighteen names to delete. A list of names is a list of the forgeries
+// somebody thought of. The nineteenth key — `pricing_provenance`,
+// `price_authority`, `_pricing_meta_v2`, a Cyrillic `а` in `pricing_status`, or
+// whatever a future model invents — was authority again.
+//
+// THE CONTRACT, stated as a property rather than as a list:
+//
+//   AN AUTHORITATIVE PRICING FIELD IS ONE THIS MODULE MINTED.
+//
+// Not one that has the right NAME, or the right SHAPE, or survived the right
+// filter. `sealServerAuthority` records the object's IDENTITY in a WeakSet that
+// exists only inside this module's closure. `readServerAuthority` returns the
+// object only if it is in that set.
+//
+// A model emits JSON. `JSON.parse` mints fresh objects. A fresh object is not in
+// the WeakSet and cannot be put there — nothing exported adds to it except
+// `sealServerAuthority`, whose call sites are server code by construction. So:
+//
+//   · an invented key the schema has never heard of  -> not authority
+//   · a perfect byte-for-byte forgery of _pricing_meta -> not authority
+//   · a Unicode confusable, a prototype-shaped name, a nested array -> not authority
+//   · a key nobody has predicted, in a round nobody has run yet -> not authority
+//
+// and none of those facts depends on anyone maintaining a list. The allowlist in
+// api/analyze.js (`sealModelVerification`) is the second layer: it bounds which
+// keys a model may contribute AT ALL. This is the layer that decides which ones
+// carry authority, and it is the one that stays correct when the allowlist is
+// wrong.
+//
+// WHY A WeakSet AND NOT A SYMBOL PROPERTY. A symbol survives `structuredClone`
+// and can be re-attached by any code holding the symbol; membership of a closed
+// WeakSet cannot be forged, copied, or serialised into existence. It also means
+// a seal does NOT survive JSON round-tripping — which is correct: a value that
+// has been through the wire is no longer the object this server minted, and
+// treating it as though it were is the whole defect.
+const SERVER_AUTHORITY = new WeakSet();
+
+/**
+ * Mint an authoritative, server-owned pricing record.
+ *
+ * FROZEN, so the value cannot be mutated after it has been vouched for. Returns
+ * the same object it sealed, so a call site reads `_pricing_meta: seal({...})`.
+ */
+export function sealServerAuthority(fields) {
+  if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return null;
+  const sealed = Object.freeze({ ...fields });
+  SERVER_AUTHORITY.add(sealed);
+  return sealed;
+}
+
+/** Was this value minted by `sealServerAuthority`? */
+export function isServerAuthority(value) {
+  return typeof value === 'object' && value !== null && SERVER_AUTHORITY.has(value);
+}
+
+/**
+ * The authoritative record, or null.
+ *
+ * EVERY consumer of server pricing provenance reads through here. `null` is the
+ * same answer a missing field gives, so a forged one degrades to "no
+ * provenance" — the fail-closed direction — rather than to an error a caller
+ * might swallow.
+ */
+export function readServerAuthority(value) {
+  return isServerAuthority(value) ? value : null;
 }
 
 /** The serialisable form of an evidence set: a stable, sorted array of names. */

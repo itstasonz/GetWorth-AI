@@ -33,7 +33,18 @@ import assert from 'node:assert/strict';
 // item, so a test can no longer describe a shape production cannot emit.
 import { visionData } from './helpers/vision-fixture.mjs';
 const { parseVisionResponse } = await import('../api/analyze.js');
-const vd = (block, opts) => visionData(parseVisionResponse, block, opts);
+// REC7-C1. The provenance record is now computed AT THE PARSE, and
+// `parseVisionResponse` lives in api/analyze.js, which imports the REAL
+// pricing-authority. Left alone, the parser would hand every fixture an
+// UNMUTATED subject/reference verdict and every block-rule mutant would
+// survive untouched — which is exactly what M63 did on its first run after the
+// change. So the one field the module under test owns is recomputed with the
+// module under test. R6-0 in tests/round6-authority.test.mjs asserts the two
+// agree when they are the same module.
+const vd = (block, opts) => {
+  const parsed = visionData(parseVisionResponse, block, opts);
+  return { ...parsed, ocr_context: { ...parsed.ocr_context, provenance: A.classifyOcrBlock(block) } };
+};
 import { readFileSync } from 'node:fs';
 // VAL001_GUARD_PATH points this suite at a MUTATED COPY of the guard, exactly as
 // tests/valuation-guard.test.mjs is pointed. Without the indirection the mutation
@@ -123,7 +134,11 @@ describe('EA-2 each bucket declares what it costs to enter', () => {
       ['electronics:iphone', [EVIDENCE.OBJECT_CLASS, EVIDENCE.BRAND_TEXT]],
       ['electronics:macbook', [EVIDENCE.OBJECT_CLASS, EVIDENCE.BRAND_TEXT]],
       ['electronics:ipad', [EVIDENCE.OBJECT_CLASS, EVIDENCE.BRAND_TEXT]],
-      ['watches:luxury', [EVIDENCE.BRAND_TEXT, EVIDENCE.PRODUCT_TEXT]],
+      // ROUND 6: OBJECT_CLASS added. The marker vocabulary was this bucket's
+      // ONLY layer, so every gap in it was a ₪250,000 gap — see the note at
+      // BUCKET_AUTHORITY. The sub-assertion below still proves each class is
+      // genuinely load-bearing by dropping them one at a time.
+      ['watches:luxury', [EVIDENCE.OBJECT_CLASS, EVIDENCE.BRAND_TEXT, EVIDENCE.PRODUCT_TEXT]],
     ];
     for (const [key, req] of cases) {
       assert.deepEqual([...bucketEntryRequirement(key)].sort(), [...req].sort(), key);

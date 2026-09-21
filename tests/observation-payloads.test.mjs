@@ -77,7 +77,11 @@ const observationFiles = memo(() => {
     let entries;
     try { entries = readdirSync(`${ROOT}${dir}`); } catch { continue; }
     for (const name of entries) {
-      if (!/\.(jsx?|mjs)$/.test(name) || name.includes('__mutant__') || name.includes('__obsmutant__')) continue;
+      // §13. ONE marker, everywhere. `__obsmutant__` was a second name for the
+      // same thing, and a second name is a second thing every walker has to be
+      // told about — scripts/design-lint.mjs never was, so a concurrent run's
+      // observation mutant was linted as production source.
+      if (!/\.(jsx?|mjs)$/.test(name) || name.includes('__mutant__')) continue;
       const rel = `${dir}/${name}`;
       if (rel === 'src/lib/observations.js') continue;  // the recorder itself, not a call site
       const path = OVERRIDES[rel] || `${ROOT}${rel}`;

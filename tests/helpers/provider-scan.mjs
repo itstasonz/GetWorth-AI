@@ -219,7 +219,22 @@ export function lex(src) {
 // are enumerated is a guard; one whose blind spots are unknown is a decoration.
 export const NETWORK_ENTRYPOINTS = Object.freeze(['fetch', 'fetchWithRetry', 'new URL']);
 
-const ENTRYPOINT_CALL = /\b(?:new\s+URL|fetch|fetchWithRetry)\s*\(/;
+// S-1. DERIVED FROM THE DECLARATION ABOVE, NOT TRANSCRIBED BESIDE IT.
+//
+// These were two independent statements of one list, and the mechanical
+// inventory found the consequence: `NETWORK_ENTRYPOINTS` was exported, read by
+// nobody, and emptying it changed NOTHING. The only list that mattered was the
+// one inlined in the regex, so the "declared source of truth" in the header
+// above was decorative — a mutant that deleted it SURVIVED, which is the exact
+// shape of unobserved authority this round exists to remove.
+//
+// Longest first, so `fetch` cannot shadow `fetchWithRetry`; a space in a name
+// becomes `\s+` so `new  URL` is the same entrypoint as `new URL`.
+const ENTRYPOINT_CALL = new RegExp(
+  '\\b(?:' + [...NETWORK_ENTRYPOINTS]
+    .sort((a, b) => b.length - a.length)
+    .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+'))
+    .join('|') + ')\\s*\\(');
 
 // Routes to the network whose DESTINATIONS this verification layer cannot see.
 // Not a judgement about the libraries -- `undici` is what `fetch` is built on.

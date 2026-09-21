@@ -87,22 +87,24 @@ export const PRIMITIVE_MUTANTS = [
     property: 'LF/CR/TAB are converted to a single space, so no attacker-supplied ' +
               'text can begin a line of its own and forge a section header.',
     security: true,
-    // EQUIVALENT, and verified by differential probe rather than asserted.
+    // ── THE EQUIVALENCE MARKER WAS WITHDRAWN IN ROUND 6 ─────────────────────
     //
-    // promptSafe ends with `.replace(/\s+/g, ' ')`, and JavaScript's `\s` class
-    // already covers LF, CR and TAB. So letting those three characters through
-    // the explicit branch and into `out` produces BYTE-IDENTICAL output for
-    // every input — probed over the forged-header payloads, mixed CRLF, leading
-    // and trailing whitespace, and every C0 code point. No test can kill it,
-    // and counting it in the denominator would cap the achievable score below
-    // 100% and make the number useless as a pass/fail signal.
+    // It claimed, with a differential probe behind it, that this mutation is
+    // unobservable: promptSafe ends with `.replace(/\s+/g, ' ')`, JavaScript's
+    // `\s` already covers LF/CR/TAB, so letting those three through the explicit
+    // branch produced byte-identical output.
     //
-    // The branch is NOT dead code and must not be deleted on the strength of
-    // this: it states the intent that the whitespace collapse merely happens to
-    // also satisfy, and the collapse could legitimately be narrowed later. The
-    // property it names is covered by PI-01/PI-02/PI-06; only THIS mutation of
-    // it is unobservable.
-    equivalent: 'the trailing /\\s+/ collapse already maps LF/CR/TAB to a single space',
+    // The harness reported it KILLED — by PI-41b, the shared-market-fence
+    // property — and printed "[marked equivalent but KILLED — drop the marker]".
+    // The claim had gone stale: the fence is now SHARED rather than copied, so
+    // the sanitiser's output reaches a consumer the probe did not cover when the
+    // marker was written. An equivalence claim is a statement about the whole
+    // program, and this one stopped being true the moment a new consumer
+    // appeared.
+    //
+    // Dropped rather than re-argued. A mutant that a test actually kills belongs
+    // in the numerator, and leaving a contradicted marker beside it is how a
+    // report acquires an annotation nobody rechecks.
     find: "    if (c === 0x09 || c === 0x0A || c === 0x0D) { out += ' '; continue; }",
     replace: '    if (c === 0x09 || c === 0x0A || c === 0x0D) { out += ch; continue; }',
   },

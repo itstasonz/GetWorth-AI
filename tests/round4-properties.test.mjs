@@ -213,7 +213,7 @@ describe('C3 an unresolved bucket fails closed', () => {
     assert.equal(weak.key, 'watches', 'must fall back to the parent, not honour the request');
     assert.ok(weak.hard_max < 250000);
     const strong = resolveEnvelope({ envelope_key: 'watches:luxury', identity: CONFIRMED,
-      recognition: rec, evidence: new Set(['DERIVED', 'BRAND_TEXT', 'PRODUCT_TEXT']) });
+      recognition: rec, evidence: new Set(['DERIVED', 'OBJECT_CLASS', 'BRAND_TEXT', 'PRODUCT_TEXT']) });
     assert.equal(strong.key, 'watches:luxury', 'and must be honoured when the evidence is there');
   });
 

@@ -30,11 +30,37 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { discoverModules, scanAll, scanModule, lex, SCANNED_EXTENSIONS, enclosingFunction }
-  from './helpers/provider-scan.mjs';
+import { readFileSync, mkdirSync, writeFileSync, rmSync, mkdtempSync, copyFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+// ── S-1. THIS SUITE WAS LISTED AS A JUDGE AND COULD NOT SEE THE DEFENDANT ───
+//
+// tests/mutations/provider-run.mjs names this file among the three suites it
+// judges provider mutants with, and this file imported the scanner DIRECTLY.
+// So every mutant written to the temp copy was invisible here: PD-2, PD-4,
+// PD-9, M-CONCAT and M-IMPORT could never go red, and mutants those tests are
+// the natural observers for were reported SURVIVED for a reason that has
+// nothing to do with the property. One third of the harness's own judging
+// surface was decorative.
+const SCAN_URL = process.env.PROVIDER_SCAN_PATH
+  ? new URL(`file://${process.env.PROVIDER_SCAN_PATH}`)
+  : new URL('./helpers/provider-scan.mjs', import.meta.url);
+const { discoverModules, scanAll, scanModule, lex, SCANNED_EXTENSIONS, enclosingFunction } =
+  await import(SCAN_URL.href);
+// ── S-2. THE SURFACE IS DERIVED FROM THE DEPLOYMENT CONTRACT ────────────────
+// `const API = new URL('../api/', import.meta.url)` was an axiom nobody had
+// checked. See tests/helpers/runtime-surface.mjs.
+// Pointed at the mutated copy for the same reason the scanner is: S-2 put
+// thirteen more security decision sites in that module, and a suite that
+// imports it directly cannot observe any of them being deleted.
+const SURFACE_URL = process.env.RUNTIME_SURFACE_PATH
+  ? new URL(`file://${process.env.RUNTIME_SURFACE_PATH}`)
+  : new URL('./helpers/runtime-surface.mjs', import.meta.url);
+const { discoverRuntimeSurface, deploymentContract, UNSCANNABLE_RUNTIME_EXTENSIONS } =
+  await import(SURFACE_URL.href);
 
-const API = new URL('../api/', import.meta.url);
+const REPO = fileURLToPath(new URL('../', import.meta.url)).replace(/[\\/]$/, '');
 const PROBE = new URL('./fixtures/provider-probe/', import.meta.url);
 
 // ── THE HOST REGISTRY ───────────────────────────────────────────────────────
@@ -64,18 +90,19 @@ const HOST_REGISTRY = {
 // this is what catches it next".
 const DYNAMIC_REGISTRY = [
   {
-    file: 'analyze.js', shape: 'variable-base-target',
+    file: 'api/analyze.js', shape: 'variable-base-target',
     why: 'Supabase JWKS, base from process.env.SUPABASE_URL — our own infrastructure, not a provider',
     coveredBy: 'runtime: the harness routes fake.supabase.co explicitly; anything else is recorded unknown',
   },
   {
-    file: 'analyze.js', shape: 'non-literal-target',
+    file: 'api/analyze.js', shape: 'non-literal-target',
     why: 'fetchWithRetry(url) — the retry wrapper. Its callers pass the literals scanned above',
     coveredBy: 'static: every fetchWithRetry CALLER has a literal target, asserted below',
   },
 ];
 
-const MODULES = discoverModules(API);
+const SURFACE = discoverRuntimeSurface(REPO);
+const MODULES = SURFACE.modules;
 
 describe('discovery covers every executable module and every host', () => {
   test('PD-1 the scanned extension set includes the ones that were missing', () => {
@@ -84,11 +111,119 @@ describe('discovery covers every executable module and every host', () => {
     }
   });
 
-  test('PD-2 every api/ module is discovered, including nested _lib', () => {
+  test('PD-2 every runtime module is discovered, including nested _lib', () => {
     const paths = MODULES.map((m) => m.path);
-    assert.ok(paths.includes('analyze.js'));
-    assert.ok(paths.includes('_lib/openai-recognition.js'), 'nested modules must be discovered');
-    assert.ok(paths.length >= 9, `expected every module under api/, found ${paths.length}`);
+    assert.ok(paths.includes('api/analyze.js'));
+    assert.ok(paths.includes('api/_lib/openai-recognition.js'), 'nested modules must be discovered');
+    assert.ok(paths.length >= 9, `expected every runtime module, found ${paths.length}`);
+    // The discovery mechanism the MUTATION harness breaks is `discoverModules`,
+    // and the surface deriver does not use it — so the same property is asserted
+    // through it as well, or a mutant that blinds it has no observer here.
+    const walked = discoverModules(new URL('./fixtures/provider-probe/', import.meta.url));
+    assert.ok(walked.length >= 5,
+      `discoverModules walked ${walked.length} files in a directory that plainly has more`);
+  });
+
+  // ── S-2. THE SURFACE, DERIVED ────────────────────────────────────────────
+  describe('PD-11 the runtime surface comes from the deployment contract', () => {
+    test('PD-11a the contract is READ, and names the artefacts it was read from', () => {
+      const c = deploymentContract(REPO);
+      assert.ok(c.sources.includes('vercel.json'),
+        'the deployment contract must be read from the repository, not assumed');
+      assert.ok(c.roots.length >= 1, 'no function root was derived at all');
+      assert.ok(!c.roots.includes(c.outputDirectory),
+        'the static build output is not server code, whatever a rewrite says');
+    });
+
+    test('PD-11b a provider path in a location NOBODY NAMED is still discovered', () => {
+      // THE ADVERSARIAL PROOF. A synthetic repository carrying THIS repo's real
+      // vercel.json, with three provider paths planted where no line of the
+      // implementation mentions them:
+      //   1. a deeply nested module under the function root
+      //   2. a module OUTSIDE every function root, reached only by an import
+      //   3. a Python function — executable in production, unreadable here
+      // All three must be accounted for. The third must be REFUSED by name
+      // rather than skipped, because a blind spot that reports clean is the
+      // defect this whole layer exists to remove.
+      const root = mkdtempSync(join(tmpdir(), 'gw-surface-'));
+      try {
+        copyFileSync(join(REPO, 'vercel.json'), join(root, 'vercel.json'));
+        copyFileSync(join(REPO, 'package.json'), join(root, 'package.json'));
+        mkdirSync(join(root, 'api/_lib/deeply/nested'), { recursive: true });
+        mkdirSync(join(root, 'lib/pricing'), { recursive: true });
+        writeFileSync(join(root, 'api/quote.js'),
+          "import { price } from '../lib/pricing/vendor.js';\nexport default async function h(req) { return price(req); }\n");
+        writeFileSync(join(root, 'api/_lib/deeply/nested/market.mjs'),
+          "export const q = () => fetch('https://api.nested-market-vendor.example/v1');\n");
+        writeFileSync(join(root, 'lib/pricing/vendor.js'),
+          "export const price = (q) => fetch('https://api.outside-the-root-vendor.example/v1');\n");
+        writeFileSync(join(root, 'api/report.py'), "import requests\n");
+
+        const s = discoverRuntimeSurface(root);
+        const paths = s.modules.map((m) => m.path);
+        assert.ok(paths.includes('api/_lib/deeply/nested/market.mjs'),
+          'a module nested below the function root was not discovered');
+        assert.ok(paths.includes('lib/pricing/vendor.js'),
+          'a module OUTSIDE every function root, imported by a handler, runs on the server ' +
+          'and was not discovered — this is the assumption S-2 exists to remove');
+
+        const hosts = scanAll(s.modules).literals.map((l) => l.host).sort();
+        assert.deepEqual(hosts,
+          ['api.nested-market-vendor.example', 'api.outside-the-root-vendor.example'],
+          'both planted providers must be found by the scan over the derived surface');
+
+        assert.deepEqual(s.unscannable.map((u) => u.path), ['api/report.py'],
+          'a runtime an extension this toolchain cannot lex must be REFUSED by name, not skipped');
+        assert.ok(UNSCANNABLE_RUNTIME_EXTENSIONS.includes('.py'));
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test('PD-11c a specifier chosen at RUNTIME is refused, not reported clean', () => {
+      // THE SELF-REVIEW'S WITNESS against the first version of this module. A
+      // handler containing `await import('../lib/hidden/' + n + '.js')` reaches
+      // a provider the surface never lists — and `unresolved` came back EMPTY,
+      // so the report was clean about a region it had not entered. That is the
+      // four-known-hosts failure one level up, and it is why the walk now
+      // DETECTS THE SHAPE AND REFUSES IT rather than resolving what it can and
+      // saying nothing about the rest.
+      const root = mkdtempSync(join(tmpdir(), 'gw-dyn-'));
+      try {
+        copyFileSync(join(REPO, 'vercel.json'), join(root, 'vercel.json'));
+        mkdirSync(join(root, 'api'), { recursive: true });
+        mkdirSync(join(root, 'lib'), { recursive: true });
+        writeFileSync(join(root, 'api/a.js'),
+          "const n = 'vendor';\nexport default async function h() { const m = await import('../lib/' + n + '.js'); return m.go(); }\n");
+        writeFileSync(join(root, 'lib/vendor.js'),
+          "export const go = () => fetch('https://api.computed-specifier-vendor.example/v1');\n");
+        // The control beside it: an ORDINARY literal dynamic import is followed,
+        // not refused. A walk that flags every `import(` is noise, not a guard.
+        writeFileSync(join(root, 'api/b.js'),
+          "export default async function h2() { const m = await import('./_ok.js'); return m.ok(); }\n");
+        writeFileSync(join(root, 'api/_ok.js'),
+          "export const ok = () => fetch('https://api.literal-dynamic-vendor.example/v1');\n");
+
+        const s = discoverRuntimeSurface(root);
+        const computed = s.unresolved.filter((u) => u.shape === 'computed-specifier');
+        assert.equal(computed.length, 1,
+          `a computed specifier must be refused by name; got ${JSON.stringify(s.unresolved)}`);
+        assert.equal(computed[0].from, 'api/a.js');
+        assert.ok(scanAll(s.modules).literals.map((l) => l.host)
+          .includes('api.literal-dynamic-vendor.example'),
+          'a LITERAL dynamic import must still be followed — refusing every import() is noise');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
+    test('PD-11d the real surface has no unscannable file and no unfollowable import', () => {
+      assert.deepEqual(SURFACE.unscannable, [],
+        'a production file the platform executes and this toolchain cannot read');
+      assert.deepEqual(SURFACE.unresolved, [],
+        'an import this walk cannot follow — unresolvable on disk, or a specifier chosen at ' +
+        'runtime — is a region of the surface it did not enter');
+    });
   });
 
   test('PD-3 every host literal under api/ has an explicit disposition', () => {
@@ -158,7 +293,7 @@ describe('unresolvable construction is REFUSED, not reported clean', () => {
     // literals. That is a claim about other code, so it gets verified here
     // rather than believed. A caller that passes a computed URL turns the
     // wrapper into an unbounded egress point.
-    const analyze = MODULES.find((m) => m.path === 'analyze.js');
+    const analyze = MODULES.find((m) => m.path === 'api/analyze.js');
     const { code, strings } = lex(analyze.source);
     const literalAt = new Map(strings.map((s) => [s.index, s]));
     const callers = [];
@@ -267,7 +402,7 @@ describe('MUTATIONS — each planted provider is detected, and by a named layer'
 // above by finding nothing at all. Same failure, same file, as the runaway
 // recorded in tests/refund-crossproduct.test.mjs.
 test('PD-9 the lexer does not desynchronise on the largest production file', () => {
-  const analyze = MODULES.find((m) => m.path === 'analyze.js');
+  const analyze = MODULES.find((m) => m.path === 'api/analyze.js');
   const { code, strings } = lex(analyze.source);
 
   assert.equal(code.length, analyze.source.length, 'the mask must not shift a single index');

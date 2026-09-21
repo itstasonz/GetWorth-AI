@@ -129,7 +129,7 @@ export const TARGETS = {
   // persistence mutant and an observation mutant name AppContext.jsx.
   contextObs: {
     src: 'src/contexts/AppContext.jsx',
-    mutant: 'src/contexts/AppContext.__obsmutant__.jsx',
+    mutant: 'src/contexts/AppContext.__mutant__.obs.jsx',
     env: 'UI003_CONTEXT_PATH',
     suite: 'tests/observation-payloads.test.mjs',
   },
@@ -137,13 +137,13 @@ export const TARGETS = {
   // stay beside the original — `./translations.js` resolves from its directory.
   utilsObs: {
     src: 'src/lib/utils.js',
-    mutant: 'src/lib/utils.__obsmutant__.js',
+    mutant: 'src/lib/utils.__mutant__.obs.js',
     env: 'UI003_UTILS_PATH',
     suite: 'tests/observation-payloads.test.mjs',
   },
   camera: {
     src: 'src/views/CameraResultsView.jsx',
-    mutant: 'src/views/CameraResultsView.__obsmutant__.jsx',
+    mutant: 'src/views/CameraResultsView.__mutant__.obs.jsx',
     env: 'UI003_CAMERA_PATH',
     suite: 'tests/observation-payloads.test.mjs',
   },
@@ -152,13 +152,13 @@ export const TARGETS = {
   // mirror of positivePriceOrNull is judged by the persistence-row suite.
   analyzeGuard: {
     src: 'api/analyze.js',
-    mutant: 'api/analyze.__gmutant__.js',
+    mutant: 'api/analyze.__mutant__.g.js',
     env: 'UI003_ANALYZE_PATH',
     suite: 'tests/valuation-guard.test.mjs',
   },
   utilsPersist: {
     src: 'src/lib/utils.js',
-    mutant: 'src/lib/utils.__pmutant__.js',
+    mutant: 'src/lib/utils.__mutant__.p.js',
     env: 'UI003_UTILS_PATH',
     suite: 'tests/persistence-rows.test.mjs',
   },

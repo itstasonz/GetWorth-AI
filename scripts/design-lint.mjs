@@ -338,8 +338,22 @@ const FILE_RULES = [
 ];
 
 // ── Walk ────────────────────────────────────────────────────────────────────
+// A MUTANT SCRATCH COPY IS NOT PRODUCTION SOURCE  ·  §13
+//
+// The mutation harnesses write their broken copies BESIDE the original —
+// `src/components/ui.__mutant__.<run>.jsx` — because relative imports and
+// Tailwind's content globs have to resolve from the file's own directory. This
+// walker had no opinion about them, so a mutation run in flight put deliberately
+// broken files inside the tree this linter measures. Every concurrent `npm test`
+// and every OTHER harness then failed on violations that belong to somebody
+// else's mutant, and a harness whose suite fails for every mutant is a UNIVERSAL
+// KILLER: it reports 100% and has measured nothing.
+//
+// The exclusion is by NAME and applies to files and directories alike, so it
+// cannot be defeated by nesting.
 const walk = (dir) =>
   readdirSync(dir).flatMap((f) => {
+    if (f.includes('__mutant__')) return [];
     const p = join(dir, f);
     return statSync(p).isDirectory() ? walk(p) : /\.(jsx?|mjs)$/.test(p) ? [p] : [];
   });

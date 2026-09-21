@@ -57,6 +57,20 @@ export function mintJWT(sub = '11111111-2222-3333-4444-555555555555') {
   return `${h}.${p}.${sig}`;
 }
 
+/**
+ * The AUTHORITY of a URL, or null when it cannot be parsed.
+ *
+ * Null is deliberately unmatchable: a target this harness cannot parse is not a
+ * target it may answer, so it falls through to the unknown-host record.
+ */
+function hostOf(u) {
+  try { return new URL(String(u)).host; } catch { return null; }
+}
+/** The path of a URL, or '' — used only AFTER the host has been matched. */
+function pathOf(u) {
+  try { return new URL(String(u)).pathname; } catch { return ''; }
+}
+
 function jsonRes(body, status = 200, headers = {}) {
   return new Response(JSON.stringify(body), {
     status, headers: { 'content-type': 'application/json', ...headers },
@@ -131,6 +145,11 @@ export function discoverEndpoints() {
   const out = [];
   for (const name of readdirSync(dir)) {
     if (!/\.(js|mjs|cjs|ts)$/.test(name)) continue;
+    // §13. `api/analyze.__mutant__.<run>.js` is a scratch copy written by
+    // tests/mutations/sanitizer-run.mjs. Driving another run's deliberately
+    // broken handler makes PC-5b fail for reasons that have nothing to do with
+    // the mutant under test — the universal-killer shape, across harnesses.
+    if (name.includes('__mutant__')) continue;
     const src = readFileSync(join(dir, name), 'utf8');
     if (/export\s+default\s/.test(src)) out.push(name);
   }
@@ -152,7 +171,7 @@ export async function driveEndpoint(name, { method = 'POST', body = {}, headers 
   const prev = active;
   active = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : (input?.url ?? String(input));
-    if (url.includes('fake.supabase.co')) return jsonRes([], 200);
+    if (hostOf(url) === 'fake.supabase.co') return jsonRes([], 200);
     // Same doctrine as run(): an unmodelled host is recorded OUT OF BAND first,
     // then refused. A harness that invents a success launders an unknown into a pass.
     endpointHosts.push(url);
@@ -194,7 +213,29 @@ export async function harness() {
     let body = {};
     try { body = init.body ? JSON.parse(init.body) : {}; } catch { /* non-json body */ }
 
-    if (url.includes('api.anthropic.com')) {
+    // ── A SUBSTRING IS NOT A HOST  ·  SEC-9, AGAIN ────────────────────────
+    //
+    // Every branch below used `url.includes('<host>')`, and an independent
+    // security reviewer walked straight through it:
+    //
+    //   https://exfil.example/steal?cb=fake.supabase.co   ANSWERED 200
+    //   https://api.anthropic.com.exfil.example/v1/...    ANSWERED 200
+    //   https://api.voyageai.com.exfil.example/v1/...     ANSWERED 200
+    //
+    // The first is the sharpest: the real host is `exfil.example` and the
+    // modelled name appears ONLY in the query string, yet it took the Supabase
+    // branch, was answered `200 []`, and never reached `state.unknownHosts`.
+    // The other two are the ordinary suffix trick — `api.anthropic.com.evil`
+    // contains `api.anthropic.com`.
+    //
+    // This is the exact failure the block below says was fixed ("a test harness
+    // that invents a success is worse than one that has no opinion"), still
+    // live in the matcher underneath it. A host is the AUTHORITY of a parsed
+    // URL, compared whole — never a substring of the href.
+    const host = hostOf(url);
+    const isHost = (h) => host === h;
+
+    if (isHost('api.anthropic.com')) {
       state.providerCalls.anthropic++;
       const r = state.anthropic ? await state.anthropic(body, url, init) : null;
       if (r instanceof Response) return r;
@@ -204,7 +245,7 @@ export async function harness() {
       }
       return jsonRes(r?.body ?? {}, r?.status ?? 200, r?.headers ?? {});
     }
-    if (url.includes('api.openai.com')) {
+    if (isHost('api.openai.com')) {
       state.providerCalls.openai++;
       const r = state.openai ? await state.openai(body, url, init) : null;
       if (r instanceof Response) return r;
@@ -214,7 +255,7 @@ export async function harness() {
       }
       return jsonRes(r?.body ?? {}, r?.status ?? 200);
     }
-    if (url.includes('vision.googleapis.com')) {
+    if (isHost('vision.googleapis.com')) {
       state.providerCalls.vision++;
       const r = state.vision ? await state.vision(body, url, init) : null;
       if (r instanceof Response) return r;
@@ -226,7 +267,7 @@ export async function harness() {
     // below and was answered 200 with `[]` — a successful-looking empty
     // embedding, counted in no `providerCalls` bucket, across all 50 passing
     // refund tests. The inventory said it was covered; nothing modelled it.
-    if (url.includes('api.voyageai.com')) {
+    if (isHost('api.voyageai.com')) {
       state.providerCalls.voyage++;
       const r = state.voyage ? await state.voyage(body, url, init) : null;
       if (r instanceof Response) return r;
@@ -235,11 +276,11 @@ export async function harness() {
     }
 
     // ── Supabase ──
-    if (url.includes('/rpc/check_and_increment_scan_rate')) {
+    if (isHost('fake.supabase.co') && pathOf(url).includes('/rpc/check_and_increment_scan_rate')) {
       state.rpcLog.push('ratelimit');
       return jsonRes([{ allowed: true, limit_type: null, daily_count: 1, charged: state.charged }]);
     }
-    if (url.includes('/rpc/decrement_user_daily_scan')) {
+    if (isHost('fake.supabase.co') && pathOf(url).includes('/rpc/decrement_user_daily_scan')) {
       state.refunds++;
       state.rpcLog.push('REFUND');
       return jsonRes(0);
@@ -255,7 +296,7 @@ export async function harness() {
     // refund test would have stayed green against a call the harness never saw.
     // A test harness that invents a success is worse than one that has no
     // opinion: it launders an unknown into a pass.
-    if (url.includes('fake.supabase.co')) {
+    if (isHost('fake.supabase.co')) {
       state.otherLog.push(url.replace('https://fake.supabase.co', ''));
       return jsonRes([], 200);
     }

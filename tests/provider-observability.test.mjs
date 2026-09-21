@@ -27,6 +27,8 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { harness, IMG, VALID_RECOGNITION, anthropicText } from './helpers/analyze-harness.mjs';
 
 let h;
@@ -247,14 +249,40 @@ describe('HIGH-1 an attempted unknown host fails the test even when swallowed', 
     // A quieting flag that spreads is a quieting flag. Assert that this file is
     // the only one that can use it, so a future test cannot silence a real
     // finding by copying a line.
-    const here = new URL('.', import.meta.url);
-    const { readdirSync } = await import('node:fs');
+    //
+    // ── THE AUDIT USED TO CHECK ONE DIRECTORY AND ONE EXTENSION ────────────
+    //
+    // `readdirSync(here)` is NOT recursive and the filter was `.mjs`-only, so
+    // tests/helpers/, tests/mutations/ and tests/fixtures/ were never read, and
+    // a `.js` or `.cjs` file anywhere was invisible. The claim "used nowhere
+    // else" was TRUE, and nothing established it — a security reviewer's M-1,
+    // and the same shape as every other finding this round: a guarantee whose
+    // scope was narrower than its sentence.
+    //
+    // Recursive, every executable extension, and the two files that legitimately
+    // mention the flag are named rather than pattern-matched: the harness that
+    // DEFINES it, and this file, which is the one place allowed to use it.
+    const { readdirSync, statSync } = await import('node:fs');
+    const root = fileURLToPath(new URL('.', import.meta.url));
+    // BY PATH, NOT BY BASENAME. The reviewer who found M-1 noticed that my fix
+    // for it exempted on basename, so any future `tests/**/analyze-harness.mjs`
+    // would inherit the exemption — the same "scope narrower than the wording"
+    // defect, inside the fix for it. Two relative paths, named exactly.
+    const ALLOWED = new Set(['provider-observability.test.mjs', 'helpers/analyze-harness.mjs']);
+    const EXECUTABLE = /\.(?:js|mjs|cjs|jsx|ts|mts|cts|tsx)$/;
     const offenders = [];
-    for (const f of readdirSync(here)) {
-      if (!f.endsWith('.mjs') || f === 'provider-observability.test.mjs') continue;
-      const src = readFileSync(new URL(f, here), 'utf8');
-      if (src.includes('allowUnknownHosts')) offenders.push(f);
-    }
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        if (name === 'node_modules' || name.startsWith('.')) continue;
+        const full = join(dir, name);
+        if (statSync(full).isDirectory()) { walk(full); continue; }
+        if (!EXECUTABLE.test(name)) continue;
+        const rel = relative(root, full).split(String.fromCharCode(92)).join('/');
+        if (ALLOWED.has(rel)) continue;
+        if (readFileSync(full, 'utf8').includes('allowUnknownHosts')) offenders.push(rel);
+      }
+    };
+    walk(root);
     assert.deepEqual(offenders, [],
       `allowUnknownHosts appears in ${offenders.join(', ')} — it exists only to prove the ` +
       'mechanism works, never to accept an unmodelled provider');

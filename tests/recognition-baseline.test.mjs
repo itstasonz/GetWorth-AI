@@ -581,11 +581,21 @@ test('B-05 [DEFECT-5 RETIRED] the write-only Stage 1 output fields are gone', ()
     'labels_detected is consumed by the model-confidence clamp and must remain');
 });
 
-test('B-06 [DEFECT-6] the JSON schemas are declared but never applied', () => {
-  // Both schemas are exported and referenced by no executable code — no
-  // validator, no structured-output request. Expected fix: they become
-  // load-bearing (structured outputs would also remove the JSON-parse failure
-  // class that currently routes to 503s and rescue pricing).
+test('B-06 [DEFECT-6] VERIFICATION_SCHEMA is load-bearing; RECOGNITION_SCHEMA is not', () => {
+  // THE DEFECT RECORD, HALF CLOSED — and the half that closed is recorded here
+  // rather than deleted, because the remaining half is the same defect.
+  //
+  // Both schemas used to be exported and referenced by no executable code: no
+  // validator, no structured-output request. The stated expected fix was that
+  // they become load-bearing. V5-2 did that for VERIFICATION_SCHEMA:
+  // `MODEL_VERIFICATION_ALLOWLIST` is derived from `VERIFICATION_SCHEMA.properties`,
+  // so a key the schema does not declare no longer reaches the pipeline at all.
+  // A field added to the prompt without being added to the schema is now
+  // REFUSED rather than merely undocumented — which is why
+  // `authenticity_assessment` had to be declared in the same change.
+  //
+  // RECOGNITION_SCHEMA is still declaration-only. Stage 1's output crosses no
+  // equivalent boundary, and inventing one was not in this round's scope.
   //
   // Comments are stripped before counting: an earlier version of this test
   // counted raw substrings and flipped the moment a code comment MENTIONED a
@@ -594,10 +604,14 @@ test('B-06 [DEFECT-6] the JSON schemas are declared but never applied', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
 
-  for (const name of ['RECOGNITION_SCHEMA', 'VERIFICATION_SCHEMA']) {
-    const uses = code.split(name).length - 1;
-    assert.equal(uses, 1, `${name} is declared once and never referenced by executable code; found ${uses}`);
-  }
+  assert.equal(code.split('RECOGNITION_SCHEMA').length - 1, 1,
+    'RECOGNITION_SCHEMA is declared once and never referenced by executable code — ' +
+    'the open half of DEFECT-6');
+  assert.ok(code.split('VERIFICATION_SCHEMA').length - 1 >= 2,
+    'VERIFICATION_SCHEMA must stay load-bearing: MODEL_VERIFICATION_ALLOWLIST is derived ' +
+    'from it, and a hand-written copy of that list is the denylist V5-2 removed');
+  assert.match(code, /MODEL_VERIFICATION_ALLOWLIST = Object\.freeze\(\s*Object\.keys\(VERIFICATION_SCHEMA\.properties\)/,
+    'the allowlist must be DERIVED from the schema, never transcribed beside it');
 });
 
 

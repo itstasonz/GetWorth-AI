@@ -16,15 +16,20 @@
  * is invoked directly rather than reading dist/ so the suite is self-contained
  * and cannot pass against a stale build.
  */
-import { test, describe, before } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const OUT = join(ROOT, 'node_modules/.cache/ui-002a/compiled.css');
+// §13. PER-RUN, for the reason recorded at the top of tests/ui-interaction.test.mjs:
+// a shared build path made two concurrent mutation runs compile into one file,
+// and the harness scored each mutant against whichever had written last.
+const OUT_DIR = join(ROOT, 'node_modules/.cache',
+  `ui-002a-css-${process.pid}-${Math.random().toString(36).slice(2, 8)}`);
+const OUT = join(OUT_DIR, 'compiled.css');
 
 // The mutation harness (tests/mutations/ui-run.mjs) redirects these to broken
 // COPIES so it can ask "would this suite notice?" without ever writing to the
@@ -37,7 +42,7 @@ const INDEX_HTML = process.env.UI002A_INDEX_HTML || join(ROOT, 'index.html');
 let css;
 
 before(() => {
-  mkdirSync(join(ROOT, 'node_modules/.cache/ui-002a'), { recursive: true });
+  mkdirSync(OUT_DIR, { recursive: true });
   execFileSync(
     process.execPath,
     [join(ROOT, 'node_modules/tailwindcss/lib/cli.js'), '-i', CSS_IN, '-o', OUT, ...(TW_CONFIG ? ['-c', TW_CONFIG] : [])],
@@ -48,6 +53,10 @@ before(() => {
   // ever match. Strip them first.
   css = readFileSync(OUT, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 });
+
+// The per-run build directory is removed, or the next run inherits a tree full
+// of other runs' compiled artefacts.
+after(() => { try { rmSync(OUT_DIR, { recursive: true, force: true }); } catch { /* best effort */ } });
 
 /** Every innermost `selector { declarations }` block in the sheet. */
 const rules = () => [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]

@@ -116,7 +116,14 @@ describe('the Rolex witness: what bounds it now, measured not assumed', () => {
   // of. The tests passed against data production never produces.
   //
   // Built by the parser itself now, from the text as PRINTED on the item.
-  const sawText = (...lines) => visionData(parseVisionResponse, lines.join('\n'));
+  // ROUND 6: the fixture now carries the classifier label a real photograph of a
+  // watch carries. `watches:luxury` requires OBJECT_CLASS as well as the two
+  // text classes — a recognition reviewer showed that without it the
+  // compatibility-marker vocabulary was this bucket's ONLY layer, so every gap
+  // in that vocabulary was a ₪250,000 gap. A fixture with text and no classifier
+  // output describes a photograph Vision never looked at.
+  const sawText = (...lines) =>
+    visionData(parseVisionResponse, lines.join('\n'), { labels: ['Watch', 'Analog watch'] });
 
   test('OI-3a self-written text alone does NOT reach watches:luxury', () => {
     // The strongest single improvement in this round for this witness. The

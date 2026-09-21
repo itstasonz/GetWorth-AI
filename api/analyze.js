@@ -227,7 +227,11 @@ async function verifyJWTLocally(token, { secret, supabaseUrl }) {
   return payload;
 }
 
-async function verifyJWT(authHeader) {
+// EXPORTED for api/enrich.js. §3 of the Phase-B order: "Reuse existing
+// authentication patterns. Do not invent a second incompatible authentication
+// system." Adding an export changes no behaviour on the production scan path —
+// the function, its callers and its semantics are untouched.
+export async function verifyJWT(authHeader) {
   const hasBearer = !!authHeader?.startsWith('Bearer ');
   const token = hasBearer ? authHeader.slice(7).trim() : '';
   // Safe diagnostics — never logs the token or secret value.
@@ -544,7 +548,16 @@ import {
 import { canonicalCategory, CANONICAL_CATEGORIES } from './_lib/category.js';
 // §3/§9. Evidence provenance and the one semantic confidence parser. See the
 // module header for why nothing here reads a model-written `evidence` string.
-import { deriveEvidence, confidence as parseConfidence } from './_lib/pricing-authority.js';
+import {
+  deriveEvidence, confidence as parseConfidence,
+  // REC7-C1. Block-level subject/reference provenance. `classifyOcrBlock` runs
+  // at the parse, on the untruncated annotation; `subjectTextPermitted` is the
+  // one predicate BOTH the evidence rule and the Stage-2 identity upgrade ask,
+  // so the two cannot answer it differently.
+  classifyOcrBlock, subjectTextPermitted,
+  // V5-2. The server-owned pricing authority seal.
+  sealServerAuthority, readServerAuthority,
+} from './_lib/pricing-authority.js';
 
 export { webSafe, webSafeBlock };
 
@@ -686,6 +699,17 @@ export const VERIFICATION_SCHEMA = {
     selling_tips:          { type: 'string' },
     israeli_market_notes:  { type: 'string' },
     price_factors:         { type: 'array', items: { type: 'object' } },
+    // V5-2. DECLARED HERE BECAUSE IT IS ASKED FOR AND READ.
+    // `buildVerificationPrompt` requests this block whenever forensics are on,
+    // `assessAuthenticity` reads it, and it was in NO schema — so the schema and
+    // the prompt disagreed about what Stage 2 produces. That was survivable
+    // while the schema was documentation; it is not survivable now that
+    // `MODEL_VERIFICATION_ALLOWLIST` is derived from it, because an undeclared
+    // field is no longer merely undocumented, it is refused. Declaring it is the
+    // honest fix: the model genuinely produces this, and the pipeline genuinely
+    // consumes it. Nothing in it carries pricing authority — `assessAuthenticity`
+    // derives a multiplier from it under the guard's own rules.
+    authenticity_assessment: { type: 'object' },
     // GW-004: comparable_items removed — AI-fabricated comps are never generated or surfaced.
   },
 };
@@ -1362,10 +1386,34 @@ async function setCachedVisionResult(supa, hash, result) {
 // ocr_context field is CAPTURE-ONLY spatial metadata (nothing in the pipeline
 // consumes it yet); it is surfaced verbatim in _debug.ocr_context so OCE
 // scoring (M1.2+) can be designed against real production geometry.
-export function parseVisionResponse(response) {
+// ── REC7-C1 §4. TRUNCATION MAY NEVER INCREASE AUTHORITY ─────────────────────
+//
+//   AUTHORITY(truncated_input) <= AUTHORITY(full_input)
+//
+// `full_text` is capped at OCR_FULL_TEXT_CAP because it is carried in the
+// response envelope and must stay bounded. That cap removes the TAIL of the
+// block — and on accessory packaging the relation marker is very often in the
+// tail:
+//
+//   ROLEX SUBMARINER
+//   …490 characters of specification text…
+//   Replacement Strap For          <- cut by the cap
+//
+// Classified after the cap, that block is a clean product label and buys
+// `watches:luxury`. Classified before it, it is an accessory. Same photograph,
+// and the safety truncation was the thing that granted the authority.
+//
+// So provenance is computed on the UNTRUNCATED annotation, once, here — at the
+// only point in the system that has the whole block — and carried forward as a
+// bounded record. `full_text` remains a display/capture field; nothing derives
+// authority from it any more when the record is present.
+export const OCR_FULL_TEXT_CAP = 500;
+
+export function parseVisionResponse(response, { textCap = OCR_FULL_TEXT_CAP } = {}) {
   // TEXT/LOGO boundingPoly carries pixel `vertices`; OBJECT_LOCALIZATION
   // carries 0–1 `normalizedVertices`. Google omits x/y when 0.
   const verts = (poly, key) => (poly?.[key] || []).map(v => ({ x: v.x ?? 0, y: v.y ?? 0 }));
+  const fullBlock = response.textAnnotations?.[0]?.description || '';
 
   return {
     // ── FLOOR-A: A SCORE FLOOR ON LABELS ─────────────────────────────────
@@ -1407,10 +1455,20 @@ export function parseVisionResponse(response) {
       .filter(e => e.description && Number(e.score) > VISION_SIGNAL_FLOOR)
       .map(e => e.description),
     ocr_context: {
-      version: 1,
+      // VERSION 2 — the record below was added, and a version-1 row (a stale
+      // vision_cache entry) therefore carries NO provenance. `blockProvenance`
+      // fails closed on that, which is the correct reading of an old row: we
+      // cannot prove what its `full_text` left out.
+      version: 2,
       // annotation[0] is Vision's full-text block — kept (capped) because it
       // preserves reading order/line structure the flat array loses.
-      full_text: (response.textAnnotations?.[0]?.description || '').slice(0, 500) || null,
+      full_text: fullBlock.slice(0, textCap) || null,
+      // Whether the field above is the whole block. Recorded rather than
+      // inferred from its length, because a block exactly at the cap is
+      // indistinguishable from one cut at it.
+      full_text_truncated: fullBlock.length > textCap,
+      // REC7-C1. Computed on `fullBlock`, NOT on the capped copy above.
+      provenance: classifyOcrBlock(fullBlock),
       // Deliberately UNFILTERED (only capped): the flat `text` array drops
       // fragments of length ≤1 — but bare "G" / CJK junk are exactly the
       // tokens OCE must learn to score (B-18 family).
@@ -2803,29 +2861,75 @@ export function calibrateRecognition(recognition) {
 // removed at the boundary, with the claim preserved under a name nothing acts on
 // (the same treatment `price_method` already gets via `model_claimed_method`).
 //
-// Deletes rather than sanitises: there is no subset of these fields the model is
-// entitled to set, so there is nothing to validate.
-const MODEL_FORBIDDEN_KEYS = Object.freeze([
-  '_pricing_meta', '_fast_path', '_db_retail', 'validation', 'pricing_status',
-  'pricing_confidence', 'pricing_warning', 'pricing_reason', 'pre_source',
-  'fallback_key', 'recognition_verdict', 'valuation_verdict', 'identity_tier',
-  'evidence', 'pricing_envelope_source', 'category_disagreement', 'envelope_key',
-]);
+// ── V5-2 ROUND 6. A DENYLIST OF EIGHTEEN NAMES IS EIGHTEEN GUESSES ──────────
+//
+// The list below used to be `MODEL_FORBIDDEN_KEYS`, and it worked exactly as
+// far as it had been written. The nineteenth key was authority again:
+//
+//   pricing_provenance   price_authority   _pricing_meta_v2   trusted_source
+//   pricing_status with a Cyrillic 'а'     __proto__-shaped names
+//   whatever the next model invents, in a round nobody has run yet
+//
+// Two changes, and neither of them is a longer list.
+//
+// 1. AN ALLOWLIST. `VERIFICATION_SCHEMA` already declares, field by field, what
+//    Stage 2 is ASKED for. That declaration is now enforced: a key outside it
+//    does not reach the pipeline at all. An invented key lands in `model_claims`
+//    — a bag nothing downstream reads — whatever it is called. The set of keys
+//    a model may contribute is therefore CLOSED, and closing it took no
+//    prediction about what would be invented.
+//
+// 2. A SEAL ON THE OTHER SIDE. The allowlist bounds the NAME; it cannot bound
+//    the VALUE, and a schema field is still a model's sentence about itself. So
+//    the fields that carry pricing AUTHORITY — provenance, grade, status — are
+//    not schema fields at all: they live in `_pricing_meta`, minted by
+//    `sealServerAuthority` in api/_lib/pricing-authority.js, and read back
+//    through `readServerAuthority`. Membership of that seal cannot be forged by
+//    any JSON, because `JSON.parse` mints fresh objects and only this server's
+//    own call sites can seal one.
+//
+// The two together give the property the round asked for:
+//
+//   MODEL_OUTPUT ∩ SERVER_AUTHORITY = ∅
+//
+// with no enumeration on either side. `model_claims` is kept for drift
+// measurement — the same discipline `model_claimed_method` already has: a claim
+// worth counting is not a claim worth acting on.
+export const MODEL_VERIFICATION_ALLOWLIST = Object.freeze(
+  Object.keys(VERIFICATION_SCHEMA.properties),
+);
 
-export function stripModelPricingProvenance(verification) {
+/**
+ * The boundary a Stage-2 response crosses on its way into the pipeline.
+ *
+ * Own enumerable string keys only, taken with `Object.create(null)` as the
+ * accumulator so a `__proto__` or `constructor` key is data rather than a
+ * mutation of anything. Symbol keys cannot survive JSON and are dropped with
+ * everything else that is not on the list.
+ */
+export function sealModelVerification(verification) {
   if (!verification || typeof verification !== 'object' || Array.isArray(verification)) return verification;
+  const allowed = new Set(MODEL_VERIFICATION_ALLOWLIST);
   const out = {};
-  const claimed = {};
-  for (const [k, v] of Object.entries(verification)) {
-    if (MODEL_FORBIDDEN_KEYS.includes(k)) { claimed[k] = v; continue; }
-    out[k] = v;
+  const claims = Object.create(null);
+  let claimed = 0;
+  for (const k of Object.keys(verification)) {
+    const v = verification[k];
+    if (allowed.has(k)) { out[k] = v; continue; }
+    // A NULL-PROTOTYPE BAG. `claims['__proto__'] = {…}` on an ordinary object
+    // REPLACES the prototype instead of recording a key — so the one key most
+    // worth recording would have vanished from the drift measurement while
+    // quietly mutating the bag. With no prototype there is no setter to hit.
+    claims[k] = v;
+    claimed++;
   }
-  // Kept for drift measurement only. Nothing downstream reads it, which is the
-  // same discipline model_claimed_method already has: a claim worth counting is
-  // not a claim worth acting on.
-  if (Object.keys(claimed).length) out.model_claimed_pricing_meta = claimed;
+  if (claimed) out.model_claims = claims;
   return out;
 }
+
+// The old name, kept so a caller that has not been updated still crosses the
+// boundary rather than silently bypassing it. One implementation, two names.
+export const stripModelPricingProvenance = sealModelVerification;
 
 export function calibrateVerification(verification, recognition, dbMatches, visionData = null) {
   // ── HIGH-3: THE SAME BOUNDARY, ON THE WAY OUT ────────────────────────────
@@ -3541,7 +3645,7 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     stage: guardCtx.stage || 'stage2',
     // `_pricing_meta` is written by the rescue/PRE path INSIDE this function's
     // caller chain, so it is fresher than whatever guardCtx was built with.
-    pre_source: verification._pricing_meta?.pre_source || guardCtx.pre_source || null,
+    pre_source: readServerAuthority(verification._pricing_meta)?.pre_source || guardCtx.pre_source || null,
     anchor: guardCtx.anchor || null,
     anchorModelEvidence: guardCtx.anchorModelEvidence || false,
     identity: guardCtx.identity || null,
@@ -3565,7 +3669,7 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
         mid:  verification.price_estimate_mid,
         high: verification.price_estimate_high,
         currency: verification.currency,
-        pricing_status: verification._pricing_meta?.pricing_status,
+        pricing_status: readServerAuthority(verification._pricing_meta)?.pricing_status,
         price_method: verification.price_method,
         condition: verification.condition,
       },
@@ -3677,10 +3781,10 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
       // strictly positive and ordered.
       pricing_status: resolvePricingStatus(
         verdict,
-        verification._pricing_meta?.pricing_status
+        readServerAuthority(verification._pricing_meta)?.pricing_status
           || (verification.price_method === 'comp_based' ? 'db_based' : 'ai_estimate'),
       ),
-      pricing_warning: verification._pricing_meta?.pricing_warning || null,
+      pricing_warning: readServerAuthority(verification._pricing_meta)?.pricing_warning || null,
       // SCAN-008 grade, now DERIVED by the guard rather than read from the
       // model's self-declared price_method. A model that hallucinates a price
       // and labels it comp_based no longer earns the top grade.
@@ -3694,12 +3798,12 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
       // the two can never disagree about whether a price exists.
       pricing_confidence: resolvePricingGrade(
         verdict,
-        verification._pricing_meta?.pricing_confidence
+        readServerAuthority(verification._pricing_meta)?.pricing_confidence
           || (verification.price_method === 'comp_based' ? 'HIGH' : 'MEDIUM'),
       ),
       // SCAN-009: PRE provenance — which rescue source priced this (internal).
-      pricing_reason: verification._pricing_meta?.pricing_reason || null,
-      pre_source:     verification._pricing_meta?.pre_source || null,
+      pricing_reason: readServerAuthority(verification._pricing_meta)?.pricing_reason || null,
+      pre_source:     readServerAuthority(verification._pricing_meta)?.pre_source || null,
 
       // VAL-001 — condition authority. The server owns the ladder; the client
       // applies only the RESIDUAL delta between the condition this price was
@@ -4689,7 +4793,7 @@ async function handleRequest(req) {
       const stage2Cap = Math.max(8_000, Math.min(24_000, rem() - STAGE2_RESERVE_MS));
       plog('Stage 2 start', `cap=${stage2Cap}ms rem=${rem()}ms`);
       try {
-        verification = stripModelPricingProvenance(await timed('stage2_verify', withTimeout(
+        verification = sealModelVerification(await timed('stage2_verify', withTimeout(
           verifyAndPrice(recognition, candidates, corrections, lang, apiKey, visionData, stage2Cap),
           stage2Cap,
           'Stage 2 verification'
@@ -4722,7 +4826,7 @@ async function handleRequest(req) {
     })();
     const guardCtx = {
       stage: stage2FallbackUsed ? 'pre' : 'stage2',
-      pre_source: verification._pricing_meta?.pre_source || null,
+      pre_source: readServerAuthority(verification._pricing_meta)?.pre_source || null,
       anchor: guardAnchor,
       anchorModelEvidence: !!guardAnchor?.model,
       // ── THE GUARD MUST SEE WHAT STAGE 2 ESTABLISHED, NOT ONLY STAGE 1 ──────
@@ -4822,8 +4926,31 @@ async function handleRequest(req) {
         //   3. A model-shaped token must MIX letters and digits. Bare digits
         //      let a warranty year ("EXPIRES 2019") and a price tag ("NIS 1299")
         //      stand in for a model number.
+        //
+        // ── REC7-C1. AND THE SCOPE OF THAT QUESTION IS THE BLOCK ─────────────
+        //
+        // Everything above is a PER-LINE rule applied to `visionData.text`,
+        // which `parseVisionResponse` builds from `textAnnotations[1..]` —
+        // Google's INDIVIDUAL WORDS. So every "line" here is one word, the
+        // compatibility token sits alone in its own entry, it is dropped alone,
+        // and every other word survives as a clean single-word line. That is
+        // the identical defect R5-C1 found in the evidence rule, still live in
+        // this predicate.
+        //
+        // The fix is not a second opinion about markers. `subjectTextPermitted`
+        // is the SAME predicate the evidence rule uses, over the SAME block,
+        // computed once at the parse on the untruncated annotation. If the
+        // block is about a relationship — in any layout, in any script, on
+        // either side of the marker — no body text from it corroborates
+        // anything here either.
+        //
+        // The logo path below is deliberately NOT gated: a logo is a
+        // classifier's verdict that a mark is ON the object, which is the
+        // independent subject signal the contract admits. Text cannot promote
+        // itself into one.
         const COMPATIBILITY = /\b(compatible|compatibility|for|fits|fit|replacement|suits|suitable|universal|spare)\b/;
-        const lines = (visionData?.text || [])
+        const bodyTextIsAboutSubject = subjectTextPermitted(visionData);
+        const lines = (bodyTextIsAboutSubject ? (visionData?.text || []) : [])
           .map(norm)
           .filter((l) => l && !COMPATIBILITY.test(l));
         const hasPhrase = (line, phrase) => {
@@ -5220,7 +5347,7 @@ async function handleRequest(req) {
         pricing_confidence:     result.marketValue.pricing_confidence,
         pricing_reason:         result.marketValue.pricing_reason,
         pre_source:             result.marketValue.pre_source,
-        fallback_key:           verification._pricing_meta?.fallback_key || null,
+        fallback_key:           readServerAuthority(verification._pricing_meta)?.fallback_key || null,
         price_method:           verification.price_method || 'ai_estimate',
         price_low:              verification.price_estimate_low,
         price_mid:              verification.price_estimate_mid,
@@ -6303,13 +6430,13 @@ export function buildFastPathVerification(recognition, fp, lang = 'he') {
     new_retail_price_ils: positivePriceOrNull(quote._db_retail),
     // The price came from a catalog comparable, not from a model's estimate.
     price_method: 'comp_based',
-    _pricing_meta: {
+    _pricing_meta: sealServerAuthority({
       ...quote,
       // Overwrite the rescue engine's failure wording — nothing failed.
       pricing_reason: `Catalog pricing for ${anchor.brand} ${anchor.model || anchor.name}.`,
       pricing_warning: null,
       pre_source: 'catalog',
-    },
+    }),
     _fast_path: { corroboration, anchor_id: anchor?.id ?? null, reason: fp.reason },
     currency: 'ILS',
     condition: recognition.visual_features?.condition || 'unknown',
@@ -6488,7 +6615,10 @@ function buildFallback(recognition, lang, failReason = null, candidates = [], re
     // this path — so `|| 0` was the larger of the two zero producers.
     new_retail_price_ils: positivePriceOrNull(fp._db_retail),
     price_method: 'ai_estimate',
-    _pricing_meta: fp,   // consumed by normalizeForUI
+    // V5-2. SEALED AT THE MINT. This is the second of the two server paths that
+    // may speak authoritatively about how a price was reached; `readServerAuthority`
+    // in normalizeForUI accepts nothing else, whatever it is called.
+    _pricing_meta: sealServerAuthority(fp),   // consumed by normalizeForUI
     currency: 'ILS',
     condition: recognition.visual_features?.condition || 'unknown',
     is_sellable: true,
