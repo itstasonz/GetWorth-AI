@@ -1411,36 +1411,56 @@ test('PI-41b the market fence is SHARED, not copied — HIGH-5', () => {
     'api/analyze.js must consume the shared module, not a copy of it');
 });
 
-test('PI-42 webSafe is DEFINED but deliberately NOT WIRED yet', async () => {
-  // Phase B does not exist. If this ever fails, market content has started
-  // flowing and every control above must be re-verified against a live sink.
-  // webSafeBlock calls webSafe — that is the boundary's own internals, not a
-  // wiring. What must not exist is a PROMPT SINK that consumes market content.
-  // HIGH-5 moved the definitions, so the tripwire now spans BOTH files. That is
-  // the correct surface and not a widening: after the extraction a second
-  // endpoint CAN wire this, which is the whole point of extracting it, so
-  // "nothing consumes it" has to be a statement about the codebase rather than
-  // about one file. The re-export in api/analyze.js is a binding, not a call,
-  // and is excluded by the `(` in the pattern.
-  const calls = [...srcAllUses.matchAll(/(?<![\w.])webSafe\s*\(/g)].length;
-  // 2 = the declaration itself + the one internal call from webSafeBlock.
-  assert.equal(calls, 2,
-    `expected the declaration plus one internal call (webSafeBlock -> webSafe), found ${calls} — ` +
-    'a new call site means market content may now reach a prompt');
-  assert.equal((srcAllUses.match(/MARKET_FENCE_RULE/g) || []).length, 1,
-    'the market rule is DECLARED and has no consumer; a second occurrence means a ' +
-    'prompt now emits it, so the whole market boundary must be re-verified against a live sink');
-  assert.equal((srcAllUses.match(/webSafeBlock\s*\(/g) || []).length, 1,
-    'webSafeBlock has only its own declaration; a second occurrence is a caller, and Phase B is live');
-
-  // And no OTHER production module may have picked it up either. The extraction
-  // made that possible for the first time, so the tripwire has to look there.
+test('PI-42 the market boundary is WIRED, and every market sink goes through it', async () => {
+  // ── THE TRIPWIRE FIRED, AND THIS IS THE ANSWER TO IT ──────────────────────
+  //
+  // This test used to assert that `webSafe` had no consumer, and its own
+  // comment said what to do if that ever stopped being true: "market content
+  // has started flowing and every control above must be re-verified against a
+  // live sink." Phase B is that sink. `buildMarketEvidencePrompt` in
+  // api/_lib/phaseb/prompts.js emits search-tool output into a model prompt.
+  //
+  // So the tripwire is now converted rather than deleted. Deleting it would
+  // throw away the only thing standing between "market content is fenced" and
+  // "market content is interpolated", which is the property that actually
+  // matters now that the sink exists. The question changes from
+  //
+  //     does anything consume market content?          (no longer useful)
+  // to
+  //     does EVERY consumer route through the fence?   (the live property)
+  //
+  // The controls above this line — PI-30..PI-41 — were written against
+  // `webSafe`/`webSafeBlock` directly and still exercise the boundary itself.
+  // What this adds is that no prompt may reach around it.
   const { discoverModules } = await import('./helpers/provider-scan.mjs');
-  for (const mod of discoverModules(new URL('../api/', import.meta.url))) {
-    if (mod.path === '_lib/prompt-trust.js' || mod.path === 'analyze.js') continue;
+  const modules = discoverModules(new URL('../api/', import.meta.url));
+
+  // 1. THE BOUNDARY HAS A CONSUMER, and it is the one we expect. If Phase B's
+  //    market prompt ever stops fencing, this fails rather than going quiet.
+  const marketPrompt = modules.find((m) => m.path === '_lib/phaseb/prompts.js');
+  assert.ok(marketPrompt, 'the Phase-B prompt module must exist');
+  assert.match(marketPrompt.source, /webSafeBlock\s*\(/,
+    'the market-evidence prompt must fence search output with webSafeBlock');
+  assert.match(marketPrompt.source, /MARKET_FENCE_RULE/,
+    'a fenced block without its RULE is a quarantine nobody told the model about');
+
+  // 2. NO MODULE INTERPOLATES MARKET CONTENT RAW. The search adapter is the
+  //    only place raw observations exist, and it must not build a prompt.
+  const adapter = modules.find((m) => m.path === '_lib/phaseb/market-research.js');
+  assert.ok(adapter, 'the market adapter must exist');
+  assert.ok(!/`[^`]*\$\{[^}]*observation[^}]*\}/i.test(adapter.source),
+    'the adapter interpolates an observation into a template — market text must reach a model '
+    + 'only through buildMarketEvidencePrompt, where it is fenced');
+
+  // 3. EVERY caller of the sanitiser is a PROMPT BUILDER, never a data path.
+  //    A `webSafe(` in, say, the valuation module would mean market text had
+  //    been laundered into a number's provenance.
+  const ALLOWED_SINKS = new Set(['_lib/prompt-trust.js', 'analyze.js', '_lib/phaseb/prompts.js']);
+  for (const mod of modules) {
+    if (ALLOWED_SINKS.has(mod.path)) continue;
     assert.ok(!/(?<![\w.])webSafe(?:Block)?\s*\(/.test(mod.source),
-      `api/${mod.path} calls the market sanitiser. Phase B is live and the whole market ` +
-      'boundary must be re-verified against a real sink.');
+      `api/${mod.path} calls the market sanitiser. Only a prompt builder may: a sanitiser call `
+      + 'anywhere else means market content is being prepared for something other than a fence.');
   }
 });
 

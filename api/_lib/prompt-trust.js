@@ -180,10 +180,17 @@ export function promptSafeList(arr, { max = PROMPT_STR_MAX, items = 8 } = {}) {
 // §0.95  MARKET-CONTENT TRUST BOUNDARY — DEFINED, DELIBERATELY NOT WIRED
 // ══════════════════════════════════════════════════════════════════════════
 //
-// NOTHING CALLS THIS YET. Phase B (market research) does not exist, and this
-// ships ahead of it on purpose: the controls have to be designed before the
-// content arrives, not retrofitted after a listing title has already reached a
-// pricing prompt.
+// WIRED AS OF PHASE B. This shipped ahead of its consumer on purpose — the
+// controls had to be designed before the content arrived, not retrofitted
+// after a listing title had already reached a pricing prompt — and the
+// consumer now exists: `buildMarketEvidencePrompt` in
+// api/_lib/phaseb/prompts.js fences the search-tool output with
+// `webSafeBlock` and `MARKET_FENCE_RULE` before any of it reaches a model.
+//
+// The previous sentence here said "NOTHING CALLS THIS YET", which stopped
+// being true the moment that prompt was written. A comment that describes the
+// codebase is a claim about it, and a stale one is how a reader concludes a
+// boundary is unused and deletes it.
 //
 // WHY promptSafe IS NOT ENOUGH FOR WEB CONTENT.
 // promptSafe is sound for what it guards: short product-identity strings,

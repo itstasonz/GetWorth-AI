@@ -455,6 +455,18 @@ const INVENTORY = [
   { file: 'api/analyze.js',                 fn: 'verifyAndPrice',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
   { file: 'api/analyze.js',                 fn: 'preQuoteFromAI',         host: 'api.anthropic.com',     ledger: 'DOWNSTREAM' },
   { file: 'api/_lib/openai-recognition.js', fn: 'recognizeWithOpenAI',    host: 'api.openai.com',        ledger: 'DIRECT' },
+  // PHASE B — a THIRD ledger class, because §26 of the Phase-B order is
+  // explicit: "Phase B must have its own accounting boundary. Do not silently
+  // inherit Phase A refund semantics." This call is on /api/enrich, not on the
+  // scan path, so neither DIRECT (marks onBilled into the scan's refund ledger)
+  // nor DOWNSTREAM (unreachable before Stage 1 OF A SCAN) describes it — and
+  // forcing it into either would make the refund matrix assert something false
+  // about a request that has no refund semantics at all.
+  //
+  // Its billed attempts are recorded in the Phase-B call ledger
+  // (createCallLedger in api/_lib/phaseb/openai-client.js), and XP-PHASEB below
+  // PROVES the isolation rather than trusting this label.
+  { file: 'api/_lib/phaseb/openai-client.js', fn: 'callStructured', host: 'api.openai.com', ledger: 'PHASE_B' },
 ];
 
 // Provider helpers deliberately kept with NO reachable caller. Empty, and that
@@ -464,6 +476,7 @@ const DEAD_PROVIDERS = [];
 
 const DIRECT = new Set(INVENTORY.filter((e) => e.ledger === 'DIRECT').map((e) => e.fn));
 const DOWNSTREAM = new Set(INVENTORY.filter((e) => e.ledger === 'DOWNSTREAM').map((e) => e.fn));
+const PHASE_B = new Set(INVENTORY.filter((e) => e.ledger === 'PHASE_B').map((e) => e.fn));
 
 /**
  * Every production module under api/, DISCOVERED rather than listed.
@@ -551,9 +564,29 @@ test('XP-STRUCT every provider host in source is inside a ledger-covered helper'
     `expected the known provider sites, found ${found.length}`);
 
   for (const site of found) {
-    assert.ok(DIRECT.has(site.fn) || DOWNSTREAM.has(site.fn),
+    assert.ok(DIRECT.has(site.fn) || DOWNSTREAM.has(site.fn) || PHASE_B.has(site.fn),
       `provider call in ${site.fn}() at ${site.file}:${site.line} has NO ledger relationship — ` +
-      'add onBilled marking at its res.ok, or classify it as downstream-of-Stage-1 here');
+      'add onBilled marking at its res.ok, classify it as downstream-of-Stage-1, or — if it is '
+      + 'not on the scan path at all — declare it PHASE_B and let XP-PHASEB prove the isolation');
+  }
+});
+
+// ── XP-PHASEB · THE PHASE_B LABEL IS PROVED, NOT TRUSTED ───────────────────
+test('XP-PHASEB a PHASE_B provider is genuinely unreachable from the scan path', () => {
+  // A ledger class that merely says "not our problem" is how a provider ends up
+  // with no accounting at all — the SEC-9 shape, where an inventory asserted
+  // coverage nothing delivered. So the claim is checked the same way DOWNSTREAM's
+  // ordering claim is: by walking api/analyze.js and finding NOTHING.
+  //
+  // §26 requires Phase B to have its own accounting boundary, and §2 requires
+  // /api/analyze to be untouched. Both reduce to this one fact.
+  assert.ok(PHASE_B.size > 0, 'the PHASE_B class must not be vacuous');
+  for (const fn of PHASE_B) {
+    const { sites, trail } = reachableCallSites(fn);
+    assert.deepEqual(sites, [],
+      `${fn}() is declared PHASE_B — off the scan path — but api/analyze.js can reach it:\n  `
+      + `${trail.join('\n  ')}\nEither it is on the scan path and needs a refund disposition, `
+      + 'or the scan path has acquired a Phase-B dependency that §2 forbids.');
   }
 });
 
