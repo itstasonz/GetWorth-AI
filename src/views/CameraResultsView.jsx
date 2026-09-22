@@ -716,8 +716,35 @@ function getConfidenceLabel(tier, t) {
 // MEDIUM maps to "Limited" on purpose: it is the DEFAULT for any non-comp
 // Stage 2 result (api/analyze.js emits it whenever price_method !== 'comp_based'),
 // i.e. an AI estimate with no comparable sales behind it.
-function getPricingEvidence(pricingConfidence, t) {
-  switch (pricingConfidence) {
+//
+// ── THE GRADE DESCRIBES PHASE A, AND PHASE A ONLY ──────────────────────────
+//
+// `pricing_confidence` is derived in derivePricingSource (valuation-guard.js)
+// from GetWorth's OWN evidence: a priced catalog anchor gives HIGH, an
+// unanchored Stage-2 estimate gives MEDIUM. It knows nothing whatever about
+// the open-world market search, which runs afterwards in a different request.
+//
+// So on the second production witness the screen carried a pricing-evidence
+// label while the Phase B panel two sections down reported 10 listings
+// discovered, 0 admitted, 0 distinct sources and VERIFIED_MARKET not granted.
+// Neither statement was wrong on its own terms; together they read as one
+// claim about one number, and that claim was not true.
+//
+// `marketEvidence` is that second reading, passed in so the two can be
+// reconciled HERE rather than left to the user. It may only ever LOWER the
+// label — market research that found nothing is a reason to claim less, and a
+// successful search is already represented in the grade through
+// `verified_market`. A ceiling, never a floor.
+function getPricingEvidence(pricingConfidence, t, marketEvidence) {
+  const searched = marketEvidence?.searched === true;
+  const admitted = marketEvidence?.admitted ?? 0;
+  // THE CONTRADICTION, CLOSED. A search that ran and admitted nothing caps the
+  // claim at "limited", whatever Phase A's own grade says. It does not claim
+  // LESS than that either: Phase A's estimate is still an estimate, and a
+  // failed market search does not invalidate it — it just cannot corroborate it.
+  const capped = (searched && admitted === 0 && (pricingConfidence === 'HIGH'))
+    ? 'MEDIUM' : pricingConfidence;
+  switch (capped) {
     case 'HIGH':
       return { label: t?.priceEvidStrong, color: 'text-green-400' };
     case 'LOW':
@@ -728,6 +755,28 @@ function getPricingEvidence(pricingConfidence, t) {
     default:
       return { label: t?.priceEvidLimited, color: 'text-amber-400' };
   }
+}
+
+// ── WHAT KIND OF NUMBER IS THIS? ───────────────────────────────────────────
+//
+// Three sources, and the user is entitled to know which one they are looking
+// at. The witness showed ₪280 / ₪420 / ₪560 with no way to tell that every one
+// of those came from a model's estimate rather than from the market search the
+// same screen was reporting on.
+export const PRICE_BASIS = Object.freeze({
+  VERIFIED_MARKET: 'verified_market',   // qualified, diverse, priced comparables
+  MARKET_ESTIMATE: 'market_estimate',   // a GetWorth catalog/comparable anchor
+  AI_ESTIMATE: 'ai_estimate',           // a model's number, corroborated by nothing
+  NONE: 'none',
+});
+
+export function resolvePriceBasis(result) {
+  if (!hasRealPrice(result?.marketValue)) return PRICE_BASIS.NONE;
+  const gm = result?._phaseB?.validation?.market_evidence;
+  if (gm?.qualified === true) return PRICE_BASIS.VERIFIED_MARKET;
+  const src = result?.marketValue?.validation?.pricing_source;
+  if (src === 'stage2_comp_anchored' || src === 'pre_catalog') return PRICE_BASIS.MARKET_ESTIMATE;
+  return PRICE_BASIS.AI_ESTIMATE;
 }
 
 // Provenance caption for the price — replaces a 6-deep ternary that silently
@@ -1369,6 +1418,29 @@ export function ResultsView() {
               }, t)}
             </p>
           )}
+          {/* ── WHICH OF THE THREE BASES IS THIS NUMBER ON? ──────────────────
+              The witness showed ₪280 / ₪420 / ₪560 with nothing on screen
+              distinguishing a model's recollection from the market search the
+              same screen was reporting on. Three sources, one of which is
+              corroborated by nothing, and the user could not tell them apart.
+
+              Only VERIFIED_MARKET claims the open-world search produced the
+              number; the other two say plainly that it did not. */}
+          {hasPrice && (() => {
+            const basis = resolvePriceBasis(result);
+            // Tokens, not literals: src/lib/tokens.js is the sanctioned mirror
+            // and the raw-hex budget in scripts/design-lint.mjs does not grow.
+            const copy = {
+              [PRICE_BASIS.VERIFIED_MARKET]: { text: t.basisVerifiedMarket, color: T.success },
+              [PRICE_BASIS.MARKET_ESTIMATE]: { text: t.basisMarketEstimate, color: T.warning },
+              [PRICE_BASIS.AI_ESTIMATE]: { text: t.basisAiEstimate, color: T.warning },
+            }[basis];
+            return copy ? (
+              <p dir="auto" className="text-xs mt-1.5 font-semibold" style={{ color: copy.color }}>
+                {copy.text}
+              </p>
+            ) : null;
+          })()}
           {/* VAL-001: every price on this screen is an estimate. Stated once,
               always, so no tier or fallback path can quietly omit it. */}
           <p dir="auto" className="text-[10px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.7 }}>
@@ -1422,8 +1494,14 @@ export function ResultsView() {
                 // UI-003 Wave 0: the grade describes evidence behind a PRICE.
                 // With no price there is no evidence, whatever the response's
                 // own grade says (an older cached one can say MEDIUM).
+                const pb = result._phaseB;
                 const evidence = getPricingEvidence(
-                  hasPrice ? result.marketValue?.pricing_confidence : 'MANUAL_REQUIRED', t);
+                  hasPrice ? result.marketValue?.pricing_confidence : 'MANUAL_REQUIRED', t,
+                  pb ? {
+                    searched: pb.market_evidence?.search_performed === true,
+                    admitted: pb.validation?.market_evidence?.admitted
+                      ?? pb.market_evidence?.counts?.accepted ?? 0,
+                  } : null);
                 return (
                   <p dir="auto" className={`text-sm font-semibold ${evidence.color}`}>
                     {evidence.label}
@@ -2567,10 +2645,38 @@ export function ResultsView() {
                       {(me.query?.search_terms || []).map((t, i) => (
                         <p key={i} className="text-xs text-slate-400 break-all">q: {t}</p>
                       ))}
+                      {/* EVERY DISCOVERED LISTING IS ACCOUNTED FOR.
+                          The witness read "discovered 10 / admitted 0 /
+                          rejected 1" and nine listings simply vanished — they
+                          were `context_only`, foreign-currency evidence held
+                          back because no verified FX exists. Real evidence
+                          about the world, excluded from an ILS calculation.
+                          A panel that shows two of three buckets makes its own
+                          arithmetic look broken. */}
                       {row('discovered', me.counts?.returned)}
-                      {row('admitted / rejected',
-                        `${ins.evidence_admitted ?? 0} / ${ins.evidence_rejected ?? 0}`,
+                      {row('admitted', ins.evidence_admitted ?? 0,
                         (ins.evidence_admitted ?? 0) > 0 ? T.success : T.danger)}
+                      {row('rejected', ins.evidence_rejected ?? 0)}
+                      {row('foreign currency (no FX)', me.counts?.context_only ?? 0,
+                        (me.counts?.context_only ?? 0) > 0 ? T.warning : null)}
+                      {(() => {
+                        const c = me.counts || {};
+                        const seen = (c.accepted ?? 0) + (c.rejected ?? 0) + (c.context_only ?? 0);
+                        const missing = (c.returned ?? 0) - seen;
+                        return missing > 0
+                          ? row('UNACCOUNTED', missing, T.danger)
+                          : null;
+                      })()}
+                      {(me.rejected || []).slice(0, 6).map((r, i) => (
+                        <p key={i} className="text-xs break-all" style={{ color: T.textMuted }}>
+                          x {String(r.observation?.title ?? '').slice(0, 30)} [{r.observation?.source_domain ?? '?'}] {r.reason}
+                        </p>
+                      ))}
+                      {(me.context_only || []).slice(0, 4).map((r, i) => (
+                        <p key={i} className="text-xs break-all" style={{ color: T.warning }}>
+                          ~ {String(r.observation?.title ?? '').slice(0, 26)} {r.observation?.observed_price}{r.observation?.currency} {r.reason}
+                        </p>
+                      ))}
                       {row('distinct sources', ins.distinct_sources)}
                       {(me.provenance?.sources || []).slice(0, 4).map((u, i) => (
                         <p key={i} className="text-xs text-slate-500 break-all">· {u}</p>

@@ -235,3 +235,151 @@ export function applyGuard({
     },
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE IDENTITY CONTRACT  ·  what Phase B is allowed to do to Phase A's answer
+//
+// THE SECOND PRODUCTION WITNESS. Phase A looked at a Logitech mouse and
+// narrowed it to two products — G Pro X Superlight (45%) and G Pro Wireless
+// (40%) — then declined to choose. Phase B looked at the same photograph,
+// proposed G703 / G403, and searched the market for those. One picture, two
+// stages, two disjoint product families, and the second one silently won.
+//
+// Part of that was a plumbing bug: the shortlist never reached Phase B at all.
+// But fixing the plumbing does not settle the question, because Phase B is
+// SUPPOSED to be able to disagree — it is the open-world stage, and a stage
+// that can only ratify the catalog is not an open-world stage.
+//
+// So the contract is about what a disagreement MEANS, not about preventing one:
+//
+//   CONFIRM   Phase B named something Phase A also named.
+//   REFINE    Phase B named a narrower form of something Phase A named
+//             (a variant inside a proposed family).
+//   EXTEND    Phase A proposed nothing; Phase B is the only opinion there is.
+//   CONFLICT  Both named models, and they share nothing.
+//   UNKNOWN   Phase B named no model.
+//
+// WHAT A CONFLICT COSTS. Not the identity — Phase B keeps its answer, and a
+// reader sees both. What it costs is SEARCH SPECIFICITY. Searching an exact
+// model that two independent readings of the same photograph disagree about
+// produces comparables for a product we have no reason to believe is the one in
+// frame, and those comparables then look exactly like evidence. The honest
+// search is the level the two readings still agree on — the brand and the kind
+// of object — which is wider, correctly less precise, and actually about this
+// photograph.
+//
+// This is the same doctrine as everywhere else in this module: uncertainty may
+// only ever cost authority. A conflict is uncertainty that happens to be
+// legible, and legible uncertainty must not be worth more than the quiet kind.
+// ══════════════════════════════════════════════════════════════════════════════
+
+export const IDENTITY_AGREEMENT = Object.freeze({
+  CONFIRM: 'confirm',
+  REFINE: 'refine',
+  EXTEND: 'extend',
+  CONFLICT: 'conflict',
+  UNKNOWN: 'unknown',
+});
+
+/** Comparable tokens of a model string: lower-cased, alphanumeric, deduped. */
+function modelTokens(value) {
+  return new Set(words(value).filter((w) => w.length > 1 || /\d/.test(w)));
+}
+
+/**
+ * Does `a` contain everything `b` names? Used for REFINE, where the narrower
+ * answer must still carry the broader one's distinguishing words.
+ */
+function containsAll(a, b) {
+  if (b.size === 0) return false;
+  for (const t of b) if (!a.has(t)) return false;
+  return true;
+}
+
+/**
+ * Compare Phase B's proposed model against Phase A's ranked candidates.
+ *
+ * `phaseACandidates` is the shortlist the client forwards as
+ * `existing_recognition.model_candidates`. It is UNTRUSTED input — a caller
+ * could send anything — which is exactly why a match only ever WIDENS what is
+ * permitted here and never narrows it: the worst a forged shortlist can do is
+ * make a conflict look like agreement, and agreement grants nothing that
+ * corroboration has not already granted separately.
+ *
+ * Total: any shape of input yields a verdict and never throws.
+ */
+export function reconcileIdentity(input) {
+  // NOT a destructuring default. `reconcileIdentity(null)` throws against
+  // `= {}`, because a default parameter only fires for `undefined` — the same
+  // gap `qualifyMarketEvidence` records for `subject: null`. Totality is a
+  // property this function claims, so it is established rather than assumed.
+  const { identity, existingRecognition } = (input && typeof input === 'object') ? input : {};
+  const proposed = typeof identity?.subject?.model === 'string' ? identity.subject.model : null;
+  const brand = identity?.subject?.brand ?? null;
+  const raw = Array.isArray(existingRecognition?.model_candidates)
+    ? existingRecognition.model_candidates : [];
+  const candidates = raw
+    .map((c) => (typeof c === 'string' ? c : c?.model))
+    .filter((m) => typeof m === 'string' && m.trim() && m.trim().toLowerCase() !== 'unidentified');
+
+  const base = {
+    phase_a_candidates: candidates.slice(0, 6),
+    phase_b_model: proposed,
+    // The level a market search may use. Only a CONFLICT lowers it.
+    search_specificity_cap: null,
+  };
+
+  if (!proposed) {
+    return { ...base, agreement: IDENTITY_AGREEMENT.UNKNOWN, conflict: false };
+  }
+  if (candidates.length === 0) {
+    return { ...base, agreement: IDENTITY_AGREEMENT.EXTEND, conflict: false };
+  }
+
+  // BRAND-PREFIX TOLERANT. Phase A's shortlist carries display names that may
+  // repeat the brand ("Logitech G Pro X Superlight") while Phase B returns the
+  // model alone ("G Pro X Superlight"). Comparing those raw would report a
+  // conflict between two spellings of one answer, which is the exact class of
+  // bug this repository has recorded under "two implementations of one
+  // predicate" — so the brand is removed from both sides before comparing.
+  const brandToks = modelTokens(brand);
+  // Built by FILTERING rather than by removing entries from a Set. PB-9a greps
+  // this module's whole import closure for Supabase mutation verbs as a
+  // read-only tripwire, and a Set removal is spelled the same way. The removal
+  // is harmless and the tripwire cannot tell — but a security test taught to
+  // ignore one spelling is a test that will ignore the next one, so the
+  // collision is avoided here rather than excused there. (This comment is
+  // worded around the literal for the same reason.)
+  const strip = (value) => new Set([...modelTokens(value)].filter((t) => !brandToks.has(t)));
+  const pb = strip(proposed);
+  if (pb.size === 0) {
+    // Phase B's "model" was only the brand again. Nothing to reconcile.
+    return { ...base, agreement: IDENTITY_AGREEMENT.UNKNOWN, conflict: false };
+  }
+
+  let best = IDENTITY_AGREEMENT.CONFLICT;
+  let matched = null;
+  for (const cand of candidates) {
+    const pa = strip(cand);
+    if (pa.size === 0) continue;
+    if (containsAll(pb, pa) && containsAll(pa, pb)) { best = IDENTITY_AGREEMENT.CONFIRM; matched = cand; break; }
+    // Phase B named everything Phase A did, plus more: a narrower answer.
+    if (containsAll(pb, pa)) { best = IDENTITY_AGREEMENT.REFINE; matched = cand; }
+    // Phase A was narrower and Phase B named its family: still agreement about
+    // WHICH product line, so it is not a conflict.
+    else if (best === IDENTITY_AGREEMENT.CONFLICT && containsAll(pa, pb)) {
+      best = IDENTITY_AGREEMENT.REFINE; matched = cand;
+    }
+  }
+
+  const conflict = best === IDENTITY_AGREEMENT.CONFLICT;
+  return {
+    ...base,
+    agreement: best,
+    matched_candidate: matched,
+    conflict,
+    // THE ONLY CONSEQUENCE. Phase B keeps its identity; the SEARCH drops to the
+    // level both readings still support.
+    search_specificity_cap: conflict ? 'brand_category' : null,
+  };
+}

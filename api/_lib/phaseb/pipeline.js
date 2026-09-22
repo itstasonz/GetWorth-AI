@@ -31,7 +31,7 @@ import {
   createMarketResearch, MARKET_MECHANISM, normalizeObservations, rejectOutliers,
 } from './market-research.js';
 import { computeValuationCandidate, VALUATION_STATUS } from './valuation.js';
-import { corroborateSubject, applyGuard, CORROBORATION } from './validation.js';
+import { corroborateSubject, applyGuard, CORROBORATION, reconcileIdentity } from './validation.js';
 import { qualifyMarketEvidence } from '../market-evidence.js';
 
 export const PHASE_B_STATUS = Object.freeze({
@@ -172,6 +172,14 @@ export async function runPhaseB({
   // through the research stage instead of through the evidence set.
   const corroboration = corroborateSubject({ identity, ocrText, catalogCandidates });
 
+  // ── B7b · DOES PHASE B AGREE WITH PHASE A ABOUT WHAT THIS IS? ────────────
+  //
+  // Both stages read the same photograph. When they name disjoint products,
+  // that disagreement is the most important thing known about this scan, and
+  // it must not be resolved silently in favour of whichever ran last.
+  // See the contract in validation.js.
+  const reconciliation = reconcileIdentity({ identity, existingRecognition });
+
   // ── B5 · CONDITION — STARTED HERE, AWAITED AFTER THE RESEARCH BRANCH ──────
   //
   // THE DEPENDENCY GRAPH, READ OFF THE CODE RATHER THAN ASSUMED:
@@ -220,9 +228,9 @@ export async function runPhaseB({
         ledger,
         fetchImpl,
       });
-      return { data, failure: null };
+      return { data, failure: null, endedAt: now() };
     } catch (err) {
-      return { data: null, failure: classifyOpenAIFailure(err?.message) };
+      return { data: null, failure: classifyOpenAIFailure(err?.message), endedAt: now() };
     }
   })();
 
@@ -250,8 +258,27 @@ export async function runPhaseB({
           ledger,
           fetchImpl,
         });
-        query = data;
-        record('market_query', 'ok', now() - s, null, s);
+        // ── A DISPUTED MODEL MAY NOT BE SEARCHED AS IF IT WERE SETTLED ────
+        //
+        // Applied HERE, deterministically, after the model has answered —
+        // rather than by asking the prompt to be careful. The query stage
+        // reasons from Phase B's identity alone and has no way to know Phase A
+        // proposed a different family; a server-side cap is the only place
+        // that fact exists. §13's rule that the model never gains pricing
+        // authority by generating the query is the same principle: what it
+        // writes is an intent, and the server decides what the intent is
+        // allowed to be.
+        query = reconciliation.search_specificity_cap === 'brand_category'
+          ? {
+            ...data,
+            product_identity: [identity?.subject?.brand, identity?.subject?.object_class]
+              .filter(Boolean).join(' ') || data.product_identity,
+            variant: null,
+            specificity: 'brand_category',
+          }
+          : data;
+        record('market_query', 'ok', now() - s,
+          reconciliation.conflict ? 'capped to brand_category: identity disputed' : null, s);
       } catch (err) {
         record('market_query', 'failed', now() - s, classifyOpenAIFailure(err?.message), s);
       }
@@ -282,10 +309,24 @@ export async function runPhaseB({
   // Recorded with the start it ACTUALLY had, so `at_ms` shows the overlap
   // instead of pretending the stage began when it was awaited. A concurrency
   // change that reports itself as sequential is a change nobody can verify.
+  // ── THE DURATION IS THE CALL'S, NOT THE JOIN'S ───────────────────────────
+  //
+  // A MEASUREMENT BUG THIS FILE INTRODUCED WHEN IT ADDED THE CONCURRENCY, and
+  // the second production witness reported it as a product problem: condition
+  // was logged at 21,222ms, which is 4ms away from market_query + research
+  // (2,941 + 18,277 = 21,218). They match because the old line called `now()`
+  // HERE — after `await` had already waited for the longer branch — so it
+  // measured from condition's start to the moment it was collected rather than
+  // to the moment it finished.
+  //
+  // The effect is to make the fast branch look exactly as slow as the slow one,
+  // which is precisely backwards: it hides the real bottleneck behind the stage
+  // that was already free. `endedAt` is stamped INSIDE the task, when the call
+  // actually returns.
   const conditionOutcome = await conditionTask;
   const condition = conditionOutcome.data;
-  record('condition', condition ? 'ok' : 'failed', now() - conditionStarted,
-    conditionOutcome.failure, conditionStarted);
+  record('condition', condition ? 'ok' : 'failed',
+    conditionOutcome.endedAt - conditionStarted, conditionOutcome.failure, conditionStarted);
 
   // ── B6a · NORMALISATION AND QUALITY FILTERING ────────────────────────────
   const s6 = now();
@@ -387,6 +428,9 @@ export async function runPhaseB({
     failure_reason: null,
     identity_candidate: {
       ...identity,
+      // BOTH READINGS TRAVEL TOGETHER. A consumer that wants to show the user
+      // "we are not sure whether this is X or Y" now has the material to do it.
+      reconciliation,
       // §11 made structural: the model's number and GetWorth's judgement are
       // different fields, so no reader can mistake one for the other.
       corroboration,

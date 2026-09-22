@@ -202,8 +202,11 @@ describe('PWA-2 Phase B is absent from a production build', () => {
 
   test('PWA-2c the results panel is gated on DEV alone, not on is_admin', () => {
     const src = read(RESULTS);
-    const at = src.indexOf('result._phaseB');
-    assert.ok(at > 0, 'the Phase B panel must exist');
+    // ANCHOR ON THE PANEL, not on the first mention. `resolvePriceBasis` now
+    // reads `result?._phaseB` far earlier in the file, so indexOf('result._phaseB')
+    // finds a helper and asserts against the wrong 120 characters.
+    const at = src.indexOf('PHASE_B_ENABLED && result._phaseB');
+    assert.ok(at > 0, 'the Phase B panel gate must exist');
     const gate = src.slice(at - 120, at + 40);
     assert.match(gate, /PHASE_B_ENABLED && result\._phaseB/,
       'the panel must be gated on the same build-time flag that decides whether the browser '

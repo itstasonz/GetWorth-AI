@@ -2510,9 +2510,38 @@ export function AppProvider({ children }) {
           brand_candidates: phaseAResult?.identification?.brand
             && phaseAResult.identification.brand !== 'unidentified'
             ? [{ brand: phaseAResult.identification.brand, confidence: phaseAResult.confidence ?? 0 }] : [],
-          model_candidates: phaseAResult?.identification?.model
-            && phaseAResult.identification.model !== 'unidentified'
-            ? [{ model: phaseAResult.identification.model, confidence: phaseAResult.confidence ?? 0 }] : [],
+          // ── EVERY CANDIDATE PHASE A HAD, NOT JUST THE ONE IT RESOLVED ────
+          //
+          // THE SECOND PRODUCTION WITNESS. Phase A saw a Logitech mouse and
+          // produced three ranked candidates — G Pro X Superlight 45%,
+          // G Pro Wireless 40%, G305 25% — then Stage 2 declined to choose
+          // between the top two and set `final_model: 'unidentified'`.
+          //
+          // This field read ONLY `identification.model`, which IS
+          // `verification.final_model`. So the ternary saw 'unidentified',
+          // returned `[]`, and Phase B was handed a brand with no model
+          // candidates at all. It then did the only thing it could: guessed
+          // independently from the photograph, arrived at G703 / G403 — a
+          // different family entirely — and searched the market for those.
+          //
+          // The candidates were IN this payload the whole time, one field
+          // away, at `recognition.alternatives`. Stage 2's inability to pick a
+          // winner is not a reason to discard the shortlist; it is the single
+          // most useful thing Phase B could have been told.
+          //
+          // Ranked, resolved-first. `alternatives` already excludes the
+          // resolved model and dedupes by model family upstream.
+          model_candidates: [
+            ...(phaseAResult?.identification?.model
+              && phaseAResult.identification.model !== 'unidentified'
+              ? [{ model: phaseAResult.identification.model, confidence: phaseAResult.confidence ?? 0, resolved: true }]
+              : []),
+            ...(Array.isArray(phaseAResult?.recognition?.alternatives)
+              ? phaseAResult.recognition.alternatives
+                .filter((a) => a?.name && a.name !== 'unidentified')
+                .map((a) => ({ model: a.name, confidence: a.confidence ?? 0, resolved: false }))
+              : []),
+          ].slice(0, 6),
           ocr_text: { raw_texts: phaseAResult?.ocr?.text_found ?? [] },
         },
       };
