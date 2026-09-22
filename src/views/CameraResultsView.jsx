@@ -1341,7 +1341,20 @@ export function ResultsView() {
               {t.range}: {formatPrice(result.marketValue.low)} - {formatPrice(result.marketValue.high)}
             </p>
           )}
-          {result.marketValue?.newRetailPrice > 0 && (
+          {/* ── NEW RETAIL IS SHOWN ONLY WHEN IT IS EVIDENCE ──────────────────
+              The first production scan displayed "New retail: ₪950" underneath
+              a valuation the guard had REFUSED ("Set your own price"). There
+              was no catalog row and market research had never run: the number
+              was Stage 2's recollection, rendered in the same quiet grey as a
+              researched fact. A price with no provenance sitting beside a
+              withheld price reads as the one the system was too cautious to
+              commit to — which is the opposite of what happened.
+
+              `newRetailSource` is 'catalog' only when a GetWorth row supplied
+              it. Anything else stays in _debug, where it is diagnostic rather
+              than a claim to the user. */}
+          {result.marketValue?.newRetailPrice > 0
+            && result.marketValue?.newRetailSource === 'catalog' && (
             <p className="text-[11px] mt-1.5" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
               {lang === 'he' ? 'מחיר חדש: ' : 'New retail: '}{formatPrice(result.marketValue.newRetailPrice)}
             </p>

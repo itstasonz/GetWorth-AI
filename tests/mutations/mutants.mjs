@@ -710,8 +710,32 @@ export const MUTANTS = [
     target: "authority",
     invariant: "R5-C1 an accessory noun names a relationship even with no preposition.",
     kills: ["R5-3b"],
-    find: "    if (ACCESSORY_NOUN.has(w)) return RELATION.ACCESSORY_TARGET;",
-    replace: "    if (false) return RELATION.ACCESSORY_TARGET;",
+    // RE-PINNED. The branch moved when relationOfLine learned to tell a bare
+    // homograph from a product name; the INVARIANT is unchanged, so the mutant
+    // is re-aimed rather than retired. Skipping every accessory noun is still
+    // the mutation, it is just spelled with the guard clause now.
+    find: "    if (!ACCESSORY_NOUN.has(w)) continue;",
+    replace: "    if (true) continue;",
+  },
+  {
+    // ── THE OTHER HALF OF THE SAME RULE ────────────────────────────────────
+    //
+    // The homograph carve-out is the change that let the first production
+    // witness through, and a carve-out is exactly the shape of thing that
+    // quietly widens until it swallows the rule it was carved out of. This
+    // mutant removes the `barelabel` condition, so EVERY occurrence of an
+    // ambiguous noun — bare or inside a phrase — stops marking a relationship.
+    //
+    // It must die on the complement loop in FW-1c, which asserts that a
+    // qualified ambiguous noun ("Silicone Case / iPhone 16 Pro") is still
+    // packaging. If this ever survives, the carve-out has stopped being about
+    // isolated labels and has become a hole.
+    id: "M65b-AMBIGUITY-CARVEOUT-WIDENED",
+    target: "authority",
+    invariant: "FW-1 the homograph relaxation applies to BARE labels only, never inside a phrase.",
+    kills: ["FW-2a"],
+    find: "    if (barelabel && AMBIGUOUS_ACCESSORY_NOUN.has(w)) continue;",
+    replace: "    if (AMBIGUOUS_ACCESSORY_NOUN.has(w)) continue;",
   },
 
   // ==========================================================================

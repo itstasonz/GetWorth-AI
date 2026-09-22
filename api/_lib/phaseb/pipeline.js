@@ -172,10 +172,38 @@ export async function runPhaseB({
   // through the research stage instead of through the evidence set.
   const corroboration = corroborateSubject({ identity, ocrText, catalogCandidates });
 
-  // ── B5 · CONDITION (parallel-safe, but sequential here for clear timing) ──
-  let condition = null;
-  {
-    const s = now();
+  // ── B5 · CONDITION — STARTED HERE, AWAITED AFTER THE RESEARCH BRANCH ──────
+  //
+  // THE DEPENDENCY GRAPH, READ OFF THE CODE RATHER THAN ASSUMED:
+  //
+  //   identity   ← image + Phase-A hints
+  //   condition  ← image, and `identity.subject` for PROMPT CONTEXT ONLY
+  //                (object_class / brand / model, in buildConditionPrompt).
+  //                Its output is consumed in exactly one place:
+  //                computeValuationCandidate({ condition: condition?.grade }).
+  //   market_query    ← identity
+  //   market_research ← market_query
+  //
+  // So `condition` and the `market_query → market_research` chain share an
+  // ancestor and nothing else. Neither reads the other's output. Running them
+  // side by side removes min(condition, query+research) from the wall clock
+  // and changes NOTHING about either answer: condition still receives the same
+  // fully-resolved `identity` it received when it ran first.
+  //
+  // WHAT IS DELIBERATELY *NOT* DONE HERE. Starting condition concurrently with
+  // IDENTITY would save more — they both only need the image — but the
+  // condition prompt would then have no identity to reason about, and "assess
+  // the condition of a thing you have not been told the identity of" is a
+  // different question producing different grades. That is a semantic change
+  // and it needs its own evidence, so it is not taken on a latency argument.
+  // §25's rule is measure first; this change is the one that costs nothing.
+  //
+  // The promise is built so it ALWAYS RESOLVES. A rejection escaping before the
+  // await below would be an unhandled rejection in a serverless runtime, which
+  // is a process-level event rather than a stage failure — so the catch is
+  // inside, and the outcome is carried back as data.
+  const conditionStarted = now();
+  const conditionTask = (async () => {
     try {
       const { data } = await callStructured({
         stage: 'condition',
@@ -192,12 +220,11 @@ export async function runPhaseB({
         ledger,
         fetchImpl,
       });
-      condition = data;
-      record('condition', 'ok', now() - s, null, s);
+      return { data, failure: null };
     } catch (err) {
-      record('condition', 'failed', now() - s, classifyOpenAIFailure(err?.message), s);
+      return { data: null, failure: classifyOpenAIFailure(err?.message) };
     }
-  }
+  })();
 
   // ── B3 · MARKET QUERY INTENT ─────────────────────────────────────────────
   let query = null;
@@ -249,6 +276,16 @@ export async function runPhaseB({
       }
     }
   }
+
+  // ── B5 (joined) · THE CONDITION BRANCH REJOINS THE CRITICAL PATH ─────────
+  //
+  // Recorded with the start it ACTUALLY had, so `at_ms` shows the overlap
+  // instead of pretending the stage began when it was awaited. A concurrency
+  // change that reports itself as sequential is a change nobody can verify.
+  const conditionOutcome = await conditionTask;
+  const condition = conditionOutcome.data;
+  record('condition', condition ? 'ok' : 'failed', now() - conditionStarted,
+    conditionOutcome.failure, conditionStarted);
 
   // ── B6a · NORMALISATION AND QUALITY FILTERING ────────────────────────────
   const s6 = now();

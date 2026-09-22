@@ -393,6 +393,50 @@ const ACCESSORY_NOUN = new Set([
 /** The accessory vocabulary, for consumers that classify text other than OCR. */
 export const ACCESSORY_NOUNS = ACCESSORY_NOUN;
 
+// ── THE HOMOGRAPHS ──────────────────────────────────────────────────────────
+//
+// A STRICT SUBSET of ACCESSORY_NOUN: the entries that also have a common
+// non-accessory meaning, and therefore turn up as ordinary labels printed ON a
+// product — mode switches, indicators, port markings, control panels.
+//
+// The test applied to each candidate: seen ALONE, with no context, does the
+// word read as an accessory? If it does not, a bare line carrying it is not
+// evidence of a relationship.
+//
+//   חלק      smooth (a blend texture)      · part          ← the witness
+//   חלקים    smooth (plural)               · parts
+//   מגן      guard / protect (a mode)      · protector
+//   כיסוי    lid / covering                · protective cover
+//   מעמד     status / standing             · stand
+//   screen   the display itself            · screen protector
+//   case     an enclosure, "in case of"    · phone case
+//   cover    a lid, to cover               · protective cover
+//   band     frequency band (AM/FM)        · watch band
+//   stand    to stand, a stand             · accessory stand
+//   mount    to mount, a lens mount        · accessory mount
+//   dock     to dock                       · docking station
+//   part(s)  a portion of the thing        · spare part
+//
+// DELIBERATELY NOT HERE, and each exclusion is load-bearing:
+//
+//   strap · רצועה · filter · פילטר · charger · מטען · cable · blade · להב ·
+//   adapter · protector · cartridge · ink · toner · sleeve · holder
+//     — no second meaning at all. A line reading only "filter" is naming a
+//       filter, which is what keeps `DYSON V15 DETECT HEPA FILTER` and
+//       `Rolex Submariner / רצועה` classified as packaging.
+//
+//   battery · סוללה · lens · עדשה
+//     — these DO have an indicator/own-part sense, and they were in this list
+//       for exactly one commit. `MacBook Pro / סוללה` is a battery somebody is
+//       selling, and R6-5a says so. A word is only admitted here when its
+//       label sense outweighs its product sense; for these two it does not,
+//       and the repository already held the counter-example.
+const AMBIGUOUS_ACCESSORY_NOUN = new Set([
+  'case', 'cases', 'cover', 'covers', 'band', 'bands', 'screen', 'stand',
+  'mount', 'dock', 'part', 'parts',
+  'חלק', 'חלקים', 'מגן', 'כיסוי', 'מעמד',
+]);
+
 /**
  * The lines an INDEPENDENT reader returned, each already rejected if it is
  * describing compatibility rather than identity.
@@ -522,9 +566,74 @@ function relationOfLine(lineWords) {
     // Han/Kana/Hangul have no word separators, so the token IS the phrase.
     if (cjkRelation(w) === RELATION.COMPATIBILITY_TARGET) return RELATION.COMPATIBILITY_TARGET;
   }
+  // ── AN ACCESSORY NOUN NAMES A RELATIONSHIP ONLY INSIDE A NOUN PHRASE ──────
+  //
+  // THE PRODUCTION WITNESS THIS EXISTS FOR. A photographed blender's own
+  // control panel read, among fifteen OCR lines:
+  //
+  //     פולס · תוכניות · ידני · חלק · קיצור דק · בינוני · גבוה · ריסוק · זמן
+  //
+  // `חלק` is a homograph. On a control panel, between "fine chop" and "crush",
+  // it means SMOOTH — a blend texture. In ACCESSORY_NOUN it is the Hebrew for
+  // PART. One bare word made that line ACCESSORY_TARGET, which made the whole
+  // block REFERENCE, which made `subject_text_permitted` false, which meant the
+  // brand and model printed on the machine could no longer corroborate
+  // anything, which produced CONTRADICTED, which skipped market research
+  // entirely. Fifteen lines of the object describing itself, vetoed by one word
+  // that meant something else.
+  //
+  // The distinction that fixes it generically is between a LABEL and a PRODUCT
+  // NAME. A bare noun alone on a line is a label, and labels are what appear ON
+  // objects: mode switches, port markings, control panels, settings. A product
+  // name qualifies its noun — "Leather Strap", "Replacement Blade", "מטען
+  // MacBook Pro" — because a bare noun sells nothing and identifies nothing.
+  //
+  // So the accessory reading now requires the line to be a PHRASE. This is not
+  // a weakening dressed up: every genuinely relational construction still fires
+  // through a path this does not touch —
+  //
+  //   "Replacement Blade" / "חלק חילוף"  → COMPATIBILITY, matched above
+  //   "for Rolex" / "תואם ל-"            → COMPATIBILITY, matched above
+  //   "Phone not included"               → PACKAGING_REFERENCE, matched above
+  //   "Leather Strap" (R6-1e)            → still ACCESSORY_TARGET, phrase
+  //
+  // and what it gives up is the bare single-word case, where the evidence for
+  // "this is an accessory" was one ambiguous token and nothing else. That case
+  // is still covered downstream, twice: `subjectVocabulary.subject_is_accessory`
+  // in api/_lib/market-evidence.js asks this same question of the subject's own
+  // object_class, and BUCKET_AUTHORITY still refuses to let a charger reach a
+  // laptop envelope whatever its label says.
+  //
+  // CJK IS EXEMPT FROM THE PHRASE REQUIREMENT, because it has no word
+  // separators: there, one token genuinely is the phrase, so requiring two
+  // would disable the rule for those scripts entirely.
+  //
+  // ── AND THE REQUIREMENT APPLIES ONLY TO THE AMBIGUOUS NOUNS ───────────────
+  //
+  // A first attempt required a phrase for EVERY accessory noun, and it broke
+  // two real protections immediately: `Rolex Submariner / רצועה` and
+  // `DYSON / V15 / DETECT / HEPA / FILTER` both handed over the host's
+  // identity. That was the fix buying the witness at the price of the thing
+  // the rule exists for.
+  //
+  // The difference is in the WORDS, not in the products. `רצועה` and `filter`
+  // have no second meaning — a line that says only "filter" is naming a
+  // filter. `חלק` means smooth, `screen` is a display before it is a screen
+  // protector, `battery` is an indicator before it is a spare, `lens` is part
+  // of the camera. Those are the nouns that appear as ordinary labels ON
+  // objects, and they are the only ones that need a phrase before they may
+  // claim a relationship.
+  //
+  // So this is a list of HOMOGRAPHS, chosen by whether the word has a common
+  // non-accessory sense — a property of the vocabulary, not of any product.
+  // Adding a word here narrows the rule; forgetting one leaves the previous,
+  // stricter behaviour, which is the safe direction.
+  const barelabel = lineWords.length === 1;
   for (const w of lineWords) {
-    if (ACCESSORY_NOUN.has(w)) return RELATION.ACCESSORY_TARGET;
     if (cjkRelation(w) === RELATION.ACCESSORY_TARGET) return RELATION.ACCESSORY_TARGET;
+    if (!ACCESSORY_NOUN.has(w)) continue;
+    if (barelabel && AMBIGUOUS_ACCESSORY_NOUN.has(w)) continue;
+    return RELATION.ACCESSORY_TARGET;
   }
   return RELATION.SUBJECT;
 }

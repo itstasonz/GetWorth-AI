@@ -238,6 +238,9 @@ refusal and wants the same polarity inversion.
 | B-h | `VERIFIED_MARKET` is unreachable without brand **and** model | `qualifyMarketEvidence` fails the set at `IDENTITY_INSUFFICIENT` before looking at a single listing. Correct for named products; it means a genuinely generic item — an unbranded shelf, a plain desk — can never be priced, however good its comparables. See below. |
 | B-i | The model id is unverified against a live account | `ENRICHMENT_MODEL_DEFAULT` is `gpt-5.6-luna`, never exercised against a real key. `scripts/phaseb-live-benchmark.mjs --preflight` answers this for free before the first billed call. |
 | B-j | `/api/enrich` had no runtime declaration | It was written against the Web Request shape with no `config`, so Vercel's DEFAULT Node runtime would have invoked it as `(req, res)` and `req.headers.get` would have thrown on the first line. Never caught because the endpoint had never been called over HTTP. **Closed**: `config = { maxDuration: 60 }` plus the same dual-mode adapter `api/analyze.js` uses. Node, not Edge — Edge is capped at 25s and market research alone is allowed 90s. |
+| B-k | Stage-1 engine A/B is UNMEASURED | Production ran the Anthropic engine at **18,046ms** on the first witness. The OpenAI Stage-1 path exists, is capped at `OPENAI_DEFAULT_TIMEOUT_MS = 8_000` and uses `reasoning: 'none'` — but a cap is not a measurement. Tier 2 of `scripts/recognition-benchmark.mjs` reports `fixtures 0/24`: there are no photographs in the repository, so the comparison cannot be run. **The engine was NOT switched.** One real product photo committed under `tests/fixtures/recognition/` makes it runnable. |
+| B-l | Phase A is the latency (25s of 30s) | `stage1_vision=18046` + `stage2_verify=6967` are two serial LLM calls, 85% of Phase A. They are serial by necessity (Stage 2 consumes retrieval, retrieval consumes the embedding, the embedding consumes Stage 1). The available lever is B-k, not concurrency. |
+| B-m | Phase B waits for ALL of Phase A | The browser starts enrichment after the whole `/api/analyze` response. Phase B needs Stage 1's OCR (`existing_ocr`), which is ready at ~18.5s, but waits until ~30s for Stage 2. Overlapping them needs a streamed or two-part scan response — a real architecture change, recorded rather than attempted. |
 
 ---
 
@@ -356,4 +359,4 @@ Production activation requires **all** of:
 - [ ] A promotion policy that does not exist yet
 - [ ] Explicit human authorization
 
-*Last updated: PWA → Phase B development wiring (B-j), from base `fdc6da9`.*
+*Last updated: first production witness — homograph provenance, market gate, retail provenance, Phase-B concurrency (B-k, B-l, B-m), from base `500d699`.*

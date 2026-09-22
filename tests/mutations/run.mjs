@@ -64,6 +64,14 @@ const SUITES = [
   // survive against either one alone.
   'tests/market-authority.test.mjs',
   'tests/market-guard-authority.test.mjs',
+  // THE FIRST PRODUCTION WITNESS. The homograph rule in relationOfLine is
+  // observed only here, and the harness proved the point the moment the rule
+  // was added: M65b-AMBIGUITY-CARVEOUT-WIDENED SURVIVED on its first run, not
+  // because FW-2a fails to catch it — it does — but because this file was not
+  // in this list. That is the third time this exact omission has been recorded
+  // in this comment block, which is why the harness refuses to score a mutant
+  // it cannot pin rather than quietly reporting 100%.
+  'tests/first-witness.test.mjs',
 ];
 
 const argv = process.argv.slice(2);

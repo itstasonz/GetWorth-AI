@@ -3756,6 +3756,19 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
       // rendered the `?? null` at BOTH persistence sites unreachable. null is
       // the honest value; the display site already gates on `> 0`.
       newRetailPrice: positivePriceOrNull(verification.new_retail_price_ils),
+      // ── PROVENANCE, NOT DECORATION ──────────────────────────────────────
+      //
+      // DEFAULTS TO THE UNTRUSTED READING. Absent a marker, this number came
+      // from `new_retail_price_ils` in the Stage-2 RESPONSE SCHEMA — a field
+      // the model fills from recollection, with `"new_retail_price_ils": 700`
+      // shown to it as the example. The production witness displayed a
+      // confident "New retail: ₪950" beside a withheld valuation, with no
+      // catalog row and no market research behind it.
+      //
+      // Only a path that read a GetWorth catalog row sets 'catalog'. Fail
+      // closed: a future third construction site that forgets to mark itself
+      // is reported as an estimate, which is the direction that cannot mislead.
+      newRetailSource: verification.new_retail_source === 'catalog' ? 'catalog' : 'model_estimate',
       // Retained for backward compatibility with existing readers. NOTHING
       // branches on it any more — provenance comes from validation.pricing_source
       // below, which is derived from what the pipeline actually observed.
@@ -6428,6 +6441,13 @@ export function buildFastPathVerification(recognition, fp, lang = 'he') {
     price_estimate_mid:  quote.price_estimate_mid,
     price_estimate_high: quote.price_estimate_high,
     new_retail_price_ils: positivePriceOrNull(quote._db_retail),
+    // WHERE THE RETAIL NUMBER CAME FROM, carried beside the number itself.
+    // `_db_retail` is a GetWorth catalog row, so this one is evidence. The
+    // Stage-2 field of the same name is a model's recollection, and by the time
+    // normalizeForUI reads `verification.new_retail_price_ils` the two are
+    // indistinguishable — which is how a recalled number reached a user's
+    // screen looking exactly like a researched one.
+    new_retail_source: 'catalog',
     // The price came from a catalog comparable, not from a model's estimate.
     price_method: 'comp_based',
     _pricing_meta: sealServerAuthority({
@@ -6614,6 +6634,8 @@ function buildFallback(recognition, lang, failReason = null, candidates = [], re
     // absent whenever no catalog row was resolved, which is the common case on
     // this path — so `|| 0` was the larger of the two zero producers.
     new_retail_price_ils: positivePriceOrNull(fp._db_retail),
+    // Catalog-backed on this path too: the VALUE is `_db_retail` or nothing.
+    new_retail_source: 'catalog',
     price_method: 'ai_estimate',
     // V5-2. SEALED AT THE MINT. This is the second of the two server paths that
     // may speak authoritatively about how a price was reached; `readServerAuthority`
