@@ -184,6 +184,43 @@ async function handleRequest(req) {
     return json({ error: 'bad_request', detail: 'at least one image is required' }, 400, corsHeaders);
   }
 
+  // ── STRUCTURAL SANITY, BEFORE FOUR PROVIDER CALLS ───────────────────────
+  //
+  // The pixel check lives on the client, where the pixels are: deciding
+  // "is this frame black" server-side would mean decoding a JPEG here, and a
+  // server-side brightness heuristic that refuses a user's genuinely dark
+  // photograph is a worse bug than the one it prevents.
+  //
+  // What CAN be answered from the bytes is whether this is an image at all.
+  // An installed PWA can serve a cached build for days, so a client that
+  // predates the pixel check will still send whatever it captured — and a
+  // truncated, empty or non-image payload must not cost four calls to
+  // discover. A 1×1 pixel is ~120 bytes; a photograph at any usable resolution
+  // is tens of thousands. 512 is comfortably below any real capture and
+  // comfortably above a stub.
+  const MIN_IMAGE_BYTES = 512;
+  const IMAGE_MAGIC = [
+    [0xFF, 0xD8, 0xFF],                                     // JPEG
+    [0x89, 0x50, 0x4E, 0x47],                               // PNG
+    [0x52, 0x49, 0x46, 0x46],                               // RIFF (WEBP)
+    [0x47, 0x49, 0x46, 0x38],                               // GIF8
+  ];
+  for (const [i, raw] of images.entries()) {
+    const b64 = raw.includes(',') ? raw.slice(raw.indexOf(',') + 1) : raw;
+    if (Math.round(b64.length * 0.75) < MIN_IMAGE_BYTES) {
+      return json({ error: 'bad_request', detail: `image ${i + 1} is too small to be a photograph` }, 400, corsHeaders);
+    }
+    let head;
+    try {
+      head = Uint8Array.from(atob(b64.slice(0, 32)), (c) => c.charCodeAt(0));
+    } catch {
+      return json({ error: 'bad_request', detail: `image ${i + 1} is not valid base64` }, 400, corsHeaders);
+    }
+    if (!IMAGE_MAGIC.some((sig) => sig.every((byte, k) => head[k] === byte))) {
+      return json({ error: 'bad_request', detail: `image ${i + 1} is not a recognised image format` }, 400, corsHeaders);
+    }
+  }
+
   const language = String(body?.language ?? 'en').slice(0, 8);
   const existingRecognition = (body?.existing_recognition && typeof body.existing_recognition === 'object')
     ? body.existing_recognition : null;

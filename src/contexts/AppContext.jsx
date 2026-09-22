@@ -292,6 +292,179 @@ function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// IMAGE INTEGRITY — the black-frame class
+//
+// THE PRODUCTION WITNESS. A phone photographed a Logitech mouse and the engine
+// received a completely black frame: Phase A returned category Other, no brand,
+// no model, empty OCR; Phase B reported "the photograph appears completely
+// black". Five provider calls and 27.8 seconds were spent on an image with no
+// pixels in it.
+//
+// WHERE IT TURNS BLACK, exactly:
+//
+//   canvas.width = w                 ← resizing RESETS the canvas to
+//                                      TRANSPARENT black
+//   ctx.drawImage(video, ...)        ← if this paints nothing, the canvas
+//                                      keeps those transparent pixels
+//   canvas.toDataURL('image/jpeg')   ← JPEG HAS NO ALPHA CHANNEL. Every
+//                                      transparent pixel is composited to
+//                                      OPAQUE BLACK. This is the transition.
+//
+// It is specified behaviour, not a browser bug, and every downstream check
+// passed it:
+//
+//   rawImg.length > 100        a black 1280×720 JPEG is several KB
+//   compressImage rawKB < 150  a solid-colour JPEG is far under 150KB, so
+//                              compression was SKIPPED — the one place that
+//                              would have decoded the pixels never ran
+//   validateImages (server)    magic bytes and size only; a black JPEG is a
+//                              structurally perfect JPEG
+//
+// So nothing between the camera and OpenAI ever looked at a pixel. That is the
+// defect being fixed here. WHY drawImage painted nothing on that particular
+// capture is a device-level race this code cannot observe from here — and it
+// does not need to, because the fix is to stop trusting that it worked.
+//
+// NO SLEEPS ARE ADDED. A timing patch would be a guess about a race nobody has
+// measured; this instead VERIFIES the outcome, which is correct whatever the
+// cause was.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * A short, stable fingerprint of a base64 payload, for tracing one image
+ * across the client→Phase A→Phase B boundaries.
+ *
+ * Never logs the payload — only 12 hex characters of its digest. SHA-256 needs
+ * a secure context (absent on a plain-http LAN dev server), so there is a
+ * non-cryptographic fallback: this identifies an image, it does not protect
+ * one, and a hash that is unavailable in development is a hash nobody uses.
+ */
+async function imageFingerprint(base64) {
+  const s = String(base64 || '');
+  if (!s) return 'empty';
+  try {
+    if (globalThis.crypto?.subtle) {
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
+      return [...new Uint8Array(buf)].slice(0, 6).map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+  } catch { /* fall through */ }
+  let h1 = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h1 ^= s.charCodeAt(i); h1 = Math.imul(h1, 0x01000193); }
+  return `fnv${(h1 >>> 0).toString(16).padStart(8, '0')}`;
+}
+
+/** Bytes a base64 payload decodes to, without decoding it. */
+const base64Bytes = (b64) => Math.round(String(b64 || '').length * 0.75);
+
+// ── THE THRESHOLDS, AND WHY THEY ARE A CONJUNCTION ──────────────────────────
+//
+// A legitimately dark photograph — a black mouse on a dark desk, a phone shot
+// in a dim room — has LOW MEAN LUMINANCE but real VARIANCE, because sensor
+// noise, edges and highlights survive. A dead frame has no variance at all.
+// Rejecting on darkness alone would refuse exactly the photographs this
+// marketplace is full of, so darkness alone is never enough.
+const BLACK_MEAN_LUMA_MAX = 10;   // 0..255
+const BLACK_STDDEV_MAX = 4;       // essentially flat
+const UNIFORM_STDDEV_MAX = 1.5;   // a single colour at ANY brightness
+
+/**
+ * Read the pixels of an already-painted canvas and say whether they contain
+ * anything. Returns null when the pixels cannot be read at all (a tainted
+ * canvas, a missing context) — which is NOT a rejection: an unreadable canvas
+ * is unknown, and unknown must not block a scan.
+ */
+function assessCanvasPixels(canvas) {
+  try {
+    const w = canvas?.width | 0;
+    const h = canvas?.height | 0;
+    if (!w || !h) return { ok: false, reason: 'zero_dimensions', width: w, height: h };
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return null;
+    // Sample a grid rather than every pixel: 4096 samples settle a mean and a
+    // standard deviation to far better than these thresholds need, and it is
+    // O(1) in image size rather than O(pixels) on a phone.
+    const STEP_X = Math.max(1, Math.floor(w / 64));
+    const STEP_Y = Math.max(1, Math.floor(h / 64));
+    let n = 0; let sum = 0; let sumSq = 0; let maxLuma = 0; let anyOpaque = false;
+    for (let y = 0; y < h; y += STEP_Y) {
+      const row = ctx.getImageData(0, y, w, 1).data;
+      for (let x = 0; x < w; x += STEP_X) {
+        const i = x * 4;
+        if (row[i + 3] > 8) anyOpaque = true;
+        // Rec. 601 luma, the cheap one; precision here is irrelevant.
+        const l = (row[i] * 299 + row[i + 1] * 587 + row[i + 2] * 114) / 1000;
+        sum += l; sumSq += l * l; n++;
+        if (l > maxLuma) maxLuma = l;
+      }
+    }
+    if (!n) return null;
+    const mean = sum / n;
+    const stdDev = Math.sqrt(Math.max(0, sumSq / n - mean * mean));
+    const stat = {
+      width: w, height: h, anyOpaque,
+      mean_luma: Math.round(mean * 10) / 10,
+      std_dev: Math.round(stdDev * 10) / 10,
+      max_luma: Math.round(maxLuma),
+    };
+    if (!anyOpaque) return { ...stat, ok: false, reason: 'fully_transparent' };
+    if (mean <= BLACK_MEAN_LUMA_MAX && stdDev <= BLACK_STDDEV_MAX) {
+      return { ...stat, ok: false, reason: 'black_frame' };
+    }
+    if (stdDev <= UNIFORM_STDDEV_MAX) return { ...stat, ok: false, reason: 'uniform_frame' };
+    return { ...stat, ok: true, reason: null };
+  } catch {
+    // A SecurityError on a tainted canvas lands here. Unknown, not bad.
+    return null;
+  }
+}
+
+/**
+ * Decode a data URL and assess its pixels.
+ *
+ * Used for the paths where the image never passed through a canvas we own —
+ * the file picker, an appended photo, a retry. Decodes at a bounded size
+ * because this runs on a phone and the verdict does not need full resolution.
+ *
+ * Resolves to null when the image cannot be inspected; only an explicit
+ * `ok: false` is a rejection.
+ */
+function assessImageDataUrl(dataUrl, { timeoutMs = 4000 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+      resolve({ ok: false, reason: 'not_an_image_data_url' }); return;
+    }
+    if (base64Bytes(dataUrl.split(',')[1]) < 512) {
+      resolve({ ok: false, reason: 'payload_too_small' }); return;
+    }
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const timer = setTimeout(() => done(null), timeoutMs);
+    const img = new Image();
+    img.onload = () => {
+      clearTimeout(timer);
+      try {
+        const w = img.naturalWidth || img.width;
+        const h = img.naturalHeight || img.height;
+        if (!w || !h) { done({ ok: false, reason: 'decoded_zero_dimensions', width: w, height: h }); return; }
+        const scale = Math.min(1, 256 / Math.max(w, h));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(w * scale));
+        c.height = Math.max(1, Math.round(h * scale));
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        if (!ctx) { done(null); return; }
+        ctx.drawImage(img, 0, 0, c.width, c.height);
+        const r = assessCanvasPixels(c);
+        done(r ? { ...r, source_width: w, source_height: h } : null);
+      } catch { done(null); }
+    };
+    // A decode failure is a REAL rejection: HEIC that the browser cannot read,
+    // a truncated upload, a renamed non-image.
+    img.onerror = () => { clearTimeout(timer); done({ ok: false, reason: 'decode_failed' }); };
+    img.src = dataUrl;
+  });
+}
+
 export function AppProvider({ children }) {
   // Core state
   const [lang, setLang] = useState('he');
@@ -2298,7 +2471,13 @@ export function AppProvider({ children }) {
 
     const t0 = performance.now();
     const mark = (label) => console.log(`[PhaseB] ${label}`);
-    mark(`start scan=${scanUuid.slice(0, 8)} images=${base64Images.length}`);
+    // THE SAME FINGERPRINT THE PHASE-A BOUNDARY PRINTED. If these two differ
+    // for one scan, the image changed between the two requests and the bug is
+    // in this client, not in either engine. If they match and the result is
+    // still black, the frame was already black when it left the camera.
+    const fp = await imageFingerprint(base64Images[base64Images.length - 1]);
+    mark(`start scan=${scanUuid.slice(0, 8)} images=${base64Images.length} `
+       + `fp=${fp} bytes=${base64Bytes(base64Images[base64Images.length - 1])}`);
 
     try {
       const token = await getFreshToken();
@@ -2536,6 +2715,39 @@ export function AppProvider({ children }) {
 
       if (abortCtrl.signal.aborted) return;
 
+      // ── Step 1b: IS THERE ANYTHING IN THIS PHOTOGRAPH? ────────────────────
+      //
+      // THE LAST POINT BEFORE MONEY IS SPENT. Everything above this line is
+      // free; `analyzeWithRetry` below costs an Anthropic call, and a
+      // successful Phase A then costs four more in Phase B. The production
+      // witness spent all five on a frame with no pixels in it.
+      //
+      // Placed here rather than at capture because this is the ONE choke point
+      // every entry path goes through — the in-app camera, the file picker, an
+      // appended photo, and a retry all arrive at this line. A check at the
+      // camera alone would leave the other three unguarded.
+      //
+      // FAILS OPEN ON UNKNOWN. `assessImageDataUrl` resolves null when it
+      // cannot inspect the image — a tainted canvas, a decode that timed out,
+      // a browser without the APIs. A scan is never blocked by our inability
+      // to look; only an explicit `ok: false` stops it. Refusing a real
+      // photograph is a worse failure than paying for a bad one.
+      const probeImage = Array.isArray(analyzeInput) ? analyzeInput[analyzeInput.length - 1] : analyzeInput;
+      const pixels = await assessImageDataUrl(probeImage);
+      if (pixels && pixels.ok === false) {
+        console.warn('[Image] REJECTED before any provider call:', pixels.reason, {
+          width: pixels.width, height: pixels.height,
+          mean_luma: pixels.mean_luma, std_dev: pixels.std_dev,
+        });
+        setPipelineState('analysis_error');
+        setPipelineError(lang === 'he'
+          ? 'צילום התמונה נכשל. אנא צלם שוב.'
+          : 'Photo capture failed. Please retake the photo.');
+        playSound('error');
+        setImages([]);          // never leave a dead frame on screen as the scan
+        return;                 // ZERO provider calls
+      }
+
       // ── Step 2: Analyze (identifying) ──
       setPipelineState('identifying');
 
@@ -2543,6 +2755,15 @@ export function AppProvider({ children }) {
       const pricingTimer = setTimeout(() => setPipelineState('pricing'), 2000);
 
       const tApi = performance.now();
+      // ONE FINGERPRINT PER BOUNDARY, so an image can be followed from the
+      // phone to the provider without any payload ever reaching a log.
+      if (DEV || PHASE_B_ENABLED) {
+        const b64 = String(probeImage).split(',')[1] || '';
+        imageFingerprint(b64).then((fp) => console.log(
+          `[Image] phase-a payload fp=${fp} bytes=${base64Bytes(b64)} `
+          + `px=${pixels ? `${pixels.source_width ?? pixels.width}x${pixels.source_height ?? pixels.height}` : 'unknown'} `
+          + `luma=${pixels?.mean_luma ?? '?'} sd=${pixels?.std_dev ?? '?'}`));
+      }
       const analysisResult = await analyzeWithRetry(analyzeInput, abortCtrl.signal, 0, null, hints);
       clearTimeout(pricingTimer);
 
@@ -2757,6 +2978,19 @@ export function AppProvider({ children }) {
     canvas.width = Math.round(video.videoWidth * addScale);
     canvas.height = Math.round(video.videoHeight * addScale);
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // Same check as the main capture, for the same reason: the append path
+    // reaches runPipeline too, and a second photo is exactly where a stale or
+    // suspended video element produces a blank frame.
+    const addPixels = assessCanvasPixels(canvas);
+    if (addPixels && addPixels.ok === false) {
+      console.warn('[Camera] added photo produced no image:', addPixels.reason, addPixels);
+      setShowFlash(false);
+      showToastMsg(lang === 'he'
+        ? 'צילום התמונה נכשל. אנא צלם שוב.'
+        : 'Photo capture failed. Please retake the photo.');
+      return;
+    }
 
     try {
       const rawImg = canvas.toDataURL('image/jpeg', 0.92);
@@ -3278,6 +3512,26 @@ export function AppProvider({ children }) {
     canvas.height = Math.round(video.videoHeight * capScale);
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // ── DID drawImage ACTUALLY PAINT ANYTHING? ──────────────────────────────
+    //
+    // Read back the canvas BEFORE toDataURL, because toDataURL is where the
+    // evidence is destroyed: JPEG has no alpha, so an unpainted (transparent)
+    // canvas is encoded as opaque black and becomes indistinguishable from a
+    // photograph taken with the lens covered.
+    //
+    // Free — the pixels are already here. Catching it at this line means the
+    // user is still holding the camera and can simply shoot again, instead of
+    // waiting 28 seconds to be told the photo was empty.
+    const capturedPixels = assessCanvasPixels(canvas);
+    if (capturedPixels && capturedPixels.ok === false) {
+      console.warn('[Camera] capture produced no image:', capturedPixels.reason, capturedPixels);
+      setShowFlash(false);
+      showToastMsg(lang === 'he'
+        ? 'צילום התמונה נכשל. אנא צלם שוב.'
+        : 'Photo capture failed. Please retake the photo.');
+      return;
+    }
 
     // Try toBlob first (better), fallback to toDataURL
     const processCapture = (rawImg) => {
