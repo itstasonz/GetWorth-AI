@@ -234,6 +234,10 @@ refusal and wants the same polarity inversion.
 | B-c | No quota/billing policy | §26 asks only for an accounting boundary in this phase; the call ledger provides it. A customer-facing charging policy is out of scope. |
 | B-d | Market mechanism is a single hosted tool | Isolated behind `marketResearch.search(query)` (§14), so replacing it is a one-file change — but it has never been exercised against live results. |
 | B-e | Latency is unmeasured against a real provider | All timings so far are mocked. §25 requires measured timing before any decision about a synchronous vs async contract. |
+| B-g | A **standalone** scan can never reach `READ_OFF_ITEM` | `corroborateSubject` reads only the Phase-A OCR block. An open-world photo scan has no Phase-A stage, so `ocrText` is null, corroboration is always `model_claim_only`, and the guard therefore sees `brandOk: false, modelOk: false` — `category_only`, grade LOW, `V-IDENTITY-GRADE-CAP` on every scan. It still prices. It just cannot tell a read model number from a guessed one. See below. |
+| B-h | `VERIFIED_MARKET` is unreachable without brand **and** model | `qualifyMarketEvidence` fails the set at `IDENTITY_INSUFFICIENT` before looking at a single listing. Correct for named products; it means a genuinely generic item — an unbranded shelf, a plain desk — can never be priced, however good its comparables. See below. |
+| B-i | The model id is unverified against a live account | `ENRICHMENT_MODEL_DEFAULT` is `gpt-5.6-luna`, never exercised against a real key. `scripts/phaseb-live-benchmark.mjs --preflight` answers this for free before the first billed call. |
+| B-j | `/api/enrich` had no runtime declaration | It was written against the Web Request shape with no `config`, so Vercel's DEFAULT Node runtime would have invoked it as `(req, res)` and `req.headers.get` would have thrown on the first line. Never caught because the endpoint had never been called over HTTP. **Closed**: `config = { maxDuration: 60 }` plus the same dual-mode adapter `api/analyze.js` uses. Node, not Edge — Edge is capped at 25s and market research alone is allowed 90s. |
 
 ---
 
@@ -252,6 +256,85 @@ refusal and wants the same polarity inversion.
 The rule this table encodes: **GetWorth learns from validated scans, not from
 everything OpenAI ever said.**
 
+
+---
+
+## Two findings the live runner surfaced, before any paid call
+
+Both were found by running the real pipeline end to end offline
+(`scripts/phaseb-live-benchmark.mjs --rehearse`), which is what that mode is
+for. Neither blocks the first physical scan. Both bound what its result means,
+so reading the benchmark without them would overstate what was proved.
+
+### B-g · Corroboration has no input in an open-world scan
+
+`corroborateSubject` asks one question — *was this name READ off the item, or
+merely asserted?* — and it answers it from the OCR block that `/api/analyze`
+produced. That is the right source: it is text a different system read, so a
+model claim checked against it is checked against something independent.
+
+A standalone photo scan has no `/api/analyze` stage. `ocrText` is null,
+`subject_text_permitted` is false, and the level is `model_claim_only` no matter
+how legible the model number in the photograph is. Downstream, in
+`applyGuard`:
+
+    identified = level === READ_OFF_ITEM || level === CATALOG   // always false
+    brandOk = identified && !!subject.brand                     // always false
+
+so the guard is told no brand and no model were established, returns
+`identity_tier: category_only`, caps the grade at LOW and raises
+`V-IDENTITY-GRADE-CAP` — on every open-world scan, including ones where the
+identification was perfect.
+
+**What must NOT be done about it.** The identity stage already returns
+`evidence: [{ type: 'visible_text', source: 'image' }]`. Feeding that back in as
+corroboration would be the model corroborating its own claim, which is H-5 and
+SCAN-022 re-entering through a new door. `validation.js` says so in its own
+header, and it is right.
+
+**The minimum honest fix** is a genuinely independent read of the same pixels
+— the Google Vision OCR path `api/analyze.js` already operates — run before
+`runPhaseB` and passed as `ocrText`. That restores the thing corroboration is
+supposed to compare against, rather than removing the comparison.
+
+Until then: the price is real, the tier is understated, and every scan carries a
+review flag. That is the fail-closed direction, and it is the correct one to be
+wrong in.
+
+**The PWA path does not have this problem, and that is the point of wiring it.**
+`/api/enrich` accepts `existing_ocr`, and the browser fills it from Phase A's
+`ocr.text_found` — text a different system read from the same photograph.
+So a phone scan gives corroboration the independent input it needs and can
+reach `READ_OFF_ITEM` and a real identity tier, where the terminal runner
+structurally cannot. The two surfaces will therefore disagree about tier on the
+same object, and that difference is B-g, not a bug in either one.
+
+### B-h · The open-world promise stops at generic objects
+
+`qualifyMarketEvidence` refuses at the set level when the subject has no brand
+and model with a distinctive token:
+
+    if (!vocab.brand || !vocab.model) → SET_FAILURE.IDENTITY_INSUFFICIENT
+
+The reasoning in `market-evidence.js` is sound and should not be casually
+relaxed: *"compatible with the subject" is not a question that HAS an answer
+when the subject is "an LG monitor"*. Three listings for an LG 27GP850 are
+evidence about a product we have no reason to believe is the photographed one.
+
+But the product vision includes the case this forecloses. A plain wooden shelf
+has no model number to establish, its comparables are genuinely comparable, and
+`GENERIC_COMPARABLE → local comparable search → value` is a stated requirement.
+Today that item reaches `IDENTIFIED_PENDING_MARKET` and no price, forever — not
+because the evidence was thin, but because the gate runs before the evidence is
+looked at.
+
+This is a design decision, not a defect, and it is deliberately **not** changed
+here: `VERIFIED_MARKET` is a trust boundary, and widening it to admit
+attribute-matched generic comparables needs its own compatibility predicate
+(dimensions, material, capacity) and its own review. Recorded so the first
+benchmark on a generic object is read as *this gate fired*, not *the engine
+failed to find a market*.
+
 ---
 
 ## Activation checklist
@@ -263,10 +346,14 @@ Production activation requires **all** of:
 - [ ] B-a: server-side scan-context reconstruction
 - [ ] B-b: verified FX, or international evidence permanently context-only
 - [ ] Live latency measured; synchronous vs async contract decided (§25)
+- [ ] B-g: an independent OCR read for standalone scans, or an accepted
+      permanent `category_only` cap on every open-world result
+- [ ] B-h: a compatibility predicate for generic comparables, or an accepted
+      permanent refusal to price unbranded objects
 - [x] An evidence class for researched market observations — `VERIFIED_MARKET`
 - [ ] B-f: seller-level diversity, or a documented acceptance that domain
       diversity is the ceiling
 - [ ] A promotion policy that does not exist yet
 - [ ] Explicit human authorization
 
-*Last updated: VERIFIED_MARKET authority, from base `500ddcd`.*
+*Last updated: PWA → Phase B development wiring (B-j), from base `fdc6da9`.*

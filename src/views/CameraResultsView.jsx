@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Sparkles, Scan, Search, TrendingUp, Plus, Share2, RefreshCw, Zap, ZapOff, AlertTriangle, ArrowLeft, Check, Eye, Tag, Info, Camera, Upload, ChevronRight, Shield, Loader2, Rocket, Box, Database, MoreVertical, Barcode, TrendingUp as TrendingUpIcon, X, Keyboard } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { camLog } from '../contexts/AppContext';
+import { camLog, PHASE_B_ENABLED } from '../contexts/AppContext';
+import { BUILD_SHA } from '../App';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { formatPrice, isSerialEligible, hasRealPrice } from '../lib/utils';
 import { recordObservation } from '../lib/observations';
@@ -14,7 +15,7 @@ import { recordObservation } from '../lib/observations';
 // Tailwind config) had already drifted — GLASS_BG shipped at 0.4 here and
 // 0.6 in CameraResultsView, so glass panels were different weights on
 // adjacent screens. Key names are unchanged, so no call site moved.
-import { STITCH } from '../lib/tokens';
+import { STITCH, T } from '../lib/tokens';
 
 // ═══════════════════════════════════════════════════════
 // POPULAR BRANDS PER CATEGORY — for quick-select chips
@@ -2472,6 +2473,137 @@ export function ResultsView() {
                     <p className="text-[10px] font-semibold text-red-400">⛔ SILENT FAIL — Stage 2 ran but price=0</p>
                   )}
                 </div>
+
+              </div>
+            </div>
+          </FadeIn>
+        );
+      })()}
+
+      {/* ═══ PHASE B PANEL — local development only ═══════════════════════════
+          Deliberately a SECTION IN THE EXISTING DEBUG SURFACE, not a second
+          results screen. Phase B is a read-only candidate: it may be read next
+          to the shipped answer, never in place of it, so nothing below writes
+          into the price card above and the numbers are labelled as candidates.
+
+          Gated on PHASE_B_ENABLED, the same build-time flag that decides
+          whether the browser asks for enrichment at all. When the flag is off
+          the constant folds to `false` and Rollup deletes this whole subtree,
+          so a normal production build contains none of it.
+
+          ONE SWITCH, ONE MEANING. `is_admin` is deliberately NOT an additional
+          condition: while VITE_PHASE_B_ENABLED is on, this build IS the Phase-B
+          test build, and a panel that only some accounts could see would make
+          "is the engine working" depend on who is looking. The consequence is
+          stated plainly: while the flag is on, every user of this build sees
+          this panel. Turning the flag off and redeploying removes it. */}
+      {PHASE_B_ENABLED && result._phaseB && (() => {
+        const pb = result._phaseB;
+        const ins = pb.instrumentation || {};
+        const subj = pb.identity_candidate?.subject || {};
+        const val = pb.valuation_candidate || {};
+        const gm = pb.validation?.market_evidence || null;
+        const me = pb.market_evidence || {};
+        const disabled = pb.status === 'DISABLED';
+        const ok = (b) => (b ? T.success : T.danger);
+        const row = (label, value, color) => (
+          <p className="text-xs break-all" style={{ color: color || T.textMuted }}>
+            <span className="text-slate-500">{label}: </span>{value ?? '—'}
+          </p>
+        );
+        return (
+          <FadeIn delay={450}>
+            <div className="rounded-container overflow-hidden" style={{ background: 'rgba(0,0,0,0.7)', border: `1px solid ${T.borderSubtle}` }}>
+              <div className="px-3 pt-2 pb-1 flex items-center gap-2" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.accent }}>Phase B · open world</span>
+                <span className="text-xs text-slate-500">
+                  {disabled ? pb.reason : `${ins.total_end_to_end_ms ?? '?'}ms e2e · ${ins.openai_calls ?? 0} OpenAI call(s)`}
+                </span>
+                {/* The commit this bundle came from. An installed PWA can serve a
+                    cached older build indefinitely, so "is my phone running the
+                    new code" needs an answer that is visible ON the phone. */}
+                <span className="text-xs text-slate-500 ml-auto">build {BUILD_SHA}</span>
+              </div>
+              <div className="px-3 py-2 space-y-2 font-mono">
+
+                {disabled ? (
+                  <p className="text-xs text-amber-400 break-all">
+                    Phase B is off. Set {pb.required} in .env.local and restart the dev server.
+                  </p>
+                ) : (
+                  <>
+                    {/* Identity */}
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-0.5">Identity candidate</p>
+                      {row('class', subj.object_class, T.success)}
+                      {row('brand', subj.brand, subj.brand ? T.warning : T.danger)}
+                      {row('model', subj.model, subj.model ? T.accent : T.danger)}
+                      {row('variant', subj.variant)}
+                      {row('tier', ins.identity_tier, T.accentDim)}
+                      {row('corroboration', ins.corroboration,
+                        ins.corroboration === 'read_off_item' ? T.success : T.warning)}
+                      {(pb.identity_candidate?.ambiguities || []).map((a, i) => (
+                        <p key={i} className="text-xs text-slate-400 italic break-all">{a}</p>
+                      ))}
+                    </div>
+
+                    {/* Research */}
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-0.5">Market research</p>
+                      {row('specificity', me.query?.specificity, T.info)}
+                      {(me.query?.search_terms || []).map((t, i) => (
+                        <p key={i} className="text-xs text-slate-400 break-all">q: {t}</p>
+                      ))}
+                      {row('discovered', me.counts?.returned)}
+                      {row('admitted / rejected',
+                        `${ins.evidence_admitted ?? 0} / ${ins.evidence_rejected ?? 0}`,
+                        (ins.evidence_admitted ?? 0) > 0 ? T.success : T.danger)}
+                      {row('distinct sources', ins.distinct_sources)}
+                      {(me.provenance?.sources || []).slice(0, 4).map((u, i) => (
+                        <p key={i} className="text-xs text-slate-500 break-all">· {u}</p>
+                      ))}
+                      {(gm?.set_failures || []).map((f, i) => (
+                        <p key={i} className="text-xs break-all" style={{ color: T.danger }}>set fail: {f}</p>
+                      ))}
+                    </div>
+
+                    {/* Valuation — a CANDIDATE. Never the shipped price. */}
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-0.5">Valuation candidate</p>
+                      <p className="text-xs font-bold" style={{ color: ok(ins.verified_market) }}>
+                        VERIFIED_MARKET {ins.verified_market ? 'GRANTED' : 'not granted'}
+                      </p>
+                      <p className="text-xs" style={{ color: val.status === 'PRICED' ? T.accent : T.warning }}>
+                        ₪{val.low ?? '—'} / ₪{val.mid ?? '—'} / ₪{val.high ?? '—'} ({val.sample_size ?? 0} comps)
+                      </p>
+                      {row('status', val.status)}
+                      {row('guard', ins.guard_action, ins.guard_action === 'accept' ? T.success : T.warning)}
+                      {(pb.validation?.violations || []).map((v, i) => (
+                        <p key={i} className="text-xs text-amber-400 break-all">
+                          ! {typeof v === 'string' ? v : (v.rule || JSON.stringify(v))}
+                        </p>
+                      ))}
+                      <p className="text-xs text-slate-500 italic">
+                        candidate only — not written anywhere, not the price above
+                      </p>
+                    </div>
+
+                    {/* Latency — the product target lives or dies here */}
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-0.5">Latency</p>
+                      {row('Phase A', `${ins.phase_a_ms}ms`)}
+                      {row('B recognition', `${ins.phase_b_recognition_ms}ms`)}
+                      {row('B condition', `${ins.phase_b_condition_ms}ms`)}
+                      {row('market query', `${ins.market_query_ms}ms`)}
+                      {row('market research', `${ins.market_research_ms}ms`, T.warning)}
+                      {row('qualification', `${ins.evidence_qualification_ms}ms`)}
+                      {row('valuation + guard', `${ins.valuation_ms}ms`)}
+                      <p className="text-xs font-bold" style={{ color: (ins.total_end_to_end_ms ?? 1e9) <= 8000 ? T.success : T.danger }}>
+                        TOTAL {ins.total_end_to_end_ms}ms {(ins.total_end_to_end_ms ?? 1e9) <= 8000 ? 'within target' : 'over 8s'}
+                      </p>
+                    </div>
+                  </>
+                )}
 
               </div>
             </div>

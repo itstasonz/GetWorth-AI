@@ -29,10 +29,32 @@
 import { verifyJWT } from './analyze.js';
 import {
   resolveEnrichmentMode, resolveEnrichmentModel, ENRICHMENT_MODE,
-  ENRICHMENT_FLAG, ENRICHMENT_KEY_ENV,
+  ENRICHMENT_FLAG, ENRICHMENT_KEY_ENV, isEnrichmentPermitted,
 } from './_lib/phaseb/config.js';
 import { runPhaseB, PHASE_B_STATUS } from './_lib/phaseb/pipeline.js';
 import { MARKET_MECHANISM } from './_lib/phaseb/market-research.js';
+
+// ── THE RUNTIME, WHICH THIS FILE WAS SILENTLY MISSING ──────────────────────
+//
+// This endpoint was written against the Web shape — `req.headers.get()`,
+// `await req.text()`, `return new Response(...)` — exactly like
+// api/confirm-identity.js and api/submit-candidate.js. Those two declare
+// `runtime: 'edge'`. This one declared nothing, so Vercel gave it the DEFAULT
+// Node runtime, which invokes `handler(req, res)` with a Node IncomingMessage.
+// `req.headers.get` is not a function on that object, so the first line of the
+// handler threw and every request would have been a 500. Phase B has never
+// been called over HTTP, which is why nothing caught it.
+//
+// THE FIX IS NODE, NOT EDGE, and the reason is latency. Edge is wall-capped at
+// 25s (api/analyze.js records this, which is why IT moved off Edge), and Phase
+// B's market_research stage alone is allowed 90s. Declaring `runtime: 'edge'`
+// here would have replaced a 500 with a truncation at 25s — a worse failure,
+// because it looks like a slow product rather than a misconfiguration.
+//
+// So: Node runtime, an explicit maxDuration, and the SAME dual-mode adapter
+// api/analyze.js already uses at the bottom of this file. The handler body is
+// untouched and still reads a Web Request; the adapter builds one.
+export const config = { maxDuration: 60 };
 
 const ALLOWED_ORIGINS = [
   'https://get-worth-ai.vercel.app',
@@ -62,7 +84,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const MAX_BODY_BYTES = 12 * 1024 * 1024;
 const MAX_IMAGES = 4;
 
-export default async function handler(req) {
+async function handleRequest(req) {
   const origin = req.headers.get('origin') || '';
   const corsHeaders = cors(origin);
 
@@ -122,6 +144,25 @@ export default async function handler(req) {
         required: mode === ENRICHMENT_MODE.DISABLED_FLAG
           ? `${ENRICHMENT_FLAG}=true`
           : `${ENRICHMENT_KEY_ENV} (server environment)`,
+        openai_called: false,
+      },
+    }, 200, corsHeaders);
+  }
+
+  // ── THE OPTIONAL ALLOWLIST ──────────────────────────────────────────────
+  //
+  // Checked AFTER the flag and, like it, before any adapter exists — so a user
+  // who is not enrolled costs exactly nothing. The response is the same
+  // DISABLED shape with its own reason rather than a 403: not being in a test
+  // cohort is not an authorisation failure, and a 403 here would tell a
+  // caller that the feature exists and that they were singled out.
+  if (!isEnrichmentPermitted(user.id, process.env)) {
+    return json({
+      scan_uuid: scanUuid,
+      phase_b: {
+        status: 'DISABLED',
+        reason: 'not_in_enrichment_allowlist',
+        required: `${ENRICHMENT_FLAG}=true and this user in the server allowlist`,
         openai_called: false,
       },
     }, 200, corsHeaders);
@@ -195,4 +236,86 @@ export default async function handler(req) {
       },
     },
   }, 200, corsHeaders);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// NODE SERVERLESS ADAPTER
+//
+// Deliberately the SAME shape as the adapter at the bottom of api/analyze.js,
+// rather than a cleverer one. Two adapters that differ by accident is the
+// "two implementations of one predicate" defect this repository has recorded
+// four times; two that are visibly identical can be compared by eye.
+//
+// It is dual-mode on purpose. `handler(req)` with a real Web Request still
+// works — that is how the existing endpoint tests call it, and how an Edge
+// deployment would — while `handler(req, res)` adapts the Node pair. Neither
+// path changes `handleRequest`, which keeps reading a Web Request and keeps
+// returning a Response.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** The body ceiling, enforced while reading rather than after. */
+const ADAPTER_BODY_MAX_BYTES = MAX_BODY_BYTES;
+
+function toWebRequest(nodeReq) {
+  let bodyPromise;
+  const readAll = async () => {
+    // Vercel's Node runtime may have parsed the body already.
+    if (nodeReq.body !== undefined && nodeReq.body !== null && nodeReq.body !== '') {
+      return typeof nodeReq.body === 'string' ? nodeReq.body : JSON.stringify(nodeReq.body);
+    }
+    // BOUNDED. Stop consuming the moment the ceiling is crossed, so an
+    // oversized or unterminated chunked body is never fully buffered — the
+    // handler's own `raw.length > MAX_BODY_BYTES` check runs after the fact and
+    // cannot protect memory on its own.
+    let total = 0;
+    const chunks = [];
+    for await (const chunk of nodeReq) {
+      total += chunk.length;
+      if (total > ADAPTER_BODY_MAX_BYTES) {
+        throw Object.assign(new Error('body too large'), { bodyTooLarge: true });
+      }
+      chunks.push(chunk);
+    }
+    return Buffer.concat(chunks).toString('utf8');
+  };
+  return {
+    method: nodeReq.method,
+    headers: {
+      get: (name) => {
+        const v = nodeReq.headers[String(name).toLowerCase()];
+        return Array.isArray(v) ? v.join(', ') : (v ?? null);
+      },
+    },
+    text: () => {
+      if (!bodyPromise) bodyPromise = readAll();   // memoize — read once
+      return bodyPromise;
+    },
+  };
+}
+
+async function writeWebResponse(nodeRes, webRes) {
+  nodeRes.statusCode = webRes.status;
+  webRes.headers.forEach((value, key) => nodeRes.setHeader(key, value));
+  const text = await webRes.text();
+  nodeRes.end(text);
+}
+
+export default async function handler(req, res) {
+  // Web path (single Request arg, no res): return the Response directly.
+  if (!res || typeof req?.headers?.get === 'function') {
+    return handleRequest(req);
+  }
+  try {
+    const webRes = await handleRequest(toWebRequest(req));
+    await writeWebResponse(res, webRes);
+  } catch (err) {
+    // A size failure is not an internal error, and saying so lets a client
+    // shrink its images instead of retrying the same payload forever.
+    const tooLarge = err?.bodyTooLarge === true;
+    console.error('[Enrich] adapter fatal:', tooLarge ? 'payload_too_large' : err?.message);
+    res.statusCode = tooLarge ? 413 : 500;
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({ error: tooLarge ? 'payload_too_large' : 'internal_error' }));
+  }
 }

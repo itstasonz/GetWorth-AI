@@ -88,3 +88,34 @@ export const STAGE_MAX_OUTPUT_TOKENS = Object.freeze({
   market_research: 6_000,
   condition: 1_500,
 });
+
+// ── AN OPTIONAL ALLOWLIST, FOR A CONTROLLED PRODUCTION TEST ─────────────────
+//
+// Turning Phase B on in production means every authenticated scan, by every
+// user, spends real OpenAI credit. The flag alone is all-or-nothing: on, and
+// the whole user base is enrolled in an experiment nobody asked them to join;
+// off, and the person running the test cannot test.
+//
+// This narrows it without adding a second authority. It is SERVER-SIDE, like
+// the flag, and it composes with it rather than replacing it — a user on this
+// list still gets nothing unless OPENAI_ENRICHMENT_ENABLED is exactly 'true'.
+//
+// UNSET MEANS EVERYONE, which is the pre-existing behaviour and therefore the
+// safe default for a value nobody has configured. A list that defaulted to
+// "nobody" would look identical to a broken flag from the outside: enabled,
+// authenticated, and silently returning DISABLED to every request.
+export const ENRICHMENT_ALLOWLIST_ENV = 'OPENAI_ENRICHMENT_USER_IDS';
+
+/**
+ * May THIS user's scan reach the provider?
+ *
+ * Reads `env` and a user id. Like `resolveEnrichmentMode`, it takes no request
+ * and no header, so there is no field a caller can send to enrol themselves.
+ */
+export function isEnrichmentPermitted(userId, env = process.env) {
+  const raw = String(env?.[ENRICHMENT_ALLOWLIST_ENV] ?? '').trim();
+  if (!raw) return true;                       // unset → unrestricted
+  if (!userId) return false;                   // restricted → an id is required
+  const allowed = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return allowed.includes(String(userId));
+}

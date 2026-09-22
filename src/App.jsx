@@ -10,6 +10,10 @@ import { formatPrice, getSellerBadgeStyle, normalizeIsraeliPhone } from './lib/u
 // FRONTEND-006: derived at build time (vite define) — never a stale hardcoded
 // string. Format: 'YYYY-MM-DD HH:MMZ' of the build.
 export const BUILD_VERSION = typeof __BUILD_TS__ !== 'undefined' ? __BUILD_TS__ : 'dev';
+// The commit this bundle was built from, so an installed PWA can be checked
+// against `git log` rather than guessed at from a timestamp. Read it on a
+// phone without devtools from the Phase B panel on any scan result.
+export const BUILD_SHA = typeof __BUILD_SHA__ !== 'undefined' ? __BUILD_SHA__ : 'local';
 
 // Views — eager (needed immediately or very commonly accessed)
 import HomeView from './views/HomeView';
@@ -280,8 +284,9 @@ function AppShell() {
 
   // Stamp version into console + window for devtools inspection
   useEffect(() => {
-    console.log(`%cGetWorth ${BUILD_VERSION}`, 'color:#6FEEE1;font-weight:bold;font-size:13px;');
+    console.log(`%cGetWorth ${BUILD_VERSION} (${BUILD_SHA})`, 'color:#6FEEE1;font-weight:bold;font-size:13px;');
     window.__GW_VERSION__ = BUILD_VERSION;
+    window.__GW_SHA__ = BUILD_SHA;
   }, []);
 
   // Prefetch the most-used lazy chunks during idle time so first tab tap is instant.

@@ -93,9 +93,32 @@ export async function runPhaseB({
   const stages = [];
   const t0 = now();
 
-  const record = (name, status, ms, detail = null) => {
+  // ── WHERE THE TIME WENT, NOT JUST HOW MUCH ───────────────────────────────
+  //
+  // §25 asks that every stage be MEASURED before anything is optimised, and a
+  // list of durations does not answer the question optimisation actually asks.
+  // Durations tell you a stage took 9s. They cannot tell you whether that 9s
+  // was ON THE CRITICAL PATH or overlapped with something else, and the whole
+  // of the 5–8s target is a question about the critical path.
+  //
+  // `at_ms` is the stage's start, relative to the top of the run. With a start
+  // and a duration per stage the wall-clock structure is reconstructible: a
+  // reader can see that four stages ran strictly end-to-end, compute what the
+  // total would be if the independent ones overlapped, and argue about a real
+  // number instead of an intuition. Today every `at_ms` equals the previous
+  // stage's end — which IS the finding, stated in data rather than in prose.
+  //
+  // Recorded as an offset, never as a wall-clock timestamp: an absolute time
+  // in a candidate is a fingerprint, and this object is returned to a caller.
+  const record = (name, status, ms, detail = null, at = null) => {
     timings[`${name}_ms`] = ms;
-    stages.push({ stage: name, status, duration_ms: ms, detail });
+    stages.push({
+      stage: name,
+      status,
+      duration_ms: ms,
+      at_ms: at === null ? Math.max(0, now() - t0 - ms) : at - t0,
+      detail,
+    });
   };
 
   // ── B1 + B2 · VISUAL UNDERSTANDING AND STRUCTURED IDENTITY ───────────────
@@ -120,10 +143,10 @@ export async function runPhaseB({
         fetchImpl,
       });
       identity = data;
-      record('openai_identity', 'ok', now() - s);
+      record('openai_identity', 'ok', now() - s, null, s);
     } catch (err) {
       identityFailure = classifyOpenAIFailure(err?.message);
-      record('openai_identity', 'failed', now() - s, identityFailure);
+      record('openai_identity', 'failed', now() - s, identityFailure, s);
     }
   }
 
@@ -170,9 +193,9 @@ export async function runPhaseB({
         fetchImpl,
       });
       condition = data;
-      record('condition', 'ok', now() - s);
+      record('condition', 'ok', now() - s, null, s);
     } catch (err) {
-      record('condition', 'failed', now() - s, classifyOpenAIFailure(err?.message));
+      record('condition', 'failed', now() - s, classifyOpenAIFailure(err?.message), s);
     }
   }
 
@@ -183,7 +206,7 @@ export async function runPhaseB({
     if (corroboration.level === CORROBORATION.CONTRADICTED) {
       // The block says this name belongs to a REFERENCED product. Searching it
       // would retrieve the host's market, so the stage is skipped with a reason.
-      record('market_query', 'skipped', now() - s, 'subject contradicted by block provenance');
+      record('market_query', 'skipped', now() - s, 'subject contradicted by block provenance', s);
     } else {
       try {
         const { data } = await callStructured({
@@ -201,9 +224,9 @@ export async function runPhaseB({
           fetchImpl,
         });
         query = data;
-        record('market_query', 'ok', now() - s);
+        record('market_query', 'ok', now() - s, null, s);
       } catch (err) {
-        record('market_query', 'failed', now() - s, classifyOpenAIFailure(err?.message));
+        record('market_query', 'failed', now() - s, classifyOpenAIFailure(err?.message), s);
       }
     }
   }
@@ -213,16 +236,16 @@ export async function runPhaseB({
   {
     const s = now();
     if (!query) {
-      record('market_research', 'skipped', now() - s, 'no search intent');
+      record('market_research', 'skipped', now() - s, 'no search intent', s);
     } else {
       const adapter = createMarketResearch({
         mechanism: marketMechanism, model: chosenModel, apiKey, ledger, language, fetchImpl, mockSearch,
       });
       try {
         research = await adapter.search(query);
-        record('market_research', 'ok', now() - s, research.mechanism);
+        record('market_research', 'ok', now() - s, research.mechanism, s);
       } catch (err) {
-        record('market_research', 'failed', now() - s, classifyOpenAIFailure(err?.message));
+        record('market_research', 'failed', now() - s, classifyOpenAIFailure(err?.message), s);
       }
     }
   }
@@ -232,7 +255,8 @@ export async function runPhaseB({
   const normalized = normalizeObservations(research?.observations ?? []);
   const { kept, dropped } = rejectOutliers(normalized.accepted);
   record('market_normalization', 'ok', now() - s6,
-    `${kept.length} accepted / ${normalized.rejected.length + dropped.length} rejected / ${normalized.context.length} context`);
+    `${kept.length} accepted / ${normalized.rejected.length + dropped.length} rejected / ${normalized.context.length} context`,
+    s6);
 
   const marketEvidence = {
     mechanism: research?.mechanism ?? MARKET_MECHANISM.UNAVAILABLE,
@@ -270,7 +294,8 @@ export async function runPhaseB({
   record('market_qualification', 'ok', now() - sq,
     market.qualified
       ? `qualified: ${market.counts.admitted} admitted across ${market.distinct_sources} sources`
-      : `unqualified: ${market.set_failures.join(', ') || 'no admissible observation'}`);
+      : `unqualified: ${market.set_failures.join(', ') || 'no admissible observation'}`,
+    sq);
 
   // ── B6 · DETERMINISTIC VALUATION CANDIDATE ───────────────────────────────
   //
@@ -294,7 +319,7 @@ export async function runPhaseB({
     identityConfidence: identity?.confidence?.overall ?? 0,
     specificity: query?.specificity ?? null,
   });
-  record('valuation', 'ok', now() - s7, valuation.status);
+  record('valuation', 'ok', now() - s7, valuation.status, s7);
 
   // ── B7 · GETWORTH GUARD ──────────────────────────────────────────────────
   const s8 = now();
@@ -305,7 +330,7 @@ export async function runPhaseB({
     recognition: existingRecognition,
     marketEvidence: market,
   });
-  record('guard', guard.applied ? 'ok' : 'skipped', now() - s8, guard.action ?? guard.reason);
+  record('guard', guard.applied ? 'ok' : 'skipped', now() - s8, guard.action ?? guard.reason, s8);
 
   // ── B8 · STATUS ──────────────────────────────────────────────────────────
   const hasSubject = !!(identity?.subject?.brand || identity?.subject?.object_class);

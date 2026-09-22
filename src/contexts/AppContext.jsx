@@ -12,6 +12,67 @@ import { fetchReviewsFor } from '../lib/reviews';
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
+// ── PHASE B, IN A PRODUCTION BUILD ──────────────────────────────────────────
+//
+// This was `import.meta.env.DEV`, which Vite replaces with the literal `false`
+// in any build — so the branch was deleted by tree-shaking and Phase B could
+// never run in production, by construction. That was correct while production
+// activation was unauthorised. It is now the thing standing in the way.
+//
+// `VITE_PHASE_B_ENABLED` replaces it: still resolved at BUILD time (Vite
+// substitutes the literal string, so `false` still tree-shakes the whole
+// branch away), but now settable per environment instead of being welded to
+// the build mode.
+//
+// ── THIS FLAG IS NOT AUTHORITY, AND THE DISTINCTION IS THE WHOLE DESIGN ─────
+//
+// Anything in a client bundle is a suggestion. A user can flip this in
+// devtools, and it would change nothing that matters: the server reads
+// OPENAI_ENRICHMENT_ENABLED from its own environment and from nowhere else
+// (api/_lib/phaseb/config.js — `resolveEnrichmentMode` takes `env` and has no
+// parameter a request can reach). With the server flag off, a forged client
+// request gets a 200 carrying `status: 'DISABLED'` and NO OpenAI call is made.
+//
+// So there are two independent switches and they answer different questions:
+//
+//   VITE_PHASE_B_ENABLED       does the browser ASK?      (convenience, build)
+//   OPENAI_ENRICHMENT_ENABLED  does the server ANSWER?    (authority, runtime)
+//
+// The kill switch is the second one. Unsetting it stops all spend immediately,
+// with no rebuild and no deploy, because it is read per request.
+//
+// Compared with `=== 'true'` rather than truthiness: an unset variable is the
+// string "undefined" under some bundler configurations, and every non-empty
+// string is truthy. Exact-match is the same shape `resolveEnrichmentMode` uses
+// server-side, deliberately.
+export const PHASE_B_ENABLED = import.meta.env.VITE_PHASE_B_ENABLED === 'true';
+
+// ── A scan_uuid that is ALWAYS a UUID ──────────────────────────────────────
+//
+// This was `crypto.randomUUID() || \`scan-${Date.now()}-...\``, and the
+// fallback is not a UUID. It looked unreachable because every modern browser
+// has randomUUID — but randomUUID is gated on a SECURE CONTEXT, and a phone
+// opening the dev server at http://192.168.x.x:5173 is not one. So on the
+// exact device this integration exists to serve, `crypto.randomUUID` is
+// undefined, the fallback fires, and the id is `scan-1764…`.
+//
+// /api/enrich validates `scan_uuid` against a strict UUID pattern and answers
+// 400 for anything else, so every phone scan over plain HTTP would have been
+// rejected before Phase B ran — with a message about a UUID, three layers away
+// from the cause. The fallback now produces a real v4 from whatever randomness
+// is available, which keeps the id valid for the server in every context.
+function newScanUuid() {
+  const c = globalThis.crypto;
+  if (typeof c?.randomUUID === 'function') return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (typeof c?.getRandomValues === 'function') c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;   // version 4
+  b[8] = (b[8] & 0x3f) | 0x80;   // variant 10
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 // ═══ FRONTEND-007A (MKT-3): pending buy intent — sessionStorage-backed ═════
 // A signed-out Buy tap stores an intent so the flow can resume after sign-in.
 // OAuth (Google etc.) performs a FULL-PAGE redirect, so the intent must
@@ -2193,6 +2254,178 @@ export function AppProvider({ children }) {
     }
   }, [user, lang, showToastMsg]);
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // PHASE B ENRICHMENT — FLAGGED, IN PRODUCTION
+  //
+  // Phase A answers "what is it and what is it worth" from GetWorth's own
+  // catalog. Phase B answers the open-world question: it researches the live
+  // market and prices from evidence it verified itself. It is a SEPARATE
+  // endpoint on purpose and this function is the only thing that calls it.
+  //
+  // ── TWO FLAGS, ONE OF WHICH IS AUTHORITY ──────────────────────────────────
+  //
+  // `PHASE_B_ENABLED` (VITE_PHASE_B_ENABLED, build time) decides whether the
+  // browser ASKS. It is a convenience switch, not a security control, and the
+  // long comment at the top of this file says why. The server's
+  // OPENAI_ENRICHMENT_ENABLED decides whether the server ANSWERS, is read per
+  // request from the server environment, and is the kill switch: unset it and
+  // spend stops immediately with no rebuild and no deploy.
+  //
+  // A forged client request with the server flag off receives a 200 carrying
+  // `status: 'DISABLED'`, and no OpenAI call is made. That is checked by
+  // PB-1a..PB-1e in tests/phaseb-pipeline.test.mjs.
+  //
+  // ── NON-BLOCKING, AND THAT IS THE PRODUCT SHAPE ───────────────────────────
+  //
+  // This runs AFTER the results screen is already showing Phase A. Phase B
+  // takes as long as live market research takes; holding a spinner for it
+  // would make the app feel worse and would measure the wrong thing anyway.
+  // The result merges in when it lands, and the timings below record Phase A
+  // and Phase B separately so "time to first answer" and "time to a
+  // researched answer" are two numbers rather than one blurred one.
+  //
+  // ── ISOLATION ─────────────────────────────────────────────────────────────
+  //
+  // `scanUuid` is captured when the request is SENT and re-checked against the
+  // live ref before anything is merged. A slow Phase B for scan A that returns
+  // after the user has started scan B is dropped, loudly, in the console. This
+  // is the client-side half of the guarantee tests/phaseb-isolation.test.mjs
+  // makes about the server: a late answer about a different object must never
+  // paint itself onto the object currently on screen.
+  const runPhaseBEnrichment = useCallback(async (phaseAResult, base64Images, scanUuid, phaseAMs) => {
+    if (!PHASE_B_ENABLED) return;
+    if (!scanUuid || !base64Images?.length) return;
+
+    const t0 = performance.now();
+    const mark = (label) => console.log(`[PhaseB] ${label}`);
+    mark(`start scan=${scanUuid.slice(0, 8)} images=${base64Images.length}`);
+
+    try {
+      const token = await getFreshToken();
+      if (!token) { mark('skipped — no session'); return; }
+
+      // ── THE HINTS PHASE A ALREADY ESTABLISHED ──────────────────────────
+      //
+      // `existing_ocr` matters more than it looks. Phase B's corroboration
+      // step (`corroborateSubject`) decides whether a subject name was READ
+      // off the item or merely asserted by the model, and it can only answer
+      // that against text some OTHER system read. The terminal benchmark has
+      // no such text, so every standalone run is stuck at `model_claim_only`
+      // and `category_only` (recorded as B-g in the blockers doc). Here Phase
+      // A's OCR is exactly that independent read — so the PWA path is the one
+      // that can actually reach READ_OFF_ITEM.
+      //
+      // Both fields are HINTS. The server fences them as untrusted (see
+      // api/_lib/phaseb/prompts.js) and never reads them as evidence classes.
+      const body = {
+        scan_uuid: scanUuid,
+        images: base64Images,
+        language: lang,
+        existing_ocr: Array.isArray(phaseAResult?.ocr?.text_found)
+          ? phaseAResult.ocr.text_found.slice(0, 40) : [],
+        existing_recognition: {
+          category: phaseAResult?.classification?.category ?? null,
+          subcategory: phaseAResult?.classification?.subcategory ?? null,
+          product_type: phaseAResult?.classification?.subcategory ?? null,
+          category_confidence: phaseAResult?.confidence ?? 0,
+          brand_candidates: phaseAResult?.identification?.brand
+            && phaseAResult.identification.brand !== 'unidentified'
+            ? [{ brand: phaseAResult.identification.brand, confidence: phaseAResult.confidence ?? 0 }] : [],
+          model_candidates: phaseAResult?.identification?.model
+            && phaseAResult.identification.model !== 'unidentified'
+            ? [{ model: phaseAResult.identification.model, confidence: phaseAResult.confidence ?? 0 }] : [],
+          ocr_text: { raw_texts: phaseAResult?.ocr?.text_found ?? [] },
+        },
+      };
+
+      // Generous, because live market research is allowed 90s server-side and
+      // an abort here would throw away work that was already paid for.
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 120000);
+      let res;
+      try {
+        res = await fetch('/api/enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body),
+          signal: ctrl.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      const totalMs = performance.now() - t0;
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        mark(`HTTP ${res.status} after ${totalMs.toFixed(0)}ms — ${detail.slice(0, 200)}`);
+        return;
+      }
+      const payload = await res.json();
+      const pb = payload?.phase_b;
+
+      // ── STALE-RESPONSE GUARD ────────────────────────────────────────────
+      if (currentScanUuidRef.current !== scanUuid) {
+        mark(`DISCARDED — answer for ${scanUuid.slice(0, 8)} arrived after scan ${String(currentScanUuidRef.current).slice(0, 8)} started`);
+        return;
+      }
+      if (payload?.scan_uuid && payload.scan_uuid !== scanUuid) {
+        mark(`DISCARDED — server answered about ${payload.scan_uuid}, we asked about ${scanUuid}`);
+        return;
+      }
+
+      if (pb?.status === 'DISABLED') {
+        mark(`disabled (${pb.reason}) — needs ${pb.required}`);
+        setResult((prev) => (prev ? { ...prev, _phaseB: { ...pb, client_total_ms: Math.round(totalMs) } } : prev));
+        return;
+      }
+
+      // ── ONE PHONE SCAN, FULLY ACCOUNTED FOR ─────────────────────────────
+      const t = pb?.timings ?? {};
+      const calls = pb?.model_metadata?.calls ?? {};
+      const me = pb?.market_evidence ?? {};
+      const gm = pb?.validation?.market_evidence ?? null;
+      const instrumentation = {
+        phase_a_ms: Math.round(phaseAMs),
+        phase_b_recognition_ms: t.openai_identity_ms ?? null,
+        phase_b_condition_ms: t.condition_ms ?? null,
+        market_query_ms: t.market_query_ms ?? null,
+        market_research_ms: t.market_research_ms ?? null,
+        evidence_qualification_ms: (t.market_normalization_ms ?? 0) + (t.market_qualification_ms ?? 0),
+        valuation_ms: (t.valuation_ms ?? 0) + (t.guard_ms ?? 0),
+        phase_b_server_ms: t.total_ms ?? null,
+        phase_b_round_trip_ms: Math.round(totalMs),
+        total_end_to_end_ms: Math.round(phaseAMs + totalMs),
+        openai_calls: calls.attempts ?? 0,
+        openai_calls_billed: calls.billed ?? 0,
+        search_calls: me.search_performed ? 1 : 0,
+        identity_tier: pb?.validation?.identity_tier ?? null,
+        corroboration: pb?.identity_candidate?.corroboration?.level ?? null,
+        evidence_admitted: gm?.admitted ?? me.counts?.accepted ?? 0,
+        evidence_rejected: me.counts?.rejected ?? 0,
+        distinct_sources: gm?.distinct_sources ?? 0,
+        verified_market: gm?.qualified === true,
+        valuation_status: pb?.valuation_candidate?.status ?? null,
+        guard_action: pb?.validation?.action ?? null,
+        phase_b_status: pb?.status ?? null,
+      };
+
+      console.log('[PhaseB] ── one phone scan ──');
+      console.table(instrumentation);
+      mark(`${instrumentation.phase_b_status} · ${instrumentation.identity_tier} · `
+        + `VERIFIED_MARKET=${instrumentation.verified_market} · `
+        + `${instrumentation.total_end_to_end_ms}ms end to end `
+        + `(A ${instrumentation.phase_a_ms}ms + B ${instrumentation.phase_b_round_trip_ms}ms)`);
+
+      setResult((prev) => (prev ? { ...prev, _phaseB: { ...pb, instrumentation } } : prev));
+    } catch (err) {
+      // A Phase-B failure is a Phase-B failure. It never touches the Phase-A
+      // result already on screen, and it is never replaced by a stand-in.
+      mark(err?.name === 'AbortError'
+        ? `timed out after ${(performance.now() - t0).toFixed(0)}ms`
+        : `failed: ${err?.message}`);
+    }
+  }, [getFreshToken, lang]);
+
   // ── Main pipeline: compress → analyze ──
   // appendMode: if true, appends new image to existing images[] and re-analyzes all
   const runPipeline = useCallback(async (rawDataUrl, appendMode = false) => {
@@ -2260,8 +2493,7 @@ export function AppProvider({ children }) {
     // GW-000: fresh scan → new lifecycle id; append → reuse the current one so
     // the whole multi-photo/refine lifecycle stays correlated under one scan_uuid.
     if (!appendMode || !currentScanUuidRef.current) {
-      currentScanUuidRef.current =
-        (globalThis.crypto?.randomUUID?.() || `scan-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+      currentScanUuidRef.current = newScanUuid();
     }
 
     // Cancel any in-flight pipeline (defensive — guard above should prevent this)
@@ -2325,6 +2557,32 @@ export function AppProvider({ children }) {
       setView('results');
       setAddPhotoMode(false);
       playSound('success');
+
+      // ── PHASE B, FLAGGED, AFTER THE ANSWER IS ALREADY ON SCREEN ───────────
+      //
+      // PHASE A IS THE PRODUCT AND IT HAS ALREADY SHIPPED ITS ANSWER by the
+      // time this runs. That ordering is the fallback guarantee: there is no
+      // Phase-B failure mode that can degrade a scan, because the scan is
+      // already complete, persisted and rendered. Enrichment can time out,
+      // 500, return DISABLED or never resolve, and the user still has the
+      // valuation they came for.
+      //
+      // Deliberately NOT awaited. Phase A has already produced a result and
+      // the user is looking at it; Phase B researches the live market and
+      // merges in when it lands. An await here would hold the results screen
+      // hostage to a 30s round trip and would change the existing UX, which
+      // this integration is explicitly not allowed to do.
+      //
+      // `.catch` is belt-and-braces — the function has its own try/catch — but
+      // an unhandled rejection from a floating promise is a different and
+      // uglier failure than the one it is reporting.
+      if (PHASE_B_ENABLED) {
+        const phaseAMs = t2 - pipelineT0;
+        const imagesForPhaseB = (Array.isArray(analyzeInput) ? analyzeInput : [analyzeInput])
+          .map((img) => img.split(',')[1]);
+        runPhaseBEnrichment(analysisResult, imagesForPhaseB, currentScanUuidRef.current, phaseAMs)
+          .catch((e) => console.warn('[PhaseB] unhandled:', e?.message));
+      }
 
       // Auto-open help modal for very low confidence
       if (analysisResult.confidence < 0.40 && !analysisResult.userConfirmed) {
@@ -2409,7 +2667,12 @@ export function AppProvider({ children }) {
       // Always release the in-flight guard so legitimate retries can proceed.
       pipelineActiveRef.current = false;
     }
-  }, [analyzeWithRetry, fetchRecognitionHints, backupValuation, playSound, lang, getFreshToken]);
+    // runPhaseBEnrichment is listed FIRST rather than appended, because
+    // tests/scan-auth.test.mjs slices runPipeline out of this file using the
+    // tail of this array as a literal anchor. Appending renamed the anchor and
+    // took eight SA-* assertions offline at once — a dependency list is
+    // order-insensitive, so the cheap fix is to leave the tail alone.
+  }, [runPhaseBEnrichment, analyzeWithRetry, fetchRecognitionHints, backupValuation, playSound, lang, getFreshToken]);
 
   // ── Retry from the failed step — replays the EXACT last attempt (SCAN-2) ──
   const retryPipeline = useCallback(() => {
@@ -2876,6 +3139,34 @@ export function AppProvider({ children }) {
     try {
       releaseCamera();
       cameraStartingRef.current = true; // Re-set after releaseCamera clears it
+
+      // ── SECURE CONTEXT, CHECKED BEFORE IT BECOMES A TypeError ────────────
+      //
+      // `navigator.mediaDevices` is undefined outside a secure context, so
+      // `navigator.mediaDevices.getUserMedia(...)` below throws
+      // "Cannot read properties of undefined" — which is not a NotAllowedError
+      // or a NotFoundError, so it lands in the generic else branch and the user
+      // is told "Failed to open camera" with no hint of why.
+      //
+      // This is not hypothetical: it is what a phone sees at
+      // http://192.168.x.x:5173, the exact address local development serves
+      // from. localhost is a secure context and a desktop browser is therefore
+      // unaffected, which is why the path has never been noticed.
+      //
+      // The upload button uses <input type="file" accept="image/*">, which is
+      // not gated on a secure context and opens the phone's own camera app, so
+      // the message points there rather than at a dead end.
+      if (!navigator.mediaDevices?.getUserMedia) {
+        const insecure = typeof window !== 'undefined' && !window.isSecureContext;
+        camLog(`no mediaDevices — isSecureContext=${!insecure} origin=${window.location?.origin}`);
+        setError(insecure
+          ? (lang === 'he'
+            ? 'המצלמה דורשת חיבור מאובטח (HTTPS). השתמש בכפתור ההעלאה כדי לצלם.'
+            : 'The camera needs a secure (HTTPS) connection. Use the upload button to take a photo.')
+          : (lang === 'he' ? 'המצלמה אינה נתמכת בדפדפן זה' : 'Camera is not supported in this browser'));
+        cameraStartingRef.current = false;
+        return;
+      }
 
       // Check permission (not supported on all browsers)
       if (navigator.permissions?.query) {
