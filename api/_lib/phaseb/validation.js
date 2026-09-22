@@ -187,6 +187,10 @@ export function applyGuard({
     // Null unless qualification minted one. §3: OpenAI cannot put a value here
     // that means anything — the guard reads through the mint, not the field.
     market_evidence: market.token,
+    // The class-level token travels in its OWN field, read by its own
+    // predicate. A generic object's comparable set never arrives where
+    // product-level evidence is expected.
+    comparable_evidence: market.comparable_token ?? null,
   };
 
   let envelope = null;
@@ -223,6 +227,8 @@ export function applyGuard({
     evidence: [...evidence],
     market_evidence: {
       qualified: market.qualified,
+      comparable_qualified: market.comparable_qualified === true,
+      evidence_class: market.evidence_class ?? null,
       admitted: market.counts.admitted,
       considered: market.counts.considered,
       distinct_sources: market.distinct_sources,

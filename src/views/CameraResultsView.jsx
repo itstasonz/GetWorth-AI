@@ -764,9 +764,10 @@ function getPricingEvidence(pricingConfidence, t, marketEvidence) {
 // of those came from a model's estimate rather than from the market search the
 // same screen was reporting on.
 export const PRICE_BASIS = Object.freeze({
-  VERIFIED_MARKET: 'verified_market',   // qualified, diverse, priced comparables
-  MARKET_ESTIMATE: 'market_estimate',   // a GetWorth catalog/comparable anchor
-  AI_ESTIMATE: 'ai_estimate',           // a model's number, corroborated by nothing
+  VERIFIED_MARKET: 'verified_market',       // this PRODUCT's used market
+  COMPARABLE_MARKET: 'comparable_market',   // this KIND of object's used market
+  MARKET_ESTIMATE: 'market_estimate',       // a GetWorth catalog anchor
+  AI_ESTIMATE: 'ai_estimate',               // a model's number, corroborated by nothing
   NONE: 'none',
 });
 
@@ -774,6 +775,9 @@ export function resolvePriceBasis(result) {
   if (!hasRealPrice(result?.marketValue)) return PRICE_BASIS.NONE;
   const gm = result?._phaseB?.validation?.market_evidence;
   if (gm?.qualified === true) return PRICE_BASIS.VERIFIED_MARKET;
+  // A generic object's comparables are real market evidence and are NOT the
+  // same claim. The user is told which one they are looking at.
+  if (gm?.comparable_qualified === true) return PRICE_BASIS.COMPARABLE_MARKET;
   const src = result?.marketValue?.validation?.pricing_source;
   if (src === 'stage2_comp_anchored' || src === 'pre_catalog') return PRICE_BASIS.MARKET_ESTIMATE;
   return PRICE_BASIS.AI_ESTIMATE;
@@ -1432,6 +1436,7 @@ export function ResultsView() {
             // and the raw-hex budget in scripts/design-lint.mjs does not grow.
             const copy = {
               [PRICE_BASIS.VERIFIED_MARKET]: { text: t.basisVerifiedMarket, color: T.success },
+              [PRICE_BASIS.COMPARABLE_MARKET]: { text: t.basisComparableMarket, color: T.success },
               [PRICE_BASIS.MARKET_ESTIMATE]: { text: t.basisMarketEstimate, color: T.warning },
               [PRICE_BASIS.AI_ESTIMATE]: { text: t.basisAiEstimate, color: T.warning },
             }[basis];

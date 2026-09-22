@@ -271,8 +271,21 @@ describe('MA-5 market evidence never repairs identity', () => {
       subject: { brand: 'LG', model: null, object_class: 'monitor', category_candidate: 'Electronics' },
     });
     assert.equal(r.qualified, false);
-    assert.deepEqual(r.set_failures, [SET_FAILURE.IDENTITY_INSUFFICIENT]);
+    assert.ok(r.set_failures.includes(SET_FAILURE.IDENTITY_INSUFFICIENT),
+      `the original reason must survive: ${r.set_failures.join(',')}`);
     assert.equal(r.token, null);
+    // AND THE GENERIC PATH MUST NOT CATCH IT EITHER. When a class-level
+    // comparable path was added for objects with no brand, this became the
+    // case that has to keep falling between the two: a BRAND is a promise of
+    // specificity that has not been kept, and it is more dangerous than no
+    // brand at all. A `deepEqual` here used to pin the exact failure list,
+    // which broke the moment a MORE SPECIFIC reason was added beside the
+    // original — so the assertion now pins the PROPERTY (nothing is granted)
+    // rather than the diagnostic wording.
+    assert.equal(r.comparable_qualified, false,
+      'a branded subject with no model must not fall back to class-level comparables');
+    assert.equal(r.comparable_token, null);
+    assert.ok(r.set_failures.includes(SET_FAILURE.BRANDED_WITHOUT_MODEL));
   });
 
   test('MA-5b a brand with no distinctive model token cannot qualify', () => {

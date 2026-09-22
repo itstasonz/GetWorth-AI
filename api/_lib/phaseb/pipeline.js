@@ -361,17 +361,35 @@ export async function runPhaseB({
   // wrong or is bypassed cannot make this permissive. Authority requires both
   // readings to agree, and only this one mints anything.
   const sq = now();
+  // ── A DISPUTED MODEL IS NOT A SUBJECT FOR QUALIFICATION EITHER ──────────
+  //
+  // Capping the QUERY was not enough, and the three-scenario trace proved it:
+  // the search correctly dropped to brand + class, but qualification still
+  // judged whatever came back against the disputed model — so listings naming
+  // it were admitted at PRODUCT level and priced as though the model were
+  // settled. The cap moved the question and left the answer where it was.
+  //
+  // With the model withheld, the subject is brand-without-model, which the
+  // set-level gate already refuses for the reason it has always refused it:
+  // listings for one specific model of a brand are not evidence about an
+  // unknown model of that brand. The honest outcome for a disputed identity is
+  // INSUFFICIENT_MARKET_EVIDENCE, not a confident number about whichever
+  // family happened to be searched.
+  const qualificationSubject = reconciliation.conflict
+    ? { ...(identity?.subject || {}), model: null, variant: null }
+    : (identity?.subject || {});
   const market = qualifyMarketEvidence({
     observations: research?.observations ?? [],
-    subject: identity?.subject || {},
+    subject: qualificationSubject,
   });
   // STATUS 'ok' EVEN WHEN NOTHING QUALIFIED, and the distinction lives in the
   // detail. The stage vocabulary is closed — ok / failed / skipped — because a
   // status that grows a new word per stage is how a consumer's switch acquires
   // a silent fall-through. "Ran, and granted nothing" is a successful stage.
   record('market_qualification', 'ok', now() - sq,
-    market.qualified
-      ? `qualified: ${market.counts.admitted} admitted across ${market.distinct_sources} sources`
+    (market.qualified || market.comparable_qualified)
+      ? `${market.qualified ? 'VERIFIED_MARKET' : 'VERIFIED_COMPARABLE'}: `
+        + `${market.counts.admitted} admitted across ${market.distinct_sources} sources`
       : `unqualified: ${market.set_failures.join(', ') || 'no admissible observation'}`,
     sq);
 
@@ -390,7 +408,14 @@ export async function runPhaseB({
   // distinguishable from "no market found". That candidate is simply never
   // granted anything.
   const s7 = now();
-  const priceFrom = market.qualified ? rejectOutliers(market.token.observations).kept : kept;
+  //
+  // A CLASS-LEVEL SET PRICES FROM ITS OWN ADMITTED LISTINGS too, for exactly
+  // the reason the product-level one does: the sentence "these N observations
+  // imply this price" has to be true about the same N observations that earned
+  // the authority.
+  const grantingSet = market.qualified ? market.token
+    : (market.comparable_qualified ? market.comparable_token : null);
+  const priceFrom = grantingSet ? rejectOutliers(grantingSet.observations).kept : kept;
   const valuation = computeValuationCandidate({
     accepted: priceFrom,
     condition: condition?.grade ?? null,

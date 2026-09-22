@@ -844,16 +844,24 @@ export const MUTANTS = [
     target: "market",
     invariant: "§6 one advert repeated cannot become a quorum.",
     kills: ["MA-4a", "MA-4b"],
-    find: "    if (keys.some((k) => seen.has(k))) { reject(o, DISQUALIFIER.DUPLICATE); continue; }",
-    replace: "    if (false) { reject(o, DISQUALIFIER.DUPLICATE); continue; }",
+    // RE-PINNED onto the shared key builder. The rule used to live twice, once
+    // per qualification path, and this mutant matched both — so the harness
+    // refused to score it, correctly: a mutant pinned to one of two identical
+    // lines proves nothing about the other copy. The duplication was removed
+    // rather than the mutant disambiguated.
+    //
+    // Making the reference key unique per call defeats every one of the three
+    // keys at once, which is what "dedupe skipped" has to mean.
+    find: "  if (keys.some((k) => seen.has(k))) return false;",
+    replace: "  if (false) return false;",
   },
   {
     id: "M78-DEDUPE-LOSES-THE-RETITLE-KEY",
     target: "market",
     invariant: "§15 the same listing under a different title is still the same listing.",
     kills: ["MA-4b"],
-    find: "      `p:${domain}|${ils}`,",
-    replace: "      `p:${domain}|${reference}|${ils}`,",
+    find: "    `p:${domain}|${ils}`,",
+    replace: "    `p:${domain}|${reference}|${ils}`,",
   },
   {
     id: "M79-IDENTITY-COMPATIBILITY-SKIPPED",
@@ -884,8 +892,8 @@ export const MUTANTS = [
     target: "market",
     invariant: "§7 market authority never repairs an identity below product level.",
     kills: ["MA-5a"],
-    find: "  if (!vocab.brand || !vocab.model) setFailures.push(SET_FAILURE.IDENTITY_INSUFFICIENT);",
-    replace: "  if (false) setFailures.push(SET_FAILURE.IDENTITY_INSUFFICIENT);",
+    find: "  const productLevel = !!(vocab.brand && vocab.model);",
+    replace: "  const productLevel = true;",
   },
   {
     id: "M83-VARIANT-COMPATIBILITY-SKIPPED",
@@ -924,16 +932,16 @@ export const MUTANTS = [
     target: "market",
     invariant: "§9 currency ambiguity is a rejection, never a default.",
     kills: ["MA-8c"],
-    find: "    if (!currency) { reject(o, DISQUALIFIER.NO_CURRENCY); continue; }",
-    replace: "    if (false) { reject(o, DISQUALIFIER.NO_CURRENCY); continue; }",
+    find: "  if (!currency) return { reason: DISQUALIFIER.NO_CURRENCY };",
+    replace: "  if (false) return { reason: DISQUALIFIER.NO_CURRENCY };",
   },
   {
     id: "M88-FOREIGN-CURRENCY-PASSES-THROUGH",
     target: "market",
     invariant: "§9 a foreign amount must not become shekels by way of a missing branch.",
     kills: ["MA-8a", "MA-8b"],
-    find: "      if (!proof) { reject(o, DISQUALIFIER.UNVERIFIED_FX); continue; }",
-    replace: "      if (!proof) { ils = price; }",
+    find: "    if (!proof) return { reason: DISQUALIFIER.UNVERIFIED_FX };",
+    replace: "    if (!proof) { ils = price; }",
   },
   {
     id: "M89-FX-PROOF-ARITHMETIC-UNCHECKED",
@@ -948,8 +956,8 @@ export const MUTANTS = [
     target: "market",
     invariant: "§16 a listing that claims authority is an injection attempt, not evidence.",
     kills: ["MA-1c"],
-    find: "    if (assertsAuthority(o)) { reject(o, DISQUALIFIER.ASSERTED_AUTHORITY); continue; }",
-    replace: "    if (false) { reject(o, DISQUALIFIER.ASSERTED_AUTHORITY); continue; }",
+    find: "  if (assertsAuthority(o)) return { reason: DISQUALIFIER.ASSERTED_AUTHORITY };",
+    replace: "  if (false) return { reason: DISQUALIFIER.ASSERTED_AUTHORITY };",
   },
   {
     id: "M91-TOKEN-NOT-MINTED",
@@ -980,24 +988,24 @@ export const MUTANTS = [
     target: "market",
     invariant: "§4 the title is the server's word; a new listing is not used-market evidence.",
     kills: ["MA-9d"],
-    find: "    if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
-    replace: "    if (false) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
+    find: "  if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) return { reason: DISQUALIFIER.NOT_USED };",
+    replace: "  if (false) return { reason: DISQUALIFIER.NOT_USED };",
   },
   {
     id: "M95-LIKE-NEW-READ-AS-NEW",
     target: "market",
     invariant: "like new is a USED listing; reading it as new silently starves every Hebrew quorum.",
     kills: ["MA-9e"],
-    find: "    if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
-    replace: "    if (namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }",
+    find: "  if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) return { reason: DISQUALIFIER.NOT_USED };",
+    replace: "  if (namesAny(toks, NEW_RETAIL)) return { reason: DISQUALIFIER.NOT_USED };",
   },
   {
     id: "M96-PROVENANCE-NOT-REQUIRED",
     target: "market",
     invariant: "§4 an observation with no source is not evidence.",
     kills: ["MA-9b"],
-    find: "    if (!domain || !reference) { reject(o, DISQUALIFIER.NO_PROVENANCE); continue; }",
-    replace: "    if (false) { reject(o, DISQUALIFIER.NO_PROVENANCE); continue; }",
+    find: "  if (!domain || !reference) return { reason: DISQUALIFIER.NO_PROVENANCE };",
+    replace: "  if (false) return { reason: DISQUALIFIER.NO_PROVENANCE };",
   },
   {
     id: "M97-VERIFIED-MARKET-IS-ANCHORED",

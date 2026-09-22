@@ -47,6 +47,43 @@ import { ACCESSORY_NOUNS } from './pricing-authority.js';
 /** The class name. A string for serialisation; never the thing that grants. */
 export const VERIFIED_MARKET = 'VERIFIED_MARKET';
 
+// ── THE THIRD CLASS: A GENERIC OBJECT'S OWN MARKET ─────────────────────────
+//
+// B-h, closed. The set-level gate below refuses to qualify anything whose
+// subject is not known at product level, and the reasoning is sound for a
+// BRANDED subject: "compatible with the subject" has no answer when the
+// subject is "an LG monitor", because three listings for an LG 27GP850 are
+// three listings for a product we have no reason to believe is in the frame.
+//
+// It is NOT the right question for an object that has no brand at all. A plain
+// wooden desk has no model number to establish, its comparables are genuinely
+// comparable, and refusing on IDENTITY grounds means a photograph with ample
+// market evidence is declined for a reason that has nothing to do with the
+// evidence. That is the catalog acting as a prerequisite, which the product
+// vision forbids.
+//
+// So a generic subject gets its own class, and it is DELIBERATELY WEAKER:
+//
+//   VERIFIED_MARKET      this exact product's used market
+//   VERIFIED_COMPARABLE  this KIND of object's used market
+//
+// It is minted into a SEPARATE registry, so every existing reader of
+// VERIFIED_MARKET — `isMarketEvidence`, `hasVerifiedMarket`, the guard's
+// envelope and verdict rules — sees a comparable token as ABSENT and nothing
+// they permit changes. Widening the old class would have let a category-level
+// estimate satisfy requirements written for product-level evidence; adding a
+// class means the weaker evidence has to earn its own permissions.
+//
+// The price of the weaker identity is a HIGHER bar on everything else. A
+// product-level set needs 3 listings across 2 domains, because the listings
+// are about one product. A class-level set spans a whole category's spread —
+// a desk is ₪150 or ₪1,500 depending on things a photograph may not show — so
+// it needs more observations and more independent sources before a median
+// means anything.
+export const VERIFIED_COMPARABLE = 'VERIFIED_COMPARABLE';
+export const COMPARABLE_QUORUM = 5;
+export const MIN_COMPARABLE_SOURCES = 3;
+
 // ── THE QUORUM, AND WHY IT IS 3 ────────────────────────────────────────────
 //
 // Kept at 3 because that is what Phase B's own valuation already required
@@ -107,6 +144,12 @@ export const SET_FAILURE = Object.freeze({
   NO_DISTINCTIVE_IDENTITY: 'subject_name_has_no_distinctive_token',
   QUORUM: 'below_observation_quorum',
   DIVERSITY: 'below_source_diversity_floor',
+  // The generic path's own failures, named separately so a reader can tell
+  // "this product's market was thin" from "this CATEGORY's market was thin".
+  COMPARABLE_QUORUM: 'below_comparable_quorum',
+  COMPARABLE_DIVERSITY: 'below_comparable_source_floor',
+  NO_OBJECT_CLASS: 'subject_has_no_object_class',
+  BRANDED_WITHOUT_MODEL: 'branded_subject_without_model',
 });
 
 // ── Field names that only GetWorth may write ───────────────────────────────
@@ -286,6 +329,9 @@ function assertsAuthority(value, depth = 0) {
 
 // ── The mint ───────────────────────────────────────────────────────────────
 const MARKET_AUTHORITY = new WeakSet();
+// A SECOND registry, never the same one. Membership of this set grants only
+// what a consumer explicitly written for class-level evidence chooses to grant.
+const COMPARABLE_AUTHORITY = new WeakSet();
 
 /** Was this token minted here, by qualification, on this server, this request? */
 export function isMarketEvidence(value) {
@@ -300,6 +346,22 @@ export function readMarketEvidence(value) {
 /** Does this guard context carry verified market evidence? */
 export function hasVerifiedMarket(ctx) {
   return readMarketEvidence(ctx?.market_evidence) !== null;
+}
+
+/** Was this class-level token minted here, by qualification, this request? */
+export function isComparableEvidence(value) {
+  return typeof value === 'object' && value !== null && COMPARABLE_AUTHORITY.has(value);
+}
+
+/**
+ * Does this guard context carry class-level comparable evidence?
+ *
+ * Deliberately a DIFFERENT predicate from `hasVerifiedMarket`. A caller that
+ * wants to treat the two the same has to say so in its own code, where the
+ * decision is reviewable — rather than inheriting it from a widened class.
+ */
+export function hasVerifiedComparable(ctx) {
+  return isComparableEvidence(ctx?.comparable_evidence);
 }
 
 /**
@@ -331,66 +393,57 @@ export function qualifyMarketEvidence({ observations = [], subject = {}, fxProof
   //
   // So the direction of information is fixed by construction: identity gates
   // market evidence, and market evidence never feeds back into identity.
+  // ── WHICH QUESTION IS THIS SET BEING ASKED? ──────────────────────────────
+  //
+  // THE BRANDED-WITHOUT-MODEL CASE STAYS REFUSED, and that is the whole point
+  // of splitting the paths rather than relaxing the gate. "LG monitor" names a
+  // product line spanning ₪400 to ₪4,000; admitting listings for specific LG
+  // models prices an unknown product with a known one's number. A brand is a
+  // promise of specificity that has not been kept, and it is more dangerous
+  // than no brand at all.
+  //
+  // An object with NO brand makes no such promise. Its comparable set is other
+  // objects of the same kind, which is a question that genuinely has an answer.
   const setFailures = [];
-  if (!vocab.brand || !vocab.model) setFailures.push(SET_FAILURE.IDENTITY_INSUFFICIENT);
-  else if (vocab.distinctive.length === 0) setFailures.push(SET_FAILURE.NO_DISTINCTIVE_IDENTITY);
+  const productLevel = !!(vocab.brand && vocab.model);
+  const genericLevel = !vocab.brand && vocab.class_tokens.length > 0;
+
+  if (productLevel) {
+    if (vocab.distinctive.length === 0) setFailures.push(SET_FAILURE.NO_DISTINCTIVE_IDENTITY);
+  } else if (!genericLevel) {
+    // Branded but model-less, or nothing established at all.
+    setFailures.push(vocab.brand
+      ? SET_FAILURE.BRANDED_WITHOUT_MODEL
+      : SET_FAILURE.NO_OBJECT_CLASS);
+    setFailures.push(SET_FAILURE.IDENTITY_INSUFFICIENT);
+  }
 
   if (setFailures.length > 0) {
     return Object.freeze({
-      qualified: false, token: null, admitted: [], disqualified: [],
+      qualified: false, token: null, comparable_qualified: false, comparable_token: null,
+      evidence_class: null, admitted: [], disqualified: [],
       set_failures: setFailures, vocabulary: vocab,
       counts: { considered: Array.isArray(observations) ? observations.length : 0, admitted: 0, disqualified: 0 },
       distinct_sources: 0,
     });
   }
 
+  // ── THE GENERIC PATH ─────────────────────────────────────────────────────
+  //
+  // Same per-listing hygiene as the product path — a price, a proven currency,
+  // a source, a used listing, no injected authority — but compatibility is
+  // asked of the OBJECT CLASS instead of a model token, because that is the
+  // only identity the subject has.
+  if (genericLevel) return qualifyComparableSet({ observations, vocab, fxProofs });
+
   const seen = new Set();
 
   for (const o of Array.isArray(observations) ? observations : []) {
-    if (!o || typeof o !== 'object') continue;
-
-    if (assertsAuthority(o)) { reject(o, DISQUALIFIER.ASSERTED_AUTHORITY); continue; }
-
-    // ── Price and currency ───────────────────────────────────────────────
-    const price = typeof o.observed_price === 'number' && Number.isFinite(o.observed_price) && o.observed_price > 0
-      ? o.observed_price : null;
-    if (price === null) { reject(o, DISQUALIFIER.NO_PRICE); continue; }
-
-    const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : '';
-    if (!currency) { reject(o, DISQUALIFIER.NO_CURRENCY); continue; }
-
-    // §9: ILS enters directly. Anything else needs a V-FX proof whose arithmetic
-    // this function re-does. No model-authored implicit conversion, and no
-    // "$500 -> ₪500" by way of a missing branch.
-    let ils = null;
-    if (currency === 'ILS') {
-      ils = price;
-    } else {
-      const proof = fxProof(o, fxProofs);
-      if (!proof) { reject(o, DISQUALIFIER.UNVERIFIED_FX); continue; }
-      ils = proof.normalized_amount;
-    }
-
-    // ── Provenance ───────────────────────────────────────────────────────
-    const domain = normalizeDomain(o.source_domain ?? o.source);
-    const reference = o.listing_id_or_reference ?? o.source ?? null;
-    if (!domain || !reference) { reject(o, DISQUALIFIER.NO_PROVENANCE); continue; }
-
-    // ── The model's own opinion: subtract only ───────────────────────────
-    const selfMatch = typeof o.match?.confidence === 'number' ? o.match.confidence : null;
-    if (selfMatch !== null && selfMatch < SELF_REPORTED_MATCH_FLOOR) {
-      reject(o, DISQUALIFIER.SELF_REPORTED_MISMATCH); continue;
-    }
-    const kind = String(o.listing_kind ?? 'unknown');
-    if (kind === 'new_retail') { reject(o, DISQUALIFIER.NOT_USED); continue; }
-    if (kind === 'parts_only' || kind === 'broken') { reject(o, DISQUALIFIER.PARTS_ONLY); continue; }
-    if (kind === 'accessory') { reject(o, DISQUALIFIER.ACCESSORY_LISTING); continue; }
-
-    // ── Everything from here reads the TITLE, which the server can check ──
-    const toks = tokens(o.title);
-
-    if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) { reject(o, DISQUALIFIER.NOT_USED); continue; }
-    if (namesAny(toks, PARTS)) { reject(o, DISQUALIFIER.PARTS_ONLY); continue; }
+    // Every subject-independent rule, in one place, shared with the generic
+    // path. See screenListing at the bottom of this file.
+    const screened = screenListing(o, fxProofs);
+    if (screened.reason) { reject(o, screened.reason); continue; }
+    const { toks, domain, reference, ils } = screened;
 
     const verdict = identityCompatibility(toks, vocab);
     if (verdict !== null) { reject(o, verdict); continue; }
@@ -410,25 +463,11 @@ export function qualifyMarketEvidence({ observations = [], subject = {}, fxProof
     // a quorum was quietly deleting real evidence instead. Identical title AND
     // identical price on one domain is a repost; identical title alone is just
     // a product with a name.
-    const keys = [
-      `ref:${domain}|${String(reference).toLowerCase()}`,
-      `t:${domain}|${toks.join(' ').slice(0, 80)}|${ils}`,
-      `p:${domain}|${ils}`,
-    ];
-    if (keys.some((k) => seen.has(k))) { reject(o, DISQUALIFIER.DUPLICATE); continue; }
-    for (const k of keys) seen.add(k);
+    if (!claimDedupeKeys(seen, dedupeKeys({ domain, reference, title: o.title, ils }))) {
+      reject(o, DISQUALIFIER.DUPLICATE); continue;
+    }
 
-    admitted.push(Object.freeze({
-      source_domain: domain,
-      listing_id_or_reference: o.listing_id_or_reference ?? null,
-      title: o.title ?? null,
-      observed_price: price,
-      currency,
-      normalized_ils_price: ils,
-      condition: o.condition ?? null,
-      observed_at: o.observed_at ?? null,
-      listing_kind: kind,
-    }));
+    admitted.push(admittedRecord(o, screened));
   }
 
   const sources = new Set(admitted.map((a) => a.source_domain));
@@ -442,8 +481,13 @@ export function qualifyMarketEvidence({ observations = [], subject = {}, fxProof
   };
 
   if (setFailures.length > 0) {
+    // THE SAME KEYS ON EVERY PATH. A report whose shape depends on which
+    // branch produced it makes `report.comparable_qualified` undefined on the
+    // product path — and `undefined` is falsy, so it reads correctly right up
+    // until somebody writes `=== false`.
     return Object.freeze({
-      qualified: false, token: null, admitted, disqualified,
+      qualified: false, token: null, comparable_qualified: false, comparable_token: null,
+      evidence_class: null, admitted, disqualified,
       set_failures: setFailures, vocabulary: vocab, counts, distinct_sources: sources.size,
     });
   }
@@ -464,7 +508,8 @@ export function qualifyMarketEvidence({ observations = [], subject = {}, fxProof
   MARKET_AUTHORITY.add(token);
 
   return Object.freeze({
-    qualified: true, token, admitted, disqualified,
+    qualified: true, token, comparable_qualified: false, comparable_token: null,
+    evidence_class: VERIFIED_MARKET, admitted, disqualified,
     set_failures: [], vocabulary: vocab, counts, distinct_sources: sources.size,
   });
 }
@@ -576,4 +621,239 @@ function fxProof(observation, fxProofs) {
   if (Math.abs(amount * rate - normalized) > 0.001) return null;
 
   return { normalized_amount: normalized, rate, source: proof.source, timestamp: proof.timestamp };
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE GENERIC PATH  ·  a class-level comparable set
+//
+// Reached only when the subject has NO brand and DOES have an object class.
+// Every hygiene rule the product path applies is applied here unchanged — a
+// price, a currency proven rather than assumed, real provenance, a used
+// listing, no injected authority, the same three dedupe keys. The single
+// difference is the question asked of the title:
+//
+//   product path   does this listing name THIS PRODUCT?
+//   generic path   does this listing name THIS KIND OF OBJECT?
+//
+// and the bar it has to clear afterwards, which is higher in both dimensions.
+// ══════════════════════════════════════════════════════════════════════════════
+function qualifyComparableSet({ observations = [], vocab, fxProofs = null } = {}) {
+  const admitted = [];
+  const disqualified = [];
+  const reject = (observation, reason) => { disqualified.push({ observation, reason }); };
+  const seen = new Set();
+
+  for (const o of Array.isArray(observations) ? observations : []) {
+    // THE SAME SCREEN THE PRODUCT PATH USES. Not a copy of it — the copy is
+    // what the mutation harness objected to, and a second implementation of
+    // the currency and FX rules is the most expensive place this repository
+    // could have that defect.
+    const screened = screenListing(o, fxProofs);
+    if (screened.reason) { reject(o, screened.reason); continue; }
+    const { toks, domain, reference, ils } = screened;
+
+    // ── CLASS COMPATIBILITY ──────────────────────────────────────────────
+    //
+    // The listing has to name the kind of object, in the subject's own words.
+    // A subject whose class is "wooden desk" admits a listing whose title says
+    // desk; it does not admit a chair that happens to be for sale nearby.
+    //
+    // ANY class token is enough rather than all of them, because an object
+    // class is a phrase a model wrote ("solid wood writing desk") while a
+    // seller writes their own. Requiring every word would make the rule a test
+    // of whether two people described one object identically. What stops that
+    // being too loose is the quorum and the source floor below: one accidental
+    // match cannot reach five listings across three independent domains.
+    if (!vocab.class_tokens.some((t) => toks.includes(t))) {
+      reject(o, DISQUALIFIER.IDENTITY_TOO_WEAK); continue;
+    }
+
+    // A generic subject must not absorb an ACCESSORY's market, and it is the
+    // same subject/accessory rule the product path applies.
+    if (!vocab.subject_is_accessory && toks.some((t) => ACCESSORY_NOUNS.has(t))) {
+      reject(o, DISQUALIFIER.ACCESSORY_LISTING); continue;
+    }
+
+    if (!claimDedupeKeys(seen, dedupeKeys({ domain, reference, title: o.title, ils }))) {
+      reject(o, DISQUALIFIER.DUPLICATE); continue;
+    }
+
+    admitted.push(admittedRecord(o, screened));
+  }
+
+  const sources = new Set(admitted.map((a) => a.source_domain));
+  const setFailures = [];
+  if (admitted.length < COMPARABLE_QUORUM) setFailures.push(SET_FAILURE.COMPARABLE_QUORUM);
+  if (sources.size < MIN_COMPARABLE_SOURCES) setFailures.push(SET_FAILURE.COMPARABLE_DIVERSITY);
+
+  const counts = {
+    considered: Array.isArray(observations) ? observations.length : 0,
+    admitted: admitted.length,
+    disqualified: disqualified.length,
+  };
+
+  // `qualified` stays FALSE on this path in every case. It is the
+  // product-level answer, and a class-level set is not a product-level answer
+  // however good it is — so every existing consumer of `qualified` keeps
+  // meaning exactly what it has always meant.
+  if (setFailures.length > 0) {
+    return Object.freeze({
+      qualified: false, token: null, comparable_qualified: false, comparable_token: null,
+      evidence_class: null, admitted, disqualified,
+      set_failures: setFailures, vocabulary: vocab, counts, distinct_sources: sources.size,
+    });
+  }
+
+  const comparableToken = Object.freeze({
+    class: VERIFIED_COMPARABLE,
+    observation_count: admitted.length,
+    distinct_sources: sources.size,
+    sources: Object.freeze([...sources].sort()),
+    subject: Object.freeze({ brand: null, model: null, object_class: vocab.class_tokens.join(' ') }),
+    prices_ils: Object.freeze(admitted.map((a) => a.normalized_ils_price).sort((a, b) => a - b)),
+    observations: Object.freeze(admitted),
+  });
+  COMPARABLE_AUTHORITY.add(comparableToken);
+
+  return Object.freeze({
+    qualified: false,
+    token: null,
+    comparable_qualified: true,
+    comparable_token: comparableToken,
+    evidence_class: VERIFIED_COMPARABLE,
+    admitted,
+    disqualified,
+    set_failures: [],
+    vocabulary: vocab,
+    counts,
+    distinct_sources: sources.size,
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// THE SHARED LISTING SCREEN  ·  one implementation, two callers
+//
+// WHY THIS EXISTS. The class-level path began as a copy of the product path's
+// hygiene, and the mutation harness reported it within one run: eight mutants
+// that had each matched a single line suddenly matched TWO, because there were
+// now two copies of `if (!currency) reject(NO_CURRENCY)`, two of the FX proof
+// check, two of the provenance check, two of the new-retail title rule.
+//
+// The harness refused to score them rather than pick one, which is the correct
+// refusal: a mutant pinned to one of two identical lines proves the OTHER copy
+// is protected by nothing. This repository has recorded that defect — one
+// predicate, two implementations — four times, and a fifth copy carrying the
+// currency and FX rules is the most expensive place yet to have it.
+//
+// So the rules live here once. What each path still decides for itself is the
+// only thing that genuinely differs: whether a listing is ABOUT the subject.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Apply every subject-independent admissibility rule to one observation.
+ *
+ * Returns `{ reason }` when the listing is refused, or the screened values the
+ * caller needs when it passes. Never throws, never mutates its input.
+ */
+function screenListing(o, fxProofs) {
+  if (!o || typeof o !== 'object') return { reason: DISQUALIFIER.NO_PRICE };
+  if (assertsAuthority(o)) return { reason: DISQUALIFIER.ASSERTED_AUTHORITY };
+
+  // ── Price and currency ───────────────────────────────────────────────────
+  const price = typeof o.observed_price === 'number' && Number.isFinite(o.observed_price) && o.observed_price > 0
+    ? o.observed_price : null;
+  if (price === null) return { reason: DISQUALIFIER.NO_PRICE };
+
+  const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : '';
+  if (!currency) return { reason: DISQUALIFIER.NO_CURRENCY };
+
+  // §9: ILS enters directly. Anything else needs a V-FX proof whose arithmetic
+  // this function re-does. No model-authored implicit conversion, and no
+  // "$500 -> ILS 500" by way of a missing branch. A weaker evidence class is a
+  // reason to be stricter about arithmetic, never looser.
+  let ils = null;
+  if (currency === 'ILS') {
+    ils = price;
+  } else {
+    const proof = fxProof(o, fxProofs);
+    if (!proof) return { reason: DISQUALIFIER.UNVERIFIED_FX };
+    ils = proof.normalized_amount;
+  }
+
+  // ── Provenance ───────────────────────────────────────────────────────────
+  const domain = normalizeDomain(o.source_domain ?? o.source);
+  const reference = o.listing_id_or_reference ?? o.source ?? null;
+  if (!domain || !reference) return { reason: DISQUALIFIER.NO_PROVENANCE };
+
+  // ── The model's own opinion: subtract only ───────────────────────────────
+  const selfMatch = typeof o.match?.confidence === 'number' ? o.match.confidence : null;
+  if (selfMatch !== null && selfMatch < SELF_REPORTED_MATCH_FLOOR) {
+    return { reason: DISQUALIFIER.SELF_REPORTED_MISMATCH };
+  }
+
+  const kind = String(o.listing_kind ?? 'unknown');
+  if (kind === 'new_retail') return { reason: DISQUALIFIER.NOT_USED };
+  if (kind === 'parts_only' || kind === 'broken') return { reason: DISQUALIFIER.PARTS_ONLY };
+  if (kind === 'accessory') return { reason: DISQUALIFIER.ACCESSORY_LISTING };
+
+  // ── Everything from here reads the TITLE, which the server can check ─────
+  const toks = tokens(o.title);
+  if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) return { reason: DISQUALIFIER.NOT_USED };
+  if (namesAny(toks, PARTS)) return { reason: DISQUALIFIER.PARTS_ONLY };
+
+  return { reason: null, toks, domain, reference, ils, price, currency, kind };
+}
+
+/**
+ * The three dedupe keys.
+ *
+ * §15 asks for three different repeats. A stable listing reference collapses
+ * the same listing seen twice. Domain+title+price collapses a repost.
+ * Domain+price collapses the SAME LISTING RE-TITLED, which the first two miss
+ * and which is the cheapest way to manufacture a quorum out of one advert.
+ *
+ * THE TITLE KEY CARRIES THE PRICE, and the first version did not. Without it,
+ * two different sellers on one site listing the same product — who of course
+ * write the same title, because it is the product's name — were collapsed into
+ * one, and the rule that exists to stop one advert becoming a quorum was
+ * quietly deleting real evidence instead.
+ */
+function dedupeKeys({ domain, reference, title, ils }) {
+  return [
+    `ref:${domain}|${String(reference).toLowerCase()}`,
+    `t:${domain}|${String(title ?? '').toLowerCase().slice(0, 80)}|${ils}`,
+    `p:${domain}|${ils}`,
+  ];
+}
+
+/**
+ * Claim these keys for this listing, or report it as already seen.
+ *
+ * The CHECK lives here, not just the key construction. With only the builder
+ * shared, a mutant that defeated one key still found the other two catching
+ * duplicates — so "dedupe skipped" was unmutatable and the rule was, in the
+ * harness's words, a test gap. One function, one place to break.
+ *
+ * Returns true when the listing is new.
+ */
+function claimDedupeKeys(seen, keys) {
+  if (keys.some((k) => seen.has(k))) return false;
+  for (const k of keys) seen.add(k);
+  return true;
+}
+
+/** The frozen admitted record both paths emit. */
+function admittedRecord(o, screened) {
+  return Object.freeze({
+    source_domain: screened.domain,
+    listing_id_or_reference: String(screened.reference),
+    title: o.title ?? null,
+    normalized_ils_price: screened.ils,
+    original_price: screened.price,
+    original_currency: screened.currency,
+    condition: o.condition ?? null,
+    location: o.location ?? null,
+    observed_at: o.observed_at ?? null,
+    listing_kind: screened.kind,
+  });
 }

@@ -72,6 +72,12 @@ const SUITES = [
   // in this comment block, which is why the harness refuses to score a mutant
   // it cannot pin rather than quietly reporting 100%.
   'tests/first-witness.test.mjs',
+  // THE OPEN-WORLD CLASS. VERIFIED_COMPARABLE lives in market-evidence.js,
+  // which this harness already mutates, and its whole safety argument is that
+  // it grants STRICTLY LESS than VERIFIED_MARKET. A mutant that merged the two
+  // mints, or dropped the class-compatibility check, or lowered the quorum, is
+  // observed only by this suite.
+  'tests/open-world.test.mjs',
 ];
 
 const argv = process.argv.slice(2);

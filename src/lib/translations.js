@@ -111,6 +111,7 @@ const T = {
     // The basis a shipped price actually rests on. Only the first claims the
     // open-world market search produced it.
     basisVerifiedMarket: 'Based on verified market listings',
+    basisComparableMarket: 'Based on comparable items on the market',
     basisMarketEstimate: 'Based on a GetWorth catalog reference',
     basisAiEstimate:     'AI estimate — no market listings verified',
     priceEvidLimited:  'Limited pricing evidence',
@@ -391,6 +392,7 @@ const T = {
     pricingEvidence:   'בסיס התמחור',
     priceEvidStrong:   'בסיס תמחור חזק',
     basisVerifiedMarket: 'מבוסס על מודעות מאומתות מהשוק',
+    basisComparableMarket: 'מבוסס על פריטים דומים בשוק',
     basisMarketEstimate: 'מבוסס על מוצר מקטלוג GetWorth',
     basisAiEstimate:     'הערכת AI — לא אומתו מודעות בשוק',
     priceEvidLimited:  'בסיס תמחור מוגבל',

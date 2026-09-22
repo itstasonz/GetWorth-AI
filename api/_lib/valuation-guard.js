@@ -33,7 +33,7 @@
 // comparable to one from version 2, and drift is unmeasurable if both claim
 // the same validator.
 import { names, EVIDENCE_CLASSES } from './pricing-authority.js';
-import { hasVerifiedMarket, readMarketEvidence, VERIFIED_MARKET } from './market-evidence.js';
+import { hasVerifiedMarket, hasVerifiedComparable, readMarketEvidence, VERIFIED_MARKET } from './market-evidence.js';
 
 export const VALIDATOR_VERSION = 2;
 // bump on ANY envelope/threshold change.
@@ -1050,6 +1050,21 @@ export function derivePricingSource(ctx = {}) {
     // grades cannot rank measured evidence above an unmeasured estimate, and
     // adding a fifth is a UI change this task is not authorized to make.
     if (verifiedMarket) return { source: 'verified_market', grade: 'MEDIUM' };
+    // ── CLASS-LEVEL COMPARABLES ──────────────────────────────────────────
+    //
+    // Read through its OWN mint (`hasVerifiedComparable`), never through
+    // `hasVerifiedMarket`, so a category-level set cannot satisfy a rule
+    // written for product-level evidence. B-h's answer is a new source, not a
+    // widened one.
+    //
+    // MEDIUM, matching `verified_market` and `stage2_ai`, and the reason is
+    // the same one recorded four lines above: the ladder has four rungs and
+    // cannot express "measured, but about a category rather than a product".
+    // What distinguishes it is the SOURCE NAME, which the UI reads to say
+    // plainly that the number came from comparable objects rather than from
+    // this one. Ranking it below an unmeasured AI estimate would repeat the
+    // ordering defect this module was already caught making once.
+    if (hasVerifiedComparable(ctx)) return { source: 'verified_comparable', grade: 'MEDIUM' };
     return { source: 'stage2_ai', grade: 'MEDIUM' };
   }
   // THE SIBLING HOLE, CLOSED. The `default:` inside the PRE switch was changed
@@ -1588,7 +1603,33 @@ export function validateQuote(rawQuote, ctx = {}) {
   }
 
   // identity_tier and the two verdicts are already on `base` — see H-1 above.
-  if (!PRICEABLE_TIERS.has(identityTier)) {
+  //
+  // ── THE ONE EXEMPTION, AND IT IS THE CASE THE RULE WAS WRITTEN FOR ───────
+  //
+  // Read the rule's own sentence: no meaningful identity ⇒ no PRODUCT-SPECIFIC
+  // price. Its witness was a scan with no brand, no model, empty OCR and
+  // category "Other" at 10% that shipped ₪30/₪70/₪130 — a number attached to
+  // nothing, describing a product nobody had identified.
+  //
+  // A class-level comparable price makes no product-specific claim. It says
+  // "objects of this kind sell for this", it is computed from listings this
+  // server verified itself — priced, ILS or FX-proven, used, deduped,
+  // identity-compatible with the object class, five of them across three
+  // independent domains — and it is labelled as comparable evidence all the
+  // way to the screen. Refusing it would mean a photographed desk with ample
+  // Israeli market evidence is declined for having no brand, which is the
+  // catalog acting as a prerequisite.
+  //
+  // READ THROUGH THE MINT, never from a field, and through the COMPARABLE mint
+  // specifically. A caller writing `comparable_evidence: {...}` produces an
+  // ordinary object that is not in the registry and reads as absent, exactly
+  // as `market_evidence` has always worked. Nothing a model emits can reach
+  // this, and the exemption cannot be claimed — only earned.
+  //
+  // It exempts the IDENTITY floor and nothing else: the envelope band, the
+  // transform rules, V-FX and every other check still apply to the number.
+  const comparableBacked = hasVerifiedComparable(ctx);
+  if (!PRICEABLE_TIERS.has(identityTier) && !comparableBacked) {
     return degrade('V-IDENTITY-FLOOR',
       `identity tier ${identityTier} cannot carry a product-specific price ` +
       `(brand=${ctx.identity?.brandOk ? 'ok' : 'none'} model=${ctx.identity?.modelOk ? 'ok' : 'none'} ` +
