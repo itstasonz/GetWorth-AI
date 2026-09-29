@@ -28,6 +28,7 @@ import {
 import { derivePricingSource } from '../api/_lib/valuation-guard.js';
 import { runPhaseB, PHASE_B_STATUS } from '../api/_lib/phaseb/pipeline.js';
 import { MARKET_MECHANISM } from '../api/_lib/phaseb/market-research.js';
+import { researchOutput } from './fixtures/phaseb/benchmarks.mjs';
 
 const obs = (d, r, p, t, cur = 'ILS') => ({
   source: `https://${d}/${r}`, source_domain: d, listing_id_or_reference: r, title: t,
@@ -204,7 +205,9 @@ describe('OW-3 A / B / C through the real pipeline', () => {
         : n.includes('market_query') ? query
           : { observations, search_performed: true, notes: null };
     return new Response(JSON.stringify({
-      model: 't', output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(p) }] }],
+      model: 't',
+      output: n.includes('market_evidence') ? researchOutput(p)
+        : [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(p) }] }],
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
   const run = (c) => runPhaseB({

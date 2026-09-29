@@ -84,8 +84,11 @@ export const GUARD_CONTROLS = [
     control: 'kill',
     target: 'market',
     invariant: 'The harness reaches api/_lib/market-evidence.js at all.',
-    find: 'export function qualifyMarketEvidence({ observations = [], subject = {}, fxProofs = null } = {}) {',
-    replace: 'export function qualifyMarketEvidence({ observations = [], subject = {}, fxProofs = null } = {}) {\n  throw new Error("[control] market sensitivity probe");',
+    // Pinned to a statement in the function body rather than to its signature:
+    // the signature grew a parameter, and a control that silently stops
+    // matching is a harness that has stopped measuring itself.
+    find: '  vocab.aliases = localizedAliases(vocab, observations, providerText);',
+    replace: '  throw new Error("[control] market sensitivity probe");',
   },
   {
     id: 'CTL-MARKET-SPECIFICITY-MUST-LIVE',
@@ -855,13 +858,27 @@ export const MUTANTS = [
     find: "  if (keys.some((k) => seen.has(k))) return false;",
     replace: "  if (false) return false;",
   },
+  // M78 pinned the site-and-price key, which no longer exists: price is an
+  // attribute of a listing and not its identity. Its invariant survives in a
+  // truer form — the same listing under a different title is still the same
+  // listing WHEN IT IS THE SAME LISTING, which its id says and its price does
+  // not. The identity rules live in api/_lib/listing-identity.js, which this
+  // harness copies unmutated; the two mutants below cover the gate's use of it.
   {
-    id: "M78-DEDUPE-LOSES-THE-RETITLE-KEY",
+    id: "M78-DEDUPE-IGNORES-THE-LISTING-ID",
     target: "market",
     invariant: "§15 the same listing under a different title is still the same listing.",
     kills: ["MA-4b"],
-    find: "    `p:${domain}|${ils}`,",
-    replace: "    `p:${domain}|${reference}|${ils}`,",
+    find: "    explicit: o.listing_id_or_reference ?? null,",
+    replace: "    explicit: null,",
+  },
+  {
+    id: "M78b-DEDUPE-IGNORES-THE-URL",
+    target: "market",
+    invariant: "§15 one advert reached through two URLs is one advert.",
+    kills: ["MA-4e"],
+    find: "    source: o.source ?? null,",
+    replace: "    source: null,",
   },
   {
     id: "M79-IDENTITY-COMPATIBILITY-SKIPPED",
@@ -934,6 +951,62 @@ export const MUTANTS = [
     kills: ["MA-8c"],
     find: "  if (!currency) return { reason: DISQUALIFIER.NO_CURRENCY };",
     replace: "  if (false) return { reason: DISQUALIFIER.NO_CURRENCY };",
+  },
+  {
+    id: "M83b-SUBDOMAINS-ARE-SEPARATE-SOURCES",
+    target: "market",
+    invariant: "§6 independence is counted in sites. A site and its mobile subdomain are one source.",
+    kills: ["MA-12b"],
+    find: "  return new Set(list.map((a) => a.source_site));",
+    replace: "  return new Set(list.map((a) => a.source_domain));",
+  },
+  {
+    id: "M83c-ALIAS-NEEDS-NO-CORROBORATION",
+    target: "market",
+    invariant: "A localized name counts only when independent sites use it. A sound-alike in one listing is a sound-alike.",
+    kills: ["MA-13c"],
+    find: "        if (sites.length < MIN_ALIAS_SITES) continue;",
+    replace: "        if (false) continue;",
+  },
+  {
+    id: "M83d-NUMBER-NEED-NOT-BE-BESIDE-ITS-MODEL",
+    target: "market",
+    invariant: "A number in a model name is exact and sits beside the name. A 5 elsewhere in a title is not the model's 5.",
+    kills: ["MA-14a", "MA-14b"],
+    find: "    if (!beside) return DISQUALIFIER.NUMBER_MISMATCH;",
+    replace: "    if (false) return DISQUALIFIER.NUMBER_MISMATCH;",
+  },
+  {
+    id: "M83e-IDENTIFIER-NEED-NOT-MATCH",
+    target: "market",
+    invariant: "An identifier is exact. G502 is not G503.",
+    kills: ["MA-14d"],
+    find: "  if (vocab.identifier_tokens.some((id) => !toks.includes(id))) return DISQUALIFIER.IDENTIFIER_MISMATCH;",
+    replace: "  if (false) return DISQUALIFIER.IDENTIFIER_MISMATCH;",
+  },
+  {
+    id: "M83f-A-SIBLING-IS-THE-SAME-PRODUCT",
+    target: "market",
+    invariant: "A listing naming Pro, Ultra or Max names a different member of the family.",
+    kills: ["MA-14e"],
+    find: "  if ([...SIBLING_QUALIFIERS].some((q) => !subjectSiblings.has(q) && names(q))) return DISQUALIFIER.QUALIFIER_MISMATCH;",
+    replace: "  if (false) return DISQUALIFIER.QUALIFIER_MISMATCH;",
+  },
+  {
+    id: "M87b-ANY-CURRENCY-IS-A-SHEKEL",
+    target: "market",
+    invariant: "§9 only a shekel is a shekel — an unrecognised currency string is foreign.",
+    kills: ["MA-8h"],
+    find: "  return isShekel(raw) ? MARKET_CURRENCY : raw.trim().toUpperCase();",
+    replace: "  return MARKET_CURRENCY;",
+  },
+  {
+    id: "M87c-SHEKEL-SPELLINGS-UNRECOGNISED",
+    target: "market",
+    invariant: "§9 a shekel written as a shekel is not a foreign currency.",
+    kills: ["MA-8g"],
+    find: "  return typeof raw === 'string' && SHEKEL_FORMS.has(raw.trim().toLowerCase());",
+    replace: "  return typeof raw === 'string' && raw.trim() === 'ILS';",
   },
   {
     id: "M88-FOREIGN-CURRENCY-PASSES-THROUGH",

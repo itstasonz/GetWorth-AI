@@ -227,10 +227,21 @@ function rehearsalTranscript({ latencyMs = 0 } = {}) {
     // Simulated latency, so the critical-path arithmetic in the report has
     // something to chew on offline. It is labelled SIMULATED everywhere.
     if (latencyMs > 0) await new Promise((r) => setTimeout(r, latencyMs));
+    const message = { type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] };
+    // The research stage is replayed in the provider's real shape: the
+    // platform's search record, then the message. The pipeline derives
+    // "a search happened" from that record and from nothing the model says.
+    const searchRecord = {
+      type: 'web_search_call', id: 'ws_rehearsal', status: 'completed',
+      action: {
+        type: 'search', query: 'REHEARSAL',
+        sources: market.observations.map((o) => ({ type: 'url', url: o.source })),
+      },
+    };
     return new Response(JSON.stringify({
       model: body.model,
       usage: { input_tokens: 1200, output_tokens: 400 },
-      output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }],
+      output: name.includes('market_evidence') ? [searchRecord, message] : [message],
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 }
@@ -412,7 +423,9 @@ function report(ctx) {
   const me = result.market_evidence ?? {};
   const q = me.query;
   p(rule('RESEARCH'));
-  p(`  mechanism       ${fmt(me.mechanism)}   search performed: ${!!me.search_performed}`);
+  p(`  mechanism       ${fmt(me.mechanism)}   search performed: ${!!me.search_performed}  (from the platform's record, not the model)`);
+  p(`  search required ${!!me.search_required}   search calls: ${me.provenance?.search_call_count ?? 0}   market: ${fmt(me.market?.country)} ${fmt(me.market?.timezone)}`);
+  for (const sq of me.provenance?.queries ?? []) p(`    ran: ${sq}`);
   if (!q) p('  structured query: (the query stage produced nothing)');
   else {
     p(`  specificity     ${fmt(q.specificity)}`);
@@ -423,7 +436,8 @@ function report(ctx) {
   }
   p(`  sources consulted ${(me.provenance?.sources ?? []).length}`);
   for (const u of (me.provenance?.sources ?? []).slice(0, 10)) p(`    - ${u}`);
-  p(`  candidates discovered ${me.counts?.returned ?? 0}`);
+  p(`  candidates discovered ${me.counts?.returned ?? 0}   bound to a real source: ${me.counts?.provenance_bound ?? 0}   unbound: ${me.counts?.unbound ?? 0}`);
+  p(`  market outcome  ${fmt(me.outcome)}`);
 
   // ── MARKET EVIDENCE ─────────────────────────────────────────────────────
   const gm = result.validation?.market_evidence;
@@ -507,7 +521,8 @@ function report(ctx) {
   for (const c of calls.by_stage) {
     p(`    ${c.id.padEnd(20)} ${String(c.status).padEnd(9)} ${ms(c.duration_ms).padStart(8)} billed=${c.billed}${c.failure_code ? ` failure=${c.failure_code}` : ''}`);
   }
-  p('  search provider calls   ' + (me.mechanism === MARKET_MECHANISM.OPENAI_WEB_SEARCH && me.search_performed ? '1 (hosted web_search, inside the market_research call)' : '0'));
+  p('  search provider calls   ' + (me.mechanism === MARKET_MECHANISM.OPENAI_WEB_SEARCH
+    ? `${me.provenance?.search_call_count ?? 0} (hosted web_search, inside the market_research call)` : '0'));
   p('  token usage             not returned per stage by the ledger summary; see --json');
   p('  cost                    not computed here — this runner does not hold a price list, and');
   p('                          a made-up cost is worse than no cost. Read it from the OpenAI dashboard.');

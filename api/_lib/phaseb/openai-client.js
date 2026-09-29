@@ -99,6 +99,11 @@ export async function callStructured({
   maxOutputTokens = 3_000,
   reasoningEffort = 'low',
   tools = null,
+  // Passed through for the same reason `tools` is: the stage that attaches a
+  // tool decides whether it is REQUIRED and what the response must carry back,
+  // and this module still does not know what a search is.
+  toolChoice = null,
+  include = null,
   safetyIdentifier = null,
   ledger = null,
   // A DEFAULT PARAMETER, not a module-scope capture — the pattern
@@ -144,6 +149,8 @@ export async function callStructured({
     max_output_tokens: maxOutputTokens,
     text: { format: { type: 'json_schema', name: schemaName, schema, strict: true } },
     ...(tools ? { tools } : {}),
+    ...(toolChoice ? { tool_choice: toolChoice } : {}),
+    ...(Array.isArray(include) && include.length ? { include } : {}),
   };
 
   const controller = new AbortController();

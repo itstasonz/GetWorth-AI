@@ -74,11 +74,35 @@ export function resolveEnrichmentModel(env = process.env) {
 // synchronous budget, and §37 says correctness first with latency MEASURED
 // from day one. These are per-stage ceilings, not targets: an attempt that
 // exceeds one is a recorded failure of that stage, not a silent truncation.
+//
+// ── NO STAGE MAY OUTLIVE THE FUNCTION THAT CONTAINS IT ──────────────────────
+//
+// These read 60s / 20s / 90s / 45s inside a function Vercel kills at 60s. A
+// 90s research ceiling in a 60s function is not a ceiling: the platform's kill
+// arrives first, as a 504 with no stage recorded and no candidate returned, so
+// the one failure this table exists to NAME was the one it could never report.
+//
+// Two rules now hold, and tests/web-search-authority.test.mjs asserts both:
+//
+//   1. every ceiling is strictly below PIPELINE_BUDGET_MS, and
+//   2. the pipeline clamps each stage to the budget that is actually LEFT
+//      (`deadlineMs` in runPhaseB), because ceilings that are individually
+//      legal can still sum past the function — identity + query + research
+//      run end to end.
+//
+// This is a correctness fix. The ceilings were lowered to fit the container,
+// not tuned for speed; the 5–8s target is a separate piece of work.
+export const FUNCTION_MAX_DURATION_S = 60;
+/** What the pipeline may spend. The remainder covers auth, body read, reply. */
+export const PIPELINE_BUDGET_MS = 55_000;
+/** Below this a stage is not started: it could not finish, only bill. */
+export const MIN_STAGE_BUDGET_MS = 2_000;
+
 export const STAGE_TIMEOUT_MS = Object.freeze({
-  identity: 60_000,        // B1+B2, one call, vision + reasoning
+  identity: 40_000,        // B1+B2, one call, vision + reasoning
   market_query: 20_000,    // B3, text-only
-  market_research: 90_000, // B4, the search tool round-trip
-  condition: 45_000,       // B5, vision
+  market_research: 45_000, // B4, the search tool round-trip
+  condition: 40_000,       // B5, vision
 });
 
 /** Output caps. Phase B schemas are larger than recognition's, not unbounded. */
@@ -88,6 +112,47 @@ export const STAGE_MAX_OUTPUT_TOKENS = Object.freeze({
   market_research: 6_000,
   condition: 1_500,
 });
+
+// ── THE MARKET BEING RESEARCHED ─────────────────────────────────────────────
+//
+// WHERE the search happens is a fact about the user's marketplace, not about
+// the evidence engine. It lives here, as data, so that nothing downstream has
+// to know what Israel is: the research adapter is handed a region and passes
+// its location to the search tool; the prompts are handed a region and phrase
+// the search in its language.
+//
+// `country` and `timezone` are the ONLY location fields, deliberately. The
+// search tool accepts a city and a region too, and GetWorth has no honest
+// source for either — a scan carries no consented position, and a city guessed
+// from an IP address is precision nobody measured.
+//
+// ONE REGION TODAY. `resolveMarketRegion` takes an id so the caller can later
+// pass the region of the user's own marketplace; an id it does not recognise
+// resolves to the default rather than to an unlocated search, because a search
+// with no location is exactly the defect this table was added to remove.
+export const MARKET_REGIONS = Object.freeze({
+  IL: Object.freeze({
+    id: 'IL',
+    name: 'Israel',
+    country: 'IL',
+    timezone: 'Asia/Jerusalem',
+    currency: 'ILS',
+    search_language: 'Hebrew',
+    // INTENT WORDS, not queries. What a person in this market types beside a
+    // product name when they want to know what it sells for second-hand.
+    search_hints: Object.freeze(['יד שנייה', 'יד2', 'למכירה', 'מחיר']),
+    // The same words by ROLE, for a query that is assembled rather than
+    // written. A market supplies its own; nothing downstream knows a language.
+    terms: Object.freeze({ second_hand: 'יד שנייה', for_sale: 'למכירה', price: 'מחיר' }),
+  }),
+});
+export const MARKET_REGION_DEFAULT = 'IL';
+
+/** The region to research. Unknown or absent ids resolve to the default. */
+export function resolveMarketRegion(id = MARKET_REGION_DEFAULT) {
+  const key = String(id ?? '').trim().toUpperCase();
+  return MARKET_REGIONS[key] || MARKET_REGIONS[MARKET_REGION_DEFAULT];
+}
 
 // ── AN OPTIONAL ALLOWLIST, FOR A CONTROLLED PRODUCTION TEST ─────────────────
 //

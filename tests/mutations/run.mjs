@@ -250,6 +250,12 @@ for (const m of [...selected, ...GUARD_CONTROLS]) {
   // two copies of this module would be two disjoint WeakSets.
   const marketPath = join(work, 'market-evidence.js');
   writeFileSync(marketPath, target === 'market' ? mutated : SOURCES.market, 'utf8');
+  // The evidence module's own siblings, copied as they are. They are imported
+  // by relative path, so a copy of the module without them does not load, and
+  // every mutant would be "killed" by an import error rather than by a test.
+  for (const sibling of ['source-site.js', 'script-normalization.js', 'listing-identity.js']) {
+    writeFileSync(join(work, sibling), readSource(join(REPO, 'api/_lib', sibling)), 'utf8');
+  }
 
   const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', ...SUITES], {
     cwd: REPO,

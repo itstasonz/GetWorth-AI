@@ -446,6 +446,10 @@ export function normalizeOpenAIRecognition(raw, { language = 'he' } = {}) {
     },
     embedding_text,
     suggested_followup: identityOrNull(src.ambiguity_reason),
+    // The identifier the model reported READING off the item, as a public field.
+    // Descriptive only: no retrieval, calibration or pricing rule reads it. It
+    // exists so the response can carry a model NUMBER that is not a model NAME.
+    model_number_read: modelNum,
     // Namespaced under a single key so the provenance of this recognition is
     // auditable without any of it being mistaken for evidence. Read by
     // analyze.js for telemetry only — nothing branches on it.

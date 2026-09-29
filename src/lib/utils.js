@@ -718,3 +718,27 @@ export const extractSerialFromOCR = (text) => {
   }
   return null;
 };
+
+// ── A MODEL NAME IS NOT A MODEL NUMBER ──────────────────────────────────────
+//
+// The scan response used to put the model's NAME under `modelNumber`. It now
+// carries `modelName` and a separate `modelNumber` that is set only when an
+// identifier was read off the item, marked by `modelNumberSource`.
+//
+// A result produced before that change — a cached scan, a history row — still
+// holds a name under `modelNumber` and has no source. These two readers are
+// how every consumer tells the difference, so an old name is never written to
+// a column that means identifier.
+export const observedModelNumber = (recognition) => (
+  recognition?.modelNumberSource === 'reported_read_off_item'
+    && typeof recognition.modelNumber === 'string' && recognition.modelNumber.trim()
+    ? recognition.modelNumber.trim() : null
+);
+
+export const recognisedModelName = (recognition, identification) => {
+  const pick = (v) => (typeof v === 'string' && v.trim() && v.trim().toLowerCase() !== 'unidentified' ? v.trim() : null);
+  return pick(recognition?.modelName)
+    // A pre-change response: its `modelNumber` IS the name.
+    || (recognition?.modelNumberSource ? null : pick(recognition?.modelNumber))
+    || pick(identification?.model);
+};

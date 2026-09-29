@@ -354,7 +354,7 @@ describe('PWA-5 /api/enrich runs under the runtime it is deployed to', () => {
     const mod = await import('../api/enrich.js');
     assert.ok(mod.config, 'api/enrich.js must export a config');
     assert.notEqual(mod.config.runtime, 'edge',
-      'Edge is wall-capped at 25s and the market_research stage alone is allowed 90s');
+      'Edge is wall-capped at 25s and the market_research stage alone is allowed 45s');
     assert.ok(mod.config.maxDuration >= 60,
       `maxDuration must cover a live research round trip; got ${mod.config.maxDuration}`);
   });

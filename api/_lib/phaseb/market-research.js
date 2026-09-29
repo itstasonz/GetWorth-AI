@@ -34,7 +34,47 @@
 import { callStructured } from './openai-client.js';
 import { MARKET_EVIDENCE_SCHEMA } from './schemas.js';
 import { buildMarketEvidencePrompt } from './prompts.js';
-import { STAGE_TIMEOUT_MS, STAGE_MAX_OUTPUT_TOKENS } from './config.js';
+import { STAGE_TIMEOUT_MS, STAGE_MAX_OUTPUT_TOKENS, resolveMarketRegion } from './config.js';
+import { extractSearchProvenance, bindObservations } from './search-provenance.js';
+import { isShekel } from '../market-evidence.js';
+import { assessIdentityDiscovery } from './identity-expansion.js';
+
+// ── THE SEARCH REQUEST, AS OPENAI DOCUMENTS IT ──────────────────────────────
+//
+// Verified against the web-search guide and the Responses reference rather
+// than remembered:
+//
+//   tool_choice: 'required'   "Use tool_choice: "required" or a specific web
+//                             search tool choice when search must run." With
+//                             one tool attached, required means THIS tool.
+//   user_location             { type: 'approximate', country, timezone }
+//   search_context_size       'low' | 'medium' | 'high'
+//   include                   'web_search_call.action.sources' — without it
+//                             the response carries no source list at all.
+//
+// REQUIRED IS A REQUEST, NOT THE GUARANTEE. The guarantee is below: a response
+// with no completed web_search_call yields no observations, whatever the model
+// wrote. The request makes a search likely; the parse makes its absence fatal.
+export const SEARCH_TOOL_CHOICE = 'required';
+export const SEARCH_CONTEXT_SIZE = 'medium';
+// `web_search_call.results` returns the text the provider showed the model for
+// each result: what CONTENT_BOUND is checked against (content-binding.js).
+export const SEARCH_INCLUDE = Object.freeze(['web_search_call.action.sources', 'web_search_call.results']);
+
+/** The search tool, located in the market being researched. */
+export function buildSearchTool(market) {
+  return {
+    type: 'web_search',
+    search_context_size: SEARCH_CONTEXT_SIZE,
+    user_location: { type: 'approximate', country: market.country, timezone: market.timezone },
+  };
+}
+
+const EMPTY_PROVENANCE = Object.freeze({
+  tool: null, search_performed: false, web_search_call_count: 0, completed_call_count: 0,
+  search_call_count: 0, queries: [], sources: [], source_domains: [], source_details: [],
+  citations: [], pages_opened: [], results: [],
+});
 
 export const MARKET_MECHANISM = Object.freeze({
   OPENAI_WEB_SEARCH: 'openai_web_search',
@@ -45,16 +85,18 @@ export const MARKET_MECHANISM = Object.freeze({
 /** ILS unless proven otherwise — and "proven" means the listing said so. */
 export const AUTHORITATIVE_CURRENCY = 'ILS';
 
-// A currency we can act on without conversion. Everything else is context.
-const CURRENCY_ALIASES = new Map([
-  ['ils', 'ILS'], ['nis', 'ILS'], ['shekel', 'ILS'], ['₪', 'ILS'], ['שח', 'ILS'], ['ש"ח', 'ILS'],
+// The ways a shekel is written live in ONE table, in the evidence module, and
+// are imported here. This file held its own copy, the qualification gate held
+// none, and the two readings disagreed about whether "₪" was Israeli.
+const FOREIGN_ALIASES = new Map([
   ['usd', 'USD'], ['$', 'USD'], ['eur', 'EUR'], ['€', 'EUR'], ['gbp', 'GBP'], ['£', 'GBP'],
 ]);
 
 export function normalizeCurrency(raw) {
   const s = String(raw ?? '').trim().toLowerCase();
   if (!s) return null;
-  return CURRENCY_ALIASES.get(s) || (/^[a-z]{3}$/.test(s) ? s.toUpperCase() : null);
+  if (isShekel(s)) return AUTHORITATIVE_CURRENCY;
+  return FOREIGN_ALIASES.get(s) || (/^[a-z]{3}$/.test(s) ? s.toUpperCase() : null);
 }
 
 export const REJECTION = Object.freeze({
@@ -200,17 +242,25 @@ export function createMarketResearch({
   language = 'en',
   fetchImpl = fetch,
   mockSearch = null,
+  market = resolveMarketRegion(),
+  timeoutMs = STAGE_TIMEOUT_MS.market_research,
 } = {}) {
   return {
     mechanism,
-    async search(query) {
+    async search(query, { identityContext = null } = {}) {
       if (mechanism === MARKET_MECHANISM.MOCK) {
         const r = (await mockSearch?.(query)) || { observations: [], search_performed: false };
         return {
           mechanism,
           observations: r.observations ?? [],
+          extracted: (r.observations ?? []).length,
+          unbound: [],
+          bindings: null,
+          search_configured: false,
+          search_required: false,
           search_performed: r.search_performed ?? false,
-          provenance: r.provenance ?? { tool: 'mock', sources: [] },
+          model_claimed_search: null,
+          provenance: r.provenance ?? { ...EMPTY_PROVENANCE, tool: 'mock' },
           notes: r.notes ?? null,
         };
       }
@@ -222,8 +272,14 @@ export function createMarketResearch({
         return {
           mechanism: MARKET_MECHANISM.UNAVAILABLE,
           observations: [],
+          extracted: 0,
+          unbound: [],
+          bindings: null,
+          search_configured: false,
+          search_required: false,
           search_performed: false,
-          provenance: { tool: null, sources: [] },
+          model_claimed_search: null,
+          provenance: { ...EMPTY_PROVENANCE },
           notes: 'no market research mechanism configured',
         };
       }
@@ -232,36 +288,53 @@ export function createMarketResearch({
       // URL and never fetches one (§13, §40).
       const { data, meta } = await callStructured({
         stage: 'market_research',
-        prompt: buildMarketEvidencePrompt({ query, snippets: [], language }),
+        prompt: buildMarketEvidencePrompt({ query, snippets: [], language, market, context: identityContext }),
         schema: MARKET_EVIDENCE_SCHEMA,
         schemaName: 'getworth_market_evidence',
         model,
         apiKey,
-        timeoutMs: STAGE_TIMEOUT_MS.market_research,
+        timeoutMs,
         maxOutputTokens: STAGE_MAX_OUTPUT_TOKENS.market_research,
         reasoningEffort: 'low',
-        tools: [{ type: 'web_search' }],
+        tools: [buildSearchTool(market)],
+        toolChoice: SEARCH_TOOL_CHOICE,
+        include: [...SEARCH_INCLUDE],
         ledger,
         fetchImpl,
       });
 
-      // Attribution: which sources the tool actually consulted. Kept separate
-      // from the model's prose so provenance survives even when the extraction
-      // is poor (§14: "every returned market observation must retain source").
-      const sources = [];
-      for (const item of meta.output || []) {
-        if (item?.type !== 'web_search_call') continue;
-        for (const a of item?.action?.sources || item?.results || []) {
-          const url = typeof a === 'string' ? a : (a?.url ?? null);
-          if (url) sources.push(url);
-        }
-      }
+      // ── WHAT THE TOOL DID, READ FROM THE PLATFORM'S RECORD ───────────────
+      //
+      // `data.search_performed` is the model's opinion of its own work and is
+      // kept ONLY as `model_claimed_search`, so a disagreement between the
+      // claim and the record is visible. It grants nothing.
+      const provenance = extractSearchProvenance(meta.output);
+      const extracted = Array.isArray(data?.observations) ? data.observations : [];
+
+      // ── NO REAL SEARCH, NO LIVE EVIDENCE. NO UNBOUND SOURCE, EITHER. ─────
+      //
+      // What leaves this function as `observations` is only what names a
+      // source the search really reached. Everything else is returned beside
+      // it with a reason (§16: a filter whose decisions are invisible is a
+      // filter nobody can audit) and never reaches qualification.
+      const { bound, unbound, bindings, levels } = bindObservations(extracted, provenance);
 
       return {
         mechanism,
-        observations: data?.observations ?? [],
-        search_performed: data?.search_performed ?? false,
-        provenance: { tool: 'web_search', sources: [...new Set(sources)].slice(0, 40) },
+        // What the results called the product. Bound to the search record like
+        // an observation, and unlike one it is never priced from: it leaves
+        // this function in its own field and no evidence gate reads it.
+        identity_discovery: assessIdentityDiscovery(data?.identity_discovery, provenance),
+        observations: bound,
+        extracted: extracted.length,
+        unbound,
+        bindings,
+        binding_levels: levels,
+        search_configured: true,
+        search_required: true,
+        search_performed: provenance.search_performed,
+        model_claimed_search: typeof data?.search_performed === 'boolean' ? data.search_performed : null,
+        provenance,
         notes: data?.notes ?? null,
       };
     },

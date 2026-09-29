@@ -316,13 +316,43 @@ export const NINJA_BLADE_ACCESSORY = {
 export const ALL_BENCHMARKS = [NINJA, LOGITECH, LG, LOUIS_VUITTON, UNKNOWN];
 
 /**
+ * The `output` array of a market-research response, in the shape the
+ * Responses API documents: the platform's `web_search_call` record first, the
+ * model's message after it.
+ *
+ * A fixture that returned only the message would describe a response in which
+ * NO SEARCH HAPPENED, and the pipeline now treats it as exactly that. So a
+ * fixture that means "the search ran and found these" has to say so the way
+ * the provider does. `searched: false` is the other real shape — the model
+ * answered without calling the tool — and `sources` lets a test state what the
+ * search reached independently of what the model then claimed.
+ */
+export function researchOutput(market, { searched = market?.search_performed !== false, sources = null } = {}) {
+  const message = { type: 'message', content: [{ type: 'output_text', text: JSON.stringify(market) }] };
+  if (!searched) return [message];
+  const urlOf = (o) => (/^https?:\/\//i.test(String(o?.source ?? ''))
+    ? o.source
+    : `https://${o?.source_domain ?? o?.source}/${o?.listing_id_or_reference ?? ''}`);
+  const urls = sources ?? [...new Set((market?.observations ?? []).map(urlOf))];
+  return [
+    {
+      type: 'web_search_call', id: 'ws_fixture', status: 'completed',
+      action: { type: 'search', query: 'fixture query', sources: urls.map((url) => ({ type: 'url', url })) },
+    },
+    message,
+  ];
+}
+
+/**
  * A `fetchImpl` that answers each Phase-B stage from a fixture.
  *
  * Routes on the schema NAME in the request body, so the mock cannot silently
  * answer the wrong stage — a mock that returns identity data to the condition
  * stage would produce a green test about nothing.
  */
-export function mockOpenAI(fixture, { fail = null, malformed = false, refusal = false } = {}) {
+export function mockOpenAI(fixture, {
+  fail = null, malformed = false, refusal = false, searched = undefined, sources = null,
+} = {}) {
   return async (url, init) => {
     const body = JSON.parse(init.body);
     const schemaName = body?.text?.format?.name ?? '';
@@ -343,10 +373,13 @@ export function mockOpenAI(fixture, { fail = null, malformed = false, refusal = 
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     const text = malformed ? '{not json' : JSON.stringify(payload);
+    const isResearch = schemaName.includes('market_evidence') && !malformed;
     return new Response(JSON.stringify({
       model: body.model,
       usage: { input_tokens: 800, output_tokens: 300 },
-      output: [{ type: 'message', content: [{ type: 'output_text', text }] }],
+      output: isResearch
+        ? researchOutput(payload, { ...(searched === undefined ? {} : { searched }), sources })
+        : [{ type: 'message', content: [{ type: 'output_text', text }] }],
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 }

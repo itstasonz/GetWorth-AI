@@ -26,13 +26,22 @@
 import { callStructured, createCallLedger, classifyOpenAIFailure } from './openai-client.js';
 import { IDENTITY_SCHEMA, MARKET_QUERY_SCHEMA, CONDITION_SCHEMA } from './schemas.js';
 import { buildIdentityPrompt, buildMarketQueryPrompt, buildConditionPrompt } from './prompts.js';
-import { STAGE_TIMEOUT_MS, STAGE_MAX_OUTPUT_TOKENS, resolveEnrichmentModel } from './config.js';
+import {
+  STAGE_TIMEOUT_MS, STAGE_MAX_OUTPUT_TOKENS, MIN_STAGE_BUDGET_MS,
+  resolveEnrichmentModel, resolveMarketRegion,
+} from './config.js';
 import {
   createMarketResearch, MARKET_MECHANISM, normalizeObservations, rejectOutliers,
 } from './market-research.js';
+import { buildMarketReport, concludeMarketReport, providerTextOf, MARKET_OUTCOME } from './market-report.js';
 import { computeValuationCandidate, VALUATION_STATUS } from './valuation.js';
 import { corroborateSubject, applyGuard, CORROBORATION, reconcileIdentity } from './validation.js';
 import { qualifyMarketEvidence } from '../market-evidence.js';
+import {
+  buildIdentityContext, planSearch, supportedPurposes, localPlanFor, QUERY_PLANNER,
+} from './identity-expansion.js';
+
+export { MARKET_OUTCOME };
 
 export const PHASE_B_STATUS = Object.freeze({
   COMPLETE: 'COMPLETE',
@@ -86,12 +95,23 @@ export async function runPhaseB({
   marketMechanism = MARKET_MECHANISM.UNAVAILABLE,
   mockSearch = null,
   safetyIdentifier = null,
+  marketRegion = resolveMarketRegion(), // a server decision; the only place a region enters
+  queryPlanner = QUERY_PLANNER.AUTO,    // 'model' forces the provider's planner
+  deadlineMs = null,                    // what the container allows; null: ceilings only
 } = {}) {
   const chosenModel = model || resolveEnrichmentModel();
   const ledger = createCallLedger();
   const timings = {};
   const stages = [];
   const t0 = now();
+
+  // Its ceiling or what is left of the container, whichever is less (config.js).
+  const budgetFor = (stage) => {
+    const ceiling = STAGE_TIMEOUT_MS[stage];
+    if (!Number.isFinite(deadlineMs)) return ceiling;
+    return Math.min(ceiling, Math.floor(deadlineMs - (now() - t0)));
+  };
+  const DEADLINE = 'deadline exhausted before the stage could start';
 
   // ── WHERE THE TIME WENT, NOT JUST HOW MUCH ───────────────────────────────
   //
@@ -135,7 +155,7 @@ export async function runPhaseB({
         schemaName: 'getworth_phaseb_identity',
         model: chosenModel,
         apiKey,
-        timeoutMs: STAGE_TIMEOUT_MS.identity,
+        timeoutMs: budgetFor('identity'),
         maxOutputTokens: STAGE_MAX_OUTPUT_TOKENS.identity,
         reasoningEffort: 'low',
         safetyIdentifier,
@@ -178,7 +198,12 @@ export async function runPhaseB({
   // that disagreement is the most important thing known about this scan, and
   // it must not be resolved silently in favour of whichever ran last.
   // See the contract in validation.js.
+  const sx = now();
   const reconciliation = reconcileIdentity({ identity, existingRecognition });
+  // Everything known, each value with its source. Shapes the SEARCH; no gate reads it.
+  const identityContext = buildIdentityContext({ identity, existingRecognition, ocrText, corroboration });
+  const disputed = reconciliation.search_specificity_cap === 'brand_category';
+  record('identity_expansion', 'ok', now() - sx, reconciliation.agreement, sx);
 
   // ── B5 · CONDITION — STARTED HERE, AWAITED AFTER THE RESEARCH BRANCH ──────
   //
@@ -211,7 +236,11 @@ export async function runPhaseB({
   // is a process-level event rather than a stage failure — so the catch is
   // inside, and the outcome is carried back as data.
   const conditionStarted = now();
+  const conditionBudget = budgetFor('condition');
   const conditionTask = (async () => {
+    if (conditionBudget < MIN_STAGE_BUDGET_MS) {
+      return { data: null, failure: DEADLINE, endedAt: now() };
+    }
     try {
       const { data } = await callStructured({
         stage: 'condition',
@@ -221,7 +250,7 @@ export async function runPhaseB({
         schemaName: 'getworth_phaseb_condition',
         model: chosenModel,
         apiKey,
-        timeoutMs: STAGE_TIMEOUT_MS.condition,
+        timeoutMs: conditionBudget,
         maxOutputTokens: STAGE_MAX_OUTPUT_TOKENS.condition,
         reasoningEffort: 'low',
         safetyIdentifier,
@@ -242,16 +271,23 @@ export async function runPhaseB({
       // The block says this name belongs to a REFERENCED product. Searching it
       // would retrieve the host's market, so the stage is skipped with a reason.
       record('market_query', 'skipped', now() - s, 'subject contradicted by block provenance', s);
+    } else if ((query = localPlanFor(identityContext, marketRegion, { disputed, identity, planner: queryPlanner }))) {
+      record('market_query', 'ok', now() - s, 'local plan: no provider call', s);
+    } else if (budgetFor('market_query') < MIN_STAGE_BUDGET_MS) {
+      record('market_query', 'skipped', now() - s, DEADLINE, s);
     } else {
       try {
         const { data } = await callStructured({
           stage: 'market_query',
-          prompt: buildMarketQueryPrompt({ identity, language }),
+          prompt: buildMarketQueryPrompt({
+            identity, language, market: marketRegion, context: identityContext,
+            purposes: [...supportedPurposes(identityContext, { disputed })],
+          }),
           schema: MARKET_QUERY_SCHEMA,
           schemaName: 'getworth_phaseb_market_query',
           model: chosenModel,
           apiKey,
-          timeoutMs: STAGE_TIMEOUT_MS.market_query,
+          timeoutMs: budgetFor('market_query'),
           maxOutputTokens: STAGE_MAX_OUTPUT_TOKENS.market_query,
           reasoningEffort: 'low',
           safetyIdentifier,
@@ -261,22 +297,10 @@ export async function runPhaseB({
         // ── A DISPUTED MODEL MAY NOT BE SEARCHED AS IF IT WERE SETTLED ────
         //
         // Applied HERE, deterministically, after the model has answered —
-        // rather than by asking the prompt to be careful. The query stage
-        // reasons from Phase B's identity alone and has no way to know Phase A
-        // proposed a different family; a server-side cap is the only place
-        // that fact exists. §13's rule that the model never gains pricing
-        // authority by generating the query is the same principle: what it
-        // writes is an intent, and the server decides what the intent is
-        // allowed to be.
-        query = reconciliation.search_specificity_cap === 'brand_category'
-          ? {
-            ...data,
-            product_identity: [identity?.subject?.brand, identity?.subject?.object_class]
-              .filter(Boolean).join(' ') || data.product_identity,
-            variant: null,
-            specificity: 'brand_category',
-          }
-          : data;
+        // what it writes is an intent, and the server decides what the intent
+        // is allowed to be (§13). The plan is the server's too (planSearch):
+        // one query per purpose, five at most, no disputed model in any.
+        query = planSearch(data, identityContext, { disputed, identity });
         record('market_query', 'ok', now() - s,
           reconciliation.conflict ? 'capped to brand_category: identity disputed' : null, s);
       } catch (err) {
@@ -291,13 +315,22 @@ export async function runPhaseB({
     const s = now();
     if (!query) {
       record('market_research', 'skipped', now() - s, 'no search intent', s);
+    } else if (budgetFor('market_research') < MIN_STAGE_BUDGET_MS) {
+      record('market_research', 'skipped', now() - s, DEADLINE, s);
     } else {
       const adapter = createMarketResearch({
         mechanism: marketMechanism, model: chosenModel, apiKey, ledger, language, fetchImpl, mockSearch,
+        market: marketRegion, timeoutMs: budgetFor('market_research'),
       });
       try {
-        research = await adapter.search(query);
-        record('market_research', 'ok', now() - s, research.mechanism, s);
+        research = await adapter.search(query, { identityContext });
+        // The detail says whether a search HAPPENED, not merely which
+        // mechanism was configured — the two used to be the same word.
+        record('market_research', 'ok', now() - s,
+          `${research.mechanism}: ${research.search_performed
+            ? `${research.provenance?.search_call_count ?? 0} search call(s), `
+              + `${research.provenance?.sources?.length ?? 0} source(s)`
+            : 'NO web_search_call, nothing admitted as live evidence'}`, s);
       } catch (err) {
         record('market_research', 'failed', now() - s, classifyOpenAIFailure(err?.message), s);
       }
@@ -336,21 +369,12 @@ export async function runPhaseB({
     `${kept.length} accepted / ${normalized.rejected.length + dropped.length} rejected / ${normalized.context.length} context`,
     s6);
 
-  const marketEvidence = {
-    mechanism: research?.mechanism ?? MARKET_MECHANISM.UNAVAILABLE,
-    search_performed: research?.search_performed ?? false,
-    provenance: research?.provenance ?? { tool: null, sources: [] },
-    query,
-    accepted: kept,
-    rejected: [...normalized.rejected, ...dropped],
-    context_only: normalized.context,
-    counts: {
-      returned: research?.observations?.length ?? 0,
-      accepted: kept.length,
-      rejected: normalized.rejected.length + dropped.length,
-      context_only: normalized.context.length,
-    },
-  };
+  // Assembled in market-report.js: what was extracted, what bound to a real
+  // source, what each gate did with it. Unbound observations sit in `rejected`
+  // with their reason and never reach either reading below.
+  const marketEvidence = buildMarketReport({
+    research, normalized, kept, dropped, query, marketRegion, identityContext,
+  });
 
   // ── B6b · MARKET-EVIDENCE QUALIFICATION ──────────────────────────────────
   //
@@ -381,6 +405,7 @@ export async function runPhaseB({
   const market = qualifyMarketEvidence({
     observations: research?.observations ?? [],
     subject: qualificationSubject,
+    providerText: providerTextOf(research), // the provider's text, never the model's
   });
   // STATUS 'ok' EVEN WHEN NOTHING QUALIFIED, and the distinction lives in the
   // detail. The stage vocabulary is closed — ok / failed / skipped — because a
@@ -392,6 +417,10 @@ export async function runPhaseB({
         + `${market.counts.admitted} admitted across ${market.distinct_sources} sources`
       : `unqualified: ${market.set_failures.join(', ') || 'no admissible observation'}`,
     sq);
+
+  // The one-word outcome and the diagnostic record, now that qualification
+  // has answered. See concludeMarketReport for what each field is.
+  concludeMarketReport(marketEvidence, { research, qualification: market });
 
   // ── B6 · DETERMINISTIC VALUATION CANDIDATE ───────────────────────────────
   //

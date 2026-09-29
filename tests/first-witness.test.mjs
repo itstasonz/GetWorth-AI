@@ -52,6 +52,7 @@ const { classifyOcrBlock, RELATION } = await import(AUTH_URL.href);
 import { corroborateSubject, CORROBORATION } from '../api/_lib/phaseb/validation.js';
 import { runPhaseB, PHASE_B_STATUS } from '../api/_lib/phaseb/pipeline.js';
 import { MARKET_MECHANISM } from '../api/_lib/phaseb/market-research.js';
+import { researchOutput } from './fixtures/phaseb/benchmarks.mjs';
 
 const REPO = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (rel) => readFileSync(resolvePath(REPO, rel), 'utf8');
@@ -209,16 +210,20 @@ describe('FW-3 strong identity with a DB miss reaches market research', () => {
     if (latency[key]) await new Promise((r) => setTimeout(r, latency[key]));
     return new Response(JSON.stringify({
       model: 'test', usage: { input_tokens: 1, output_tokens: 1 },
-      output: [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }],
+      // The research stage answers in the provider's real shape: the search
+      // record, then the message. A message alone now means "no search ran".
+      output: key === 'market_research' ? researchOutput(payload)
+        : [{ type: 'message', content: [{ type: 'output_text', text: JSON.stringify(payload) }] }],
     }), { status: 200, headers: { 'content-type': 'application/json' } });
   };
 
-  const run = (opts) => runPhaseB({
+  const run = (opts, pipeline = {}) => runPhaseB({
     images: ['aGk='], language: 'he', ocrText: WITNESS_OCR,
     catalogCandidates: [],            // THE DB MISS, which must not matter
     apiKey: 'k', model: 'test',
     marketMechanism: MARKET_MECHANISM.OPENAI_WEB_SEARCH,
     fetchImpl: provider(opts),
+    ...pipeline,
   });
 
   test('FW-3a corroboration is READ_OFF_ITEM and the market stages RUN', async () => {
@@ -228,8 +233,18 @@ describe('FW-3 strong identity with a DB miss reaches market research', () => {
     assert.equal(stage('market_query').status, 'ok',
       `market_query ${stage('market_query').status}: ${stage('market_query').detail}`);
     assert.equal(stage('market_research').status, 'ok');
-    assert.equal(r.model_metadata.calls.attempts, 4,
-      'the witness made 2 calls because the market branch was skipped; it must now make 4');
+    // THREE provider calls, and the market branch still RUNS. The witness made
+    // 2 because the branch was skipped. It then made 4; the fourth was a call
+    // to write a query plan that a strong branded identity already implies,
+    // and that plan is now assembled locally.
+    assert.equal(r.model_metadata.calls.attempts, 3);
+    assert.match(stage('market_query').detail, /local plan/);
+    assert.deepEqual(r.model_metadata.calls.by_stage.map((c) => c.stage).sort(),
+      ['condition', 'identity', 'market_research']);
+    // The provider's planner is retained, and makes the fourth call when asked.
+    const viaModel = await run({ observations: [] }, { queryPlanner: 'model' });
+    assert.equal(viaModel.model_metadata.calls.attempts, 4);
+    assert.equal(viaModel.stages.find((s) => s.stage === 'market_query').detail, null);
   });
 
   test('FW-3b qualified evidence produces a second-hand price, not "set your own"', async () => {

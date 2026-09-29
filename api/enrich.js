@@ -30,6 +30,7 @@ import { verifyJWT } from './analyze.js';
 import {
   resolveEnrichmentMode, resolveEnrichmentModel, ENRICHMENT_MODE,
   ENRICHMENT_FLAG, ENRICHMENT_KEY_ENV, isEnrichmentPermitted,
+  PIPELINE_BUDGET_MS, resolveMarketRegion,
 } from './_lib/phaseb/config.js';
 import { runPhaseB, PHASE_B_STATUS } from './_lib/phaseb/pipeline.js';
 import { MARKET_MECHANISM } from './_lib/phaseb/market-research.js';
@@ -47,9 +48,14 @@ import { MARKET_MECHANISM } from './_lib/phaseb/market-research.js';
 //
 // THE FIX IS NODE, NOT EDGE, and the reason is latency. Edge is wall-capped at
 // 25s (api/analyze.js records this, which is why IT moved off Edge), and Phase
-// B's market_research stage alone is allowed 90s. Declaring `runtime: 'edge'`
+// B's market_research stage alone is allowed 45s. Declaring `runtime: 'edge'`
 // here would have replaced a 500 with a truncation at 25s — a worse failure,
 // because it looks like a slow product rather than a misconfiguration.
+//
+// THE NUMBER BELOW IS A CONTRACT WITH config.js. It must stay a literal, since
+// Vercel reads it statically, so it cannot import FUNCTION_MAX_DURATION_S — a
+// test holds the two equal, and holds every stage ceiling beneath it. The
+// pipeline is handed PIPELINE_BUDGET_MS and clamps each stage to what is left.
 //
 // So: Node runtime, an explicit maxDuration, and the SAME dual-mode adapter
 // api/analyze.js already uses at the bottom of this file. The handler body is
@@ -239,6 +245,10 @@ async function handleRequest(req) {
       apiKey: process.env[ENRICHMENT_KEY_ENV],
       // The research mechanism is a server decision, never a request field.
       marketMechanism: MARKET_MECHANISM.OPENAI_WEB_SEARCH,
+      // So is the market. One region exists today; when the user's own
+      // marketplace region is known server-side, its id goes here.
+      marketRegion: resolveMarketRegion(),
+      deadlineMs: PIPELINE_BUDGET_MS,
       // Pseudonymous and per-request: stable enough for abuse attribution,
       // and not an exported internal identifier.
       safetyIdentifier: `gw-${scanUuid}`,

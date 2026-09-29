@@ -3459,6 +3459,46 @@ export function composeBrandModelName(brand, model) {
   return `${b} ${m}`;
 }
 
+// ── A MODEL NAME IS NOT A MODEL NUMBER ──────────────────────────────────────
+//
+// `recognition.modelNumber` in the response was filled from `final_model`,
+// which is the model's NAME ("G Pro X Superlight"). Everything downstream that
+// reads a field called model number — the valuations row, the confirmations
+// row, a stored correction — was therefore handed a name and told it was an
+// identifier.
+//
+// They are now separate. `modelName` is the name. `modelNumber` is an
+// identifier the recognition engine REPORTED READING off the item, or null: the
+// current engine's schema has no such field, so for it the answer is always
+// null, and that is the correct answer rather than a missing one. Nothing here
+// derives a number from a name. It is a reading, not a verified fact, and the
+// source marker says so.
+//
+// `modelNumberSource` is the marker a consumer checks before treating the
+// value as an identifier. A response produced before this change carries a
+// NAME under `modelNumber` and no source, so it reads as "no identifier"
+// instead of being silently reinterpreted.
+export const MODEL_NUMBER_SOURCE_READ = 'reported_read_off_item';
+
+export function describeModelIdentity(verification, recognition) {
+  const finalModel = typeof verification?.final_model === 'string' ? verification.final_model.trim() : '';
+  const modelName = finalModel && finalModel.toLowerCase() !== 'unidentified' ? finalModel : null;
+  const read = recognition?.model_number_read;
+  const modelNumber = typeof read === 'string' && read.trim() ? read.trim().slice(0, 64) : null;
+  return {
+    modelName,
+    modelNumber,
+    modelNumberSource: modelNumber ? MODEL_NUMBER_SOURCE_READ : null,
+  };
+}
+
+/** The identifier in a response's recognition block, or null. Never a name. */
+export function observedModelNumber(recognitionBlock) {
+  return recognitionBlock?.modelNumberSource === MODEL_NUMBER_SOURCE_READ
+    && typeof recognitionBlock.modelNumber === 'string' && recognitionBlock.modelNumber.trim()
+    ? recognitionBlock.modelNumber.trim() : null;
+}
+
 // Parse + sanitize a user correction (refineModel). The client may send an
 // alternative's display string, which historically could arrive double-branded;
 // the model must never carry the brand prefix, and the stored correction text
@@ -3857,7 +3897,7 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     recognition: {
       identifiedBy: mapMethod(verification.identification_method),
       ocrText: (ocr.raw_texts || []).join(' | '),
-      modelNumber: verification.final_model !== 'unidentified' ? verification.final_model : null,
+      ...describeModelIdentity(verification, recognition),
       brandConfidence: verification.brand_confidence || 'unidentified',
       alternatives: (() => {
         const topBrand = recognition.brand_candidates?.[0]?.brand || '';
@@ -3898,7 +3938,17 @@ function normalizeForUI(recognition, verification, tierInfo, visionUsed = false,
     ocr: {
       text_found: ocr.raw_texts || [],
       logos_found: ocr.logos_detected || [],
+      labels_found: ocr.labels_detected || [],
       readable_text_on_item: ocr.has_readable_text || false,
+    },
+    // What Stage 1 SAW of the object, as opposed to what it read. Already
+    // produced and paid for; carried so a later stage can describe an item
+    // that has no brand to search by. Condition is reported elsewhere.
+    visual_attributes: {
+      materials: recognition.visual_features?.materials || [],
+      colors: recognition.visual_features?.colors || [],
+      finish: recognition.visual_features?.finish || null,
+      shape: recognition.visual_features?.shape || null,
     },
     classification: {
       category: verification.final_category || recognition.category,
@@ -5530,7 +5580,7 @@ async function handleRequest(req) {
         ai_confidence:     result.confidence || 0,
         ai_raw_response:   result,
         ocr_text:          result.recognition?.ocrText || null,
-        model_number:      result.recognition?.modelNumber || null,
+        model_number:      observedModelNumber(result.recognition),
         identified_by:     result.recognition?.identifiedBy || 'visual',
         alternatives:      result.recognition?.alternatives || [],
         // UI-003 Wave 0 — a degraded/manual valuation is persisted AS one.

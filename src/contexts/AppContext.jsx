@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull, VALID_CATEGORIES } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull, VALID_CATEGORIES, observedModelNumber, recognisedModelName } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
@@ -2331,7 +2331,7 @@ export function AppProvider({ children }) {
       ai_confidence: aiResult.confidence || 0,
       ai_raw_response: aiResult,
       ocr_text: aiResult.recognition?.ocrText || null,
-      model_number: aiResult.recognition?.modelNumber || null,
+      model_number: observedModelNumber(aiResult.recognition),
       identified_by: aiResult.recognition?.identifiedBy || 'visual',
       alternatives: aiResult.recognition?.alternatives || [],
       // NULL, not 0: zero is not a price. A 0 here is indistinguishable from an
@@ -2465,7 +2465,7 @@ export function AppProvider({ children }) {
   // is the client-side half of the guarantee tests/phaseb-isolation.test.mjs
   // makes about the server: a late answer about a different object must never
   // paint itself onto the object currently on screen.
-  const runPhaseBEnrichment = useCallback(async (phaseAResult, base64Images, scanUuid, phaseAMs) => {
+  const runPhaseBEnrichment = useCallback(async (phaseAResult, base64Images, scanUuid, phaseAMs, clientTimings = null) => {
     if (!PHASE_B_ENABLED) return;
     if (!scanUuid || !base64Images?.length) return;
 
@@ -2543,6 +2543,21 @@ export function AppProvider({ children }) {
               : []),
           ].slice(0, 6),
           ocr_text: { raw_texts: phaseAResult?.ocr?.text_found ?? [] },
+          // ── ALREADY PAID FOR, AND PREVIOUSLY LEFT BEHIND ──────────────────
+          //
+          // Phase A names the product in two languages, reads logos and labels,
+          // and describes what the object is made of. None of it reached Phase
+          // B, which then searched the market using only the text printed
+          // largest on the item. All of it is a HINT: the server fences it as
+          // untrusted and records where each value came from.
+          full_name: phaseAResult?.identification?.full_name || null,
+          full_name_hebrew: phaseAResult?.identification?.full_name_hebrew || null,
+          logos_detected: Array.isArray(phaseAResult?.ocr?.logos_found)
+            ? phaseAResult.ocr.logos_found.slice(0, 12) : [],
+          labels_detected: Array.isArray(phaseAResult?.ocr?.labels_found)
+            ? phaseAResult.ocr.labels_found.slice(0, 12) : [],
+          visual_features: phaseAResult?.visual_attributes ?? null,
+          model_number: observedModelNumber(phaseAResult?.recognition),
         },
       };
 
@@ -2593,6 +2608,13 @@ export function AppProvider({ children }) {
       const me = pb?.market_evidence ?? {};
       const gm = pb?.validation?.market_evidence ?? null;
       const instrumentation = {
+        // THE CLIENT'S HALF OF THE WATERFALL. What the phone spent before the
+        // request left, what the round trip cost, and what the server says it
+        // spent inside it; the difference is upload, download and queueing.
+        client_prepare_ms: clientTimings?.prepare_ms ?? null,
+        client_pixel_check_ms: clientTimings?.pixel_check_ms ?? null,
+        phase_a_round_trip_ms: clientTimings?.phase_a_round_trip_ms ?? null,
+        phase_a_server_ms: phaseAResult?._timings?.total_ms ?? phaseAResult?._timings?.total ?? null,
         phase_a_ms: Math.round(phaseAMs),
         phase_b_recognition_ms: t.openai_identity_ms ?? null,
         phase_b_condition_ms: t.condition_ms ?? null,
@@ -2605,7 +2627,7 @@ export function AppProvider({ children }) {
         total_end_to_end_ms: Math.round(phaseAMs + totalMs),
         openai_calls: calls.attempts ?? 0,
         openai_calls_billed: calls.billed ?? 0,
-        search_calls: me.search_performed ? 1 : 0,
+        search_calls: me.provenance?.search_call_count ?? 0,
         identity_tier: pb?.validation?.identity_tier ?? null,
         corroboration: pb?.identity_candidate?.corroboration?.level ?? null,
         evidence_admitted: gm?.admitted ?? me.counts?.accepted ?? 0,
@@ -2619,6 +2641,15 @@ export function AppProvider({ children }) {
 
       console.log('[PhaseB] ── one phone scan ──');
       console.table(instrumentation);
+      // Every stage with the offset it STARTED at, so overlap is visible and a
+      // parallel stage is never reported at the time it was merely waited for.
+      console.log('[PhaseA] server timings', phaseAResult?._timings ?? '(not returned)');
+      console.table((pb?.stages ?? []).map((st) => ({
+        stage: st.stage, status: st.status, started_at_ms: st.at_ms, duration_ms: st.duration_ms,
+        ended_at_ms: (st.at_ms ?? 0) + (st.duration_ms ?? 0), detail: st.detail,
+      })));
+      console.log('[PhaseB] provider calls', pb?.model_metadata?.calls ?? null,
+        'search', pb?.market_evidence?.diagnostics ?? null);
       mark(`${instrumentation.phase_b_status} · ${instrumentation.identity_tier} · `
         + `VERIFIED_MARKET=${instrumentation.verified_market} · `
         + `${instrumentation.total_end_to_end_ms}ms end to end `
@@ -2830,7 +2861,11 @@ export function AppProvider({ children }) {
         const phaseAMs = t2 - pipelineT0;
         const imagesForPhaseB = (Array.isArray(analyzeInput) ? analyzeInput : [analyzeInput])
           .map((img) => img.split(',')[1]);
-        runPhaseBEnrichment(analysisResult, imagesForPhaseB, currentScanUuidRef.current, phaseAMs)
+        runPhaseBEnrichment(analysisResult, imagesForPhaseB, currentScanUuidRef.current, phaseAMs, {
+          prepare_ms: Math.round(t1 - pipelineT0),
+          pixel_check_ms: Math.round(tApi - t1),
+          phase_a_round_trip_ms: Math.round(t2 - tApi),
+        })
           .catch((e) => console.warn('[PhaseB] unhandled:', e?.message));
       }
 
@@ -3123,7 +3158,7 @@ export function AppProvider({ children }) {
           result?.category || refined.category,       // category
           result?.details?.brand || refined.details?.brand, // brand
           result?.recognition?.ocrText,               // OCR text (visual cues)
-          result?.recognition?.modelNumber,           // model number
+          observedModelNumber(result?.recognition),   // model number — an identifier or null, never a name
           result?.confidence,                         // original confidence
           oldValuationId                              // link to valuation
         );
@@ -3178,10 +3213,10 @@ export function AppProvider({ children }) {
       valuation_id: result.valuation_id || null,
       detected_name: result.name || null,
       detected_brand: result.details?.brand || identification.brand || null,
-      detected_model: recognition.modelNumber || identification.model || null,
+      detected_model: recognisedModelName(recognition, identification),
       confidence: result.confidence || null,
       ocr_text: ocr.text_found?.join(', ') || recognition.ocrText || null,
-      model_number: recognition.modelNumber || identification.model || null,
+      model_number: observedModelNumber(recognition),
       user_id: user?.id || null,
     };
     if (result.product_id) confirmationRow.product_id = result.product_id;

@@ -93,6 +93,30 @@ export const IDENTITY_SCHEMA = strictObject({
       model: nullableString,
     }),
   },
+  // WHAT THE OBJECT LOOKS LIKE. For an item with no brand this IS the
+  // identity: a shelf is searched by what it is made of, not by a model
+  // number it does not have. Every field may be null or empty, and "unknown"
+  // is the expected answer for a dimension nobody can read off a photograph.
+  attributes: strictObject({
+    materials: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    colors: { type: 'array', maxItems: 6, items: { type: 'string' } },
+    finish: nullableString,
+    shape: nullableString,
+    dimensions: nullableString,
+    style: nullableString,
+    distinctive: { type: 'array', maxItems: 6, items: { type: 'string' } },
+  }),
+  // OTHER NAMES FOR THE SAME PRODUCT, from the model's own knowledge. Kept
+  // apart from `identifiers`, which holds only what was READ: a remembered
+  // name may help phrase a search and is evidence of nothing.
+  known_aliases: {
+    type: 'array',
+    maxItems: 6,
+    items: strictObject({
+      kind: { type: 'string', enum: ['alias', 'regional_name'] },
+      value: { type: 'string' },
+    }),
+  },
   ambiguities: { type: 'array', maxItems: 12, items: { type: 'string' } },
   alternatives: {
     type: 'array',
@@ -118,7 +142,20 @@ export const MARKET_QUERY_SCHEMA = strictObject({
   geography: { type: 'string' },
   currency: { type: 'string' },
   market: { type: 'string', enum: ['second_hand', 'retail', 'any'] },
-  search_terms: { type: 'array', maxItems: 6, items: { type: 'string' } },
+  // A PLAN, not a list of phrasings. Each query has a PURPOSE, and the server
+  // keeps at most one per purpose and at most five in all (see
+  // enforceQueryPlan). Five rewordings of one idea retrieve one result set.
+  queries: {
+    type: 'array',
+    maxItems: 5,
+    items: strictObject({
+      purpose: {
+        type: 'string',
+        enum: ['EXACT_IDENTITY', 'MODEL_NUMBER', 'LOCAL_SECOND_HAND', 'ALIAS_OR_REGIONAL', 'GENERIC_COMPARABLE'],
+      },
+      text: { type: 'string' },
+    }),
+  },
   specificity: {
     type: 'string',
     // §31/§33: when the exact model is not established, say so, and search at
@@ -158,6 +195,21 @@ export const MARKET_EVIDENCE_SCHEMA = strictObject({
       }),
     }),
   },
+  // WHAT THE RESULTS CALLED THIS PRODUCT. There is deliberately no price and
+  // no currency here: this block can describe an identity and cannot describe
+  // a market. It grants nothing (see assessIdentityDiscovery).
+  identity_discovery: strictObject({
+    claims: {
+      type: 'array',
+      maxItems: 24,
+      items: strictObject({
+        kind: { type: 'string', enum: ['canonical_name', 'model_number', 'mpn', 'sku', 'alias', 'regional_name'] },
+        value: { type: 'string' },
+        source_url: nullableString,
+        source_domain: nullableString,
+      }),
+    },
+  }),
   search_performed: { type: 'boolean' },
   notes: nullableString,
 });

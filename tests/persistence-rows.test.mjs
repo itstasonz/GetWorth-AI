@@ -46,7 +46,9 @@ const UTILS_SRC   = process.env.UI003_UTILS_PATH   || `${ROOT}src/lib/utils.js`;
 // other target is: a hard-coded import would test the pristine original while
 // the harness reported on a mutant, and a harness that always says KILLED
 // proves nothing.
-const { hasRealPrice, positivePriceOrNull: clientPositivePriceOrNull } = await import(pathToFileURL(UTILS_SRC).href);
+const {
+  hasRealPrice, positivePriceOrNull: clientPositivePriceOrNull, observedModelNumber: clientObservedModelNumber,
+} = await import(pathToFileURL(UTILS_SRC).href);
 const CONTEXT_SRC = process.env.UI003_CONTEXT_PATH || `${ROOT}src/contexts/AppContext.jsx`;
 
 /** The shipped server row literal, callable with its free identifiers bound. */
@@ -55,13 +57,14 @@ function serverRow(marketValue) {
   const body = objectLiteralAt(src, 'const valuationRow = {', 'api/analyze.js');
   const fn = compileRegion(
     ['result', 'isPricedMarketValue', 'positivePriceOrNull', 'candidates', 'lang',
-     'scanUuid', 'authUser', 'valuationId', 'VALUATION_VERSION'],
+     'scanUuid', 'authUser', 'valuationId', 'VALUATION_VERSION', 'observedModelNumber'],
     `return (${body});`,
     'analyze.js valuationRow',
   );
   return fn(
     { marketValue, category: 'Watches', confidence: 0.9, recognition: {} },
     isPricedMarketValue, positivePriceOrNull, [], 'en', 's-uuid', { id: 'u-1' }, 'v-1', 1,
+    clientObservedModelNumber,
   );
 }
 
@@ -70,14 +73,14 @@ function clientRow(marketValue) {
   const src = readFileSync(CONTEXT_SRC, 'utf8');
   const body = objectLiteralAt(src, 'const row = {', 'src/contexts/AppContext.jsx');
   const fn = compileRegion(
-    ['aiResult', 'priced', 'positivePriceOrNull', 'user', 'lang'],
+    ['aiResult', 'priced', 'positivePriceOrNull', 'user', 'lang', 'observedModelNumber'],
     `return (${body});`,
     'AppContext row',
   );
   const aiResult = { marketValue, valuation_id: 'v-1', name: 'X', category: 'Watches', recognition: {} };
   // The CLIENT mirror is bound here on purpose: if it drifts from the server
   // rule, PR-08 sees the divergence in the rows rather than PB-12 alone.
-  return fn(aiResult, hasRealPrice(marketValue), clientPositivePriceOrNull, { id: 'u-1' }, 'en');
+  return fn(aiResult, hasRealPrice(marketValue), clientPositivePriceOrNull, { id: 'u-1' }, 'en', clientObservedModelNumber);
 }
 
 // The shapes that matter. `degraded-but-labelled-priced` is the SHIPPED DEFECT:

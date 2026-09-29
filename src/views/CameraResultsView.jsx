@@ -4,7 +4,7 @@ import { useApp } from '../contexts/AppContext';
 import { camLog, PHASE_B_ENABLED } from '../contexts/AppContext';
 import { BUILD_SHA } from '../App';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
-import { formatPrice, isSerialEligible, hasRealPrice } from '../lib/utils';
+import { formatPrice, isSerialEligible, hasRealPrice, observedModelNumber, recognisedModelName } from '../lib/utils';
 import { recordObservation } from '../lib/observations';
 
 // ═══════════════════════════════════════════════════════
@@ -773,7 +773,11 @@ export const PRICE_BASIS = Object.freeze({
 
 export function resolvePriceBasis(result) {
   if (!hasRealPrice(result?.marketValue)) return PRICE_BASIS.NONE;
-  const gm = result?._phaseB?.validation?.market_evidence;
+  // GATED ON THE BUILD FLAG, like every other Phase B read. Ungated, this line
+  // was harmless at runtime (nothing writes the field when the flag is off) and
+  // still shipped Phase B's vocabulary in a build that was meant to contain
+  // none of it. Off must mean GONE, and the bundle is what that is said about.
+  const gm = PHASE_B_ENABLED ? result?._phaseB?.validation?.market_evidence : null;
   if (gm?.qualified === true) return PRICE_BASIS.VERIFIED_MARKET;
   // A generic object's comparables are real market evidence and are NOT the
   // same claim. The user is told which one they are looking at.
@@ -1381,12 +1385,12 @@ export function ResultsView() {
                 : (result.category || identification.generic_name || baseName);
             })()}
           </p>
-          {(recognition.modelNumber || (identification.model && identification.model !== 'unidentified')) && (
+          {(observedModelNumber(recognition) || recognisedModelName(recognition, identification)) && (
             <p
               className="text-sm mt-1 uppercase tracking-[0.2em] font-medium"
               style={{ color: STITCH.onSurfaceVariant }}
             >
-              {lang === 'he' ? 'דגם' : 'Ref.'} {recognition.modelNumber || identification.model}
+              {lang === 'he' ? 'דגם' : 'Ref.'} {observedModelNumber(recognition) || recognisedModelName(recognition, identification)}
             </p>
           )}
           {hasPrice && result.marketValue?.low > 0 && (
@@ -1499,7 +1503,7 @@ export function ResultsView() {
                 // UI-003 Wave 0: the grade describes evidence behind a PRICE.
                 // With no price there is no evidence, whatever the response's
                 // own grade says (an older cached one can say MEDIUM).
-                const pb = result._phaseB;
+                const pb = PHASE_B_ENABLED ? result._phaseB : null;
                 const evidence = getPricingEvidence(
                   hasPrice ? result.marketValue?.pricing_confidence : 'MANUAL_REQUIRED', t,
                   pb ? {

@@ -43,6 +43,9 @@
 // forbids and which tests/refund-crossproduct.test.mjs (XP-PHASEB) fails on.
 // ══════════════════════════════════════════════════════════════════════════════
 import { ACCESSORY_NOUNS } from './pricing-authority.js';
+import { sourceSite } from './source-site.js';
+import { listingIdentity } from './listing-identity.js';
+import { transliterates, scriptOf, SCRIPT } from './script-normalization.js';
 
 /** The class name. A string for serialisation; never the thing that grants. */
 export const VERIFIED_MARKET = 'VERIFIED_MARKET';
@@ -116,6 +119,48 @@ export const VERIFIED_MARKET_QUORUM = 3;
  */
 export const MIN_DISTINCT_SOURCES = 2;
 
+// ── ONE CURRENCY, SEVERAL SPELLINGS ────────────────────────────────────────
+//
+// THE FIRST LIVE WITNESS OF THIS GATE. Six genuine Israeli listings, priced in
+// shekels, were each refused as `foreign_currency_without_fx_proof`. The
+// comparison below accepted the three letters "ILS" and nothing else, and a
+// listing written for Israelis says "₪". Phase B's own filter had recognised
+// the spellings all along, so the two readings disagreed about what a shekel
+// is — and the stricter one was wrong, not careful.
+//
+// This table names the SAME currency several ways. It is not a relaxation:
+// nothing is converted, no rate is involved, and a string that is not on it is
+// exactly as foreign as it was. It is deliberately a closed list rather than a
+// pattern — "anything containing ₪" would admit "₪/$", and a rule that guesses
+// at a currency is the rule §9 exists to forbid.
+//
+// EXPORTED so there is one table. Phase B's filter imports it; a second copy is
+// how this defect happened.
+export const MARKET_CURRENCY = 'ILS';
+const SHEKEL_FORMS = new Set([
+  'ils', 'nis', 'shekel', '\u20AA',
+  '\u05E9"\u05D7',        // shin, ASCII quotation mark, chet
+  '\u05E9\u05F4\u05D7',   // shin, Hebrew gershayim, chet: how it is properly written
+  '\u05E9\u05D7',         // shin, chet
+]);
+
+/** Is this string one of the ways a shekel is written? Exact match only. */
+export function isShekel(raw) {
+  return typeof raw === 'string' && SHEKEL_FORMS.has(raw.trim().toLowerCase());
+}
+
+/**
+ * The currency a listing states, in one canonical spelling.
+ *
+ * A shekel form becomes 'ILS'. ANYTHING ELSE IS RETURNED AS WRITTEN (trimmed,
+ * upper-cased) and is therefore still not 'ILS': an unrecognised string is
+ * foreign, and foreign needs a V-FX proof. Empty or non-string input is ''.
+ */
+export function canonicalCurrency(raw) {
+  if (typeof raw !== 'string') return '';
+  return isShekel(raw) ? MARKET_CURRENCY : raw.trim().toUpperCase();
+}
+
 /** The model's own match score can subtract, never add. */
 export const SELF_REPORTED_MATCH_FLOOR = 0.6;
 
@@ -131,6 +176,8 @@ export const DISQUALIFIER = Object.freeze({
   IDENTITY_TOO_WEAK: 'listing_names_too_little_to_be_this_product',
   VARIANT_MISMATCH: 'listing_names_a_different_variant',
   QUALIFIER_MISMATCH: 'listing_names_a_different_model_qualifier',
+  IDENTIFIER_MISMATCH: 'listing_lacks_the_exact_model_identifier',
+  NUMBER_MISMATCH: 'listing_does_not_name_the_model_number_beside_the_model',
   ACCESSORY_LISTING: 'listing_is_an_accessory_for_the_subject',
   HOST_PRODUCT_LISTING: 'listing_is_the_host_product_not_the_accessory',
   DUPLICATE: 'duplicate_listing',
@@ -206,6 +253,31 @@ const QUALIFIERS = new Set([
   'power', 'premium', 'standard', 'basic', 'classic', 'sport', 'edition',
   'series', 'gen', 'generation', 'nano', 'super',
 ]);
+
+// ── THE QUALIFIERS THAT NAME A SIBLING ─────────────────────────────────────
+//
+// A subset of the list above, and a stricter rule. "Edition" and "series" are
+// decoration. These are not: a listing that says Pro, Ultra or Max is naming a
+// DIFFERENT, usually dearer, member of the family, whether or not the subject
+// carries a qualifier of its own. The older rule only fired when the subject
+// had a qualifier to disagree with, so a plain model admitted its own Pro.
+const SIBLING_QUALIFIERS = new Set([
+  'pro', 'plus', 'max', 'mini', 'ultra', 'lite', 'air', 'nano', 'xl', 'xs', 'se', 'fe',
+]);
+
+/** Words a localized alias must be corroborated on before it counts. */
+export const MIN_ALIAS_SITES = 2;
+/** A brand is worth one point and can never qualify alone, so its bar is lower. */
+const MIN_BRAND_SKELETON = 2;
+const MIN_MODEL_SKELETON = 3;
+
+export const ALIAS_PROVENANCE = Object.freeze({
+  TRANSLITERATION: 'DETERMINISTIC_TRANSLITERATION',
+  WEB: 'WEB_CORROBORATED',
+});
+
+const hasDigit = (t) => /\p{N}/u.test(t);
+const isNumber = (t) => /^\p{N}+$/u.test(t);
 
 /** Dimensions where a stated difference means a different product. */
 const DIMENSIONS = [
@@ -294,6 +366,18 @@ export function subjectVocabulary(subject = {}) {
     qualifiers: modelToks.filter((t) => QUALIFIERS.has(t)),
     class_tokens: [...classToks],
     variant_dimensions: dimensionsOf([...tokens(subject.variant), ...modelToks]),
+    // IDENTIFIERS AND NUMBERS ARE EXACT. "G502" is not "G503" and the 5 in a
+    // console's name is not a 4. Neither is ever transliterated or fuzzily
+    // matched; sizes are left to the dimension rule above, which treats
+    // silence as silence.
+    identifier_tokens: distinctive.filter((t) => hasDigit(t) && !isNumber(t)
+      && !DIMENSIONS.some((d) => d.re.test(t))),
+    number_tokens: modelToks.map((t, i) => ({ t, i })).filter(({ t }) => isNumber(t))
+      .map(({ t, i }) => ({ number: t, before: modelToks[i - 1] ?? null, after: modelToks[i + 1] ?? null })),
+    sibling_qualifiers: [...tokens(subject.variant), ...modelToks].filter((t) => SIBLING_QUALIFIERS.has(t)),
+    // Filled by qualification, from text the provider returned. Empty here: a
+    // subject on its own has no localized names, and none may be asserted.
+    aliases: [],
     subject_is_accessory: [...tokens(subject.object_class), ...tokens(subject.product_name)]
       .some((t) => ACCESSORY_NOUNS.has(t)),
     accessory_tokens: [...tokens(subject.object_class), ...tokens(subject.product_name), ...modelToks]
@@ -374,10 +458,15 @@ export function hasVerifiedComparable(ctx) {
  * Total: any shape of input yields a report and never throws. An empty or
  * malformed input is "not qualified", which is the fail-closed direction.
  */
-export function qualifyMarketEvidence({ observations = [], subject = {}, fxProofs = null } = {}) {
+export function qualifyMarketEvidence({
+  observations = [], subject = {}, fxProofs = null, providerText = null,
+} = {}) {
   // `subject: null` is not the same as an omitted subject, and a default
   // parameter does not catch it. Totality is a property this function claims.
-  const vocab = subjectVocabulary(subject && typeof subject === 'object' ? subject : {});
+  const vocab = {
+    ...subjectVocabulary(subject && typeof subject === 'object' ? subject : {}),
+  };
+  vocab.aliases = localizedAliases(vocab, observations, providerText);
   const admitted = [];
   const disqualified = [];
   const reject = (observation, reason) => { disqualified.push({ observation, reason }); };
@@ -443,7 +532,7 @@ export function qualifyMarketEvidence({ observations = [], subject = {}, fxProof
     // path. See screenListing at the bottom of this file.
     const screened = screenListing(o, fxProofs);
     if (screened.reason) { reject(o, screened.reason); continue; }
-    const { toks, domain, reference, ils } = screened;
+    const { toks, site, ils } = screened;
 
     const verdict = identityCompatibility(toks, vocab);
     if (verdict !== null) { reject(o, verdict); continue; }
@@ -463,14 +552,15 @@ export function qualifyMarketEvidence({ observations = [], subject = {}, fxProof
     // a quorum was quietly deleting real evidence instead. Identical title AND
     // identical price on one domain is a repost; identical title alone is just
     // a product with a name.
-    if (!claimDedupeKeys(seen, dedupeKeys({ domain, reference, title: o.title, ils }))) {
+    const identity = dedupeKeys({ site, o, ils });
+    if (!claimDedupeKeys(seen, identity.keys)) {
       reject(o, DISQUALIFIER.DUPLICATE); continue;
     }
 
-    admitted.push(admittedRecord(o, screened));
+    admitted.push(admittedRecord(o, { ...screened, identity }, describeMatch(toks, vocab)));
   }
 
-  const sources = new Set(admitted.map((a) => a.source_domain));
+  const sources = distinctSites(admitted);
   if (admitted.length < VERIFIED_MARKET_QUORUM) setFailures.push(SET_FAILURE.QUORUM);
   if (sources.size < MIN_DISTINCT_SOURCES) setFailures.push(SET_FAILURE.DIVERSITY);
 
@@ -556,6 +646,28 @@ function identityCompatibility(toks, vocab) {
     return DISQUALIFIER.QUALIFIER_MISMATCH;
   }
 
+  // ── A sibling named by the listing, in either alphabet ─────────────────
+  //
+  // Checked in the REFUSING direction only, so it needs no corroboration: a
+  // local word that merely sounds like "pro" costs a listing, and never
+  // admits one.
+  const subjectSiblings = new Set(vocab.sibling_qualifiers);
+  const names = (q) => toks.includes(q)
+    || toks.some((t) => scriptOf(t) !== SCRIPT.LATIN && transliterates(q, t, { minLength: 2 }));
+  if ([...SIBLING_QUALIFIERS].some((q) => !subjectSiblings.has(q) && names(q))) return DISQUALIFIER.QUALIFIER_MISMATCH;
+
+  // ── Identifiers and numbers: exact, or not this product ────────────────
+  if (vocab.identifier_tokens.some((id) => !toks.includes(id))) return DISQUALIFIER.IDENTIFIER_MISMATCH;
+  for (const { number, before, after } of vocab.number_tokens) {
+    // The number has to sit BESIDE the word it belongs to. "… 4 … with 5
+    // games" contains a 5 and is not a 5.
+    const beside = toks.some((t, i) => t === number && (
+      (before !== null && saysToken(toks[i - 1], before, vocab))
+      || (before === null && after !== null && saysToken(toks[i + 1], after, vocab))
+      || (before === null && after === null)));
+    if (!beside) return DISQUALIFIER.NUMBER_MISMATCH;
+  }
+
   // ── Dimension conflict ─────────────────────────────────────────────────
   //
   // Only a STATED difference disqualifies. A title that omits the size is not
@@ -569,12 +681,111 @@ function identityCompatibility(toks, vocab) {
   }
 
   // ── Score ──────────────────────────────────────────────────────────────
-  const brandNamed = vocab.brand_forms.some((form) => containsSequence(toks, form));
-  const modelHits = vocab.distinctive.filter((t) => toks.includes(t));
+  const brandNamed = vocab.brand_forms.some((form) => saysSequence(toks, form, vocab));
+  const modelHits = vocab.distinctive.filter((t) => toks.some((x) => saysToken(x, t, vocab)));
   if (modelHits.length === 0) return DISQUALIFIER.MODEL_ABSENT;
   const score = (brandNamed ? 1 : 0) + modelHits.length;
   if (score < 2) return DISQUALIFIER.IDENTITY_TOO_WEAK;
   return null;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// LOCALIZED NAMES  ·  the same identity, written in the seller's alphabet
+//
+// THE MEASURED LOSS. Two genuine listings for the scanned product were refused
+// because the seller wrote its name in Hebrew and this file compared Latin
+// tokens. They named the right brand, the right model and the right number.
+//
+// A localized word counts as a canonical word only when ALL of these hold:
+//
+//   1. it is written in a different alphabet and SOUNDS like the canonical
+//      word (script-normalization.js: deterministic, no dictionary, no model);
+//   2. it occurs, as a whole word, in text THE PROVIDER returned, on at least
+//      MIN_ALIAS_SITES independent sites — not in one listing, and not in
+//      anything the model wrote; and
+//   3. it is a WORD. A token with a digit is never localized.
+//
+// Neither signal is trusted alone. Sound-alikes collide, and a word can be
+// common on the web without being this name; together they say that several
+// independent sites use this spelling for something that sounds like this.
+//
+// WHAT A CALLER CANNOT DO is assert an alias. There is no parameter for one.
+// The aliases are derived here, from the listings and the provider's text,
+// every time — the round-3 lesson, where the guard accepted the caller's word
+// for an evidence class, applies to names as much as to classes.
+// ══════════════════════════════════════════════════════════════════════════════
+function localizedAliases(vocab, observations, providerText) {
+  const texts = (Array.isArray(providerText) ? providerText : [])
+    .map((r) => ({ site: sourceSite(r?.url ?? r?.domain), toks: new Set(tokens(r?.text)) }))
+    .filter((r) => r.site && r.toks.size > 0);
+  if (texts.length === 0) return [];
+
+  const brandWords = new Set(vocab.brand_forms.flat());
+  const canon = [
+    ...[...brandWords].map((word) => ({ word, min: MIN_BRAND_SKELETON })),
+    ...vocab.distinctive.filter((t) => !brandWords.has(t)).map((word) => ({ word, min: MIN_MODEL_SKELETON })),
+  ].filter(({ word }) => !hasDigit(word) && scriptOf(word) !== SCRIPT.OTHER);
+
+  const seen = new Set();
+  const out = [];
+  for (const o of Array.isArray(observations) ? observations : []) {
+    for (const t of new Set(tokens(o?.title))) {
+      for (const { word, min } of canon) {
+        if (seen.has(`${word}|${t}`) || !transliterates(word, t, { minLength: min })) continue;
+        seen.add(`${word}|${t}`);
+        const sites = [...new Set(texts.filter((r) => r.toks.has(t)).map((r) => r.site))].sort();
+        if (sites.length < MIN_ALIAS_SITES) continue;
+        out.push(Object.freeze({
+          canonical: word,
+          alias: t,
+          provenance: Object.freeze([ALIAS_PROVENANCE.TRANSLITERATION, ALIAS_PROVENANCE.WEB]),
+          sites: Object.freeze(sites),
+        }));
+      }
+    }
+  }
+  return out;
+}
+
+/** Does this title token say this canonical word — itself, or a trusted alias of it? */
+function saysToken(token, canonical, vocab) {
+  if (!token || !canonical) return false;
+  if (token === canonical) return true;
+  if (hasDigit(canonical) || hasDigit(token)) return false;
+  return vocab.aliases.some((a) => a.canonical === canonical && a.alias === token);
+}
+
+/** `containsSequence`, reading each word through its trusted aliases. */
+function saysSequence(toks, seq, vocab) {
+  if (seq.length === 0) return false;
+  for (let i = 0; i + seq.length <= toks.length; i += 1) {
+    if (seq.every((word, j) => saysToken(toks[i + j], word, vocab))) return true;
+  }
+  return false;
+}
+
+/** How an admitted listing matched, for a reader. Decides nothing. */
+function describeMatch(toks, vocab) {
+  const used = [];
+  const matched = [];
+  for (const word of [...new Set([...vocab.brand_forms.flat(), ...vocab.distinctive])]) {
+    const t = toks.find((x) => saysToken(x, word, vocab));
+    if (!t) continue;
+    matched.push(t === word ? word : `${t} = ${word}`);
+    if (t !== word) used.push(vocab.aliases.find((a) => a.canonical === word && a.alias === t));
+  }
+  return Object.freeze({
+    method: used.length > 0 ? 'localized_alias' : 'exact_tokens',
+    matched_tokens: Object.freeze(matched),
+    aliases: Object.freeze(used.map((a) => Object.freeze({
+      canonical: a.canonical, alias: a.alias, provenance: a.provenance, sites: a.sites,
+    }))),
+  });
+}
+
+/** The independent sites behind a set of admitted listings. */
+function distinctSites(list) {
+  return new Set(list.map((a) => a.source_site));
 }
 
 /** A host, lowercased, without a leading www. Empty-ish input yields null. */
@@ -650,7 +861,7 @@ function qualifyComparableSet({ observations = [], vocab, fxProofs = null } = {}
     // could have that defect.
     const screened = screenListing(o, fxProofs);
     if (screened.reason) { reject(o, screened.reason); continue; }
-    const { toks, domain, reference, ils } = screened;
+    const { toks, site, ils } = screened;
 
     // ── CLASS COMPATIBILITY ──────────────────────────────────────────────
     //
@@ -674,14 +885,15 @@ function qualifyComparableSet({ observations = [], vocab, fxProofs = null } = {}
       reject(o, DISQUALIFIER.ACCESSORY_LISTING); continue;
     }
 
-    if (!claimDedupeKeys(seen, dedupeKeys({ domain, reference, title: o.title, ils }))) {
+    const identity = dedupeKeys({ site, o, ils });
+    if (!claimDedupeKeys(seen, identity.keys)) {
       reject(o, DISQUALIFIER.DUPLICATE); continue;
     }
 
-    admitted.push(admittedRecord(o, screened));
+    admitted.push(admittedRecord(o, { ...screened, identity }));
   }
 
-  const sources = new Set(admitted.map((a) => a.source_domain));
+  const sources = distinctSites(admitted);
   const setFailures = [];
   if (admitted.length < COMPARABLE_QUORUM) setFailures.push(SET_FAILURE.COMPARABLE_QUORUM);
   if (sources.size < MIN_COMPARABLE_SOURCES) setFailures.push(SET_FAILURE.COMPARABLE_DIVERSITY);
@@ -764,7 +976,8 @@ function screenListing(o, fxProofs) {
     ? o.observed_price : null;
   if (price === null) return { reason: DISQUALIFIER.NO_PRICE };
 
-  const currency = typeof o.currency === 'string' ? o.currency.trim().toUpperCase() : '';
+  // Normalised BEFORE the comparison: "₪" and "ILS" are one currency.
+  const currency = canonicalCurrency(o.currency);
   if (!currency) return { reason: DISQUALIFIER.NO_CURRENCY };
 
   // §9: ILS enters directly. Anything else needs a V-FX proof whose arithmetic
@@ -772,7 +985,7 @@ function screenListing(o, fxProofs) {
   // "$500 -> ILS 500" by way of a missing branch. A weaker evidence class is a
   // reason to be stricter about arithmetic, never looser.
   let ils = null;
-  if (currency === 'ILS') {
+  if (currency === MARKET_CURRENCY) {
     ils = price;
   } else {
     const proof = fxProof(o, fxProofs);
@@ -782,8 +995,12 @@ function screenListing(o, fxProofs) {
 
   // ── Provenance ───────────────────────────────────────────────────────────
   const domain = normalizeDomain(o.source_domain ?? o.source);
+  // THE SITE, not the hostname, is what independence is counted in and what a
+  // repost is detected within. The hostname is kept for provenance.
+  const site = sourceSite(domain);
   const reference = o.listing_id_or_reference ?? o.source ?? null;
   if (!domain || !reference) return { reason: DISQUALIFIER.NO_PROVENANCE };
+  if (!site) return { reason: DISQUALIFIER.NO_PROVENANCE };
 
   // ── The model's own opinion: subtract only ───────────────────────────────
   const selfMatch = typeof o.match?.confidence === 'number' ? o.match.confidence : null;
@@ -801,29 +1018,28 @@ function screenListing(o, fxProofs) {
   if (!namesAny(toks, LIKE_NEW) && namesAny(toks, NEW_RETAIL)) return { reason: DISQUALIFIER.NOT_USED };
   if (namesAny(toks, PARTS)) return { reason: DISQUALIFIER.PARTS_ONLY };
 
-  return { reason: null, toks, domain, reference, ils, price, currency, kind };
+  return { reason: null, toks, domain, site, reference, ils, price, currency, kind };
 }
 
 /**
- * The three dedupe keys.
+ * The identity of a listing, and the keys a repeat of it would be found under.
  *
- * §15 asks for three different repeats. A stable listing reference collapses
- * the same listing seen twice. Domain+title+price collapses a repost.
- * Domain+price collapses the SAME LISTING RE-TITLED, which the first two miss
- * and which is the cheapest way to manufacture a quorum out of one advert.
- *
- * THE TITLE KEY CARRIES THE PRICE, and the first version did not. Without it,
- * two different sellers on one site listing the same product — who of course
- * write the same title, because it is the product's name — were collapsed into
- * one, and the rule that exists to stop one advert becoming a quorum was
- * quietly deleting real evidence instead.
+ * THERE WAS A PRICE KEY HERE — site and price, nothing else — and it is gone.
+ * It existed to catch one advert re-titled, and it caught every pair of honest
+ * sellers who asked the same round price: the first live benchmark lost a
+ * genuine listing to it. Price is an attribute of a listing, not its identity.
+ * What identifies one is in listing-identity.js: the id the source gave it,
+ * the id in its URL, and only failing both a fingerprint of several fields.
  */
-function dedupeKeys({ domain, reference, title, ils }) {
-  return [
-    `ref:${domain}|${String(reference).toLowerCase()}`,
-    `t:${domain}|${String(title ?? '').toLowerCase().slice(0, 80)}|${ils}`,
-    `p:${domain}|${ils}`,
-  ];
+function dedupeKeys({ site, o, ils }) {
+  return listingIdentity({
+    site,
+    explicit: o.listing_id_or_reference ?? null,
+    source: o.source ?? null,
+    title: o.title ?? null,
+    ils,
+    location: o.location ?? null,
+  });
 }
 
 /**
@@ -843,9 +1059,16 @@ function claimDedupeKeys(seen, keys) {
 }
 
 /** The frozen admitted record both paths emit. */
-function admittedRecord(o, screened) {
+function admittedRecord(o, screened, match = null) {
   return Object.freeze({
     source_domain: screened.domain,
+    source_site: screened.site,
+    identity_match: match,
+    // How this listing was told apart from the others, for a reader.
+    listing_id: screened.identity?.listing_id ?? null,
+    canonical_url: screened.identity?.canonical_url ?? null,
+    duplicate_key: screened.identity?.duplicate_key ?? null,
+    identity_method: screened.identity?.method ?? null,
     listing_id_or_reference: String(screened.reference),
     title: o.title ?? null,
     normalized_ils_price: screened.ils,
