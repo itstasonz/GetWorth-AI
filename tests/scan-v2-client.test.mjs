@@ -268,8 +268,8 @@ describe('V2-23 every photo failure names its stage, its code and its measuremen
     }
   });
   test('V2-23i describeCapture states type, MIME and size without reading the content', () => {
-    assert.deepEqual(describeCapture(photo()), { present: true, type: 'data_url', mime: 'image/jpeg', bytes: Math.round(4003 * 0.75) });
-    assert.deepEqual(describeCapture('blob:x'), { present: true, type: 'object_url', mime: null, bytes: 0 });
+    assert.deepEqual(describeCapture(photo()), { present: true, type: 'data_url', mime: 'image/jpeg', bytes: Math.round(4003 * 0.75), base64_length: 4003 });
+    assert.deepEqual(describeCapture('blob:x'), { present: true, type: 'object_url', mime: null, bytes: 0, base64_length: 0 });
     assert.equal(describeCapture(new Blob(['abc'], { type: 'image/heic' })).type, 'blob');
     assert.equal(describeCapture(null).present, false);
   });
@@ -341,6 +341,65 @@ describe('V2-23 every photo failure names its stage, its code and its measuremen
     await followupScanV2(deps({ dataUrl: photo('RAW2'), assess: async () => blank }));
     assert.ok(snap().image.startsWith('data:image/jpeg;base64,COMPRESSED'), 'a failed follow-up keeps the first photograph');
     assert.equal(snap().error.code, V2_FAILURE.PHOTO_BLANK_FRAME);
+  });
+  test('V2-23o an assessment that THROWS is reported as its own failure, with what was thrown, and nothing is sent', async () => {
+    const requests = script([]);
+    await startScanV2(deps({ assess: async () => { throw new RangeError('Canvas area exceeds the maximum limit'); } }));
+    const st = snap();
+    assert.equal(requests.length, 0);
+    assert.equal(st.error.code, V2_FAILURE.PHOTO_ASSESSMENT_THREW);
+    assert.equal(st.error.stage, 'pixel_check');
+    assert.match(st.diag.client.assessment_threw, /RangeError: Canvas area exceeds/);
+    assert.equal(st.diag.client.assessment_started, true);
+    assert.equal(st.diag.client.assessment_completed, true);
+    assert.equal(st.diag.client.pixel_check, null, 'a throw is not a verdict');
+    assert.equal(st.diag.client.request_started, false);
+    // The SECOND assessment (of the captured image) throwing is recorded too, and does not mask the first verdict.
+    const raw = photo();
+    script([]);
+    await startScanV2(deps({ assess: async (d) => { if (d === raw) throw new Error('decode exploded'); return blank; } }));
+    assert.equal(snap().error.code, V2_FAILURE.PHOTO_BLANK_FRAME);
+    assert.match(snap().diag.client.raw_assessment_threw, /decode exploded/);
+    assert.equal(snap().diag.client.raw_pixel_check, 'not_inspectable');
+  });
+  test('V2-23p the pipeline flags say how far the photograph got, on success and at every stopping point', async () => {
+    const flags = () => { const c = snap().diag.client; return [c.compression_started, c.compression_completed, c.assessment_started, c.assessment_completed, c.request_started]; };
+    script([]);
+    await startScanV2(deps({ dataUrl: null }));
+    assert.deepEqual(flags(), [false, false, false, false, false]);
+    script([]);
+    await startScanV2(deps({ compress: async () => { throw new Error('x'); } }));
+    assert.deepEqual(flags(), [true, true, false, false, false]);
+    script([]);
+    await startScanV2(deps({ compress: async () => 'data:,' }));
+    assert.deepEqual(flags(), [true, true, false, false, false]);
+    script([]);
+    await startScanV2(deps({ assess: async () => blank }));
+    assert.deepEqual(flags(), [true, true, true, true, false]);
+    script([identifyOk('NEED_FOLLOWUP')]);
+    await startScanV2(deps({ assess: async () => fine }));
+    assert.deepEqual(flags(), [true, true, true, true, true]);
+    const c = snap().diag.client;
+    assert.equal(c.capture_base64_length, 4003);
+    assert.equal(c.compressed_base64_length, 4010);
+    assert.equal(c.compressed_type, 'data_url');
+  });
+  test('V2-23q the panel prints every field of a pixel verdict, the thresholds beside them, and the six pipeline answers', () => {
+    const view = code('src/views/ScanV2View.jsx');
+    for (const needle of ['· ok`}', '· reason`}', '· decoded w×h`}', '· canvas w×h`}', '· any opaque pixel`}', '· mean luma`}', '· std dev`}', '· max luma`}',
+      'black frame if ≤10 and sd ≤4', 'uniform frame if ≤1.5', 'title="SENT"', 'title="CAPTURED"',
+      'label="SOURCE type"', 'label="SOURCE base64 length"', 'label="SOURCE bytes (approx)"',
+      'label="COMPRESSED type"', 'label="COMPRESSED base64 length"', 'label="COMPRESSED bytes (approx)"',
+      'label="assessment threw"', 'label="PIPELINE compression started"', 'label="PIPELINE compression completed"',
+      'label="PIPELINE assessment started"', 'label="PIPELINE assessment completed"', 'label="PIPELINE request started"',
+      'label="PIPELINE /api/v2/identify called"']) {
+      assert.ok(view.includes(needle), needle);
+    }
+    // The thresholds printed on the panel are the ones the check uses.
+    const ctx = read('src/contexts/AppContext.jsx');
+    assert.match(ctx, /const BLACK_MEAN_LUMA_MAX = 10;/);
+    assert.match(ctx, /const BLACK_STDDEV_MAX = 4;/);
+    assert.match(ctx, /const UNIFORM_STDDEV_MAX = 1\.5;/);
   });
   test('V2-23n "Photo capture failed" cannot be said by V2 at all', () => {
     for (const f of ['src/lib/scanV2.js', 'src/views/ScanV2View.jsx']) {
@@ -414,7 +473,7 @@ describe('V2-21 what the screen may say', () => {
     assert.ok(!/%|progress|width:\s*`/i.test(view.replace(/aria-live|w-full|max-w-md/g, '')));
   });
   test('V2-21g the diagnostic panel names the engine, the build and every section the measurement needs', () => {
-    for (const needle of ['SCAN ENGINE: V2', 'build {BUILD}', 'title="Photo"', 'label="failure"', 'label="capture"', 'label="compression"', 'label="pixel check (sent image)"', 'label="pixel check (captured)"', 'label="request"', 'label="server received"', 'title="Identity"', 'title="Search"', 'title="Evidence"', 'title="Valuation"', 'title="Total"',
+    for (const needle of ['SCAN ENGINE: V2', 'build {BUILD}', 'title="Photo"', 'label="failure"', 'label="preview"', 'label="server received"', 'title="Identity"', 'title="Search"', 'title="Evidence"', 'title="Valuation"', 'title="Total"',
       'label="server time"', 'label="round-trip time"', 'label="executed queries"', 'label="results"', 'label="domains"', 'label="admitted"', 'label="rejected"', 'label="used listings"', 'label="retail listings"',
       'label="currency failures"', 'label="identity failures"', 'label="rejection reasons"', 'label="evidence basis"', 'label="photo accepted → result / follow-up"', 'label="decision"', 'label="candidates"', 'label="visible text"']) {
       assert.ok(view.includes(needle), needle);

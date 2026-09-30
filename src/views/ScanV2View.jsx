@@ -97,9 +97,31 @@ const nameOf = (identity) => [identity?.brand?.value, identity?.model?.value].fi
 
 const ms = (v) => (typeof v === 'number' ? `${(v / 1000).toFixed(1)}s` : '—');
 const kb = (v) => (typeof v === 'number' ? `${(v / 1024).toFixed(1)}KB` : '—');
-/** A pixel verdict as one line: the answer, the reason, and the numbers behind it. */
-const pixelLine = (p) => (!p ? null : (typeof p === 'string' ? p
-  : `${p.ok ? 'ok' : `REJECTED: ${p.reason}`} · ${p.source_width ?? p.width ?? '?'}×${p.source_height ?? p.height ?? '?'} · luma ${p.mean_luma ?? '?'} · sd ${p.std_dev ?? '?'}`));
+const yesNo = (v) => (v === true ? 'YES' : (v === false ? 'NO' : '—'));
+const dims = (w, h) => (w === undefined && h === undefined ? 'n/a' : `${w ?? '?'}×${h ?? '?'}`);
+
+/**
+ * One pixel verdict, every field it carries, one fact per row.
+ *
+ * The three thresholds are printed beside the measurements they are compared
+ * with, so the screenshot alone says which rule fired and by how much.
+ */
+function PixelRows({ title, p }) {
+  if (!p) return <Row label={title} value="not run" />;
+  if (typeof p === 'string') return <Row label={title} value={p} />;
+  return (
+    <>
+      <Row label={`${title} · ok`} value={p.ok ? 'true' : 'FALSE'} />
+      <Row label={`${title} · reason`} value={p.reason ?? 'none'} />
+      <Row label={`${title} · decoded w×h`} value={dims(p.source_width, p.source_height)} />
+      <Row label={`${title} · canvas w×h`} value={dims(p.width, p.height)} />
+      <Row label={`${title} · any opaque pixel`} value={p.anyOpaque === undefined ? 'n/a' : (p.anyOpaque ? 'yes' : 'NO (fully transparent)')} />
+      <Row label={`${title} · mean luma`} value={p.mean_luma === undefined ? 'n/a' : `${p.mean_luma} (black frame if ≤10 and sd ≤4)`} />
+      <Row label={`${title} · std dev`} value={p.std_dev === undefined ? 'n/a' : `${p.std_dev} (uniform frame if ≤1.5)`} />
+      <Row label={`${title} · max luma`} value={p.max_luma ?? 'n/a'} />
+    </>
+  );
+}
 
 function Row({ label, value }) {
   return (
@@ -144,12 +166,23 @@ function Diagnostics({ s }) {
           any identity exists can still be read off the phone. */}
       <Group title="Photo">
         <Row label="failure" value={c.failure_code ? `${c.failure_code} @ ${c.failure_stage}${c.failure_detail ? ` — ${c.failure_detail}` : ''}` : 'none'} />
-        <Row label="capture" value={c.capture_present === undefined ? null : `${c.capture_present ? 'present' : 'MISSING'} · ${c.capture_type} · ${c.capture_mime ?? 'no mime'} · ${kb(c.capture_bytes)}`} />
         <Row label="preview" value={c.preview_present === undefined ? null : (c.preview_present ? 'present' : 'MISSING')} />
-        <Row label="compression" value={c.compression_started ? `${c.compression_succeeded === null ? 'running' : (c.compression_succeeded ? 'ok' : 'FAILED')}${c.compression_skipped ? ' (skipped: already small)' : ''} · ${c.compressed_mime ?? 'no mime'} · ${kb(c.compressed_bytes)}` : 'not started'} />
-        <Row label="pixel check (sent image)" value={pixelLine(c.pixel_check)} />
-        <Row label="pixel check (captured)" value={pixelLine(c.raw_pixel_check)} />
-        <Row label="request" value={c.request_started ? `started · ${kb(c.request_payload_bytes)} · HTTP ${c.identify_http_status ?? '…'} · ${ms(c.identify_roundtrip_ms)}` : 'not started'} />
+        <Row label="SOURCE type" value={c.capture_present === undefined ? null : `${c.capture_present ? c.capture_type : 'MISSING'} · ${c.capture_mime ?? 'no mime'}`} />
+        <Row label="SOURCE base64 length" value={c.capture_base64_length} />
+        <Row label="SOURCE bytes (approx)" value={c.capture_bytes === undefined ? null : `${c.capture_bytes} (${kb(c.capture_bytes)})`} />
+        <Row label="COMPRESSED type" value={c.compression_completed ? `${c.compressed_type ?? 'none'} · ${c.compressed_mime ?? 'no mime'}${c.compression_skipped ? ' (conversion skipped: source already small)' : ''}` : null} />
+        <Row label="COMPRESSED base64 length" value={c.compressed_base64_length} />
+        <Row label="COMPRESSED bytes (approx)" value={c.compressed_bytes === null || c.compressed_bytes === undefined ? null : `${c.compressed_bytes} (${kb(c.compressed_bytes)})`} />
+        <PixelRows title="SENT" p={c.pixel_check} />
+        <PixelRows title="CAPTURED" p={c.raw_pixel_check} />
+        <Row label="assessment threw" value={c.assessment_threw ?? (c.assessment_started ? 'no' : null)} />
+        <Row label="captured-image assessment threw" value={c.raw_assessment_threw} />
+        <Row label="PIPELINE compression started" value={yesNo(c.compression_started)} />
+        <Row label="PIPELINE compression completed" value={c.compression_started === undefined ? '—' : `${yesNo(c.compression_completed)}${c.compression_completed ? (c.compression_succeeded ? ' (usable image)' : ' (NO usable image)') : ''}`} />
+        <Row label="PIPELINE assessment started" value={yesNo(c.assessment_started)} />
+        <Row label="PIPELINE assessment completed" value={yesNo(c.assessment_completed)} />
+        <Row label="PIPELINE request started" value={yesNo(c.request_started)} />
+        <Row label="PIPELINE /api/v2/identify called" value={c.request_started === undefined ? '—' : `${yesNo(c.request_started)}${c.request_started ? ` · ${kb(c.request_payload_bytes)} · HTTP ${c.identify_http_status ?? 'no response'} · ${ms(c.identify_roundtrip_ms)}` : ''}`} />
         <Row label="server received" value={sv ? `${sv.content_type ?? 'no content-type'} · image ${sv.image_field_present ? 'present' : `MISSING (${sv.image_field_type})`} · ${sv.image_mime ?? 'unknown mime'} · ${kb(sv.image_bytes)} · parse ${sv.parse_success ? 'ok' : 'FAILED'}` : null} />
         <Row label="server provider call" value={sv ? `${sv.provider_request_started ? 'started' : 'not started'} · ${sv.provider_request_succeeded ? 'succeeded' : 'not succeeded'}${sv.failure_code ? ` · ${sv.failure_code} @ ${sv.failure_stage}` : ''}` : null} />
         <Row label="device" value={typeof navigator !== 'undefined' ? String(navigator.userAgent).replace(/^Mozilla\/5\.0 /, '').slice(0, 90) : null} />

@@ -164,6 +164,7 @@ export const V2_FAILURE = Object.freeze({
   PHOTO_CONVERSION_FAILED: 'PHOTO_CONVERSION_FAILED',
   PHOTO_EMPTY: 'PHOTO_EMPTY',
   PHOTO_DECODE_FAILED: 'PHOTO_DECODE_FAILED',
+  PHOTO_ASSESSMENT_THREW: 'PHOTO_ASSESSMENT_THREW',
   PHOTO_BLANK_FRAME: 'PHOTO_BLANK_FRAME',
   PHOTO_BLANK_AFTER_CONVERSION: 'PHOTO_BLANK_AFTER_CONVERSION',
   PHOTO_TOO_LARGE: 'PHOTO_TOO_LARGE',
@@ -193,7 +194,7 @@ const MESSAGE = {
 };
 const MESSAGE_FOR = {
   [F.PHOTO_MISSING]: 'photo', [F.PHOTO_NOT_AN_IMAGE]: 'photo', [F.PHOTO_CONVERSION_FAILED]: 'photo',
-  [F.PHOTO_EMPTY]: 'photo', [F.PHOTO_DECODE_FAILED]: 'photo', [F.PHOTO_BLANK_AFTER_CONVERSION]: 'photo',
+  [F.PHOTO_EMPTY]: 'photo', [F.PHOTO_DECODE_FAILED]: 'photo', [F.PHOTO_ASSESSMENT_THREW]: 'photo', [F.PHOTO_BLANK_AFTER_CONVERSION]: 'photo',
   [F.PHOTO_BLANK_FRAME]: 'blank', [F.PHOTO_TOO_LARGE]: 'large', [F.REQUEST_SERIALIZATION_FAILED]: 'photo',
   [F.NO_SESSION]: 'session', [F.NETWORK_ERROR]: 'network', [F.REQUEST_TIMEOUT]: 'timeout',
   [F.IDENTIFY_HTTP_ERROR]: 'identify', [F.SERVER_PARSE_FAILED]: 'identify',
@@ -212,14 +213,15 @@ function fail(lang, code, stage, detail = null, retryable = true) {
 
 /** What a captured value IS, without reading what is in it. */
 export function describeCapture(value) {
-  if (value === null || value === undefined || value === '') return { present: false, type: 'none', mime: null, bytes: 0 };
+  if (value === null || value === undefined || value === '') return { present: false, type: 'none', mime: null, bytes: 0, base64_length: 0 };
   if (typeof value !== 'string') {
-    return { present: true, type: typeof Blob !== 'undefined' && value instanceof Blob ? 'blob' : typeof value, mime: value?.type ?? null, bytes: value?.size ?? 0 };
+    return { present: true, type: typeof Blob !== 'undefined' && value instanceof Blob ? 'blob' : typeof value, mime: value?.type ?? null, bytes: value?.size ?? 0, base64_length: 0 };
   }
-  if (value.startsWith('blob:')) return { present: true, type: 'object_url', mime: null, bytes: 0 };
+  if (value.startsWith('blob:')) return { present: true, type: 'object_url', mime: null, bytes: 0, base64_length: 0 };
   const m = /^data:([^;,]*)[^,]*,/.exec(value);
-  if (!m) return { present: true, type: 'string', mime: null, bytes: 0 };
-  return { present: true, type: 'data_url', mime: m[1] || null, bytes: Math.round((value.length - m[0].length) * 0.75) };
+  if (!m) return { present: true, type: 'string', mime: null, bytes: 0, base64_length: 0 };
+  const base64Length = value.length - m[0].length;
+  return { present: true, type: 'data_url', mime: m[1] || null, bytes: Math.round(base64Length * 0.75), base64_length: base64Length };
 }
 
 const MIN_IMAGE_BYTES = 512;
@@ -235,8 +237,11 @@ async function identify({ dataUrl, lang, getToken, compress, assess, followup })
   note({
     followup: !!followup,
     capture_present: capture.present, capture_type: capture.type, capture_mime: capture.mime, capture_bytes: capture.bytes,
+    capture_base64_length: capture.base64_length,
     preview_present: !!(followup ? dataUrl : state.image),
-    compression_started: false, compression_succeeded: null, compressed_mime: null, compressed_bytes: null,
+    compression_started: false, compression_completed: false, compression_succeeded: null,
+    compressed_type: null, compressed_mime: null, compressed_bytes: null, compressed_base64_length: null,
+    assessment_started: false, assessment_completed: false, assessment_threw: null, raw_assessment_threw: null,
     pixel_check: null, raw_pixel_check: null, request_started: false, request_payload_bytes: null,
     identify_http_status: null, identify_roundtrip_ms: null, failure_stage: null, failure_code: null, failure_detail: null,
   });
@@ -253,15 +258,16 @@ async function identify({ dataUrl, lang, getToken, compress, assess, followup })
   try {
     compressed = await compress(dataUrl);
   } catch (err) {
-    note({ compression_succeeded: false });
+    note({ compression_completed: true, compression_succeeded: false });
     fail(lang, F.PHOTO_CONVERSION_FAILED, 'compression', clip(err?.message));
     return;
   }
   stamp(followup ? 'followup_compression_complete' : 'compression_complete');
   const converted = describeCapture(compressed);
   note({
-    compression_succeeded: usableImage(converted), compression_skipped: compressed === dataUrl,
-    compressed_mime: converted.mime, compressed_bytes: converted.bytes,
+    compression_completed: true, compression_succeeded: usableImage(converted), compression_skipped: compressed === dataUrl,
+    compressed_type: converted.type, compressed_mime: converted.mime, compressed_bytes: converted.bytes,
+    compressed_base64_length: converted.base64_length,
   });
   // A canvas that could not be allocated encodes as "data:,": a string, and no image.
   if (!usableImage(converted)) {
@@ -275,10 +281,25 @@ async function identify({ dataUrl, lang, getToken, compress, assess, followup })
   // `ok: false` stops the scan — and says WHICH check said no, on WHICH image.
   // When the converted image fails, the captured one is inspected too, so a
   // photograph that was fine until it was converted is reported as exactly that.
-  const pixels = await assess(compressed);
-  note({ pixel_check: pixels ?? 'not_inspectable' });
+  //
+  // An assessment that THROWS is neither of those. It stopped the scan before
+  // this was written too (as an unnamed client exception); it is now reported
+  // as its own thing, with what was thrown.
+  note({ assessment_started: true });
+  let pixels;
+  try {
+    pixels = await assess(compressed);
+  } catch (err) {
+    note({ assessment_completed: true, assessment_threw: clip(`${err?.name ?? 'Error'}: ${err?.message ?? ''}`) });
+    fail(lang, F.PHOTO_ASSESSMENT_THREW, 'pixel_check', clip(`${err?.name ?? 'Error'}: ${err?.message ?? ''}`));
+    return;
+  }
+  note({ assessment_completed: true, pixel_check: pixels ?? 'not_inspectable' });
   if (pixels && pixels.ok === false) {
-    const raw = compressed === dataUrl ? pixels : await Promise.resolve(assess(dataUrl)).catch(() => null);
+    const raw = compressed === dataUrl ? pixels : await Promise.resolve().then(() => assess(dataUrl)).catch((err) => {
+      note({ raw_assessment_threw: clip(`${err?.name ?? 'Error'}: ${err?.message ?? ''}`) });
+      return null;
+    });
     note({ raw_pixel_check: raw ?? 'not_inspectable' });
     const reason = String(pixels.reason ?? 'unknown');
     const rawFine = compressed !== dataUrl && raw && raw.ok === true;
