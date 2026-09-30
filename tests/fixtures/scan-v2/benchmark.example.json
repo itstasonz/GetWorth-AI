@@ -1,0 +1,22 @@
+[
+  { "id": "ninja-blender", "label": "Ninja blender", "photo": null, "followup_photo": null,
+    "expect": { "brand": "Ninja", "decision": "SEARCH_NOW" } },
+  { "id": "logitech-mouse", "label": "Logitech ambiguous mouse (top view, then underside label)", "photo": null, "followup_photo": null,
+    "expect": { "brand": "Logitech", "decision": "NEED_FOLLOWUP" } },
+  { "id": "perfume", "label": "Recognizable perfume", "photo": null, "followup_photo": null,
+    "expect": { "decision": "SEARCH_NOW" } },
+  { "id": "jordan-shoe", "label": "Jordan / Nike shoe", "photo": null, "followup_photo": null,
+    "expect": { "decision": "SEARCH_NOW" } },
+  { "id": "console", "label": "PlayStation or other console", "photo": null, "followup_photo": null,
+    "expect": { "decision": "SEARCH_NOW" } },
+  { "id": "appliance-label", "label": "Appliance with model label", "photo": null, "followup_photo": null,
+    "expect": { "decision": "SEARCH_NOW" } },
+  { "id": "generic-household", "label": "Generic / unbranded household item", "photo": null, "followup_photo": null,
+    "expect": { "decision": "SEARCH_NOW" } },
+  { "id": "abundant-listings", "label": "Product with abundant used listings", "photo": null, "followup_photo": null,
+    "expect": { "decision": "SEARCH_NOW" } },
+  { "id": "sparse-listings", "label": "Product with sparse listings", "photo": null, "followup_photo": null,
+    "expect": {} },
+  { "id": "dark-photo", "label": "Difficult / dark photograph", "photo": null, "followup_photo": null,
+    "expect": {} }
+]

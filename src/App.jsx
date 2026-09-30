@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense, useSyncExternalStore } from 'react';
 import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw, Upload } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
+import { scanV2Store } from './lib/scanV2';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
 import NotificationsPanel from './components/NotificationsPanel';
@@ -24,6 +25,9 @@ import { AuthView, ProfileView } from './views/AuthProfileView';
 const LazyCameraView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.CameraView })));
 const LazyAnalyzingView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.AnalyzingView })));
 const LazyResultsView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.ResultsView })));
+// Scan Engine V2's own screen. Loaded only when a V2 scan is active, which needs
+// the build flag AND the server's per-account enrolment (src/lib/scanV2.js).
+const LazyScanV2View = React.lazy(() => import('./views/ScanV2View'));
 const LazyInboxView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.InboxView })));
 const LazyChatView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.ChatView })));
 const LazyMyListingsView = React.lazy(() => import('./views/SellViews').then(m => ({ default: m.MyListingsView })));
@@ -273,6 +277,10 @@ function AppShell() {
     cameraBlocked, setCameraBlocked,
     showNotifications, setShowNotifications,
   } = useApp();
+
+  // False for every scan that is not a V2 scan, which is every scan unless the
+  // build flag and the server's allowlist both say otherwise.
+  const scanV2Active = useSyncExternalStore(scanV2Store.subscribe, () => scanV2Store.getSnapshot().active);
 
   const { hasUpdate, updating, applyUpdate, dismissUpdate } = usePWAUpdate();
   // Active-work gating: the banner never auto-activates anything, but it is
@@ -618,8 +626,8 @@ function AppShell() {
         {/* paint over the composer. Moving ChatView here puts it at root stacking level.                  */}
         <Suspense fallback={<LoadingScreen fullscreen />}>
           {view === 'camera' && <LazyCameraView />}
-          {view === 'analyzing' && <LazyAnalyzingView />}
-          {view === 'results' && <LazyResultsView />}
+          {view === 'analyzing' && (scanV2Active ? <LazyScanV2View /> : <LazyAnalyzingView />)}
+          {view === 'results' && (scanV2Active ? <LazyScanV2View /> : <LazyResultsView />)}
           {view === 'chat' && <LazyChatView />}
         </Suspense>
 

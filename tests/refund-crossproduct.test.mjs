@@ -467,6 +467,14 @@ const INVENTORY = [
   // (createCallLedger in api/_lib/phaseb/openai-client.js), and XP-PHASEB below
   // PROVES the isolation rather than trusting this label.
   { file: 'api/_lib/phaseb/openai-client.js', fn: 'callStructured', host: 'api.openai.com', ledger: 'PHASE_B' },
+  // SCAN ENGINE V2 — the same class, for the same reason. It is reached only
+  // from /api/v2/identify and /api/v2/price, never from /api/analyze, so it has
+  // no place in the V1 scan's refund ledger; XP-PHASEB proves that unreachability
+  // for this entry exactly as it does for the one above. V2 records its own
+  // calls per request (`calls` in api/_lib/v2/scan.js). It does NOT yet charge
+  // the daily scan quota — an open item for V2, and the reason it is
+  // allowlist-only.
+  { file: 'api/_lib/v2/openai-stream.js', fn: 'streamResponse', host: 'api.openai.com', ledger: 'PHASE_B' },
 ];
 
 // Provider helpers deliberately kept with NO reachable caller. Empty, and that

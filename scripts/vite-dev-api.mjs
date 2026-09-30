@@ -64,15 +64,21 @@ function parseEnvFile(path) {
 const REQUIRED = {
   '/api/analyze': ['SUPABASE_URL', 'ANTHROPIC_API_KEY'],
   '/api/enrich': ['OPENAI_ENRICHMENT_ENABLED', 'OPENAI_API_KEY'],
+  // Scan Engine V2: the flag, the key, and the secret that signs scan state.
+  '/api/v2/identify': ['SCAN_ENGINE_V2_ENABLED', 'OPENAI_API_KEY', 'SCAN_ENGINE_V2_STATE_SECRET'],
+  '/api/v2/price': ['SCAN_ENGINE_V2_ENABLED', 'OPENAI_API_KEY', 'SCAN_ENGINE_V2_STATE_SECRET'],
 };
 const OPTIONAL = ['GOOGLE_VISION_API_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_ANON_KEY',
-  'SUPABASE_JWT_SECRET', 'VOYAGE_API_KEY', 'OPENAI_ENRICHMENT_MODEL'];
+  'SUPABASE_JWT_SECRET', 'VOYAGE_API_KEY', 'OPENAI_ENRICHMENT_MODEL',
+  'SCAN_ENGINE_V2_USER_IDS', 'SCAN_ENGINE_V2_MODEL'];
 
 const ROUTES = [
   ['/api/analyze', '../api/analyze.js'],
   ['/api/enrich', '../api/enrich.js'],
   ['/api/confirm-identity', '../api/confirm-identity.js'],
   ['/api/submit-candidate', '../api/submit-candidate.js'],
+  ['/api/v2/identify', '../api/v2/identify.js'],
+  ['/api/v2/price', '../api/v2/price.js'],
 ];
 
 export default function devApi({ envFile = '.env.local' } = {}) {
@@ -101,6 +107,7 @@ export default function devApi({ envFile = '.env.local' } = {}) {
       // terminal scrollback, a screenshot and a support thread.
       lines.push(`  OPENAI_API_KEY   ${has('OPENAI_API_KEY') ? 'present (value never printed)' : 'ABSENT'}`);
       lines.push(`  Phase B flag     ${process.env.OPENAI_ENRICHMENT_ENABLED === 'true' ? 'ON' : 'off'}`);
+      lines.push(`  Scan V2 flag     ${process.env.SCAN_ENGINE_V2_ENABLED === 'true' ? 'ON' : 'off'}`);
       lines.push('');
       config.logger.info(lines.join('\n'));
     },

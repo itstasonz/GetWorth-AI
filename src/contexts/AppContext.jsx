@@ -8,6 +8,9 @@ import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
+import {
+  SCAN_V2_ENABLED, scanV2Store, isScanV2Available, awaitingFollowup, startScanV2, followupScanV2,
+} from '../lib/scanV2';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -838,6 +841,7 @@ export function AppProvider({ children }) {
     ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
     currentScanUuidRef.current = null; capturedImageRef.current = null;
     lastAttemptRef.current = null; // SCAN-2: never replay a signed-out user's images
+    scanV2Store.reset();           // nor leave their V2 scan, photograph or signed state behind
     // MKT-3: a REAL logout/expiry/switch must drop the buy intent so it can
     // never resume in another account's session. Guarded by outgoingUserId:
     // this function also runs on the anonymous boot — which is exactly the
@@ -2717,6 +2721,47 @@ export function AppProvider({ children }) {
       return;
     }
 
+    // ── SCAN ENGINE V2 — A SEPARATE PATH, TAKEN ONLY WHEN THE SERVER SAYS SO ──
+    //
+    // Off unless this build was made with VITE_SCAN_ENGINE_V2_ENABLED AND the
+    // server enrols this account (asked once per session, with no photograph).
+    // For everyone else nothing below this block changes: the V1 pipeline runs
+    // exactly as it did, and no V2 request is ever made on its behalf.
+    //
+    // A V2 scan calls neither /api/analyze nor /api/enrich, and returns before
+    // any V1 state is touched. Its own state lives in src/lib/scanV2.js.
+    if (SCAN_V2_ENABLED) {
+      const v2Followup = appendMode && awaitingFollowup();
+      const v2ScanUuid = v2Followup ? currentScanUuidRef.current : newScanUuid();
+      const v2 = v2Followup || await isScanV2Available({
+        userId: currentUserIdRef.current, getToken: getFreshToken, scanUuid: v2ScanUuid,
+      });
+      if (v2) {
+        if (pipelineActiveRef.current) return;
+        pipelineActiveRef.current = true;
+        try {
+          const deps = {
+            dataUrl: rawDataUrl, lang, getToken: getFreshToken,
+            compress: (d) => compressImage(d, 1280, 0.82), assess: assessImageDataUrl,
+          };
+          setAddPhotoMode(false);
+          setView('analyzing');
+          if (v2Followup) {
+            await followupScanV2(deps);
+          } else {
+            currentScanUuidRef.current = v2ScanUuid;
+            await startScanV2({ ...deps, scanUuid: v2ScanUuid });
+          }
+          // Still this scan, and the user has not left it.
+          if (scanV2Store.getSnapshot().active) setView('results');
+        } finally {
+          pipelineActiveRef.current = false;
+        }
+        return;
+      }
+      if (scanV2Store.getSnapshot().active) scanV2Store.reset();
+    }
+
     pipelineActiveRef.current = true;
 
     // SCAN-2: snapshot BEFORE any state mutation — imagesBefore is what the
@@ -2979,6 +3024,7 @@ export function AppProvider({ children }) {
   // ── Cancel and go home ──
   const cancelPipeline = useCallback(() => {
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
+    scanV2Store.reset(); // a V2 scan in flight is abandoned with the flow (no-op otherwise)
     lastAttemptRef.current = null; // SCAN-2: leaving the flow drops the retry snapshot
     setPipelineState('idle');
     setPipelineError(null);
@@ -4590,6 +4636,7 @@ export function AppProvider({ children }) {
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline, scanCooldownUntil,
+    getFreshToken, // Scan Engine V2 retries its price step with the user's own session
     // Multi-photo + Help modal
     addPhoto, addPhotoMode, setAddPhotoMode,
     captureAdditionalPhoto, handleAdditionalFile, submitBrandHint,
