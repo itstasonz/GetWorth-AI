@@ -36,7 +36,7 @@ const ENV_KEYS = ['SCAN_ENGINE_V2_ENABLED', 'SCAN_ENGINE_V2_USER_IDS', 'SCAN_ENG
   'OPENAI_API_KEY', 'VERCEL_ENV', 'SUPABASE_JWT_SECRET', 'SUPABASE_URL', 'SUPABASE_ANON_KEY'];
 
 /** Call a V2 handler with a controlled environment and a controlled provider. */
-async function call(path, body, { env = ON, provider = mockV2Provider({}), headers = {}, method = 'POST', user = USER } = {}) {
+async function call(path, body, { env = ON, provider = mockV2Provider({}), headers = {}, method = 'POST', user = USER, onLog = null } = {}) {
   const saved = {};
   for (const k of ENV_KEYS) { saved[k] = process.env[k]; delete process.env[k]; }
   process.env.SUPABASE_JWT_SECRET = 'test-secret';
@@ -47,7 +47,7 @@ async function call(path, body, { env = ON, provider = mockV2Provider({}), heade
   const outbound = [];
   globalThis.fetch = async (url, init) => { outbound.push(String(url)); return provider(url, init); };
   const orig = { log: console.log, warn: console.warn, error: console.error };
-  console.log = () => {}; console.warn = () => {}; console.error = () => {};
+  console.log = (...a) => { if (onLog) onLog(a.map(String).join(' ')); }; console.warn = () => {}; console.error = () => {};
   try {
     const mod = await import(`../api/v2/${path}.js`);
     const res = await mod.default(new Request(`https://getworth.ai/api/v2/${path}`, {
@@ -181,6 +181,76 @@ describe('V2-15 identify', () => {
     assert.equal(r.payload.failure, 'upstream_5xx');
     assert.equal(r.payload.state, undefined);
     assert.equal(r.payload.identity, undefined);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// V2-24 · WHAT THE SERVER RECEIVED, STATED ON EVERY ANSWER
+// ════════════════════════════════════════════════════════════════════════════
+describe('V2-24 identify reports what arrived and where the request stopped', () => {
+  const jpeg = (bytes) => Buffer.concat([Buffer.from([0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46]), Buffer.alloc(bytes, 0x37)]).toString('base64');
+
+  test('V2-24a a photograph the size a phone sends reaches the provider call with its bytes intact', async () => {
+    const image = jpeg(350_000);
+    const provider = mockV2Provider({ identities: [RAW.NINJA] });
+    const r = await identify({ image }, { provider });
+    assert.equal(r.payload.status, 'OK');
+    assert.deepEqual(r.payload.diagnostics, {
+      request_received: true, content_type: 'application/json', image_field_present: true, image_field_type: 'string',
+      image_mime: 'image/jpeg', image_bytes: Math.round(image.length * 0.75), parse_success: true,
+      provider_request_started: true, provider_request_succeeded: true, failure_stage: null, failure_code: null,
+    });
+    const sent = provider.calls[0].body.input[0].content.find((c) => c.type === 'input_image').image_url;
+    assert.equal(sent, `data:image/jpeg;base64,${image}`, 'the provider is handed exactly the bytes that arrived');
+  });
+  test('V2-24b the image travels in the field named `image`, bare or as a data URL', async () => {
+    const asDataUrl = await identify({ image: `data:image/jpeg;base64,${IMG}` }, { provider: mockV2Provider({ identities: [RAW.NINJA] }) });
+    assert.equal(asDataUrl.payload.status, 'OK');
+    assert.equal(asDataUrl.payload.diagnostics.image_bytes, Math.round(IMG.length * 0.75));
+    for (const wrong of [{ image: undefined, imageData: IMG }, { image: undefined, images: [IMG] }, { image: undefined, file: IMG }]) {
+      const r = await identify(wrong);
+      assert.equal(r.status, 400);
+      assert.equal(r.payload.code, 'SERVER_PARSE_FAILED');
+      assert.equal(r.payload.diagnostics.image_field_present, false);
+      assert.equal(r.payload.diagnostics.image_field_type, 'absent');
+      assert.deepEqual(r.outbound, []);
+    }
+  });
+  test('V2-24c missing, zero-byte, stub and unsupported images are SERVER_PARSE_FAILED with the reason, and no provider call', async () => {
+    const heic = Buffer.concat([Buffer.from([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]), Buffer.alloc(4096, 1)]).toString('base64');
+    const pdf = Buffer.concat([Buffer.from('%PDF-1.7'), Buffer.alloc(4096, 1)]).toString('base64');
+    const cases = [[null, /required/], ['', /required/], ['AAAA', /too small/], [heic, /not a recognised image format/], [pdf, /not a recognised image format/], [42, /required/]];
+    for (const [image, why] of cases) {
+      const r = await identify({ image });
+      assert.equal(r.status, 400, String(image).slice(0, 12));
+      assert.equal(r.payload.code, 'SERVER_PARSE_FAILED');
+      assert.match(r.payload.detail, why);
+      assert.equal(r.payload.diagnostics.parse_success, false);
+      assert.equal(r.payload.diagnostics.provider_request_started, false);
+      assert.equal(r.payload.diagnostics.failure_stage, 'parse');
+      assert.deepEqual(r.outbound, []);
+    }
+  });
+  test('V2-24d a provider 4xx is PROVIDER_IMAGE_REJECTED; a provider 5xx is PROVIDER_FAILED; both say the call started', async () => {
+    const rejected = await identify({}, { provider: mockV2Provider({ identityStatus: 400 }) });
+    assert.equal(rejected.payload.diagnostics.failure_code, 'PROVIDER_IMAGE_REJECTED');
+    assert.equal(rejected.payload.diagnostics.provider_request_started, true);
+    assert.equal(rejected.payload.diagnostics.provider_request_succeeded, false);
+    const down = await identify({}, { provider: mockV2Provider({ identityStatus: 503 }) });
+    assert.equal(down.payload.diagnostics.failure_code, 'PROVIDER_FAILED');
+    assert.equal(down.payload.diagnostics.failure_stage, 'provider');
+  });
+  test('V2-24e the diagnostics and the log line carry no image content, token or state', async () => {
+    const image = jpeg(20_000);
+    const logs = [];
+    const r = await identify({ image }, { provider: mockV2Provider({ identities: [RAW.NINJA] }), onLog: (line) => logs.push(line) });
+    const text = JSON.stringify(r.payload.diagnostics);
+    assert.ok(!text.includes(image.slice(0, 40)));
+    assert.ok(!text.includes('Bearer') && !text.includes(r.payload.state));
+    const line = logs.find((l) => l.startsWith('[V2Identify]'));
+    assert.ok(line, 'one log line per request');
+    assert.ok(!line.includes(image.slice(0, 40)) && !line.includes(r.payload.state) && !line.includes(USER));
+    assert.match(line, /"image_bytes":\d+/);
   });
 });
 

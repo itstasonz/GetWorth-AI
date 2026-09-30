@@ -20,6 +20,7 @@ const CFG = 'api/_lib/v2/config.js';
 const HTP = 'api/_lib/v2/http.js';
 const SCN = 'api/_lib/v2/scan.js';
 const IDE = 'api/v2/identify.js';
+const CLI = 'src/lib/scanV2.js';
 
 export const V2_CONTROLS = [
   {
@@ -162,6 +163,29 @@ export const V2_MUTANTS = [
     find: "  if (!user || user._expired || !user.id) return { response: json({ error: 'unauthorized' }, 401, headers) };", replace: "  if (!user) user = { id: 'anonymous' };" },
   { id: 'H03-FOLLOWUP-ANY-TIME', file: IDE, invariant: 'a follow-up is accepted only when one was asked for, once',
     find: '    if (s.sufficiency?.decision !== DECISION.NEED_FOLLOWUP || (s.followups_used ?? 0) >= V2_MAX_FOLLOWUPS) {', replace: '    if (false) {' },
+  // ── THE PHOTOGRAPH'S PATH (the 221686a production failure) ────────────────
+  { id: 'K01-BLANK-IMAGE-IS-SENT', file: CLI, invariant: 'an image the pixel check rejected is never sent to the provider',
+    find: '  if (pixels && pixels.ok === false) {', replace: '  if (false) {' },
+  { id: 'K02-UNINSPECTABLE-IS-A-REJECTION', file: CLI, invariant: 'an image that cannot be inspected is not a failure',
+    find: '  if (pixels && pixels.ok === false) {', replace: '  if (!pixels || pixels.ok === false) {' },
+  { id: 'K03-EMPTY-CANVAS-IS-SENT', file: CLI, invariant: 'a conversion that produced no image stops the scan as PHOTO_EMPTY',
+    find: '  if (!usableImage(converted)) {', replace: '  if (false) {' },
+  { id: 'K04-CONVERSION-BLAMED-ON-THE-CAPTURE', file: CLI, invariant: 'a photo that was fine until it was converted is reported as that',
+    find: '(rawFine ? F.PHOTO_BLANK_AFTER_CONVERSION : F.PHOTO_BLANK_FRAME)', replace: '(F.PHOTO_BLANK_FRAME)' },
+  { id: 'K05-COMPRESSION-ERROR-UNNAMED', file: CLI, invariant: 'a conversion that throws is PHOTO_CONVERSION_FAILED',
+    find: "    fail(lang, F.PHOTO_CONVERSION_FAILED, 'compression', clip(err?.message));", replace: "    fail(lang, F.CLIENT_EXCEPTION, 'client', clip(err?.message));" },
+  { id: 'K06-NON-IMAGE-REACHES-COMPRESSION', file: CLI, invariant: 'a capture that is not an image data URL never reaches compression',
+    find: '  if (!usableImage(capture)) {', replace: '  if (false) {' },
+  { id: 'K07-TOKEN-IN-ERROR-DETAIL', file: CLI, invariant: 'a token-shaped string is redacted from an error detail',
+    find: ".replace(/(eyJ|sk-)[A-Za-z0-9._-]{8,}/g, '[redacted]')", replace: '' },
+  { id: 'K08-SERVER-REASON-DROPPED', file: CLI, invariant: 'a 400 from the server is SERVER_PARSE_FAILED, not a generic HTTP error',
+    find: '        : (status === 400 ? F.SERVER_PARSE_FAILED', replace: '        : (status === 999 ? F.SERVER_PARSE_FAILED' },
+  { id: 'K09-FAILURE-WITHOUT-A-RECORD', file: CLI, invariant: 'a failure is written to the diagnostics, not only to the message',
+    find: '  note({ failure_stage: stage, failure_code: code, failure_detail: detail });', replace: '' },
+  { id: 'D01-PROVIDER-REJECTION-UNNAMED', file: IDE, invariant: 'a provider 4xx is reported as the image being rejected',
+    find: "/^http_4/.test(String(result.failure)) ? 'PROVIDER_IMAGE_REJECTED' : 'PROVIDER_FAILED'", replace: "'PROVIDER_FAILED'" },
+  { id: 'D02-PARSE-FAILURE-WITHOUT-DIAGNOSTICS', file: IDE, invariant: 'a parse failure states what arrived',
+    find: "    return answer({ error: 'bad_request', code: 'SERVER_PARSE_FAILED', detail: image.error }, 400);", replace: "    return json({ error: 'bad_request', code: 'SERVER_PARSE_FAILED', detail: image.error }, 400, headers);" },
   { id: 'R01-PRICE-IGNORES-THE-GATE', file: SCN, invariant: 'no search runs for an identity the gate refused',
     find: '  if (sufficiency?.decision !== DECISION.SEARCH_NOW) {\n    return {\n      ...base', replace: '  if (false) {\n    return {\n      ...base' },
 ];

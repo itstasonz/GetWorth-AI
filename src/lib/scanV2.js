@@ -66,6 +66,10 @@ const initial = () => ({
   // Offsets in ms from the moment the photograph was accepted.
   timings: {},
   server: { identify: null, followup: null, price: null },
+  // What happened to the photograph between the shutter and the provider, on
+  // both sides of the request. Facts about the image — type, size, a pixel
+  // verdict — and never the image.
+  diag: { client: {}, server: null },
   error: null,
 });
 
@@ -97,6 +101,8 @@ export const awaitingFollowup = () => state.active && state.stage === V2_STAGE.N
 const availability = new Map();   // user id -> boolean
 
 async function post(path, body, token, timeoutMs, signal) {
+  // A caller that needs the exact request size serialises the body itself.
+  const serialised = typeof body === 'string' ? body : JSON.stringify(body);
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const onAbort = () => ctrl.abort();
@@ -105,7 +111,7 @@ async function post(path, body, token, timeoutMs, signal) {
     const res = await fetch(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(body),
+      body: serialised,
       signal: ctrl.signal,
     });
     let payload = null;
@@ -140,36 +146,192 @@ export async function isScanV2Available({ userId, getToken, scanUuid }) {
 
 const text = (lang, en, he) => (lang === 'he' ? he : en);
 
-function fail(lang, error, retryable = true) {
-  set({ stage: V2_STAGE.ERROR, error: { message: error, retryable } });
+// ── EVERY FAILURE HAS A NAME ────────────────────────────────────────────────
+//
+// THE PRODUCTION WITNESS. Three valid photographs, each visibly rendered on the
+// scan screen, each answered "Photo capture failed. Please retake the photo."
+// The capture had not failed: the photograph was on screen. One predicate
+// further down the pipeline had said no, and the screen reported it under the
+// name of a different stage, with nothing to say which check, on which image,
+// with what measurement.
+//
+// So a failure is now reported as the stage it happened in and a code for what
+// happened there. The wording stays friendly; the code and the measurements
+// behind it are on the diagnostic panel.
+export const V2_FAILURE = Object.freeze({
+  PHOTO_MISSING: 'PHOTO_MISSING',
+  PHOTO_NOT_AN_IMAGE: 'PHOTO_NOT_AN_IMAGE',
+  PHOTO_CONVERSION_FAILED: 'PHOTO_CONVERSION_FAILED',
+  PHOTO_EMPTY: 'PHOTO_EMPTY',
+  PHOTO_DECODE_FAILED: 'PHOTO_DECODE_FAILED',
+  PHOTO_BLANK_FRAME: 'PHOTO_BLANK_FRAME',
+  PHOTO_BLANK_AFTER_CONVERSION: 'PHOTO_BLANK_AFTER_CONVERSION',
+  PHOTO_TOO_LARGE: 'PHOTO_TOO_LARGE',
+  REQUEST_SERIALIZATION_FAILED: 'REQUEST_SERIALIZATION_FAILED',
+  NO_SESSION: 'NO_SESSION',
+  NETWORK_ERROR: 'NETWORK_ERROR',
+  REQUEST_TIMEOUT: 'REQUEST_TIMEOUT',
+  IDENTIFY_HTTP_ERROR: 'IDENTIFY_HTTP_ERROR',
+  SERVER_PARSE_FAILED: 'SERVER_PARSE_FAILED',
+  PROVIDER_IMAGE_REJECTED: 'PROVIDER_IMAGE_REJECTED',
+  PROVIDER_FAILED: 'PROVIDER_FAILED',
+  PRICE_HTTP_ERROR: 'PRICE_HTTP_ERROR',
+  CLIENT_EXCEPTION: 'CLIENT_EXCEPTION',
+});
+const F = V2_FAILURE;
+
+const MESSAGE = {
+  photo: ['We could not prepare this photo. Please try again.', 'לא הצלחנו להכין את התמונה. אנא נסו שוב.'],
+  blank: ['The photo came out blank. Please take it again.', 'התמונה יצאה ריקה. אנא צלמו שוב.'],
+  large: ['The photo is too large to send. Please try again.', 'התמונה גדולה מדי לשליחה. אנא נסו שוב.'],
+  session: ['Sign in required to scan', 'יש להתחבר כדי לסרוק'],
+  network: ['No connection to the server. Please try again.', 'אין חיבור לשרת. אנא נסו שוב.'],
+  timeout: ['Request timed out, please try again', 'הזמן הקצוב פג, נסה שוב'],
+  identify: ['Identification failed — please try again', 'הזיהוי נכשל — אנא נסה שוב'],
+  price: ['The market check failed — please try again', 'בדיקת השוק נכשלה — אנא נסה שוב'],
+  other: ['Something went wrong, please try again', 'משהו השתבש, נסה שוב'],
+};
+const MESSAGE_FOR = {
+  [F.PHOTO_MISSING]: 'photo', [F.PHOTO_NOT_AN_IMAGE]: 'photo', [F.PHOTO_CONVERSION_FAILED]: 'photo',
+  [F.PHOTO_EMPTY]: 'photo', [F.PHOTO_DECODE_FAILED]: 'photo', [F.PHOTO_BLANK_AFTER_CONVERSION]: 'photo',
+  [F.PHOTO_BLANK_FRAME]: 'blank', [F.PHOTO_TOO_LARGE]: 'large', [F.REQUEST_SERIALIZATION_FAILED]: 'photo',
+  [F.NO_SESSION]: 'session', [F.NETWORK_ERROR]: 'network', [F.REQUEST_TIMEOUT]: 'timeout',
+  [F.IDENTIFY_HTTP_ERROR]: 'identify', [F.SERVER_PARSE_FAILED]: 'identify',
+  [F.PROVIDER_IMAGE_REJECTED]: 'identify', [F.PROVIDER_FAILED]: 'identify', [F.PRICE_HTTP_ERROR]: 'price',
+};
+
+const note = (patch) => set({ diag: { ...state.diag, client: { ...state.diag.client, ...patch } } });
+const clip = (v, n = 160) => String(v ?? '').replace(/(eyJ|sk-)[A-Za-z0-9._-]{8,}/g, '[redacted]').slice(0, n);
+
+/** Stop the scan at `stage`, for the reason `code`. */
+function fail(lang, code, stage, detail = null, retryable = true) {
+  const [en, he] = MESSAGE[MESSAGE_FOR[code] ?? 'other'];
+  note({ failure_stage: stage, failure_code: code, failure_detail: detail });
+  set({ stage: V2_STAGE.ERROR, error: { message: text(lang, en, he), retryable, code, stage, detail } });
 }
+
+/** What a captured value IS, without reading what is in it. */
+export function describeCapture(value) {
+  if (value === null || value === undefined || value === '') return { present: false, type: 'none', mime: null, bytes: 0 };
+  if (typeof value !== 'string') {
+    return { present: true, type: typeof Blob !== 'undefined' && value instanceof Blob ? 'blob' : typeof value, mime: value?.type ?? null, bytes: value?.size ?? 0 };
+  }
+  if (value.startsWith('blob:')) return { present: true, type: 'object_url', mime: null, bytes: 0 };
+  const m = /^data:([^;,]*)[^,]*,/.exec(value);
+  if (!m) return { present: true, type: 'string', mime: null, bytes: 0 };
+  return { present: true, type: 'data_url', mime: m[1] || null, bytes: Math.round((value.length - m[0].length) * 0.75) };
+}
+
+const MIN_IMAGE_BYTES = 512;
+const usableImage = (d) => d.type === 'data_url' && String(d.mime).startsWith('image/') && d.bytes >= MIN_IMAGE_BYTES;
+const BLANK = new Set(['black_frame', 'uniform_frame', 'fully_transparent', 'zero_dimensions']);
+const UNDECODABLE = new Set(['decode_failed', 'decoded_zero_dimensions']);
 
 async function identify({ dataUrl, lang, getToken, compress, assess, followup }) {
   set({ stage: V2_STAGE.PREPARING, error: null });
-  const compressed = await compress(dataUrl);
+
+  // ── CAPTURE ──────────────────────────────────────────────────────────────
+  const capture = describeCapture(dataUrl);
+  note({
+    followup: !!followup,
+    capture_present: capture.present, capture_type: capture.type, capture_mime: capture.mime, capture_bytes: capture.bytes,
+    preview_present: !!(followup ? dataUrl : state.image),
+    compression_started: false, compression_succeeded: null, compressed_mime: null, compressed_bytes: null,
+    pixel_check: null, raw_pixel_check: null, request_started: false, request_payload_bytes: null,
+    identify_http_status: null, identify_roundtrip_ms: null, failure_stage: null, failure_code: null, failure_detail: null,
+  });
+  if (!capture.present) { fail(lang, F.PHOTO_MISSING, 'capture'); return; }
+  if (!usableImage(capture)) {
+    fail(lang, capture.bytes < MIN_IMAGE_BYTES && capture.type === 'data_url' ? F.PHOTO_EMPTY : F.PHOTO_NOT_AN_IMAGE,
+      'capture', `${capture.type} ${capture.mime ?? 'no mime'} ${capture.bytes}B`);
+    return;
+  }
+
+  // ── CONVERSION ───────────────────────────────────────────────────────────
+  note({ compression_started: true });
+  let compressed;
+  try {
+    compressed = await compress(dataUrl);
+  } catch (err) {
+    note({ compression_succeeded: false });
+    fail(lang, F.PHOTO_CONVERSION_FAILED, 'compression', clip(err?.message));
+    return;
+  }
   stamp(followup ? 'followup_compression_complete' : 'compression_complete');
+  const converted = describeCapture(compressed);
+  note({
+    compression_succeeded: usableImage(converted), compression_skipped: compressed === dataUrl,
+    compressed_mime: converted.mime, compressed_bytes: converted.bytes,
+  });
+  // A canvas that could not be allocated encodes as "data:,": a string, and no image.
+  if (!usableImage(converted)) {
+    fail(lang, F.PHOTO_EMPTY, 'compression', `${converted.type} ${converted.mime ?? 'no mime'} ${converted.bytes}B`);
+    return;
+  }
+
+  // ── DOES THE IMAGE THAT WILL BE SENT CONTAIN ANYTHING? ───────────────────
+  //
+  // null means "could not be inspected", which is not a rejection. An explicit
+  // `ok: false` stops the scan — and says WHICH check said no, on WHICH image.
+  // When the converted image fails, the captured one is inspected too, so a
+  // photograph that was fine until it was converted is reported as exactly that.
   const pixels = await assess(compressed);
+  note({ pixel_check: pixels ?? 'not_inspectable' });
   if (pixels && pixels.ok === false) {
-    fail(lang, text(lang, 'Photo capture failed. Please retake the photo.', 'צילום התמונה נכשל. אנא צלם שוב.'));
+    const raw = compressed === dataUrl ? pixels : await Promise.resolve(assess(dataUrl)).catch(() => null);
+    note({ raw_pixel_check: raw ?? 'not_inspectable' });
+    const reason = String(pixels.reason ?? 'unknown');
+    const rawFine = compressed !== dataUrl && raw && raw.ok === true;
+    const code = UNDECODABLE.has(reason) ? F.PHOTO_DECODE_FAILED
+      : (BLANK.has(reason) ? (rawFine ? F.PHOTO_BLANK_AFTER_CONVERSION : F.PHOTO_BLANK_FRAME) : F.PHOTO_EMPTY);
+    fail(lang, code, 'pixel_check', `converted: ${reason}; captured: ${raw ? (raw.ok ? 'ok' : raw.reason) : 'not inspectable'}`);
     return;
   }
   set(followup ? { followupImage: compressed } : { image: compressed });
 
   const token = await getToken();
-  if (!token) { fail(lang, text(lang, 'Sign in required to scan', 'יש להתחבר כדי לסרוק'), false); return; }
+  if (!token) { fail(lang, F.NO_SESSION, 'session', null, false); return; }
 
+  // ── REQUEST ──────────────────────────────────────────────────────────────
+  let body;
+  try {
+    body = JSON.stringify({
+      scan_uuid: state.scanUuid,
+      image: compressed.slice(compressed.indexOf(',') + 1),
+      language: lang,
+      ...(followup ? { state: state.stateToken } : {}),
+    });
+  } catch (err) {
+    fail(lang, F.REQUEST_SERIALIZATION_FAILED, 'request', clip(err?.message));
+    return;
+  }
   set({ stage: V2_STAGE.IDENTIFYING });
+  note({ request_started: true, request_payload_bytes: body.length });
   stamp(followup ? 'followup_request_start' : 'identity_request_start');
-  const { status, payload } = await post('/api/v2/identify', {
-    scan_uuid: state.scanUuid,
-    image: compressed.split(',')[1],
-    language: lang,
-    ...(followup ? { state: state.stateToken } : {}),
-  }, token, IDENTIFY_TIMEOUT_MS, controller.signal);
+  const sentAt = performance.now();
+  let response;
+  try {
+    response = await post('/api/v2/identify', body, token, IDENTIFY_TIMEOUT_MS, controller.signal);
+  } catch (err) {
+    if (controller?.signal.aborted) throw err;          // the user left
+    note({ identify_roundtrip_ms: Math.round(performance.now() - sentAt) });
+    fail(lang, err?.name === 'AbortError' ? F.REQUEST_TIMEOUT : F.NETWORK_ERROR, 'request', clip(err?.message));
+    return;
+  }
+  const { status, payload } = response;
   stamp(followup ? 'followup_complete' : 'identity_complete');
+  note({ identify_http_status: status, identify_roundtrip_ms: Math.round(performance.now() - sentAt) });
+  if (payload?.diagnostics) set({ diag: { ...state.diag, server: payload.diagnostics } });
 
   if (status !== 200 || payload?.status !== 'OK') {
-    fail(lang, text(lang, 'Identification failed — please try again', 'הזיהוי נכשל — אנא נסה שוב'));
+    const detail = clip([payload?.error, payload?.detail, payload?.failure, payload?.reason].filter(Boolean).join(' · ') || `HTTP ${status}`);
+    const code = status === 413 ? F.PHOTO_TOO_LARGE
+      : (status === 401 ? F.NO_SESSION
+        : (status === 400 ? F.SERVER_PARSE_FAILED
+          : (status === 200 && payload?.status === 'FAILED'
+            ? (/^http_4/.test(String(payload.failure)) ? F.PROVIDER_IMAGE_REJECTED : F.PROVIDER_FAILED)
+            : F.IDENTIFY_HTTP_ERROR)));
+    fail(lang, code, status === 200 ? 'provider' : 'server', detail, status !== 401);
     return;
   }
   set({
@@ -193,13 +355,13 @@ async function identify({ dataUrl, lang, getToken, compress, assess, followup })
 
 async function price({ lang, getToken }) {
   const token = await getToken();
-  if (!token) { fail(lang, text(lang, 'Sign in required to scan', 'יש להתחבר כדי לסרוק'), false); return; }
+  if (!token) { fail(lang, F.NO_SESSION, 'session', null, false); return; }
   set({ stage: V2_STAGE.SEARCHING });
   stamp('search_request_start');
   const { status, payload } = await post('/api/v2/price', { scan_uuid: state.scanUuid, state: state.stateToken }, token, PRICE_TIMEOUT_MS, controller.signal);
   stamp('price_complete');
   if (status !== 200 || payload?.status !== 'OK') {
-    fail(lang, text(lang, 'The market check failed — please try again', 'בדיקת השוק נכשלה — אנא נסה שוב'));
+    fail(lang, F.PRICE_HTTP_ERROR, 'price', clip([payload?.error, payload?.detail].filter(Boolean).join(' · ') || `HTTP ${status}`));
     return;
   }
   set({
@@ -217,9 +379,9 @@ async function guarded(lang, work) {
     await work();
   } catch (err) {
     if (controller?.signal.aborted) return;       // the user left; the store was reset
-    fail(lang, err?.name === 'AbortError'
-      ? text(lang, 'Request timed out, please try again', 'הזמן הקצוב פג, נסה שוב')
-      : text(lang, 'Something went wrong, please try again', 'משהו השתבש, נסה שוב'));
+    fail(lang, err?.name === 'AbortError' ? F.REQUEST_TIMEOUT
+      : (err?.name === 'TypeError' && /fetch|network|load failed/i.test(String(err?.message)) ? F.NETWORK_ERROR : F.CLIENT_EXCEPTION),
+    'client', clip(`${err?.name ?? 'Error'}: ${err?.message ?? ''}`));
   }
 }
 

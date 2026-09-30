@@ -4,7 +4,7 @@
 //
 // "If V2 silently lost one of its rules, would any test notice?"
 //
-// The real tree is never written to. The harness mirrors `api/` and the V2
+// The real tree is never written to. The harness mirrors `api/`, `src/` and the V2
 // suites into a scratch directory INSIDE the repository (so bare imports still
 // resolve to node_modules), breaks one rule in the mirror, runs the suites
 // there, and restores the file.
@@ -39,6 +39,8 @@ const SUITES = [
   'tests/scan-v2-evidence.test.mjs',
   'tests/scan-v2-pipeline.test.mjs',
   'tests/scan-v2-endpoints.test.mjs',
+  // The client half: the photograph's path from the shutter to the request.
+  'tests/scan-v2-client.test.mjs',
 ];
 
 const argv = process.argv.slice(2);
@@ -58,6 +60,7 @@ function mirror() {
   rmSync(SCRATCH, { recursive: true, force: true });
   mkdirSync(join(SCRATCH, 'tests'), { recursive: true });
   cpSync(join(REPO, 'api'), join(SCRATCH, 'api'), { recursive: true });
+  cpSync(join(REPO, 'src'), join(SCRATCH, 'src'), { recursive: true });
   cpSync(join(REPO, 'tests/helpers'), join(SCRATCH, 'tests/helpers'), { recursive: true });
   cpSync(join(REPO, 'tests/fixtures'), join(SCRATCH, 'tests/fixtures'), { recursive: true });
   for (const s of SUITES) cpSync(join(REPO, s), join(SCRATCH, s));

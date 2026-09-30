@@ -96,6 +96,10 @@ const nameOf = (identity) => [identity?.brand?.value, identity?.model?.value].fi
   || identity?.local_name || identity?.object_class || '';
 
 const ms = (v) => (typeof v === 'number' ? `${(v / 1000).toFixed(1)}s` : '—');
+const kb = (v) => (typeof v === 'number' ? `${(v / 1024).toFixed(1)}KB` : '—');
+/** A pixel verdict as one line: the answer, the reason, and the numbers behind it. */
+const pixelLine = (p) => (!p ? null : (typeof p === 'string' ? p
+  : `${p.ok ? 'ok' : `REJECTED: ${p.reason}`} · ${p.source_width ?? p.width ?? '?'}×${p.source_height ?? p.height ?? '?'} · luma ${p.mean_luma ?? '?'} · sd ${p.std_dev ?? '?'}`));
 
 function Row({ label, value }) {
   return (
@@ -124,6 +128,8 @@ function Diagnostics({ s }) {
     ? t.identity_complete - t.identity_request_start : null;
   const followupMs = t.followup_complete !== undefined && t.followup_request_start !== undefined
     ? t.followup_complete - t.followup_request_start : null;
+  const c = s.diag?.client ?? {};
+  const sv = s.diag?.server ?? null;
   const priceMs = t.price_complete !== undefined && t.search_request_start !== undefined
     ? t.price_complete - t.search_request_start : null;
   return (
@@ -132,6 +138,22 @@ function Diagnostics({ s }) {
         <p className="text-label font-semibold text-text-primary">SCAN ENGINE: V2</p>
         <p className="text-meta text-text-muted">build {BUILD}</p>
       </div>
+      {/* The photograph's own journey: capture, conversion, the pixel verdict,
+          the request and what the server received. Facts about the image, never
+          the image. Shown from the first moment of a scan, so a failure before
+          any identity exists can still be read off the phone. */}
+      <Group title="Photo">
+        <Row label="failure" value={c.failure_code ? `${c.failure_code} @ ${c.failure_stage}${c.failure_detail ? ` — ${c.failure_detail}` : ''}` : 'none'} />
+        <Row label="capture" value={c.capture_present === undefined ? null : `${c.capture_present ? 'present' : 'MISSING'} · ${c.capture_type} · ${c.capture_mime ?? 'no mime'} · ${kb(c.capture_bytes)}`} />
+        <Row label="preview" value={c.preview_present === undefined ? null : (c.preview_present ? 'present' : 'MISSING')} />
+        <Row label="compression" value={c.compression_started ? `${c.compression_succeeded === null ? 'running' : (c.compression_succeeded ? 'ok' : 'FAILED')}${c.compression_skipped ? ' (skipped: already small)' : ''} · ${c.compressed_mime ?? 'no mime'} · ${kb(c.compressed_bytes)}` : 'not started'} />
+        <Row label="pixel check (sent image)" value={pixelLine(c.pixel_check)} />
+        <Row label="pixel check (captured)" value={pixelLine(c.raw_pixel_check)} />
+        <Row label="request" value={c.request_started ? `started · ${kb(c.request_payload_bytes)} · HTTP ${c.identify_http_status ?? '…'} · ${ms(c.identify_roundtrip_ms)}` : 'not started'} />
+        <Row label="server received" value={sv ? `${sv.content_type ?? 'no content-type'} · image ${sv.image_field_present ? 'present' : `MISSING (${sv.image_field_type})`} · ${sv.image_mime ?? 'unknown mime'} · ${kb(sv.image_bytes)} · parse ${sv.parse_success ? 'ok' : 'FAILED'}` : null} />
+        <Row label="server provider call" value={sv ? `${sv.provider_request_started ? 'started' : 'not started'} · ${sv.provider_request_succeeded ? 'succeeded' : 'not succeeded'}${sv.failure_code ? ` · ${sv.failure_code} @ ${sv.failure_stage}` : ''}` : null} />
+        <Row label="device" value={typeof navigator !== 'undefined' ? String(navigator.userAgent).replace(/^Mozilla\/5\.0 /, '').slice(0, 90) : null} />
+      </Group>
       <Group title="Identity">
         <Row label="server time" value={`${ms(s.server.identify?.identity_complete_ms)} · first event ${ms(s.server.identify?.identity_first_event_ms)}`} />
         <Row label="round-trip time" value={ms(identityMs)} />
@@ -299,6 +321,7 @@ export default function ScanV2View() {
             <p className="text-body text-text-primary flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-danger" aria-hidden="true" />{s.error?.message}
             </p>
+            {s.error?.code && <p className="text-meta text-text-muted font-mono" dir="ltr">{s.error.code} @ {s.error.stage}</p>}
             {s.stateToken && s.sufficiency?.decision === 'SEARCH_NOW' && (
               <Btn primary fullWidth onClick={() => retryPriceV2({ lang, getToken: getFreshToken })}>{c.retry}</Btn>
             )}
@@ -309,7 +332,7 @@ export default function ScanV2View() {
           <Btn fullWidth onClick={close}>{c.scanAgain}</Btn>
         )}
 
-        {s.identity && <Diagnostics s={s} />}
+        {s.active && <Diagnostics s={s} />}
       </div>
     </div>
   );

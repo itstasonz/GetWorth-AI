@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   SCAN_V2_ENABLED, scanV2Store, startScanV2, followupScanV2, declineFollowupV2, retryPriceV2,
-  awaitingFollowup, isScanV2Available, V2_STAGE,
+  awaitingFollowup, isScanV2Available, describeCapture, V2_STAGE, V2_FAILURE,
 } from '../src/lib/scanV2.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -48,8 +48,12 @@ function script(responses) {
   };
   return requests;
 }
+// A data URL the size of a real (small) photograph. The marker at its head is
+// what the fake compressor rewrites, so a test can tell which image was sent.
+const PAD = 'A'.repeat(4000);
+const photo = (marker = 'RAW') => `data:image/jpeg;base64,${marker}${PAD}`;
 const deps = (over = {}) => ({
-  dataUrl: 'data:image/jpeg;base64,RAW', scanUuid: UUID, lang: 'en',
+  dataUrl: photo(), scanUuid: UUID, lang: 'en',
   getToken: async () => 'user-session-token',
   compress: async (d) => d.replace('RAW', 'COMPRESSED'),
   assess: async () => ({ ok: true }),
@@ -64,7 +68,8 @@ describe('V2-19 the client store', () => {
     const requests = script([identifyOk('SEARCH_NOW'), priceOk()]);
     await startScanV2(deps());
     assert.deepEqual(requests.map((r) => r.path), ['/api/v2/identify', '/api/v2/price']);
-    assert.equal(requests[0].body.image, 'COMPRESSED', 'the compressed photograph, without its data-URL prefix');
+    assert.equal(requests[0].body.image, `COMPRESSED${PAD}`, 'the compressed photograph, without its data-URL prefix');
+    assert.deepEqual(Object.keys(requests[0].body).sort(), ['image', 'language', 'scan_uuid'], 'the exact fields /api/v2/identify reads');
     assert.equal(requests[0].body.state, undefined);
     assert.deepEqual(Object.keys(requests[1].body).sort(), ['scan_uuid', 'state'], 'price sends the signed state and nothing else');
     assert.equal(requests[1].body.state, 'signed.token');
@@ -97,9 +102,9 @@ describe('V2-19 the client store', () => {
     script([identifyOk('NEED_FOLLOWUP')]);
     await startScanV2(deps());
     const requests = script([identifyOk('SEARCH_NOW', { followups_used: 1, state: 'signed.second' }), priceOk('MARKET_INFORMED_ESTIMATE')]);
-    await followupScanV2(deps({ dataUrl: 'data:image/jpeg;base64,RAW2' }));
+    await followupScanV2(deps({ dataUrl: photo('RAW2') }));
     assert.equal(requests[0].body.state, 'signed.token');
-    assert.equal(requests[0].body.image, 'COMPRESSED2');
+    assert.equal(requests[0].body.image, `COMPRESSED2${PAD}`);
     assert.equal(requests[1].body.state, 'signed.second');
     assert.equal(snap().followupsUsed, 1);
     assert.equal(snap().stage, V2_STAGE.DONE);
@@ -124,20 +129,16 @@ describe('V2-19 the client store', () => {
     assert.equal(again.length, 1);
     assert.equal(snap().valuation.state, 'NEED_MORE_INFORMATION');
   });
-  test('V2-19g a blank frame is refused before any request', async () => {
-    const requests = script([]);
-    await startScanV2(deps({ assess: async () => ({ ok: false, reason: 'blank' }) }));
-    assert.equal(requests.length, 0);
-    assert.equal(snap().stage, V2_STAGE.ERROR);
-  });
-  test('V2-19h a failed identify or price is an ERROR stage, never a made-up result; price can be retried alone', async () => {
+  test('V2-19g a failed identify or price is an ERROR stage, never a made-up result; price can be retried alone', async () => {
     script([ok({ engine: 'v2', status: 'FAILED', failure: 'timeout' })]);
     await startScanV2(deps());
     assert.equal(snap().stage, V2_STAGE.ERROR);
+    assert.equal(snap().error.code, V2_FAILURE.PROVIDER_FAILED);
     assert.equal(snap().identity, null);
     script([identifyOk('SEARCH_NOW'), new Response('{}', { status: 500 })]);
     await startScanV2(deps());
     assert.equal(snap().stage, V2_STAGE.ERROR);
+    assert.equal(snap().error.code, V2_FAILURE.PRICE_HTTP_ERROR);
     assert.equal(snap().valuation, null);
     assert.equal(snap().identity.brand.value, 'Sony', 'the identity already earned is kept');
     const retry = script([priceOk()]);
@@ -145,10 +146,14 @@ describe('V2-19 the client store', () => {
     assert.deepEqual(retry.map((r) => r.path), ['/api/v2/price']);
     assert.equal(snap().stage, V2_STAGE.DONE);
   });
-  test('V2-19i a network failure is an ERROR stage', async () => {
+  test('V2-19i a network failure is NETWORK_ERROR at the request stage, with the preparation on record', async () => {
     script([new TypeError('Failed to fetch')]);
     await startScanV2(deps());
     assert.equal(snap().stage, V2_STAGE.ERROR);
+    assert.equal(snap().error.code, V2_FAILURE.NETWORK_ERROR);
+    assert.equal(snap().error.stage, 'request');
+    assert.equal(snap().diag.client.compression_succeeded, true);
+    assert.equal(snap().diag.client.request_started, true);
   });
   test('V2-19j a new scan starts clean: nothing of the previous scan survives', async () => {
     script([identifyOk('SEARCH_NOW'), priceOk()]);
@@ -167,6 +172,180 @@ describe('V2-19 the client store', () => {
     await startScanV2(deps({ getToken: async () => null }));
     assert.equal(requests.length, 0);
     assert.equal(snap().stage, V2_STAGE.ERROR);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// V2-23 · THE PHOTOGRAPH, FROM THE SHUTTER TO THE REQUEST
+//
+// THE PRODUCTION WITNESS (build 221686a). Three valid photographs, each visibly
+// rendered on the V2 screen, each answered "Photo capture failed. Please retake
+// the photo." The one predicate that produces that sentence in V2 is the pixel
+// verdict on the CONVERTED image — a check two stages after capture — and the
+// screen gave no code, no stage and no measurement.
+// ════════════════════════════════════════════════════════════════════════════
+describe('V2-23 every photo failure names its stage, its code and its measurement', () => {
+  const blank = { ok: false, reason: 'black_frame', width: 256, height: 192, mean_luma: 0, std_dev: 0 };
+  const fine = { ok: true, reason: null, width: 256, height: 192, mean_luma: 105, std_dev: 62 };
+
+  test('V2-23a THE PRODUCTION FAILURE: a photo that is fine as captured and blank after conversion is reported as exactly that', async () => {
+    const requests = script([]);
+    const raw = photo();
+    await startScanV2(deps({ assess: async (d) => (d === raw ? fine : blank) }));
+    const st = snap();
+    assert.equal(requests.length, 0, 'no provider call for an image that failed preparation');
+    assert.equal(st.stage, V2_STAGE.ERROR);
+    assert.equal(st.error.code, V2_FAILURE.PHOTO_BLANK_AFTER_CONVERSION);
+    assert.equal(st.error.stage, 'pixel_check', 'not "capture": the capture is on screen');
+    assert.match(st.error.detail, /converted: black_frame; captured: ok/);
+    assert.ok(!/capture failed/i.test(st.error.message), 'a displayed photo is never called a capture failure');
+    assert.equal(st.image, raw, 'the photograph the user sees is still there');
+    assert.deepEqual(st.diag.client.pixel_check, blank, 'the measurement that said no');
+    assert.deepEqual(st.diag.client.raw_pixel_check, fine, 'and the one that says the capture was fine');
+    assert.equal(st.diag.client.failure_code, V2_FAILURE.PHOTO_BLANK_AFTER_CONVERSION);
+  });
+  test('V2-23b a photo that is blank as captured is PHOTO_BLANK_FRAME, and says so in those words', async () => {
+    const requests = script([]);
+    await startScanV2(deps({ assess: async () => blank }));
+    assert.equal(requests.length, 0);
+    assert.equal(snap().error.code, V2_FAILURE.PHOTO_BLANK_FRAME);
+    assert.match(snap().error.message, /blank/i);
+  });
+  test('V2-23c a converted image the browser cannot decode is PHOTO_DECODE_FAILED', async () => {
+    script([]);
+    await startScanV2(deps({ assess: async () => ({ ok: false, reason: 'decode_failed' }) }));
+    assert.equal(snap().error.code, V2_FAILURE.PHOTO_DECODE_FAILED);
+    assert.equal(snap().error.stage, 'pixel_check');
+  });
+  test('V2-23d an image that cannot be INSPECTED is not a failure: the scan proceeds', async () => {
+    const requests = script([identifyOk('SEARCH_NOW'), priceOk()]);
+    await startScanV2(deps({ assess: async () => null }));
+    assert.equal(requests.length, 2);
+    assert.equal(snap().stage, V2_STAGE.DONE);
+    assert.equal(snap().diag.client.pixel_check, 'not_inspectable');
+  });
+  test('V2-23e an image with no readable text and no brand is still a valid payload', async () => {
+    const requests = script([identifyOk('SEARCH_NOW'), priceOk()]);
+    await startScanV2(deps({ assess: async () => ({ ...fine, mean_luma: 40, std_dev: 9 }) }));
+    assert.equal(requests.length, 2);
+    assert.equal(snap().error, null);
+  });
+  test('V2-23f compression that throws is PHOTO_CONVERSION_FAILED with the reason, and nothing is sent', async () => {
+    const requests = script([]);
+    await startScanV2(deps({ compress: async () => { throw new Error('Failed to load image for compression'); } }));
+    assert.equal(requests.length, 0);
+    assert.equal(snap().error.code, V2_FAILURE.PHOTO_CONVERSION_FAILED);
+    assert.equal(snap().error.stage, 'compression');
+    assert.match(snap().error.detail, /Failed to load image/);
+    assert.equal(snap().diag.client.compression_started, true);
+    assert.equal(snap().diag.client.compression_succeeded, false);
+  });
+  test('V2-23g compression that returns an empty canvas ("data:,"), null, or a stub is PHOTO_EMPTY', async () => {
+    for (const out of ['data:,', null, undefined, '', 'data:image/jpeg;base64,AAAA']) {
+      const requests = script([]);
+      await startScanV2(deps({ compress: async () => out }));
+      assert.equal(requests.length, 0, String(out));
+      assert.equal(snap().error.code, V2_FAILURE.PHOTO_EMPTY, String(out));
+      assert.equal(snap().error.stage, 'compression', String(out));
+    }
+  });
+  test('V2-23h a missing capture is PHOTO_MISSING; an object URL, a File or a non-image is PHOTO_NOT_AN_IMAGE; none reaches compression', async () => {
+    const cases = [
+      [null, V2_FAILURE.PHOTO_MISSING], [undefined, V2_FAILURE.PHOTO_MISSING], ['', V2_FAILURE.PHOTO_MISSING],
+      ['blob:https://get-worth-ai.vercel.app/3f1c', V2_FAILURE.PHOTO_NOT_AN_IMAGE],
+      [new Blob([new Uint8Array(2048)], { type: 'image/jpeg' }), V2_FAILURE.PHOTO_NOT_AN_IMAGE],
+      [`data:application/pdf;base64,${PAD}`, V2_FAILURE.PHOTO_NOT_AN_IMAGE],
+      ['data:image/jpeg;base64,', V2_FAILURE.PHOTO_EMPTY],
+    ];
+    for (const [dataUrl, code] of cases) {
+      let compressed = false;
+      const requests = script([]);
+      await startScanV2(deps({ dataUrl, compress: async (d) => { compressed = true; return d; } }));
+      assert.equal(snap().error.code, code, String(dataUrl).slice(0, 30));
+      assert.equal(snap().error.stage, 'capture');
+      assert.equal(compressed, false);
+      assert.equal(requests.length, 0);
+    }
+  });
+  test('V2-23i describeCapture states type, MIME and size without reading the content', () => {
+    assert.deepEqual(describeCapture(photo()), { present: true, type: 'data_url', mime: 'image/jpeg', bytes: Math.round(4003 * 0.75) });
+    assert.deepEqual(describeCapture('blob:x'), { present: true, type: 'object_url', mime: null, bytes: 0 });
+    assert.equal(describeCapture(new Blob(['abc'], { type: 'image/heic' })).type, 'blob');
+    assert.equal(describeCapture(null).present, false);
+  });
+  test('V2-23j the server\'s answers are told apart: 413, 400, 401, a provider failure and a provider image rejection', async () => {
+    const cases = [
+      [new Response(JSON.stringify({ error: 'payload_too_large' }), { status: 413 }), V2_FAILURE.PHOTO_TOO_LARGE, 'server'],
+      [new Response(JSON.stringify({ error: 'bad_request', detail: 'image is not a recognised image format' }), { status: 400 }), V2_FAILURE.SERVER_PARSE_FAILED, 'server'],
+      [new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401 }), V2_FAILURE.NO_SESSION, 'server'],
+      [new Response('<html>gateway</html>', { status: 502 }), V2_FAILURE.IDENTIFY_HTTP_ERROR, 'server'],
+      [ok({ engine: 'v2', status: 'FAILED', failure: 'http_400' }), V2_FAILURE.PROVIDER_IMAGE_REJECTED, 'provider'],
+      [ok({ engine: 'v2', status: 'FAILED', failure: 'upstream_5xx' }), V2_FAILURE.PROVIDER_FAILED, 'provider'],
+    ];
+    for (const [response, code, stage] of cases) {
+      script([response]);
+      await startScanV2(deps());
+      assert.equal(snap().error.code, code);
+      assert.equal(snap().error.stage, stage, code);
+      assert.equal(snap().diag.client.identify_http_status, response.status, code);
+    }
+    script([new Response(JSON.stringify({ error: 'bad_request', detail: 'image is not a recognised image format' }), { status: 400 })]);
+    await startScanV2(deps());
+    assert.match(snap().error.detail, /not a recognised image format/, 'the server’s own reason reaches the screen');
+  });
+  test('V2-23k a successful scan records the whole client half: capture, conversion, pixel verdict, request, response', async () => {
+    script([identifyOk('SEARCH_NOW', { diagnostics: { request_received: true, image_bytes: 3000, parse_success: true } }), priceOk()]);
+    await startScanV2(deps({ assess: async () => fine }));
+    const c = snap().diag.client;
+    assert.equal(c.capture_present, true);
+    assert.equal(c.capture_type, 'data_url');
+    assert.equal(c.capture_mime, 'image/jpeg');
+    assert.ok(c.capture_bytes > 2000);
+    assert.equal(c.preview_present, true);
+    assert.equal(c.compression_started, true);
+    assert.equal(c.compression_succeeded, true);
+    assert.equal(c.compressed_mime, 'image/jpeg');
+    assert.ok(c.compressed_bytes > 2000);
+    assert.deepEqual(c.pixel_check, fine);
+    assert.equal(c.request_started, true);
+    assert.ok(c.request_payload_bytes > 4000, 'the serialised request, image included');
+    assert.equal(c.identify_http_status, 200);
+    assert.equal(typeof c.identify_roundtrip_ms, 'number');
+    assert.equal(c.failure_code, null);
+    assert.deepEqual(snap().diag.server, { request_received: true, image_bytes: 3000, parse_success: true });
+  });
+  test('V2-23l the diagnostics hold facts about the image and never the image, the token or the state', async () => {
+    script([identifyOk('SEARCH_NOW'), priceOk()]);
+    await startScanV2(deps({ assess: async () => fine }));
+    const text = JSON.stringify(snap().diag);
+    assert.ok(!text.includes(PAD.slice(0, 40)), 'no base64');
+    assert.ok(!text.includes('user-session-token') && !text.includes('signed.token'));
+    script([new TypeError('Failed to fetch eyJhbGciOiJIUzI1NiJ9abcdefgh')]);
+    await startScanV2(deps());
+    assert.ok(!JSON.stringify(snap().error).includes('eyJhbGciOiJIUzI1NiJ9'), 'a token-shaped string in an error is redacted');
+  });
+  test('V2-23m the preview survives every stage and every failure', async () => {
+    const raw = photo();
+    for (const over of [{ assess: async () => blank }, { compress: async () => { throw new Error('x'); } }, { compress: async () => 'data:,' }]) {
+      script([]);
+      await startScanV2(deps(over));
+      assert.equal(snap().image, raw);
+      assert.equal(snap().active, true, 'the V2 screen stays, with the photograph on it');
+    }
+    script([new Response('{}', { status: 500 })]);
+    await startScanV2(deps());
+    assert.ok(snap().image.startsWith('data:image/jpeg;base64,COMPRESSED'));
+    script([identifyOk('NEED_FOLLOWUP')]);
+    await startScanV2(deps());
+    script([]);
+    await followupScanV2(deps({ dataUrl: photo('RAW2'), assess: async () => blank }));
+    assert.ok(snap().image.startsWith('data:image/jpeg;base64,COMPRESSED'), 'a failed follow-up keeps the first photograph');
+    assert.equal(snap().error.code, V2_FAILURE.PHOTO_BLANK_FRAME);
+  });
+  test('V2-23n "Photo capture failed" cannot be said by V2 at all', () => {
+    for (const f of ['src/lib/scanV2.js', 'src/views/ScanV2View.jsx']) {
+      assert.ok(!/capture failed|צילום התמונה נכשל/i.test(code(f)), f);
+    }
   });
 });
 
@@ -235,11 +414,15 @@ describe('V2-21 what the screen may say', () => {
     assert.ok(!/%|progress|width:\s*`/i.test(view.replace(/aria-live|w-full|max-w-md/g, '')));
   });
   test('V2-21g the diagnostic panel names the engine, the build and every section the measurement needs', () => {
-    for (const needle of ['SCAN ENGINE: V2', 'build {BUILD}', 'title="Identity"', 'title="Search"', 'title="Evidence"', 'title="Valuation"', 'title="Total"',
+    for (const needle of ['SCAN ENGINE: V2', 'build {BUILD}', 'title="Photo"', 'label="failure"', 'label="capture"', 'label="compression"', 'label="pixel check (sent image)"', 'label="pixel check (captured)"', 'label="request"', 'label="server received"', 'title="Identity"', 'title="Search"', 'title="Evidence"', 'title="Valuation"', 'title="Total"',
       'label="server time"', 'label="round-trip time"', 'label="executed queries"', 'label="results"', 'label="domains"', 'label="admitted"', 'label="rejected"', 'label="used listings"', 'label="retail listings"',
       'label="currency failures"', 'label="identity failures"', 'label="rejection reasons"', 'label="evidence basis"', 'label="photo accepted → result / follow-up"', 'label="decision"', 'label="candidates"', 'label="visible text"']) {
       assert.ok(view.includes(needle), needle);
     }
+  });
+  test('V2-21i the panel is shown for the whole scan, and the error card shows the failure code', () => {
+    assert.match(view, /\{s\.active && <Diagnostics s=\{s\} \/>\}/);
+    assert.match(view, /\{s\.error\.code\} @ \{s\.error\.stage\}/);
   });
   test('V2-21h the follow-up card shows the server’s instruction, never client-written copy', () => {
     assert.match(view, /s\.sufficiency\?\.followup\?\.instruction/);

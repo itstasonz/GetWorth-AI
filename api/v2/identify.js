@@ -20,6 +20,7 @@ import { resolveV2Model, V2_KEY_ENV, V2_MAX_FOLLOWUPS } from '../_lib/v2/config.
 import { runV2Identify } from '../_lib/v2/scan.js';
 import { signScanState, verifyScanState } from '../_lib/v2/state.js';
 import { DECISION } from '../_lib/v2/sufficiency.js';
+import { detectImageMime } from '../_lib/openai-recognition.js';
 
 // Must stay a literal: Vercel reads it statically. Held equal to
 // V2_FUNCTION_MAX_DURATION_S by tests/scan-v2-endpoints.test.mjs.
@@ -41,22 +42,59 @@ async function handleRequest(req) {
     return json({ scan_uuid: scanUuid, engine: 'v2', status: 'READY', openai_called: false }, 200, headers);
   }
 
-  const image = readImage(body?.image);
-  if (image.error) return json({ error: 'bad_request', detail: image.error }, 400, headers);
+  // ── WHAT ARRIVED, STATED ON EVERY ANSWER ─────────────────────────────────
+  //
+  // Facts about the request and never its contents: whether an image field was
+  // present, what kind of image its first bytes say it is, how large it is, and
+  // the stage at which this request stopped. It travels back in the response
+  // and is logged as one line, so a scan that fails on a phone can be read from
+  // the phone and from the server log alike.
+  const field = body?.image;
+  const diagnostics = {
+    request_received: true,
+    content_type: String(req.headers.get('content-type') ?? '').slice(0, 60) || null,
+    image_field_present: typeof field === 'string' && field.length > 0,
+    image_field_type: field === undefined ? 'absent' : (field === null ? 'null' : typeof field),
+    image_mime: null,
+    image_bytes: typeof field === 'string' ? Math.round((field.includes(',') ? field.length - field.indexOf(',') - 1 : field.length) * 0.75) : 0,
+    parse_success: false,
+    provider_request_started: false,
+    provider_request_succeeded: false,
+    failure_stage: null,
+    failure_code: null,
+  };
+  const answer = (payload, status) => {
+    console.log(`[V2Identify] scan=${scanUuid.slice(0, 8)} http=${status} ${JSON.stringify(diagnostics)}`);
+    return json({ ...payload, diagnostics }, status, headers);
+  };
+  const stop = (stage, code) => { diagnostics.failure_stage = stage; diagnostics.failure_code = code; };
+
+  const image = readImage(field);
+  if (image.error) {
+    stop('parse', 'SERVER_PARSE_FAILED');
+    return answer({ error: 'bad_request', code: 'SERVER_PARSE_FAILED', detail: image.error }, 400);
+  }
+  diagnostics.image_mime = detectImageMime(image.b64, null);
+  diagnostics.parse_success = true;
   const language = String(body?.language ?? 'en').slice(0, 8);
 
   // ── A FOLLOW-UP PHOTOGRAPH AUGMENTS A SCAN THIS SERVER STARTED ───────────
   let priorState = null;
   if (body?.state !== undefined && body?.state !== null) {
     const verified = await verifyScanState(body.state, { userId: user.id, scanUuid });
-    if (!verified.ok) return json({ error: 'invalid_state', detail: verified.error }, 400, headers);
+    if (!verified.ok) {
+      stop('state', 'INVALID_STATE');
+      return answer({ error: 'invalid_state', detail: verified.error }, 400);
+    }
     const s = verified.state;
     if (s.sufficiency?.decision !== DECISION.NEED_FOLLOWUP || (s.followups_used ?? 0) >= V2_MAX_FOLLOWUPS) {
-      return json({ error: 'followup_not_expected' }, 409, headers);
+      stop('state', 'FOLLOWUP_NOT_EXPECTED');
+      return answer({ error: 'followup_not_expected' }, 409);
     }
     priorState = s;
   }
 
+  diagnostics.provider_request_started = true;
   const result = await runV2Identify({
     image: image.b64,
     priorState,
@@ -68,13 +106,17 @@ async function handleRequest(req) {
   });
 
   if (!result.ok) {
-    return json({
+    // An upstream 4xx on a request whose only variable part is the image is
+    // the provider refusing the image; anything else is the provider failing.
+    stop('provider', /^http_4/.test(String(result.failure)) ? 'PROVIDER_IMAGE_REJECTED' : 'PROVIDER_FAILED');
+    return answer({
       scan_uuid: scanUuid, engine: 'v2', status: 'FAILED', failure: result.failure, retryable: true,
       timings: result.timings, calls: result.calls, openai_called: true,
-    }, 200, headers);
+    }, 200);
   }
+  diagnostics.provider_request_succeeded = true;
 
-  return json({
+  return answer({
     scan_uuid: scanUuid,
     engine: 'v2',
     status: 'OK',
@@ -88,7 +130,7 @@ async function handleRequest(req) {
     }),
     timings: result.timings,
     calls: result.calls,
-  }, 200, headers);
+  }, 200);
 }
 
 export default nodeHandler(handleRequest, { maxBodyBytes: MAX_BODY_BYTES, tag: 'V2Identify' });
