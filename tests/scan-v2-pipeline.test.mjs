@@ -187,7 +187,7 @@ describe('V2-12 a scan ends in an honest state', () => {
     const priced = await price(fetchImpl, stateOf(second));
     assert.deepEqual(fetchImpl.calls.map((c) => c.kind), ['identity', 'identity', 'search']);
     assert.equal(priced.subject.model, 'G Pro X Superlight');
-    assert.equal(priced.valuation.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE);
+    assert.equal(priced.valuation.state, PRICE_STATE.USED_EVIDENCE_BELOW_QUORUM);
     assert.equal(priced.valuation.recommended, 650);
   });
   test('V2-12c a search that fails is NO_PRICE_EVIDENCE with the reason, and nothing is thrown', async () => {

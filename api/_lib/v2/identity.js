@@ -37,6 +37,7 @@ export const CONDITION_SIGNALS = Object.freeze([
   'box_present', 'sealed_packaging', 'clean',
 ]);
 export const MAX_CANDIDATES = 4;
+export const MAX_HYPOTHESES = 3;
 const MAX_VISIBLE_TEXT = 10;
 
 const nullable = { type: ['string', 'null'] };
@@ -66,6 +67,16 @@ export const V2_IDENTITY_SCHEMA = strict({
   }),
   identity_evidence: { type: 'array', maxItems: 4, items: { type: 'string', enum: [...IDENTITY_EVIDENCE] } },
   missing_evidence: { type: 'string', enum: [...FOLLOWUP_TYPES] },
+  // SEARCH HYPOTHESES, NOT IDENTITY. What is printed on an item is not always
+  // what it is sold as: a panel says "POWER BLENDER DUO PRO" and the shops list
+  // a model number. These come from the model's memory, so they may be wrong,
+  // and they are used for exactly one thing — to phrase a search. Whether one
+  // of them names this product is decided afterwards, from what the search
+  // returned, in market-identity.js.
+  market_hypotheses: strict({
+    aliases: { type: 'array', maxItems: MAX_HYPOTHESES, items: { type: 'string' } },
+    model_numbers: { type: 'array', maxItems: MAX_HYPOTHESES, items: { type: 'string' } },
+  }),
 });
 
 const FIELDS = `category: the closest category.
@@ -76,7 +87,8 @@ brand, model, variant: value, confidence 0-1, and what it rests on. "model" is t
 ranked_candidates: when the model is not established, up to ${MAX_CANDIDATES} products it could be, most likely first, each with at most six words on what would tell it apart. Empty when the model is established or nothing narrows it.
 condition: visible condition only. Unknown when the photograph does not show it.
 identity_evidence: what the identity rests on.
-missing_evidence: the ONE further photograph that would settle the exact model, or NONE when it is settled or no photograph could settle it.`;
+missing_evidence: the ONE further photograph that would settle the exact model, or NONE when it is settled or no photograph could settle it.
+market_hypotheses: names or model numbers this exact product is SOLD under that are NOT printed on it, from your own knowledge, most likely first. They are guesses used only to search. Empty when you know none.`;
 
 export function buildIdentityPrompt() {
   return `Identify the item in the photograph for a second-hand marketplace.
@@ -190,7 +202,27 @@ export function normalizeIdentity(raw) {
     identity_evidence: [...new Set((Array.isArray(r.identity_evidence) ? r.identity_evidence : [])
       .filter((s) => IDENTITY_EVIDENCE.includes(s)))].slice(0, 4),
     missing_evidence: oneOf(r.missing_evidence, FOLLOWUP_TYPES, FOLLOWUP.NONE),
+    market_hypotheses: normalizeHypotheses(r.market_hypotheses, [brand.value, model.value]),
   };
+}
+
+/** Distinct, bounded, and never a restatement of what was already read. */
+function normalizeHypotheses(raw, known) {
+  const knownKeys = new Set(known.filter(Boolean).map((k) => tokens(k).join(' ')));
+  const list = (v, max) => {
+    const seen = new Set();
+    const out = [];
+    for (const x of Array.isArray(v) ? v : []) {
+      const s = text(x, max);
+      const key = tokens(s).join(' ');
+      if (!s || !key || seen.has(key) || knownKeys.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+      if (out.length >= MAX_HYPOTHESES) break;
+    }
+    return out;
+  };
+  return { aliases: list(raw?.aliases, 60), model_numbers: list(raw?.model_numbers, 24) };
 }
 
 /**

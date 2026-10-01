@@ -38,22 +38,32 @@ const COPY = {
     retry: 'Try again',
     close: 'Close',
     condition: 'Condition',
+    // One headline per state the server can produce. The reserved state has
+    // none: if it ever arrives, its raw name shows, undressed.
     states: {
       VERIFIED_MARKET_VALUE: 'Verified market value',
-      MARKET_INFORMED_ESTIMATE: 'Market-informed estimate',
-      ESTIMATED_WORTH: 'Estimated worth',
+      USED_EVIDENCE_ESTIMATE: 'Estimate from verified listings',
+      USED_EVIDENCE_BELOW_QUORUM: 'Estimate from a few listings',
+      COMPARABLE_MARKET_ESTIMATE: 'Estimate from similar items',
       NEED_MORE_INFORMATION: 'More information needed',
-      NO_PRICE_EVIDENCE: 'No reliable listings found',
+      NO_PRICE_EVIDENCE: 'No second-hand price found',
     },
     basis: {
       verified_used_listings: (b) => `Based on ${b.listings} second-hand listings from ${b.sources} independent sources.`,
       verified_comparable_listings: (b) => `Based on ${b.listings} second-hand listings of similar items. This is the market for this kind of item, not for an exact model.`,
+      verified_used_listings_range_adjusted: (b) => `Based on ${b.listings} second-hand listings from ${b.sources} source${b.sources === 1 ? '' : 's'}. Our price check adjusted the range, so it is shown as an estimate.`,
+      verified_comparable_listings_range_adjusted: (b) => `Based on ${b.listings} second-hand listings of similar items; our price check adjusted the range. This is the market for this kind of item, not for an exact model.`,
       admitted_used_listings_below_quorum: (b) => `Based on ${b.listings} real second-hand listing${b.listings === 1 ? '' : 's'} from ${b.sources} source${b.sources === 1 ? '' : 's'} — too few to verify a market value.`,
-      used_listings_for_brand_and_kind: (b) => `Based on ${b.listings} second-hand listings for this brand and kind of item. The exact model was not established.`,
-      new_retail_price_less_condition_discount: (b) => `No second-hand listings were found. Estimated from the new price (${formatPrice(b.new_retail_price)}) and the item’s condition.`,
     },
+    // The new price is shown BESIDE the value and is never the value.
+    retailTitle: 'Price new',
+    retailLine: (a) => (a.low === a.high ? formatPrice(a.median) : `${formatPrice(a.low)}–${formatPrice(a.high)}`),
+    retailBasis: (a) => `What it costs to buy new in Israel today, from ${a.shops} shop${a.shops === 1 ? '' : 's'}. This is not a second-hand value.`,
+    identityConfidence: 'Identification',
+    pricingConfidence: 'Second-hand price evidence',
+    levels: { VERY_HIGH: 'very high', HIGH: 'high', MODERATE: 'moderate', LOW: 'low', NONE: 'none', BELOW_QUORUM: 'a few listings', COMPARABLE: 'similar items', VERIFIED: 'verified' },
     needMore: 'The exact model could not be established, so no price is shown.',
-    noEvidence: 'We identified the item and checked the market, and found no listings we can rely on.',
+    noEvidence: 'We identified the item and checked the market, and found no second-hand listings for it that we can rely on.',
     searchFailed: 'The market check did not complete. No price is shown.',
     low: 'Quick sale', recommended: 'Recommended', high: 'Optimistic',
   },
@@ -73,18 +83,25 @@ const COPY = {
     condition: 'מצב',
     states: {
       VERIFIED_MARKET_VALUE: 'שווי שוק מאומת',
-      MARKET_INFORMED_ESTIMATE: 'הערכה מבוססת שוק',
-      ESTIMATED_WORTH: 'שווי משוער',
+      USED_EVIDENCE_ESTIMATE: 'הערכה ממודעות מאומתות',
+      USED_EVIDENCE_BELOW_QUORUM: 'הערכה ממודעות בודדות',
+      COMPARABLE_MARKET_ESTIMATE: 'הערכה מפריטים דומים',
       NEED_MORE_INFORMATION: 'נדרש מידע נוסף',
-      NO_PRICE_EVIDENCE: 'לא נמצאו מודעות אמינות',
+      NO_PRICE_EVIDENCE: 'לא נמצא מחיר יד שנייה',
     },
     basis: {
       verified_used_listings: (b) => `מבוסס על ${b.listings} מודעות יד שנייה מ-${b.sources} מקורות בלתי תלויים.`,
       verified_comparable_listings: (b) => `מבוסס על ${b.listings} מודעות יד שנייה של פריטים דומים. זהו השוק לסוג הפריט, לא לדגם מדויק.`,
+      verified_used_listings_range_adjusted: (b) => `מבוסס על ${b.listings} מודעות יד שנייה מ-${b.sources} מקורות. בדיקת המחיר שלנו התאימה את הטווח, ולכן הוא מוצג כהערכה.`,
+      verified_comparable_listings_range_adjusted: (b) => `מבוסס על ${b.listings} מודעות יד שנייה של פריטים דומים; בדיקת המחיר שלנו התאימה את הטווח. זהו השוק לסוג הפריט, לא לדגם מדויק.`,
       admitted_used_listings_below_quorum: (b) => `מבוסס על ${b.listings} מודעות יד שנייה אמיתיות מ-${b.sources} מקורות — מעט מדי כדי לאמת שווי שוק.`,
-      used_listings_for_brand_and_kind: (b) => `מבוסס על ${b.listings} מודעות יד שנייה של המותג וסוג הפריט. הדגם המדויק לא נקבע.`,
-      new_retail_price_less_condition_discount: (b) => `לא נמצאו מודעות יד שנייה. ההערכה מבוססת על המחיר כחדש (${formatPrice(b.new_retail_price)}) ועל מצב הפריט.`,
     },
+    retailTitle: 'מחיר כחדש',
+    retailLine: (a) => (a.low === a.high ? formatPrice(a.median) : `${formatPrice(a.low)}–${formatPrice(a.high)}`),
+    retailBasis: (a) => `כמה עולה לקנות חדש בישראל היום, לפי ${a.shops === 1 ? 'חנות אחת' : `${a.shops} חנויות`}. זה אינו שווי יד שנייה.`,
+    identityConfidence: 'זיהוי',
+    pricingConfidence: 'ראיות למחיר יד שנייה',
+    levels: { VERY_HIGH: 'גבוה מאוד', HIGH: 'גבוה', MODERATE: 'בינוני', LOW: 'נמוך', NONE: 'אין', BELOW_QUORUM: 'מודעות בודדות', COMPARABLE: 'פריטים דומים', VERIFIED: 'מאומת' },
     needMore: 'לא ניתן היה לקבוע את הדגם המדויק, ולכן לא מוצג מחיר.',
     noEvidence: 'זיהינו את הפריט ובדקנו את השוק, ולא נמצאו מודעות שאפשר להסתמך עליהן.',
     searchFailed: 'בדיקת השוק לא הושלמה. לא מוצג מחיר.',
@@ -97,6 +114,20 @@ const nameOf = (identity) => [identity?.brand?.value, identity?.model?.value].fi
 
 const ms = (v) => (typeof v === 'number' ? `${(v / 1000).toFixed(1)}s` : '—');
 const kb = (v) => (typeof v === 'number' ? `${(v / 1024).toFixed(1)}KB` : '—');
+/** One sentence on where the number came from, or why there is none. For the panel. */
+const explain = (v) => {
+  if (!v) return null;
+  const a = v.retail_anchor;
+  const retail = a?.shops ? ` Retail anchor ${a.low}–${a.high} from ${a.shops} shop(s) is reported beside it and is not part of the value.` : ' No retail anchor.';
+  const g = v.guard;
+  const moved = g?.material_repair ? ` The guard moved ${g.moved.join('/')}: ${g.range_before.low}/${g.range_before.mid}/${g.range_before.high} → ${g.range_after.low}/${g.range_after.mid}/${g.range_after.high}.` : '';
+  if (v.state === 'VERIFIED_MARKET_VALUE') return `p25 / median / p85 of ${v.basis.listings} admitted second-hand listings from ${v.basis.sources} sources, condition-adjusted, accepted by the guard with no material repair.${retail}`;
+  if (v.state === 'USED_EVIDENCE_ESTIMATE') return `Sufficient exact used evidence (${v.basis.listings} admitted listings, ${v.basis.sources} source(s)); the guard materially adjusted the range, so the numbers are the guard's and the state is not VERIFIED.${moved}${retail}`;
+  if (v.state === 'COMPARABLE_MARKET_ESTIMATE') return `${v.basis.listings} verified listings of this KIND of object, not of this product${g?.material_repair ? '; the guard adjusted the range' : ''}.${moved}${retail}`;
+  if (v.state === 'USED_EVIDENCE_BELOW_QUORUM') return `min / median / max of ${v.basis.listings} admitted second-hand listing(s) from ${v.basis.sources} source(s), condition-adjusted; below the verification floors.${retail}`;
+  if (v.state === 'NEED_MORE_INFORMATION') return 'No search was made: the identity cannot carry a product price.';
+  return `No second-hand value: ${v.reason ?? 'no admitted listing'}. Nothing is derived from the retail price.${retail}`;
+};
 const yesNo = (v) => (v === true ? 'YES' : (v === false ? 'NO' : '—'));
 const dims = (w, h) => (w === undefined && h === undefined ? 'n/a' : `${w ?? '?'}×${h ?? '?'}`);
 
@@ -152,6 +183,8 @@ function Diagnostics({ s }) {
     ? t.followup_complete - t.followup_request_start : null;
   const c = s.diag?.client ?? {};
   const sv = s.diag?.server ?? null;
+  const mk = ev?.market_identity ?? null;
+  const acc = ev?.accounting ?? null;
   const priceMs = t.price_complete !== undefined && t.search_request_start !== undefined
     ? t.price_complete - t.search_request_start : null;
   return (
@@ -205,11 +238,46 @@ function Diagnostics({ s }) {
         <Row label="outcome" value={s.search && `${s.search.outcome}${s.search.failure ? ` (${s.search.failure})` : ''}${s.search.stopped_at_results ? ' · stopped at results' : ''}`} />
         <Row label="planned queries" value={(s.search?.planned_queries ?? []).map((q) => q.text).join(' | ')} />
         <Row label="executed queries" value={(s.search?.executed_queries ?? []).join(' | ')} />
-        <Row label="search calls" value={s.search?.search_calls} />
+        <Row label="search actions" value={s.search?.search_actions} />
+        <Row label="aliases proposed" value={mk ? [...(mk.proposed?.model_numbers ?? []), ...(mk.proposed?.aliases ?? [])].join(' | ') || 'none' : null} />
+        <Row label="aliases corroborated" value={mk ? (mk.corroborated ?? []).join(' | ') || 'none' : null} />
         <Row label="results" value={s.search?.results} />
         <Row label="domains" value={(s.search?.domains ?? []).join(', ')} />
       </Group>
+      <Group title="Market identity">
+        <Row label="read off item" value={mk?.visible_name} />
+        <Row label="exact match tokens" value={mk ? (mk.exact_tokens ?? []).join(' | ') || 'none beyond the name' : null} />
+        {(mk?.aliases ?? []).map((a) => (
+          <Row key={`${a.kind}|${a.value}`} label={`${a.relation}${a.weak ? ' (weak)' : ''}`} value={`${a.value} · ${a.sites_seen} site(s)${a.evidence?.length ? ` · ${a.evidence.join(', ')}` : ''}${a.tied_to?.length ? ` · tied to ${a.tied_to.join(', ')}` : ''}${a.kind === 'name' ? ` · beside the read name on ${a.seen_beside_read_name ?? 0}, as a fragment on ${a.seen_as_fragment ?? 0}` : ''}${a.also_used_for?.length ? ` · also used for ${a.also_used_for.join(', ')}` : ''}${a.short_form_of ? ` · short form of ${a.short_form_of}` : ''}`} />
+        ))}
+      </Group>
+      <Group title="Extraction">
+        <Row label="results inspected" value={acc?.total} />
+        <Row label="duplicates" value={acc?.buckets?.DUPLICATE} />
+        <Row label="no price data" value={acc?.buckets?.NO_PRICE_DATA} />
+        <Row label="price candidates" value={acc?.price_candidates} />
+        <Row label="refused at extraction (results)" value={acc?.buckets?.REFUSED_AT_EXTRACTION} />
+        <Row label="qualifier rejected (results)" value={acc?.buckets?.QUALIFIER_REJECTED} />
+        <Row label="admitted (results)" value={acc?.buckets?.ADMITTED} />
+        <Row label="counts reconcile" value={acc ? (acc.reconciles ? 'yes' : 'NO') : null} />
+        <Row label="observations extracted" value={ev?.counts?.extracted} />
+        <Row label="numbers refused" value={ev?.counts?.refused_at_extraction} />
+        <Row label="extraction reasons" value={Object.entries(ev?.extraction_reasons ?? {}).map(([reason, n]) => `${reason} ×${n}`).join(' · ')} />
+        <Row label="unmarked prices seen" value={ev?.counts?.unmarked_prices} />
+      </Group>
       <Group title="Evidence">
+        <Row label="local used" value={ev?.counts?.by_class?.LOCAL_USED} />
+        <Row label="international used" value={ev?.counts?.by_class?.FOREIGN_USED} />
+        <Row label="local retail" value={ev?.counts?.by_class?.LOCAL_RETAIL} />
+        <Row label="international retail" value={ev?.counts?.by_class?.FOREIGN_RETAIL} />
+        <Row label="other" value={ev?.counts?.by_class?.OTHER} />
+        <Row label="exact-model" value={ev?.counts?.by_relation?.EXACT} />
+        <Row label="regional variant" value={ev?.counts?.by_relation?.REGIONAL_VARIANT} />
+        <Row label="sibling" value={ev?.counts?.by_relation?.SIBLING} />
+        <Row label="family-level" value={ev?.counts?.by_relation?.FAMILY} />
+        <Row label="duplicates removed" value={ev?.counts?.duplicates_removed} />
+        <Row label="distinct sources" value={ev?.distinct_sources} />
+        <Row label="qualified under" value={(ev?.qualification_runs ?? []).map((r) => `${r.form}: ${r.admitted}${r.granting ? ' (speaks)' : ''}`).join(' · ')} />
         <Row label="admitted" value={ev?.counts?.admitted} />
         <Row label="rejected" value={ev?.counts?.rejected} />
         <Row label="used listings" value={ev?.counts?.used_listings} />
@@ -220,8 +288,8 @@ function Diagnostics({ s }) {
         <Row label="rejection reasons" value={Object.entries(ev?.rejection_reasons ?? {}).map(([reason, n]) => `${reason} ×${n}`).join(' · ')} />
         <Row label="set failures" value={(ev?.set_failures ?? []).join(', ')} />
         <Row label="extract / qualify" value={ev?.timings && `${ev.timings.extraction_ms}ms / ${ev.timings.qualification_ms}ms`} />
-        {(ev?.admitted ?? []).map((a) => (
-          <Row key={`${a.url}|${a.price}`} label={a.domain} value={`${a.price} ${a.currency} · ${a.title}`} />
+        {[...(ev?.admitted ?? []), ...(ev?.retail ?? [])].map((a) => (
+          <Row key={`${a.url}|${a.price}`} label={`${a.outcome} · ${a.domain}`} value={`${a.price} ${a.currency}${a.delivery_fee ? ` (stated ${a.stated_price}, less ${a.delivery_fee} delivery)` : ''} · ${a.relation} · ${a.title}`} />
         ))}
       </Group>
       <Group title="Valuation">
@@ -230,6 +298,11 @@ function Diagnostics({ s }) {
         <Row label="recommended" value={v?.recommended} />
         <Row label="high" value={v?.high} />
         <Row label="evidence basis" value={v?.basis && `${v.basis.kind} · ${v.basis.listings} listing(s) · ${v.basis.sources} source(s)`} />
+        <Row label="guard" value={v?.guard && `${v.guard.action}${v.guard.material_repair ? ` · MATERIAL repair of ${v.guard.moved.join('/')}` : ' · no material repair'}${v.guard.violations?.length ? ` · ${v.guard.violations.map((x) => x.rule ?? x).join(', ')}` : ''}`} />
+        <Row label="identity confidence" value={v?.confidence?.identity && `${v.confidence.identity.level} · brand ${v.confidence.identity.brand} · model ${v.confidence.identity.model}${v.confidence.identity.model_read_off_item ? ' · read off item' : ''}`} />
+        <Row label="used-market evidence" value={v?.confidence?.pricing?.used_market} />
+        <Row label="retail anchor" value={v?.retail_anchor && `${v.retail_anchor.strength} · ${v.retail_anchor.shops} shop(s)${v.retail_anchor.shops ? ` · ${v.retail_anchor.low}–${v.retail_anchor.high} ${v.retail_anchor.currency}` : ''}`} />
+        <Row label="how it was calculated" value={explain(v)} />
         <Row label="reason" value={v?.reason} />
       </Group>
       <Group title="Total">
@@ -346,6 +419,23 @@ export default function ScanV2View() {
             ) : (
               <p className="text-body text-text-secondary">{unpricedText}</p>
             )}
+          </div>
+        )}
+
+        {/* What it costs new — context beside the value, never the value. */}
+        {s.stage === V2_STAGE.DONE && v?.retail_anchor?.shops > 0 && (
+          <div className="rounded-container border border-subtle bg-surface p-4 space-y-1">
+            <p className="text-label font-semibold uppercase tracking-widest text-text-muted">{c.retailTitle}</p>
+            <p className="text-price text-text-primary">{c.retailLine(v.retail_anchor)}</p>
+            <p className="text-body-sm text-text-muted">{c.retailBasis(v.retail_anchor)}</p>
+          </div>
+        )}
+
+        {/* Two separate answers: how sure we are what it is, and how well its price is evidenced. */}
+        {s.stage === V2_STAGE.DONE && v?.confidence && (
+          <div className="text-body-sm text-text-secondary space-y-0.5">
+            <p>{c.identityConfidence}: {c.levels[v.confidence.identity.level] ?? v.confidence.identity.level}</p>
+            <p>{c.pricingConfidence}: {c.levels[v.confidence.pricing.used_market] ?? v.confidence.pricing.used_market}</p>
           </div>
         )}
 

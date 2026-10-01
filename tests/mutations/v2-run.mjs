@@ -38,6 +38,9 @@ const SUITES = [
   'tests/scan-v2-gate.test.mjs',
   'tests/scan-v2-evidence.test.mjs',
   'tests/scan-v2-pipeline.test.mjs',
+  'tests/scan-v2-market.test.mjs',
+  'tests/scan-v2-alias.test.mjs',
+  'tests/scan-v2-anchor.test.mjs',
   'tests/scan-v2-endpoints.test.mjs',
   // The client half: the photograph's path from the shutter to the request.
   'tests/scan-v2-client.test.mjs',
@@ -63,6 +66,9 @@ function mirror() {
   cpSync(join(REPO, 'src'), join(SCRATCH, 'src'), { recursive: true });
   cpSync(join(REPO, 'tests/helpers'), join(SCRATCH, 'tests/helpers'), { recursive: true });
   cpSync(join(REPO, 'tests/fixtures'), join(SCRATCH, 'tests/fixtures'), { recursive: true });
+  // The offline calibration harness: a suite holds that nothing the scan runs imports it.
+  mkdirSync(join(SCRATCH, 'scripts'), { recursive: true });
+  cpSync(join(REPO, 'scripts/valuation-calibration.mjs'), join(SCRATCH, 'scripts/valuation-calibration.mjs'));
   for (const s of SUITES) cpSync(join(REPO, s), join(SCRATCH, s));
 }
 

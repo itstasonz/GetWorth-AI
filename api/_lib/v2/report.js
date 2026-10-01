@@ -3,7 +3,8 @@
 //
 // The on-screen diagnostic panel is how a V2 scan is measured on a phone, so
 // everything it needs is in the response: what was searched, what came back,
-// what each gate did with it, and where the time went. No remote debugger.
+// where every result and every number went, what the product turned out to be
+// sold as, and where the time went. No remote debugger.
 //
 // BOUNDED, AND NO SECRET. Listing text is third-party content and is truncated;
 // lists are capped; nothing here is a key, a token payload or an environment
@@ -26,6 +27,8 @@ export function describeSearch(plan, search) {
     failure: search?.failure ?? null,
     planned_queries: (plan?.queries ?? []).map((q) => ({ purpose: q.purpose, text: q.text, hypothesis: q.hypothesis ?? null })),
     executed_queries: (p?.queries ?? []).slice(0, 12),
+    // One action is the budget. More than one is a finding, and it is visible.
+    search_actions: p?.search_call_count ?? 0,
     search_calls: p?.search_call_count ?? 0,
     results: p?.results?.length ?? 0,
     sources: p?.sources?.length ?? 0,
@@ -35,35 +38,73 @@ export function describeSearch(plan, search) {
   };
 }
 
-/** The evidence half: counts, and the listings behind each count. */
+/** What the product is sold as, and what supports each name. */
+function describeMarket(market) {
+  if (!market) return null;
+  return {
+    visible_name: market.visible_name,
+    proposed: market.proposed,
+    corroborated: market.corroborated,
+    exact_tokens: [...market.exact_roots, ...market.exact_phrases.map((p) => p.join(' '))],
+    aliases: market.aliases.slice(0, MAX_LISTED).map((a) => ({
+      value: a.value, kind: a.kind, relation: a.relation, proposed: a.proposed, weak: a.weak,
+      sites_seen: a.sites_seen, also_used_for: a.also_used_for ?? [], short_form_of: a.short_form_of ?? null,
+      // A name's positive evidence, and what was seen that does not count.
+      tied_to: a.tied_to ?? [], seen_beside_read_name: a.seen_beside_read_name ?? 0, seen_as_fragment: a.seen_as_fragment ?? 0,
+      evidence: (a.evidence ?? []).slice(0, 4).map((e) => e.site),
+    })),
+  };
+}
+
+/** The evidence half: the accounting, and the listings behind each count. */
 export function describeEvidence(evidence) {
   if (!evidence) return null;
   const q = evidence.qualification;
   const row = (e) => ({
     class: e.evidence_class,
+    relation: e.relation,
+    role: e.role,
+    binding: e.binding,
+    page_type: e.page_type,
     domain: e.observation.source_domain,
     url: clip(e.observation.source, 300),
     title: clip(e.observation.title),
     price: e.observation.observed_price,
+    stated_price: e.stated_price,
+    delivery_fee: e.delivery_fee,
     currency: e.observation.currency,
+    outcome: e.admitted ? 'ADMITTED_USED' : (e.retail_anchor ? 'RETAIL_ANCHOR' : 'REJECTED'),
+    admitted_as: e.admitted_as ?? null,
     reason: e.reason ?? null,
   });
   return {
+    // TOTAL -> DUPLICATE / NO_PRICE_DATA / PRICE_CANDIDATE -> REFUSED / REJECTED / ADMITTED
+    accounting: evidence.accounting,
     counts: evidence.counts,
+    market_identity: describeMarket(evidence.market),
+    qualification_runs: evidence.qualification_runs,
     distinct_sources: evidence.distinct_sources,
     qualified: q.qualified === true,
     comparable_qualified: q.comparable_qualified === true,
     set_failures: q.set_failures ?? [],
     admitted: evidence.entries.filter((e) => e.admitted).slice(0, MAX_LISTED).map(row),
-    rejected: evidence.entries.filter((e) => !e.admitted).slice(0, MAX_LISTED).map(row),
+    retail: evidence.entries.filter((e) => e.retail_anchor).slice(0, MAX_LISTED).map(row),
+    rejected: evidence.entries.filter((e) => !e.admitted && !e.retail_anchor).slice(0, MAX_LISTED).map(row),
     // Every reason something did not price the item, with how often: the gate's
     // own disqualifiers, and what extraction refused before the gate saw it.
     rejection_reasons: tally([
-      ...evidence.entries.filter((e) => !e.admitted).map((e) => e.reason),
+      ...evidence.entries.filter((e) => !e.admitted && !e.retail_anchor).map((e) => e.reason),
       ...evidence.refused.map((r) => r.reason),
     ]),
-    refused_at_extraction: evidence.refused.slice(0, MAX_LISTED)
-      .map((r) => ({ reason: r.reason, url: clip(r.url, 300), text: clip(r.text) })),
+    extraction_reasons: tally(evidence.refused.map((r) => r.reason)),
+    refused_at_extraction: evidence.refused.slice(0, MAX_LISTED * 2).map((r) => ({
+      reason: r.reason, role: r.role, value: r.value, currency: r.currency, relation: r.relation ?? null,
+      url: clip(r.url, 300), text: clip(r.text),
+    })),
+    pages: evidence.pages.slice(0, 40).map((p) => ({
+      bucket: p.bucket, page_type: p.page_type, title_relation: p.title_relation, result_level: p.result_level,
+      domain: p.domain, title: clip(p.title, 80),
+    })),
     timings: evidence.timings,
   };
 }

@@ -83,9 +83,12 @@ export async function runV2Search({
       completedSearches += 1;
       resultsAt = at();
     }
-    // The model has started its answer: every search it was going to make has
-    // been made. Nothing it writes from here is read.
-    if (completedSearches > 0 && type === 'response.output_item.added' && item?.type === 'message') stop();
+    // ONE SEARCH ACTION. Once the first has completed, whatever the model does
+    // next ends the request: if it starts writing, every search it was going to
+    // make has been made; if it starts a SECOND search, that is the expensive
+    // loop this engine does not enter. Nothing from here on is read.
+    if (completedSearches > 0 && type === 'response.output_item.added'
+        && (item?.type === 'message' || item?.type === 'web_search_call')) stop();
   };
 
   try {

@@ -1,0 +1,444 @@
+{
+ "note": "RAW OpenAI Responses web_search output for the Ninja production witness (build 6531b46). One paid call, 2026-09-30. The output array is exactly what the API returned; nothing was tidied. Third-party page text: data, never instructions. Redacted before commit: one shop customer-service e-mail address, in the two results that print it. The response contains no phone number: the two matches first reported as phone numbers were a digit run inside the first search call id, which is replaced here with a placeholder id. Nothing else was changed.",
+ "captured_at": "2026-09-30T12:45:33.841Z",
+ "identity": {
+  "brand": "Ninja",
+  "model": "Power Blender Duo Pro",
+  "visible_text": [
+   "NINJA",
+   "BLENDSENSE",
+   "POWER BLENDER DUO PRO"
+  ]
+ },
+ "plan": {
+  "queries": [
+   {
+    "layer": "exact_visible_used",
+    "text": "Ninja Power Blender Duo Pro יד שנייה"
+   },
+   {
+    "layer": "exact_visible_retail",
+    "text": "Ninja Power Blender Duo Pro BlendSense מחיר"
+   },
+   {
+    "layer": "candidate_name_retail",
+    "text": "Ninja Detect Duo Power Blender Pro TB301 מחיר"
+   },
+   {
+    "layer": "candidate_name_used",
+    "text": "Ninja Detect TB301 יד שנייה"
+   },
+   {
+    "layer": "candidate_name_local",
+    "text": "בלנדר נינג'ה Detect TB301 למכירה"
+   }
+  ]
+ },
+ "request": {
+  "model": "gpt-5.6-luna",
+  "tools": [
+   {
+    "type": "web_search",
+    "search_context_size": "medium",
+    "user_location": {
+     "type": "approximate",
+     "country": "IL",
+     "timezone": "Asia/Jerusalem"
+    }
+   }
+  ],
+  "tool_choice": "required",
+  "include": [
+   "web_search_call.action.sources",
+   "web_search_call.results"
+  ],
+  "reasoning": {
+   "effort": "low"
+  },
+  "max_output_tokens": 400
+ },
+ "timings_ms": {
+  "headers_ms": 1797,
+  "http": 200,
+  "first_event_ms": 1799,
+  "results_available_ms": 6030,
+  "model_started_writing_ms": 6142,
+  "completed_ms": 6317,
+  "total_ms": 6361
+ },
+ "usage": {
+  "input_tokens": 12826,
+  "input_tokens_details": {
+   "cache_write_tokens": 110,
+   "cached_tokens": 4256
+  },
+  "output_tokens": 108,
+  "output_tokens_details": {
+   "reasoning_tokens": 103
+  },
+  "total_tokens": 12934
+ },
+ "status": "completed",
+ "output": [
+  {
+   "id": "ws_fixture_search_call_1",
+   "type": "web_search_call",
+   "status": "completed",
+   "action": {
+    "type": "search",
+    "queries": [
+     "Ninja Power Blender Duo Pro יד שנייה",
+     "Ninja Power Blender Duo Pro BlendSense מחיר",
+     "Ninja Detect Duo Power Blender Pro TB301 מחיר",
+     "Ninja Detect TB301 יד שנייה"
+    ],
+    "query": "Ninja Power Blender Duo Pro יד שנייה",
+    "sources": [
+     {
+      "type": "url",
+      "url": "https://www.sharkninja.com/ninja-detect-duo-power-blender-smoothie-maker-with-blendsense/TB301.html?bvstate=pg%3A19%2Fct%3Ar&filters=CategoryNameLevel0%3DNinja%252BCatalog%252BUS%26productFilter%3Dfallback_searchquerydefinition%26category%3Dninjaus%252Fdeals&page=1&pcpp_platform=facebook"
+     },
+     {
+      "type": "url",
+      "url": "https://www.ivory.co.il/catalog.php?id=141461"
+     },
+     {
+      "type": "url",
+      "url": "https://shop.super-pharm.co.il/electricity-and-electronics/small-kitchen-appliances/blenders-and-food-trimmers/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-TB301/p/mp-00344808"
+     },
+     {
+      "type": "url",
+      "url": "https://www.officedepot.co.il/product/4717927"
+     },
+     {
+      "type": "url",
+      "url": "https://www.zap.co.il/models.aspx?db3261242=5950275&pageinfo=2&sog=e-blender"
+     },
+     {
+      "type": "url",
+      "url": "https://ek.ua/ua/NINJA-DETECT-DUO-POWER-BLENDER-PRO-TB301.htm"
+     },
+     {
+      "type": "url",
+      "url": "https://www.zap.co.il/models.aspx?db3261242=5950275&db3261243=9983717&sog=e-blender"
+     },
+     {
+      "type": "url",
+      "url": "https://www.currys.ie/products/ninja-detect-duo-power-pro-and-single-serve-tb301uk-blender-black-10268882.html"
+     },
+     {
+      "type": "url",
+      "url": "https://shop.super-pharm.co.il/NINJA/c/b_5202?q=%3Apopularity%3Acategory%3A55141200"
+     },
+     {
+      "type": "url",
+      "url": "https://www.cwc.co.il/product/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-ninja-%D7%A0%D7%99%D7%A0%D7%92%D7%94-tb301/"
+     },
+     {
+      "type": "url",
+      "url": "https://tabseeta.com/products/ninja-detect-duo-tb301-power-blender-pro"
+     },
+     {
+      "type": "url",
+      "url": "https://shikolat.ir/product/ninja-cxg47b"
+     },
+     {
+      "type": "url",
+      "url": "https://www.tehnomax.me/index.php?format=pdf&mod=catalog&op=export_product_data&product_id=42001"
+     },
+     {
+      "type": "url",
+      "url": "https://www.reddit.com/r/NinjaFoodi/comments/1jl51qc"
+     },
+     {
+      "type": "url",
+      "url": "https://www.tomsguide.com/home/home-appliances/ninja-detect-power-pro-with-blendsense-review"
+     },
+     {
+      "type": "url",
+      "url": "https://www.tomsguide.com/best-picks/best-blenders"
+     }
+    ]
+   },
+   "results": [
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search0 [wordlim: 200] Crawled: 2 weeks ago; The Ninja Detect™ Duo® Power Blender Pro with BlendSense™ Technology lets you toss in any ingredient, press the dial, and watch it transform into a perfectly smooth output. ... Ninja Detect™ (TB301) 1800-Peak-Watt Blender Motor Base with BlendSense™ Technology\n",
+     "title": "Ninja Detect™ Duo® Power Blender Smoothie Maker with BlendSense™ Blenders & Kitchen Systems - Ninja",
+     "url": "https://www.sharkninja.com/ninja-detect-duo-power-blender-smoothie-maker-with-blendsense/TB301.html?bvstate=pg%3A19%2Fct%3Ar&filters=CategoryNameLevel0%3DNinja%252BCatalog%252BUS%26productFilter%3Dfallback_searchquerydefinition%26category%3Dninjaus%252Fdeals&page=1&pcpp_platform=facebook"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search1 [wordlim: 200] Crawled: 2 weeks ago; # נינג'ה בלנדר ושייקר Ninja Detect 2-in-1 TB301 1200W ... אפשרויות איסוף ומשלוח:איסוף מהסניף: ללא עלות נוספת הזמנה לסניפי אילת : ללא עלות נוספת משלוח מהיר אספקה מהיום למחר: ₪ 55 משלוח לנקודת איסוף : ₪ 9 משלוח לבית הלקוח : ₪ 29 מחיר כולל משלוח לנקודת איסוף: 608 ₪ ... שימו לב - תמונות, אנימציות וסרטוני וידאו של המוצר - להמחשה בלבד. ... נינג'ה בלנדר ושייקר Ninja Detect 2-in-1 TB301 1200W\n",
+     "title": "נינג'ה בלנדר ושייקר Ninja Detect 2-in-1 TB301 1200W",
+     "url": "https://www.ivory.co.il/catalog.php?id=141461"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search2 [wordlim: 200] Crawled: 2 weeks ago; ה-Ninja Detect משתמש בטכנולוגיה חכמה לזיהוי מרכיבים ובחירה אוטומטית של ההגדרות הטובות ביותר: ... טוחן תבלינים דרגות מהירות: 14 כותש קרח אביזרים כלולים: קנקן 2.1 ליטר, כוסות 700 מ\"ל, להבי Ninja Total Crushing & Chopping, להבי Hybrid Edge נפח מיכל (ליטר): 2.1 הספק (וואט): 1200 הוראות שימוש: מצורפות לאריזת המוצר דגם: TB301 ... מדיניות משלוחים והחזרות: ליצירת קשר עם שירות הלקוחות : [redacted-email] ניתן להחזיר מוצר שנרכש באתר תוך 14 ימים, בתנאי שלא נעשה שימוש במוצר והמוצר נימצא באריזתו המקורית.\n",
+     "title": "‫NINJA - בלנדר ושייקר TB301 | סופר-פארם‬",
+     "url": "https://shop.super-pharm.co.il/electricity-and-electronics/small-kitchen-appliances/blenders-and-food-trimmers/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-TB301/p/mp-00344808"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search3 [wordlim: 200] Crawled: 4 days ago; # בלנדר ושייקר עוצמתי בנפח 2.1 ליטר TB301 NINJA ... בלנדר ושייקר עוצמתי Ninja Detect דגם TB301 - בנפח 2.1 ליטר, עם שלוש שנים אחריות ע\"י היבואן הרשמי.בלנדר מתקדם עם טכנולוגיית BlendSense חכמה המותאמת באופן אוטומטי למהירות ולזמן לפעולה חלקה ומושלמת בכל פעם. ... מחיר כולל מע\"מ\n",
+     "title": "בלנדר ושייקר עוצמתי בנפח 2.1 ליטר TB301 NINJA | Office Depot",
+     "url": "https://www.officedepot.co.il/product/4717927"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search4 [wordlim: 200] Crawled: 3 weeks ago; בלנדר Ninja Nutri-Blender Plus BN303 יבואן רשמי ... Ninja Detect Duo TB301 – בלנדר ושייקר חכם עם טכנולוגיית BlendSense | טכנולוגיית BlendSense: מערכת חכמה המזהה אוטומטית את סוג המרכיבים (טריים/קפואים) ואת כמותם, ומתאימה את זמן הערבול והעוצמה לקבלת מרקם מושלם | עוצמת מנוע: מנוע חזק בהספק של 1200W המיועד לט ... הכירו את ה־Ninja BlendBoss DB351EUCY, הבלנדר האישי המתקדם מבית Ninja, המאפשר להכין שייקים, משקאות חלבון, מחיות ורטבים במהירות ובקלות. ... מעבד מזון+בלנדר Ninja TB401 נינג’ה **עם טכנולוגיית BlendSense** מערכת Ninja Detect Power Kitchen עם טכנולוגיית BlendSense מאפשרת לך למזג שייקים, לקצוץ, לפרוס ולגרוס ירקות והכל במערכת אחת.יש רק להכניס מרכיבים, ללחוץ על החוגה ולראות אותם הופכים לפלט מושלם\n",
+     "title": "בלנדרים ‏Ninja - זאפ השוואת מחירים - עמוד 2",
+     "url": "https://www.zap.co.il/models.aspx?db3261242=5950275&pageinfo=2&sog=e-blender"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search5 [wordlim: 200] Crawled: 4 months ago; # Блендер Ninja Detect Duo Power Blender Pro TB301 чорний (TB301UK)\n",
+     "title": "Ninja Detect Duo Power Blender Pro TB301 чорний (TB301UK) - купити блендер: ціни, відгуки, характеристики > вартість в магазинах України: Київ, Дніпро, Львів, Одеса",
+     "url": "https://ek.ua/ua/NINJA-DETECT-DUO-POWER-BLENDER-PRO-TB301.htm"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search6 [wordlim: 200] Crawled: 3 weeks ago; מודעה ‏בלנדר שייקר Ninja Power Nutri Duo CB103-יבואן רשמי שריג! ... BN503 נוטרי שייקר מקצועי בעל פאנל תצוגה בעברית להכנת משקאות ושייקים בריאים, מגוון רחב של מנות: ממרחים ורטבים, מחיות לתינוקות ואוכל בריא לכל המשפחה – הדרך הקלה לשלב פירות וירקות בתזונה שלכם! ... מקט: 375036 להב PRO EXTRACTOR לכוס נוטרי נינג’ה מתאים לכוסות בנפח 500 מ”ל /650 מ”ל / 900 מ”ל ... Ninja Detect Duo TB301 – בלנדר ושייקר חכם עם טכנולוגיית BlendSense | טכנולוגיית BlendSense: מערכת חכמה המזהה אוטומטית את סוג המרכיבים (טריים/קפואים) ואת כמותם, ומתאימה את זמן הערבול והעוצמה לקבלת מרקם מושלם | עוצמת מנוע: מנוע חזק בהספק של 1200W המיועד לט\n",
+     "title": "בלנדרים ‏Ninja ‏שייקר - זאפ השוואת מחירים",
+     "url": "https://www.zap.co.il/models.aspx?db3261242=5950275&db3261243=9983717&sog=e-blender"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search7 [wordlim: 200] Crawled: 2 weeks ago; NINJA Detect Duo Power Pro & Single Serve TB301UK Blender - Black\n",
+     "title": "Buy NINJA Detect Duo Power Pro & Single Serve TB301UK Blender - Black | CurrysIE",
+     "url": "https://www.currys.ie/products/ninja-detect-duo-power-pro-and-single-serve-tb301uk-blender-black-10268882.html"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search8 [wordlim: 200] Crawled: last week; החל מ- 558 558   NINJA מעבד מזון ובלנדר דגם BN800 (100) מוכר חיצוני להצעות נוספות החל מ- 346 346   NINJA בלנדר שייקר עוצמתי Ninja נינג'ה CB103 POWER NUTRI DUO (2) מוכר חיצוני להצעות נוספות החל מ- 249 249   NINJA נוטרי נינג'ה AUTO IQ בלנדר שייק מקצועי להכנת משקאות ושייקים בריאים QB3001 (86) מוכר חיצוני להצעות נוספות החל מ- 149 149   NINJA בלנדר Ninja Blast BC151 בצבע אדום (3) מוכר חיצוני להצעות נוספות החל מ- 276 276   NINJA בלנדר מקצועי כולל ריסוק פירות וירקות שלמים וכותש קרח Ninja נינג'ה Nutri-Blender Plus BN303 (1) מוכר חיצוני להצעות נוספות החל מ- 779 779 999 999 בתוקף עד 30.09.2026 NINJA בלנדר משולב מעבד מזון Ninja נינג'ה Auto IQ 3in1 BL682 משלוח חינם מוכר חיצוני להצעות נוספות יבוא רשמי 550 550   NINJA בלנדר שייקר עוצמתי 1200 וואט Ninja TB303 DETECT (2) משלוח חינם נמכר ע״י אלקטרו-ביי בע\"מ הוספה לסל החל מ- 365 365   NINJA ‏בלנדר Ninja Blender with Auto-IQ BN495 (15) מוכר חיצוני להצעות נוספות החל מ- 448 448 799 799 בתוקף עד 02.11.2026 NINJA בלנדר 2-ב-1 Ninja 2-In-1 Blender With Auto-iQ 2.1L 1200W BN750EU (46) מוכר חיצוני להצעות נוספות החל מ- 860 860   NINJA בלנדר Ninja TB403 נינגה מוכר חיצוני להצעות נוספות החל מ- 400 400   NINJA בלנדר שייקר מקצועי Ninja Auto IQ BN503 מוכר חיצוני להצעות נוספות החל מ- 985 985   NINJA בלנדר מקצועי משולב מעבד מזון 4 ב-1 Ninja נינג'ה CT683 (1) מוכר חיצוני להצעות נוספות יבוא מקביל 169 169   NINJA bc151-pr בלנדר נייד ואלחוטי מבית נינג'ה בצבע סגול נמכר ע״י מ.\n",
+     "title": "NINJA | מוצרי חשמל למטבח של נינג'ה ✨ סופר-פארם אונליין | סופר-פארם",
+     "url": "https://shop.super-pharm.co.il/NINJA/c/b_5202?q=%3Apopularity%3Acategory%3A55141200"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search9 [wordlim: 200] Crawled: 4 days ago; מחיר אילת הינו בכפוף לחוק אזור סחר חפשי באילת ובהתאם לתקנות, ... #### הכירו את העתיד של הבלנדרים – Ninja Detect 2-in-1 ... Ninja Detect 2-in-1 בדגם TB301 הוא בלנדר שולחני עם מנוע 1200W וקנקן בנפח 2.1 ליטר. ... ### שאלות נפוצות על TB301\n",
+     "title": "בלנדר ושייקר ninja נינג'ה TB301 - ninja - נינג'ה - עולם הקולנוע והחשמל",
+     "url": "https://www.cwc.co.il/product/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-ninja-%D7%A0%D7%99%D7%A0%D7%92%D7%94-tb301/"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search10 [wordlim: 200] Crawled: 2 months ago;   * Image: Ninja Detect Duo TB301 Power Blender Pro\n",
+     "title": "Ninja Detect Duo TB301 Power Blender Pro – Tabseeta",
+     "url": "https://tabseeta.com/products/ninja-detect-duo-tb301-power-blender-pro"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search11 [wordlim: 200] Crawled: last week; # مخلوط کن شخصی TB301 DETECT DUO POWER BLENDER PRO + SINGLE SERVICE اورجینال NINJA\n",
+     "title": "مخلوط کن شخصی TB301 DETECT DUO POWER BLENDER PRO + SINGLE SERVICE اورجینال NINJA",
+     "url": "https://shikolat.ir/product/ninja-cxg47b"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0search12 [wordlim: 200] NINJA TB301EU, Blender, Detect Power Pro\n",
+     "title": "TEHNOMAX\n\nNINJA\n\nNINJA TB301EU, Blender, Detect Po",
+     "url": "https://www.tehnomax.me/index.php?format=pdf&mod=catalog&op=export_product_data&product_id=42001"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0reddit13 [wordlim: 200] Published: 1.5 years ago; Crawled: 1.5 years ago; **Ninja 2-in-1 Detect Power Blender Pro & Single Serve, 1200W Blender With Jug, & Single Serve Cup, Blend Smoothies, Chop Vegetables & Mix Frozen Drinks, Black/Copper, TB301UKCP**\n",
+     "title": "Differences between CB350UK & TB301UKCP blenders?",
+     "url": "https://www.reddit.com/r/NinjaFoodi/comments/1jl51qc"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0news34 [wordlim: 100] Published: 1.5 years ago; [Image 0: the ninja detect power pro with blendsense, a powerful blender with removable blades, a personal blender attachment, and control dial photographed against a blue background]\nI just tested this state-of-the-art $179 Ninja blender — but it performs like a Vitamix\nDate: Fri Apr 11 16:27:56 2025 UTC\n\nNinja Detect Power Pro with BlendSense review: Design & controls\n\n[Image 2: the ninja detect power pro with blendsense, a powerful blender with removable blades, a personal blender attachment, and control dial photographed against a blue background]\nOne of the most impressive design features on this blender is that the blades are 100% removable. Yes, gone are the days of trying to play acrobat to get your cleaning cloth under stiff blades and in weird little crevices.\nWhy is this not more common on pitcher blenders? Why only food processors? It makes life so much easier. I cleaned the Detect Power Pro quickly and easily with no food residue left in hard-to-reach places.\nThe blending base is quite large at 8 inches high and 8 inches wide, but it has sticky feet so it won't vibrate off of your kitchen counter. In the center of the motor base is a bright LCD BlendSense dial you can turn to select blending mode and length of blend.\n",
+     "title": "I just tested this state-of-the-art $179 Ninja blender - but it performs like a Vitamix",
+     "url": "https://www.tomsguide.com/home/home-appliances/ninja-detect-power-pro-with-blendsense-review"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn0news35 [wordlim: 100] Published: last month; Ninja Detect Power Pro Blender ... Dimensions : 6.88 x 8.38 x 17.5 inches | Weight: 10.7 pounds | Capacity: 72 fluid ounces + 24oz single-serve cup | Max noise : 90 dB | Power: 1,800 watts | Settings : 3 (mince, small chop, large chop) + 3 (low, medium, high) + BlendSense | Warranty: 1 year\nThis is the best blender in the world, and two trusty, cheaper alternatives\nDate: Tue Aug  4 10:03:25 2026 UTC\n\nAlmost as good, and a third of the price \n\n2. Ninja Detect Power Pro Blender    \n\nInsanely powerful, and somewhat affordable \nDimensions : 6.88 x 8.38 x 17.5 inches | Weight: 10.7 pounds | Capacity: 72 fluid ounces + 24oz single-serve cup | Max noise : 90 dB | Power: 1,800 watts | Settings : 3 (mince, small chop, large chop) + 3 (low, medium, high) + BlendSense | Warranty: 1 year \nNinja likes to throw a bit of jargon on every generation of its latest blenders. The older models come with \"Auto IQ\", and the latest addition is BlendSense. This claims to automatically sense the weight and firmness of your ingredients and adjust the blend setting accordingly. \nHow, you ask? Well, we couldn't quite get to the bottom of that in testing, and there's not much info on the tech online. Luckily, though, this blender is just so powerful that you don't need jargon or auto features to recommend it. It's just really good at blending. \n",
+     "title": "This is the best blender in the world, and two trusty, cheaper alternatives",
+     "url": "https://www.tomsguide.com/best-picks/best-blenders"
+    }
+   ]
+  },
+  {
+   "id": "ws_034df23749b04530016abd0471f6b887d1a6fe176253d06a5b",
+   "type": "web_search_call",
+   "status": "completed",
+   "action": {
+    "type": "search",
+    "queries": [
+     "בלנדר נינג'ה Detect TB301 למכירה"
+    ],
+    "query": "בלנדר נינג'ה Detect TB301 למכירה",
+    "sources": [
+     {
+      "type": "url",
+      "url": "https://www.ivory.co.il/catalog.php?id=157381"
+     },
+     {
+      "type": "url",
+      "url": "https://www.ivory.co.il/catalog.php?id=141461"
+     },
+     {
+      "type": "url",
+      "url": "https://www.officedepot.co.il/product/4717927"
+     },
+     {
+      "type": "url",
+      "url": "https://www.zap.co.il/models.aspx?db10715451=10715467&db3261243=9983717&sog=e-blender"
+     },
+     {
+      "type": "url",
+      "url": "https://shop.super-pharm.co.il/electricity-and-electronics/small-kitchen-appliances/blenders-and-food-trimmers/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%A0%D7%99%D7%A0%D7%92%27%D7%94-Ninja-TB301/p/mp-00501390"
+     },
+     {
+      "type": "url",
+      "url": "https://shop.super-pharm.co.il/electricity-and-electronics/small-kitchen-appliances/blenders-and-food-trimmers/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-TB301/p/mp-00344808"
+     },
+     {
+      "type": "url",
+      "url": "https://www.zap.co.il/models.aspx?db10715451=10715467&db3261242=5950275&sog=e-blender"
+     },
+     {
+      "type": "url",
+      "url": "https://shop.zap.co.il/product-model?offerid=23017964"
+     },
+     {
+      "type": "url",
+      "url": "https://www.zap.co.il/model.aspx?modelid=1236683"
+     },
+     {
+      "type": "url",
+      "url": "https://www.cwc.co.il/product/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-ninja-%D7%A0%D7%99%D7%A0%D7%92%D7%94-tb301/"
+     },
+     {
+      "type": "url",
+      "url": "https://www.zap.co.il/models.aspx?db3261242=5950275&db3261243=9983717&sog=e-blender"
+     },
+     {
+      "type": "url",
+      "url": "https://shop.super-pharm.co.il/NINJA/c/b_5202?q=%3Apopularity%3Acategory%3A55141200"
+     },
+     {
+      "type": "url",
+      "url": "https://www.reddit.com/r/Smoothies/comments/1uvs4mn/ninja_detect_duo_tb301_worth_it/"
+     },
+     {
+      "type": "url",
+      "url": "https://www.reddit.com/r/KitchenStack/comments/1qcybxa/tested_the_ninja_detect_blender_pro_for_smoothies/"
+     },
+     {
+      "type": "url",
+      "url": "https://www.reddit.com/r/ninjakitchen/comments/1962nhi/ninja_tb301_detect_duo_power_blender_pro_single/"
+     }
+    ]
+   },
+   "results": [
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search0 [wordlim: 200] Crawled: last week; # מציאון – נינג'ה בלנדר ושייקר 1200WNinja Detect 2-in-1 TB301 – מוחדש ... קנקן 2.1 ליטר עם פיית מזיגה וכוס 700 מ\"ל למנה אישית – באמצעותם תכינו מנות גדולות או אישיות בקלות. ... באמצעות האביזרים הכלולים, תיהנו מגמישות מלאה להכנת מגוון רחב של מנות. ... מציאון – נינג'ה בלנדר ושייקר 1200WNinja Detect 2-in-1 TB301 – מוחדש\n",
+     "title": "מציאון – נינג'ה בלנדר ושייקר 1200WNinja Detect 2-in-1 TB301 – מוחדש",
+     "url": "https://www.ivory.co.il/catalog.php?id=157381"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search1 [wordlim: 200] Crawled: 2 weeks ago; # נינג'ה בלנדר ושייקר Ninja Detect 2-in-1 TB301 1200W ... ## בלנדר 2 ב - 1 Ninja Detect מגיע עם טכנולוגיה חכמה לזיהוי מרכיבים, מנוע עוצמתי 1200W ואביזרים מגוונים. ... אפשרויות איסוף ומשלוח:איסוף מהסניף: ללא עלות נוספת הזמנה לסניפי אילת : ללא עלות נוספת משלוח מהיר אספקה מהיום למחר: ₪ 55 משלוח לנקודת איסוף : ₪ 9 משלוח לבית הלקוח : ₪ 29 מחיר כולל משלוח לנקודת איסוף: 608 ₪ ... שימו לב - תמונות, אנימציות וסרטוני וידאו של המוצר - להמחשה בלבד.\n",
+     "title": "נינג'ה בלנדר ושייקר Ninja Detect 2-in-1 TB301 1200W",
+     "url": "https://www.ivory.co.il/catalog.php?id=141461"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search2 [wordlim: 200] Crawled: 4 days ago; בלנדר ושייקר עוצמתי Ninja Detect דגם TB301 - בנפח 2.1 ליטר, עם שלוש שנים אחריות ע\"י היבואן הרשמי.בלנדר מתקדם עם טכנולוגיית BlendSense חכמה המותאמת באופן אוטומטי למהירות ולזמן לפעולה חלקה ומושלמת בכל פעם. ...   * טכנולוגיית BlendSense חכמה - התאמה אוטומטית של מהירות וזמן לפי סוג המרכיבים למרקם חלק ומושלם ...   * Ice Detect - מזהה כמות קרח ומכין את המשקה במרקם מושלם ... לבדיקת זמינות מלאי בסניפים\n",
+     "title": "בלנדר ושייקר עוצמתי בנפח 2.1 ליטר TB301 NINJA | Office Depot",
+     "url": "https://www.officedepot.co.il/product/4717927"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search3 [wordlim: 200] Crawled: 2 weeks ago; מודעה ‏בלנדר BN653 מעבד מזון Ninja יבואן רשמי 389 ₪ ב-וואלה שופס מודעה ‏שייקר Ninja Detect TB303 נינג'ה-יבואן רשמי שריג! ... Ninja Detect Duo TB301 – בלנדר ושייקר חכם עם טכנולוגיית BlendSense | טכנולוגיית BlendSense: מערכת חכמה המזהה אוטומטית את סוג המרכיבים (טריים/קפואים) ואת כמותם, ומתאימה את זמן הערבול והעוצמה לקבלת מרקם מושלם | עוצמת מנוע: מנוע חזק בהספק של 1200W המיועד לט\n",
+     "title": "בלנדרים ‏500 - 1,000 ‏₪ ‏שייקר - זאפ השוואת מחירים",
+     "url": "https://www.zap.co.il/models.aspx?db10715451=10715467&db3261243=9983717&sog=e-blender"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search4 [wordlim: 200] Crawled: 2 weeks ago; Image: בלנדר נינג'ה Ninja TB301 ... # בלנדר נינג'ה Ninja TB301 ... בזכות טכנולוגיית BlendSense החכמה, הבלנדר מתאים את עצמו אוטומטית למרכיבים, לגודל המנה ואפילו לקרח, ומספק תוצאות מושלמות בכל פעם. ... ה-Ninja Detect משתמש בטכנולוגיה חכמה לזיהוי מרכיבים ובחירה אוטומטית של ההגדרות הטובות ביותר: ... טוחן תבלינים דרגות מהירות: 14 כותש קרח אביזרים כלולים: קנקן 2.1 ליטר: מתאים למנות גדולות של שייקים ומשקאות.\n",
+     "title": "‫NINJA - בלנדר נינג'ה Ninja TB301 | סופר-פארם‬",
+     "url": "https://shop.super-pharm.co.il/electricity-and-electronics/small-kitchen-appliances/blenders-and-food-trimmers/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%A0%D7%99%D7%A0%D7%92%27%D7%94-Ninja-TB301/p/mp-00501390"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search5 [wordlim: 200] Crawled: 2 weeks ago; בזכות טכנולוגיית BlendSense החכמה, הבלנדר מתאים את עצמו אוטומטית למרכיבים, לגודל המנה ואפילו לקרח, ומספק תוצאות מושלמות בכל פעם. ... ה-Ninja Detect משתמש בטכנולוגיה חכמה לזיהוי מרכיבים ובחירה אוטומטית של ההגדרות הטובות ביותר: ... טוחן תבלינים דרגות מהירות: 14 כותש קרח אביזרים כלולים: קנקן 2.1 ליטר, כוסות 700 מ\"ל, להבי Ninja Total Crushing & Chopping, להבי Hybrid Edge נפח מיכל (ליטר): 2.1 הספק (וואט): 1200 הוראות שימוש: מצורפות לאריזת המוצר דגם: TB301 ... מדיניות משלוחים והחזרות: ליצירת קשר עם שירות הלקוחות : [redacted-email] ניתן להחזיר מוצר שנרכש באתר תוך 14 ימים, בתנאי שלא נעשה שימוש במוצר והמוצר נימצא באריזתו המקורית.\n",
+     "title": "‫NINJA - בלנדר ושייקר TB301 | סופר-פארם‬",
+     "url": "https://shop.super-pharm.co.il/electricity-and-electronics/small-kitchen-appliances/blenders-and-food-trimmers/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-TB301/p/mp-00344808"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search6 [wordlim: 200] Crawled: 3 weeks ago; Ninja Detect Duo TB301 – בלנדר ושייקר חכם עם טכנולוגיית BlendSense | טכנולוגיית BlendSense: מערכת חכמה המזהה אוטומטית את סוג המרכיבים (טריים/קפואים) ואת כמותם, ומתאימה את זמן הערבול והעוצמה לקבלת מרקם מושלם | עוצמת מנוע: מנוע חזק בהספק של 1200W המיועד לט ... בלנדר אישי Ninja DB351EUCY נינג'ה כחולמנוע עוצמתי 1100W לריסוק קרח לשלג בשניותכוס 709 מ''ל עם מכסה אטום 100% לנזילות לתיק3 תוכניות Auto-iQ חכמות לערבול אוטומטילהבי CrushBlade ו-2 שנות אחריות שריג רשמי\n",
+     "title": "בלנדרים ‏500 - 1,000 ‏₪ ‏Ninja - זאפ השוואת מחירים",
+     "url": "https://www.zap.co.il/models.aspx?db10715451=10715467&db3261242=5950275&sog=e-blender"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search7 [wordlim: 200] Crawled: 2 weeks ago; בלנדר ושייקר TB301 נינג'ה NINJA ... בלנדר ושייקר TB301 נינג'ה NINJA הכירו את העתיד של הבלנדרים – בלנדר ה-Ninja Detect 2-in-1, המשלב עוצמה וטכנולוגיה, ומתאים לכל בשלן ביתי שמעריך נוחות ודיוק. ... טכנולוגיית BlendSense ה-Ninja Detect משתמש בטכנולוגיה חכמה לזיהוי מרכיבים ובחירה אוטומטית של ההגדרות הטובות ביותר: • זיהוי עוצמה: מזהה אם המרכיבים טריים או קפואים ומתאים את העוצמה.\n",
+     "title": "בלנדר ושייקר TB301 נינג'ה NINJA - 23017964 - zap",
+     "url": "https://shop.zap.co.il/product-model?offerid=23017964"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search8 [wordlim: 200] Crawled: 2 weeks ago; בלנדר עוצמתי ושייקר Ninja Detect TB303 נינג'ה - Ninja Ninja Ninja Detect TB303 בלנדר עוצמתי ושייקר Ninja Detect TB303 מבית Ninjaהנינג'ה שחושב עבורכם למרקם מושלם ובלי ניחושיםטכנולוגיית ה- BlendSense החכמה של נינג'ה מחוללת מהפכה בבלנדרים המסורתיים, מזהה את המרכיבים שלכם ומתאימה באופן אוטומטי את המהירות והזמן לקבלת ... בלנדר NINJA דגם TB303 והזמן לתוצאות במרקם חלק ומושלם בכל פעם מחדש VARIABLE SPEED CONTROL – שליטה במהירות ובמרקם של כל תערובת מרקם חלק שאפשר לשתות בקשית- למשקאות קפואים / ריסוק קרח / מיצים / שייקים מרקם סמיך שאפשר לאכול בכפית – לחמאת בוטנים / סמודי בול טחינה וקיצוץ אחיד- למטבל\n",
+     "title": "‏שייקר Ninja Detect TB303 נינג'ה - זאפ השוואת מחירים",
+     "url": "https://www.zap.co.il/model.aspx?modelid=1236683"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search9 [wordlim: 200] Crawled: 4 days ago; # בלנדר ושייקר ninja נינג’ה TB301 ... הפטור ממע\"מ לרכישת מוצרים שהינם פטורים ממע\"מ , מותנה בכך שהמכירה והמסירה תהיה באילת, לשימוש עצמי, ושהמכירה הינה לרוכש בודד בכמות של מכשיר בודד (מסוג המוצרים הרלבנטי). ... Ninja Detect 2-in-1 בדגם TB301 הוא בלנדר שולחני עם מנוע 1200W וקנקן בנפח 2.1 ליטר. ... הכוס האישית בנפח 700 מ”ל מיועדת לשייק או למיץ בדרכים, והיא מגיעה עם מכסה נסיעות. ... המכסה של הקנקן ננעל למקומו ומונע שפיכה בזמן הערבול, מה שמפחית גם את הניקוי סביב המכשיר.\n",
+     "title": "בלנדר ושייקר ninja נינג'ה TB301 - ninja - נינג'ה - עולם הקולנוע והחשמל",
+     "url": "https://www.cwc.co.il/product/%D7%91%D7%9C%D7%A0%D7%93%D7%A8-%D7%95%D7%A9%D7%99%D7%99%D7%A7%D7%A8-ninja-%D7%A0%D7%99%D7%A0%D7%92%D7%94-tb301/"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search10 [wordlim: 200] Crawled: 3 weeks ago; 418 ₪ ב-מרכז החשמל של יגאל מודעה ‏שייקר Ninja Detect TB303 נינג'ה-יבואן רשמי שריג! ... Ninja Detect Duo TB301 – בלנדר ושייקר חכם עם טכנולוגיית BlendSense | טכנולוגיית BlendSense: מערכת חכמה המזהה אוטומטית את סוג המרכיבים (טריים/קפואים) ואת כמותם, ומתאימה את זמן הערבול והעוצמה לקבלת מרקם מושלם | עוצמת מנוע: מנוע חזק בהספק של 1200W המיועד לט\n",
+     "title": "בלנדרים ‏Ninja ‏שייקר - זאפ השוואת מחירים",
+     "url": "https://www.zap.co.il/models.aspx?db3261242=5950275&db3261243=9983717&sog=e-blender"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1search11 [wordlim: 200] Crawled: last week; ברוכים ובניו בע\"מ הוספה לסל החל מ- 465 465   NINJA בלנדר אישי עוצמתי Ninja נינג'ה Blend Boss כחול DB351EUCY מוכר חיצוני להצעות נוספות יבוא מקביל 470 470   NINJA ‏בלנדר Ninja BN750 נינג'ה משלוח חינם נמכר ע״י D9 הוספה לסל החל מ- 169 169   NINJA בלנדר נייד Ninja Blast בצבע כחול דגם BC151 מוכר חיצוני להצעות נוספות החל מ- 475 475 589 589 בתוקף עד 30.09.2026 NINJA בלנדר חכם Ninja Detect Blender Pro TB201EU מוכר חיצוני להצעות נוספות החל מ- 832 832 949 949 בתוקף עד 30.09.2026 NINJA בלנדר משולב מזון עוצמתי 3 ב-1 Ninja נינג'ה TB403 משלוח חינם מוכר חיצוני להצעות נוספות החל מ- 440 440   NINJA בלנדר שייקר מקצועי Ninja TWISTI CB153 מוכר חיצוני להצעות נוספות יבוא מקביל 194 194   NINJA בלנדר Ninja Blast BC151 נינג’ה - לבן (1) משלוח חינם נמכר ע״י מובייל יבוא והפצה הוספה לסל יבוא מקביל 199 199   NINJA בלנדר נייד Ninja Blast בצבע שחור דגם BC151 (4) משלוח חינם נמכר ע״י מובייל יבוא והפצה הוספה לסל החל מ- 299 299 399 399 בתוקף עד 30.09.2026 NINJA שייקר אלחוטי נייד Ninja נינג'ה Blast Max BC251 - כחול מוכר חיצוני להצעות נוספות יבוא רשמי 399 399   NINJA שייקר אלחוטי NINJA נינג`ה דגם BLAST MAX BC251EUNV נמכר ע״י חשמל נטו הוספה לסל יבוא רשמי 399 399   NINJA שייקר אלחוטי NINJA נינג`ה דגם BLAST MAX BC251EUGY נמכר ע״י חשמל נטו הוספה לסל החל מ- 868 868   NINJA TB401 בלנדר+פוד פרוססור נינגה (1) משלוח חינם מוכר חיצוני להצעות נוספות יבוא מקביל 569 569   NINJA בלנדר ושייקר TB301 משלוח חינם נמכר ע״י מ.\n",
+     "title": "NINJA | מוצרי חשמל למטבח של נינג'ה ✨ סופר-פארם אונליין | סופר-פארם",
+     "url": "https://shop.super-pharm.co.il/NINJA/c/b_5202?q=%3Apopularity%3Acategory%3A55141200"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1reddit12 [wordlim: 200] Published: 2 months ago; I’m thinking about buying the Ninja Detect Duo TB301, mainly for making smoothies with frozen fruit and ice every day.\n",
+     "title": "Ninja Detect Duo TB301 - worth it?",
+     "url": "https://www.reddit.com/r/Smoothies/comments/1uvs4mn/ninja_detect_duo_tb301_worth_it/"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1reddit13 [wordlim: 200] Published: 8 months ago; Crawled: 5 days ago; Been running the Ninja TB301 through my usual home tests for a couple weeks, same way I size up gear before I’d recommend it to friends.\n",
+     "title": "Tested the Ninja Detect Blender Pro for Smoothies Chopping and Daily Use",
+     "url": "https://www.reddit.com/r/KitchenStack/comments/1qcybxa/tested_the_ninja_detect_blender_pro_for_smoothies/"
+    },
+    {
+     "type": "text_result",
+     "snippet": "citeturn1reddit14 [wordlim: 200] Published: 2.7 years ago;         I am looking for a cup with blender blades that can fit my  Ninja Detect Duo (TB-301 model).\n",
+     "title": "Ninja TB301 Detect Duo Power Blender Pro + Single Serve Replacement Cups?",
+     "url": "https://www.reddit.com/r/ninjakitchen/comments/1962nhi/ninja_tb301_detect_duo_power_blender_pro_single/"
+    }
+   ]
+  },
+  {
+   "id": "msg_034df23749b04530016abd0473f04c87d1a3e19138d5e43ef9",
+   "type": "message",
+   "status": "completed",
+   "content": [
+    {
+     "type": "output_text",
+     "annotations": [],
+     "logprobs": [],
+     "text": "done"
+    }
+   ],
+   "phase": "final_answer",
+   "role": "assistant"
+  }
+ ]
+}

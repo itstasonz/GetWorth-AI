@@ -70,7 +70,11 @@ describe('V2-1 the flag is server-owned and off by default', () => {
 
 describe('V2-2 the identity contract is small and is normalised', () => {
   test('V2-2a the schema has no price, no valuation and no free-text reasoning field', () => {
-    const text = JSON.stringify(V2_IDENTITY_SCHEMA);
+    // The one field that names the market holds SEARCH HYPOTHESES: strings, capped, and no number.
+    const hyp = V2_IDENTITY_SCHEMA.properties.market_hypotheses;
+    assert.deepEqual(Object.keys(hyp.properties).sort(), ['aliases', 'model_numbers']);
+    for (const k of ['aliases', 'model_numbers']) assert.equal(hyp.properties[k].items.type, 'string', k);
+    const text = JSON.stringify(V2_IDENTITY_SCHEMA).replaceAll('"market_hypotheses"', '"hypotheses"');
     for (const banned of ['price', 'valuation', 'worth', 'reasoning', 'explanation', 'notes', 'market']) {
       assert.ok(!text.toLowerCase().includes(`"${banned}`), `schema must not carry a ${banned} field`);
     }

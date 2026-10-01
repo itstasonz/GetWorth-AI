@@ -1,0 +1,71 @@
+{
+  "note": "EXAMPLE OF THE DATASET SHAPE. Every product, shop, seller and price here is INVENTED so the harness and its tests have something to run on. It is not market data and no factor computed from it means anything.",
+  "market": "IL",
+  "currency": "ILS",
+  "products": [
+    {
+      "id": "example-appliance-1", "identity": "Example Blender A", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 600, "source": "shop-one.example" }, { "price": 640, "source": "shop-two.example" }],
+      "used": [
+        { "price": 300, "source": "board-one.example", "condition": "Good" },
+        { "price": 320, "source": "board-two.example", "condition": "Good" },
+        { "price": 340, "source": "board-one.example", "condition": "Good" }
+      ]
+    },
+    {
+      "id": "example-appliance-2", "identity": "Example Mixer B", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 1000, "source": "shop-one.example" }, { "price": 1100, "source": "shop-three.example" }],
+      "used": [
+        { "price": 500, "source": "board-one.example", "condition": "Good" },
+        { "price": 560, "source": "board-two.example", "condition": "Good" },
+        { "price": 600, "source": "board-three.example", "condition": "Good" }
+      ]
+    },
+    {
+      "id": "example-appliance-3", "identity": "Example Kettle C", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 200, "source": "shop-one.example" }, { "price": 220, "source": "shop-two.example" }],
+      "used": [
+        { "price": 90, "source": "board-one.example", "condition": "Good" },
+        { "price": 100, "source": "board-two.example", "condition": "Good" },
+        { "price": 120, "source": "board-three.example", "condition": "Good" }
+      ]
+    },
+    {
+      "id": "example-appliance-4", "identity": "Example Toaster D", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 400, "source": "shop-two.example" }, { "price": 400, "source": "shop-three.example" }],
+      "used": [
+        { "price": 180, "source": "board-one.example", "condition": "Good" },
+        { "price": 200, "source": "board-two.example", "condition": "Good" },
+        { "price": 240, "source": "board-two.example", "condition": "Good" }
+      ]
+    },
+    {
+      "id": "example-appliance-5", "identity": "Example Fryer E", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 800, "source": "shop-one.example" }, { "price": 880, "source": "shop-two.example" }],
+      "used": [
+        { "price": 400, "source": "board-one.example", "condition": "Good" },
+        { "price": 450, "source": "board-three.example", "condition": "Good" },
+        { "price": 470, "source": "board-two.example", "condition": "Good" }
+      ]
+    },
+    {
+      "id": "example-mouse-1", "identity": "Example Mouse F", "category": "Electronics", "product_class": "gaming peripheral",
+      "retail": [{ "price": 500, "source": "shop-one.example" }, { "price": 520, "source": "shop-two.example" }],
+      "used": [
+        { "price": 350, "source": "board-one.example", "condition": "Good" },
+        { "price": 360, "source": "board-two.example", "condition": "Good" },
+        { "price": 380, "source": "board-three.example", "condition": "Good" }
+      ]
+    },
+    {
+      "id": "example-retail-only", "identity": "Example Blender G", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 599, "source": "shop-one.example" }],
+      "used": []
+    },
+    {
+      "id": "example-foreign", "identity": "Example Blender H", "category": "Home", "product_class": "consumer appliance",
+      "retail": [{ "price": 179, "source": "shop-abroad.example", "currency": "USD" }, { "price": 700, "source": "shop-one.example" }],
+      "used": [{ "price": 100, "source": "board-abroad.example", "condition": "Good", "currency": "USD" }]
+    }
+  ]
+}

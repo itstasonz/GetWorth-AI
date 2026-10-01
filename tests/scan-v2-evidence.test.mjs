@@ -13,9 +13,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-import { extractListings, REFUSED, SHAPE, MAX_PER_RESULT } from '../api/_lib/v2/listing-extraction.js';
-import { assessV2Evidence, EVIDENCE_CLASS } from '../api/_lib/v2/evidence.js';
-import { resolveV2Price, PRICE_STATE, BASIS } from '../api/_lib/v2/pricing.js';
+import { extractListings, REFUSED, ROLE, SHAPE, MAX_PER_RESULT } from '../api/_lib/v2/listing-extraction.js';
+import { assessV2Evidence, EVIDENCE_CLASS, ANCHOR_STRENGTH } from '../api/_lib/v2/evidence.js';
+import { resolveV2Price, PRICE_STATE, BASIS, USED_EVIDENCE } from '../api/_lib/v2/pricing.js';
 import { normalizeIdentity } from '../api/_lib/v2/identity.js';
 import { decideSufficiency, DECISION, IDENTITY_LEVEL } from '../api/_lib/v2/sufficiency.js';
 import { subjectOf } from '../api/_lib/v2/search-plan.js';
@@ -78,11 +78,14 @@ describe('V2-6 a number is not a price, and a price is not a listing', () => {
     assert.equal(entries.length, 1);
     assert.equal(entries[0].observation.observed_price, 790);
   });
-  test('V2-6g a bundle or an upsell — several asking prices in one listing — is refused whole', () => {
-    const { entries, refused } = extractListings(one('לוח יד שניה', 'Sony PlayStation 5 למכירה 1,700 ש"ח בנוסף שלט שני ב-150 ש"ח'));
-    assert.equal(entries.length, 0);
-    assert.equal(refused[0].reason, REFUSED.SEVERAL_PRICES);
-    assert.deepEqual(refused[0].prices, ['1700|ILS', '150|ILS']);
+  test('V2-6g two asking prices in one listing are refused whole; a labelled add-on is refused alone', () => {
+    const two = extractListings(one('לוח יד שניה', 'Sony PlayStation 5 למכירה 1,700 ש"ח או עם משחקים 1,900 ש"ח'));
+    assert.equal(two.entries.length, 0);
+    assert.deepEqual(two.refused.map((r) => [r.value, r.reason]), [[1700, REFUSED.SEVERAL_PRICES], [1900, REFUSED.SEVERAL_PRICES]]);
+    // "in addition, a second controller for 150": the label says what the 150 is.
+    const upsell = extractListings(one('לוח יד שניה', 'Sony PlayStation 5 למכירה 1,700 ש"ח בנוסף שלט שני ב-150 ש"ח'));
+    assert.deepEqual(upsell.entries.map((e) => e.observation.observed_price), [1700]);
+    assert.deepEqual(upsell.refused.map((r) => [r.value, r.role, r.reason]), [[150, ROLE.ACCESSORY_PRICE, REFUSED.ACCESSORY]]);
   });
   test('V2-6h a table row is extracted and is NOT admissible: its category cell can name a product it is not', () => {
     for (const text of [
@@ -119,26 +122,28 @@ describe('V2-6 a number is not a price, and a price is not a listing', () => {
 });
 
 describe('V2-7 evidence classes: what priced the item, and what was kept apart', () => {
-  test('V2-7a of nine kinds of result, exactly one becomes a used listing', () => {
+  test('V2-7a of nine kinds of result, only the two real listings become used listings', () => {
     const { evidence } = scan(RAW.PS5, RESULTS_MIXED);
     const admitted = evidence.entries.filter((e) => e.admitted);
-    assert.equal(admitted.length, 1);
-    assert.equal(admitted[0].observation.observed_price, 1800);
-    assert.equal(admitted[0].evidence_class, EVIDENCE_CLASS.USED_LISTING);
+    assert.deepEqual(admitted.map((e) => e.observation.observed_price).sort(), [1700, 1800]);
+    assert.ok(admitted.every((e) => e.evidence_class === EVIDENCE_CLASS.LOCAL_USED));
     const prices = evidence.entries.map((e) => e.observation.observed_price);
     for (const never of [29, 15, 150, 2400]) assert.ok(!prices.includes(never), `${never} must never be an observation`);
   });
   test('V2-7b retail, foreign, accessory and unrelated are each labelled, with a reason', () => {
     const { evidence } = scan(RAW.PS5, RESULTS_MIXED);
     const byPrice = (p) => evidence.entries.find((e) => e.observation.observed_price === p);
-    assert.equal(byPrice(2299).evidence_class, EVIDENCE_CLASS.NEW_RETAIL);
-    assert.equal(byPrice(300).evidence_class, EVIDENCE_CLASS.FOREIGN_CONTEXT);
-    assert.equal(byPrice(80).evidence_class, EVIDENCE_CLASS.ACCESSORY_PARTS);
-    assert.equal(byPrice(200).evidence_class, EVIDENCE_CLASS.UNRELATED, 'the table row');
-    assert.equal(byPrice(250).evidence_class, EVIDENCE_CLASS.UNRELATED, 'the flattened table row');
-    assert.equal(byPrice(2100).evidence_class, EVIDENCE_CLASS.UNRELATED, 'the forum comment');
-    assert.ok(evidence.entries.filter((e) => !e.admitted).every((e) => e.reason), 'every rejection says why');
-    assert.equal(evidence.counts.admitted, 1);
+    assert.equal(byPrice(2299).evidence_class, EVIDENCE_CLASS.LOCAL_RETAIL);
+    assert.equal(byPrice(2299).admitted, false, 'a shop price is never a used listing');
+    assert.equal(byPrice(300).evidence_class, EVIDENCE_CLASS.FOREIGN_USED);
+    assert.equal(byPrice(300).reason, 'foreign_currency_without_fx_proof');
+    assert.equal(byPrice(300).observation.observed_price, 300, 'and its amount is never converted');
+    assert.equal(byPrice(80).reason, 'listing_is_an_accessory_for_the_subject');
+    assert.equal(byPrice(200).reason, 'table_row_identity_is_not_beside_the_price', 'the table row');
+    assert.equal(byPrice(250).reason, 'table_row_identity_is_not_beside_the_price', 'the flattened table row');
+    assert.equal(byPrice(2100).evidence_class, EVIDENCE_CLASS.OTHER, 'the forum comment');
+    assert.ok(evidence.entries.filter((e) => !e.admitted && !e.retail_anchor).every((e) => e.reason), 'every rejection says why');
+    assert.equal(evidence.counts.admitted, 2);
     assert.equal(evidence.counts.retail_listings, 1);
     assert.equal(evidence.counts.currency_failures, 1);
     assert.equal(evidence.counts.admitted + evidence.counts.rejected, evidence.counts.extracted);
@@ -165,8 +170,8 @@ describe('V2-7 evidence classes: what priced the item, and what was kept apart',
     const { evidence, price } = scan(RAW.LOGITECH, results, { level: IDENTITY_LEVEL.BRAND_CLASS });
     assert.equal(evidence.counts.admitted, 0);
     assert.ok(evidence.qualification.set_failures.includes('branded_subject_without_model'));
-    assert.notEqual(price.state, PRICE_STATE.VERIFIED_MARKET_VALUE);
-    assert.notEqual(price.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE);
+    assert.equal(price.state, PRICE_STATE.NO_PRICE_EVIDENCE);
+    assert.equal(price.recommended, null);
   });
 });
 
@@ -182,52 +187,47 @@ describe('V2-8 the price state is the claim', () => {
     assert.ok(price.low <= price.recommended && price.recommended <= price.high);
     assert.ok(price.recommended >= 1700 && price.recommended <= 2000, 'a price inside the listings that earned it');
   });
-  test('V2-8b the same three listings from ONE site are an informed estimate, not a verified value', () => {
+  test('V2-8b the same three listings from ONE site are below the floors, not a verified value', () => {
     const oneSite = RESULTS_PS5_VERIFIED.map((r, i) => ({ ...r, url: `https://www.boardone.co.il/ad/${i + 1}` }));
     const { price } = scan(RAW.PS5, oneSite);
-    assert.equal(price.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE);
+    assert.equal(price.state, PRICE_STATE.USED_EVIDENCE_BELOW_QUORUM);
     assert.equal(price.authority, 'none');
     assert.equal(price.basis.kind, BASIS.ADMITTED_BELOW_QUORUM);
     assert.equal(price.basis.listings, 3);
     assert.equal(price.basis.sources, 1);
   });
-  test('V2-8c one admitted listing for the product is an informed estimate that says "1 listing"', () => {
-    const { price } = scan(RAW.PS5, RESULTS_MIXED);
-    assert.equal(price.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE);
+  test('V2-8c one admitted listing for the product is below the floors, and says "1 listing"', () => {
+    const { price } = scan(RAW.PS5, RESULTS_MIXED.filter((r) => !r.url.includes('/item/2002')));
+    assert.equal(price.state, PRICE_STATE.USED_EVIDENCE_BELOW_QUORUM);
     assert.equal(price.basis.listings, 1);
     assert.equal(price.recommended, 1800);
   });
-  test('V2-8d nothing admitted, a shop page for this product: ESTIMATED_WORTH from the new price and GetWorth’s own ladder', () => {
+  test('V2-8d nothing admitted, a shop page for this product: NO used value, and the new price beside it as an anchor', () => {
     const { price, evidence } = scan(RAW.NINJA, RESULTS_RETAIL_ONLY);
     assert.equal(evidence.counts.admitted, 0);
-    assert.equal(price.state, PRICE_STATE.ESTIMATED_WORTH);
+    assert.equal(price.state, PRICE_STATE.NO_PRICE_EVIDENCE);
     assert.equal(price.authority, 'none');
-    assert.equal(price.basis.kind, BASIS.RETAIL_DEPRECIATED);
-    assert.equal(price.basis.new_retail_price, 1000);
-    assert.equal(price.recommended, 700, 'Good -> the used rung, 30% below new');
-    assert.equal(price.high, 850);
-    assert.equal(price.low, 500);
+    assert.equal(price.basis.kind, BASIS.NONE);
+    for (const k of ['low', 'recommended', 'high']) assert.equal(price[k], null, `no ${k} is derived from a shop price`);
+    assert.equal(price.retail_anchor.kind, 'RETAIL_REPLACEMENT_ANCHOR');
+    assert.equal(price.retail_anchor.strength, ANCHOR_STRENGTH.SINGLE_SOURCE);
+    assert.deepEqual([price.retail_anchor.low, price.retail_anchor.median, price.retail_anchor.high, price.retail_anchor.shops], [1000, 1000, 1000, 1]);
+    assert.equal(price.confidence.pricing.used_market, USED_EVIDENCE.NONE);
     assert.equal(price.guard, null);
+    // No number anywhere in the used value is a fraction of the anchor.
+    assert.ok(!JSON.stringify({ ...price, retail_anchor: null }).match(/\b(700|850|500)\b/));
   });
   test('V2-8e a shop page for a DIFFERENT product of the brand is not retail context for this one', () => {
     const other = [{ ...RESULTS_RETAIL_ONLY[0], title: 'Ninja Foodi Air Fryer - השוואת מחירים | שופזון' }];
     assert.equal(scan(RAW.NINJA, other).price.state, PRICE_STATE.NO_PRICE_EVIDENCE);
   });
-  test('V2-8f a brand and a kind of object: listings naming both give ESTIMATED_WORTH, never a market state', () => {
+  test('V2-8f a brand and a kind of object: the gate refuses the set, and nothing else prices it', () => {
     const { price, evidence } = scan(RAW.ZARA, RESULTS_ZARA);
     assert.equal(evidence.counts.admitted, 0, 'the market gate refuses a brand with no model');
-    assert.equal(price.state, PRICE_STATE.ESTIMATED_WORTH);
-    assert.equal(price.basis.kind, BASIS.BRAND_CLASS_LISTINGS);
-    assert.equal(price.basis.listings, 3);
-    assert.equal(price.low, 120);
-    assert.equal(price.high, 200);
-    // A shirt of the same brand is not a jacket: the brand alone is not context.
-    const shirt = { type: 'text_result', url: 'https://www.boardfour.co.il/ad/504', title: 'חולצה Zara למכירה 40 ש"ח | לוח יד שניה', snippet: '' };
-    const withShirt = scan(RAW.ZARA, [...RESULTS_ZARA, shirt]);
-    assert.equal(withShirt.price.basis.listings, 3);
-    assert.equal(withShirt.price.low, 120);
-    const two = scan(RAW.ZARA, RESULTS_ZARA.slice(0, 2));
-    assert.equal(two.price.state, PRICE_STATE.NO_PRICE_EVIDENCE, 'two listings are not a range');
+    assert.equal(price.state, PRICE_STATE.NO_PRICE_EVIDENCE);
+    assert.equal(price.recommended, null);
+    assert.equal(price.retail_anchor.strength, ANCHOR_STRENGTH.NONE);
+    assert.ok(evidence.entries.every((e) => /^set_refused: /.test(e.reason)), 'and each listing says the set was refused');
   });
   test('V2-8g an identity the gate did not approve has no price and no search behind it', () => {
     for (const raw of [RAW.LOGITECH, RAW.DARK]) {
@@ -262,11 +262,24 @@ describe('V2-8 the price state is the claim', () => {
     }));
     assert.equal(scan(RAW.SOFA, sofa(1)).price.state, PRICE_STATE.NO_PRICE_EVIDENCE);
     const three = scan(RAW.SOFA, sofa(3));
-    assert.equal(three.price.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE);
+    assert.equal(three.price.state, PRICE_STATE.USED_EVIDENCE_BELOW_QUORUM);
     assert.equal(three.price.authority, 'none');
     const five = scan(RAW.SOFA, sofa(5));
-    assert.equal(five.price.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE, 'comparables verify a KIND, never this product');
+    assert.equal(five.price.state, PRICE_STATE.COMPARABLE_MARKET_ESTIMATE, 'comparables verify a KIND, never this product');
+    assert.equal(five.price.confidence.pricing.used_market, USED_EVIDENCE.COMPARABLE);
     assert.notEqual(five.price.state, PRICE_STATE.VERIFIED_MARKET_VALUE);
+    assert.notEqual(five.price.state, PRICE_STATE.USED_EVIDENCE_ESTIMATE, 'a kind’s market is never "exact used evidence"');
+    assert.deepEqual([five.price.basis.kind, five.price.guard.material_repair], [BASIS.COMPARABLE_LISTINGS, false]);
+    // Five comparables that agree to the shekel: the guard widens the band. Still a kind's market, and it says the guard moved it.
+    const agree = (n) => Array.from({ length: n }, (_, i) => ({
+      type: 'text_result', url: `https://www.board${i}.co.il/ad/${i}`, title: `ספה פינתית למכירה 1,200 ש"ח | לוח יד שניה`, snippet: '',
+    }));
+    const widened = scan(RAW.SOFA, agree(5)).price;
+    assert.equal(widened.state, PRICE_STATE.COMPARABLE_MARKET_ESTIMATE);
+    assert.notEqual(widened.state, PRICE_STATE.USED_EVIDENCE_ESTIMATE, 'a widened comparable range is not "sufficient exact used evidence"');
+    assert.deepEqual([widened.basis.kind, widened.guard.action, widened.guard.material_repair, widened.guard.moved], [BASIS.COMPARABLE_GUARD_ADJUSTED, 'repair', true, ['low', 'high']]);
+    assert.equal(widened.confidence.pricing.used_market, USED_EVIDENCE.COMPARABLE);
+    assert.ok(widened.low < 1200 && widened.recommended === 1200 && widened.high > 1200);
   });
   test('V2-8l a verified set the GUARD declines is not shown under any label', () => {
     const at = (prices) => prices.map((p, i) => ({
@@ -283,12 +296,18 @@ describe('V2-8 the price state is the claim', () => {
     }
   });
   test('V2-8k only a verified state carries authority, and every priced state names its basis and sample', () => {
-    const cases = [scan(RAW.PS5, RESULTS_PS5_VERIFIED), scan(RAW.PS5, RESULTS_MIXED), scan(RAW.NINJA, RESULTS_RETAIL_ONLY), scan(RAW.ZARA, RESULTS_ZARA)];
+    const cases = [scan(RAW.PS5, RESULTS_PS5_VERIFIED), scan(RAW.PS5, RESULTS_MIXED)];
     for (const { price } of cases) {
       assert.ok(price.recommended > 0);
       assert.notEqual(price.basis.kind, BASIS.NONE);
       assert.ok(price.basis.listings >= 1);
       assert.equal(price.authority === 'verified_market', price.state === PRICE_STATE.VERIFIED_MARKET_VALUE);
+    }
+    // And a state with no number names no basis and no sample.
+    for (const { price } of [scan(RAW.NINJA, RESULTS_RETAIL_ONLY), scan(RAW.ZARA, RESULTS_ZARA)]) {
+      assert.equal(price.recommended, null);
+      assert.deepEqual(price.basis, { kind: BASIS.NONE, listings: 0, sources: 0 });
+      assert.equal(price.authority, 'none');
     }
   });
 });
@@ -310,10 +329,20 @@ describe('V2-9 authority rules V2 must not regress', () => {
     assert.ok(!/context|retail/i.test(guardCall));
     assert.equal((code('evidence.js').match(/qualifyMarketEvidence\(/g) || []).length, 1, 'one qualification call, on the bound candidates');
   });
-  test('V2-9c V2 contains no "strong evidence" or catalog-reference claim to make', () => {
+  test('V2-9c "strong" describes a retail anchor and nothing else; there is no catalog-reference claim', () => {
+    // The one permitted use: the strength of the RETAIL anchor, by name.
+    const allowed = /ANCHOR_STRENGTH\.STRONG|STRONG: 'STRONG'/g;
     for (const f of ['pricing.js', 'report.js', 'evidence.js']) {
-      assert.ok(!/strong|catalog reference/i.test(code(f)), f);
+      assert.ok(!/strong|catalog reference/i.test(code(f).replace(allowed, '')), f);
     }
+    assert.equal((code('evidence.js').match(/ANCHOR_STRENGTH\.STRONG/g) || []).length, 1, 'assigned in one place: the retail anchor');
+    assert.ok(!/ANCHOR_STRENGTH\.STRONG/.test(code('pricing.js')), 'the used-market state never reads it');
+  });
+  test('V2-9e no used value is derived from a retail price: pricing reads the anchor only to pass it through', () => {
+    const pricing = code('pricing.js');
+    assert.ok(!/anchor\.(low|median|high|prices)/.test(pricing), 'no arithmetic on the anchor');
+    assert.ok(!/ESTIMATED_WORTH|RETAIL_DEPRECIATED|0\.7\b|0\.70\b/.test(pricing));
+    assert.ok(!/valuation-calibration/.test(code('pricing.js') + code('evidence.js') + code('scan.js')), 'the offline harness is not imported');
   });
   test('V2-9d no model output is a number in the valuation: pricing imports no provider client', () => {
     assert.ok(!/openai-stream|identifyItem|streamResponse|fetch\(/.test(code('pricing.js')));

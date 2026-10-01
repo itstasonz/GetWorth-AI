@@ -101,7 +101,7 @@ describe('V2-19 the client store', () => {
   test('V2-19d the follow-up sends the NEW photograph with the signed state, then prices', async () => {
     script([identifyOk('NEED_FOLLOWUP')]);
     await startScanV2(deps());
-    const requests = script([identifyOk('SEARCH_NOW', { followups_used: 1, state: 'signed.second' }), priceOk('MARKET_INFORMED_ESTIMATE')]);
+    const requests = script([identifyOk('SEARCH_NOW', { followups_used: 1, state: 'signed.second' }), priceOk('USED_EVIDENCE_BELOW_QUORUM')]);
     await followupScanV2(deps({ dataUrl: photo('RAW2') }));
     assert.equal(requests[0].body.state, 'signed.token');
     assert.equal(requests[0].body.image, `COMPRESSED2${PAD}`);
@@ -446,16 +446,40 @@ describe('V2-20 the flag: V1 is the path unless the build AND the server say oth
 
 describe('V2-21 what the screen may say', () => {
   const view = code('src/views/ScanV2View.jsx');
-  test('V2-21a every price state has a headline in both languages', () => {
-    for (const state of ['VERIFIED_MARKET_VALUE', 'MARKET_INFORMED_ESTIMATE', 'ESTIMATED_WORTH', 'NEED_MORE_INFORMATION', 'NO_PRICE_EVIDENCE']) {
+  test('V2-21a every price state the server produces has a headline in both languages, and the reserved one has none', () => {
+    assert.ok(!view.includes('ESTIMATED_WORTH'), 'the removed state has no headline to show');
+    const pricing = read('api/_lib/v2/pricing.js');
+    const states = [...pricing.matchAll(/^\s+([A-Z_]+): '\1',/gm)].map((m) => m[1]);
+    assert.deepEqual(states, ['VERIFIED_MARKET_VALUE', 'USED_EVIDENCE_ESTIMATE', 'USED_EVIDENCE_BELOW_QUORUM', 'COMPARABLE_MARKET_ESTIMATE', 'MARKET_INFORMED_ESTIMATE', 'NEED_MORE_INFORMATION', 'NO_PRICE_EVIDENCE']);
+    for (const state of states.filter((s) => s !== 'MARKET_INFORMED_ESTIMATE')) {
       assert.equal((view.match(new RegExp(`${state}: '`, 'g')) || []).length, 2, state);
     }
+    // The reserved state is not dressed for the screen: no headline, no sentence, no mention.
+    assert.ok(!view.includes('MARKET_INFORMED_ESTIMATE'));
   });
   test('V2-21b every priced basis the server can return has a sentence in both languages', () => {
     const pricing = read('api/_lib/v2/pricing.js');
     const kinds = [...pricing.matchAll(/^\s+[A-Z_]+: '([a-z_]+)',$/gm)].map((m) => m[1]).filter((k) => k !== 'none');
-    assert.ok(kinds.length >= 5);
+    assert.deepEqual(kinds.sort(), ['admitted_used_listings_below_quorum', 'verified_comparable_listings', 'verified_comparable_listings_range_adjusted', 'verified_used_listings', 'verified_used_listings_range_adjusted']);
     for (const kind of kinds) assert.equal((view.match(new RegExp(`${kind}: \\(b\\) =>`, 'g')) || []).length, 2, kind);
+    assert.ok(!/new_retail_price|used_listings_for_brand_and_kind/.test(view), 'no sentence for a basis that no longer exists');
+  });
+  test('V2-21j the new price is its own card, says it is not a second-hand value, and is never the headline number', () => {
+    assert.match(view, /v\?\.retail_anchor\?\.shops > 0/);
+    assert.match(view, /This is not a second-hand value\./);
+    assert.match(view, /זה אינו שווי יד שנייה\./);
+    const headline = view.slice(view.indexOf('{priced ? ('), view.indexOf('v?.retail_anchor?.shops > 0'));
+    assert.ok(headline.length > 0 && !/retail/i.test(headline), 'the price card never reads the anchor');
+    assert.match(view, /const priced = v && typeof v\.recommended === 'number' && v\.recommended > 0;/);
+  });
+  test('V2-21k identification and price evidence are two lines, read from two fields', () => {
+    assert.match(view, /c\.identityConfidence\}: \{c\.levels\[v\.confidence\.identity\.level\]/);
+    assert.match(view, /c\.pricingConfidence\}: \{c\.levels\[v\.confidence\.pricing\.used_market\]/);
+    for (const needle of ['label="identity confidence"', 'label="used-market evidence"', 'label="retail anchor"', 'label="search actions"', 'label="aliases proposed"', 'label="aliases corroborated"',
+      'title="Market identity"', 'title="Extraction"', 'label="results inspected"', 'label="duplicates"', 'label="no price data"', 'label="price candidates"', 'label="counts reconcile"',
+      'label="extraction reasons"', 'label="local used"', 'label="local retail"', 'label="international used"', 'label="international retail"', 'label="sibling"', 'label="family-level"', 'label="how it was calculated"']) {
+      assert.ok(view.includes(needle), needle);
+    }
   });
   test('V2-21c the screen cannot say "strong evidence" or claim a catalog reference', () => {
     assert.ok(!/strong|catalog|קטלוג|בסיס תמחור חזק/i.test(view));

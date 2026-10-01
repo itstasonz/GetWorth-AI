@@ -162,5 +162,9 @@ export function mergeIdentity(prior, next) {
     condition: prior.condition?.grade && prior.condition.grade !== 'Unknown' ? prior.condition : next.condition,
     identity_evidence: union(prior.identity_evidence, next.identity_evidence, 6),
     missing_evidence: next.missing_evidence ?? FOLLOWUP.NONE,
+    market_hypotheses: {
+      aliases: union(prior.market_hypotheses?.aliases, next.market_hypotheses?.aliases, 3),
+      model_numbers: union(prior.market_hypotheses?.model_numbers, next.market_hypotheses?.model_numbers, 3),
+    },
   };
 }

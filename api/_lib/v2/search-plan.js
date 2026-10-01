@@ -13,6 +13,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { IDENTITY_LEVEL } from './sufficiency.js';
 
+// FOUR, AND IT IS A HARD CAP. A fifth query was measured to push the provider
+// into a second search action: 6.0s to results instead of 3.4s.
 export const MAX_V2_QUERIES = 4;
 export const V2_PURPOSE = Object.freeze({
   SECOND_HAND: 'SECOND_HAND',
@@ -20,7 +22,18 @@ export const V2_PURPOSE = Object.freeze({
   PRICE_CONTEXT: 'PRICE_CONTEXT',
   LOCAL_NAME: 'LOCAL_NAME',
   HYPOTHESIS: 'CANDIDATE_MODEL',
+  ALIAS_SECOND_HAND: 'ALIAS_SECOND_HAND',
+  ALIAS_PRICE: 'ALIAS_PRICE',
 });
+
+/** The one market name worth two of the four queries: a model number first. */
+function bestHypothesis(identity) {
+  const h = identity?.market_hypotheses ?? {};
+  const number = (h.model_numbers ?? [])[0];
+  if (number) return { value: number, kind: 'model_number' };
+  const alias = (h.aliases ?? [])[0];
+  return alias ? { value: alias, kind: 'name' } : null;
+}
 
 const clean = (v, max = 80) => {
   const t = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
@@ -85,11 +98,23 @@ export function planV2Search(identity, level, market) {
   const hypotheses = [];
 
   if (level === IDENTITY_LEVEL.PRODUCT) {
+    // FOUR QUERIES, TWO NAMES, TWO INTENTS. What was read off the item, and the
+    // best guess at what it is sold as; each asked once for second-hand
+    // listings and once for a price. The guess is a HYPOTHESIS: it shapes a
+    // search and is matched on only if the results corroborate it.
     name = overlapJoin(brand, id.model?.value);
+    const guess = bestHypothesis(id);
     add(V2_PURPOSE.SECOND_HAND, join(name, t.second_hand));
-    add(V2_PURPOSE.FOR_SALE, join(name, t.for_sale));
     add(V2_PURPOSE.PRICE_CONTEXT, join(name, t.price));
-    if (id.local_name) add(V2_PURPOSE.LOCAL_NAME, join(id.local_name, brand, t.second_hand));
+    if (guess) {
+      const alias = overlapJoin(brand, guess.value);
+      add(V2_PURPOSE.ALIAS_SECOND_HAND, join(alias, t.second_hand), { hypothesis: guess.value });
+      add(V2_PURPOSE.ALIAS_PRICE, join(alias, t.price), { hypothesis: guess.value });
+      hypotheses.push({ model: guess.value, kind: guess.kind, confidence: null });
+    } else {
+      add(V2_PURPOSE.FOR_SALE, join(name, t.for_sale));
+      if (id.local_name) add(V2_PURPOSE.LOCAL_NAME, join(id.local_name, brand, t.second_hand));
+    }
   } else if (level === IDENTITY_LEVEL.CANDIDATES) {
     name = join(brand, id.object_class);
     for (const c of (id.ranked_candidates ?? []).slice(0, MAX_V2_QUERIES - 1)) {

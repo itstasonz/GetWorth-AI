@@ -174,17 +174,27 @@ function identityEvents(raw) {
   ];
 }
 
-function searchEvents(results, queries) {
+function searchEvents(results, queries, second = null) {
   const call = {
     id: 'ws_1', type: 'web_search_call', status: 'completed',
     action: { type: 'search', queries, sources: results.map((r) => ({ type: 'url', url: r.url })) },
     results,
   };
   const message = { type: 'message', content: [{ type: 'output_text', text: 'done' }] };
+  // A provider that decides to search again: the expensive loop.
+  const call2 = second && {
+    id: 'ws_2', type: 'web_search_call', status: 'completed',
+    action: { type: 'search', queries: ['a second action'], sources: second.map((r) => ({ type: 'url', url: r.url })) },
+    results: second,
+  };
   return [
     { type: 'response.created' },
     { type: 'response.output_item.added', item: { id: 'ws_1', type: 'web_search_call' } },
     { type: 'response.output_item.done', item: call },
+    ...(call2 ? [
+      { type: 'response.output_item.added', item: { id: 'ws_2', type: 'web_search_call' } },
+      { type: 'response.output_item.done', item: call2 },
+    ] : []),
     { type: 'response.output_item.added', item: { type: 'message' } },
     // Everything below is the model writing. V2 must not wait for it.
     { type: 'response.output_text.delta', delta: 'do' },
@@ -199,10 +209,11 @@ function searchEvents(results, queries) {
  *
  * `identities` are consumed in order, one per identity call. `results` answers
  * every search call; `searchStatus` makes the search call fail with that HTTP
- * status instead, and `hangSearch` makes it never answer. Returns the fetch with a `calls` record beside it.
+ * status instead, `hangSearch` makes it never answer, and `secondSearch` makes
+ * the provider begin a second search action after the first. Returns the fetch with a `calls` record beside it.
  */
 export function mockV2Provider({
-  identities = [], results = [], searchStatus = null, identityStatus = null, hangSearch = false,
+  identities = [], results = [], searchStatus = null, identityStatus = null, hangSearch = false, secondSearch = null,
 } = {}) {
   const calls = [];
   let next = 0;
@@ -226,7 +237,7 @@ export function mockV2Provider({
     }
     const text = body.input?.[0]?.content?.find((c) => c.type === 'input_text')?.text ?? '';
     const events = isSearch
-      ? searchEvents(results, text.split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => l.replace(/^\d+\. /, '')))
+      ? searchEvents(results, text.split('\n').filter((l) => /^\d+\. /.test(l)).map((l) => l.replace(/^\d+\. /, '')), secondSearch)
       : identityEvents(identities[next++] ?? RAW.DARK);
     const stream = streamOf(events, record);
     init.signal?.addEventListener('abort', () => { record.aborted = true; });
