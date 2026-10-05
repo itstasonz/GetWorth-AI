@@ -143,7 +143,14 @@ export const MARKET_REGIONS = Object.freeze({
     search_hints: Object.freeze(['יד שנייה', 'יד2', 'למכירה', 'מחיר']),
     // The same words by ROLE, for a query that is assembled rather than
     // written. A market supplies its own; nothing downstream knows a language.
-    terms: Object.freeze({ second_hand: 'יד שנייה', for_sale: 'למכירה', price: 'מחיר' }),
+    // `model_number` is the word a shop prints beside a product's number
+    // ("דגם: TB301"); a query carrying it reaches the pages that print one.
+    terms: Object.freeze({ second_hand: 'יד שנייה', for_sale: 'למכירה', price: 'מחיר', model_number: 'דגם' }),
+    // Which hosts are IN this market. A site under one of these suffixes
+    // sells here and prices in this market's currency; every other host is
+    // abroad, whatever currency its page happens to show. Data, read by V2's
+    // source typing (api/_lib/v2/source-type.js); V1 does not read it.
+    site_suffixes: Object.freeze(['.il']),
   }),
 });
 export const MARKET_REGION_DEFAULT = 'IL';

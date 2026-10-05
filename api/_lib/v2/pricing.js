@@ -24,27 +24,37 @@
 //   COMPARABLE_MARKET_ESTIMATE the item is a KIND of object, priced from its
 //                              verified comparables: that kind's market, never
 //                              this product's
-//   MARKET_INFORMED_ESTIMATE   RESERVED, and never produced here. The name of a
-//                              future calibrated fallback — a retail anchor and
-//                              empirically learned resale behaviour — that has
-//                              not been earned (scripts/valuation-calibration.mjs)
+//   MARKET_INFORMED_ESTIMATE   the identity is product-level and strong, a
+//                              local shop's new price for the exact product
+//                              is in hand, the used market is thin — and a
+//                              MEASURED resale factor exists for this kind of
+//                              object in this condition (resale-factors.js).
+//                              The estimate is the anchor times that factor,
+//                              blended with whatever exact used listings were
+//                              admitted below the quorum. Disclosed as an
+//                              estimate, with its own pricing confidence.
 //   NEED_MORE_INFORMATION      the identity cannot carry a product price
 //   NO_PRICE_EVIDENCE          identified and searched, and no second-hand
 //                              listing for it was admitted (or the search failed)
 //
 // The RETAIL_REPLACEMENT_ANCHOR is not a state: it is reported beside whichever
 // state the used evidence earned, under `retail_anchor`, and is never promoted
-// into one. "Retail evidence only" is NO_PRICE_EVIDENCE with an anchor.
+// into one. "Retail evidence only" is NO_PRICE_EVIDENCE with an anchor — and a
+// LIMITATION that says what the estimate is waiting for.
+//
+// ── THREE CLAIMS, ABOVE THE STATES ──────────────────────────────────────────
+//
+// `evidence_state` folds the finer states into the three answers the product
+// makes: VERIFIED_USED_MARKET, MARKET_INFORMED_ESTIMATE, INSUFFICIENT_EVIDENCE.
 //
 // ── WHAT IS DELIBERATELY NOT HERE ───────────────────────────────────────────
 //
-// No second-hand value is derived from a retail price. GetWorth has a
-// condition ladder that discounts "used" by a fixed share of new, and it has
-// never been measured against a real market: multiplying a shop price by it
-// would replace "no evidence" with a number that only looks like evidence. The
-// step from a retail anchor to a used value is scripts/valuation-calibration.mjs'
-// to earn, offline, before it is allowed in here — and when it is, it will be
-// MARKET_INFORMED_ESTIMATE, a state no present path produces.
+// No universal percentage. The condition ladder discounts "used" by a fixed
+// share of new and has never been measured against a market; it is not used
+// to turn a shop price into a value. A resale factor enters only from the
+// table scripts/valuation-calibration.mjs writes from observed pairs, per
+// category and kind of object, and a group it did not measure yields nothing:
+// the state says INSUFFICIENT_EVIDENCE and names the missing factor.
 //
 // ── TWO CONFIDENCES, NEVER ONE ──────────────────────────────────────────────
 //
@@ -61,18 +71,23 @@ import { applyGuard, corroborateSubject } from '../phaseb/validation.js';
 import { DECISION, IDENTITY_LEVEL } from './sufficiency.js';
 import { SEARCH_OUTCOME } from './search.js';
 import { ANCHOR_STRENGTH } from './evidence.js';
+import { findResaleFactor, loadResaleFactors } from './resale-factors.js';
 
 export const PRICE_STATE = Object.freeze({
   VERIFIED_MARKET_VALUE: 'VERIFIED_MARKET_VALUE',
   USED_EVIDENCE_ESTIMATE: 'USED_EVIDENCE_ESTIMATE',
   USED_EVIDENCE_BELOW_QUORUM: 'USED_EVIDENCE_BELOW_QUORUM',
   COMPARABLE_MARKET_ESTIMATE: 'COMPARABLE_MARKET_ESTIMATE',
-  MARKET_INFORMED_ESTIMATE: 'MARKET_INFORMED_ESTIMATE',   // reserved: see above
+  MARKET_INFORMED_ESTIMATE: 'MARKET_INFORMED_ESTIMATE',
   NEED_MORE_INFORMATION: 'NEED_MORE_INFORMATION',
   NO_PRICE_EVIDENCE: 'NO_PRICE_EVIDENCE',
 });
-/** The states a scan can end in today. The reserved one is not among them. */
-export const PRODUCED_STATES = Object.freeze(Object.values(PRICE_STATE).filter((s) => s !== PRICE_STATE.MARKET_INFORMED_ESTIMATE));
+/** Every state a scan can end in. */
+export const PRODUCED_STATES = Object.freeze(Object.values(PRICE_STATE));
+/** The three claims the product makes, above the finer states. */
+export const EVIDENCE_STATE = Object.freeze({ VERIFIED_USED_MARKET: 'VERIFIED_USED_MARKET', MARKET_INFORMED_ESTIMATE: 'MARKET_INFORMED_ESTIMATE', INSUFFICIENT_EVIDENCE: 'INSUFFICIENT_EVIDENCE' });
+/** Why no estimate: what it is waiting for. */
+export const LIMITATION = Object.freeze({ IDENTITY: 'identity_below_product_level', SEARCH: 'search_did_not_complete', NO_ANCHOR: 'no_retail_anchor', NO_FACTOR: 'no_calibrated_resale_factor', NOT_BELOW_RETAIL: 'estimate_not_below_retail', GUARD: 'guard_declined_the_market_price' });
 
 export const BASIS = Object.freeze({
   VERIFIED_LISTINGS: 'verified_used_listings',
@@ -80,11 +95,18 @@ export const BASIS = Object.freeze({
   ADMITTED_BELOW_QUORUM: 'admitted_used_listings_below_quorum',
   GUARD_ADJUSTED: 'verified_used_listings_range_adjusted',
   COMPARABLE_GUARD_ADJUSTED: 'verified_comparable_listings_range_adjusted',
+  MARKET_INFORMED: 'retail_anchor_times_measured_resale_factor',
   NONE: 'none',
 });
 
-export const USED_EVIDENCE = Object.freeze({ NONE: 'NONE', BELOW_QUORUM: 'BELOW_QUORUM', COMPARABLE: 'COMPARABLE', VERIFIED: 'VERIFIED' });
+export const USED_EVIDENCE = Object.freeze({ NONE: 'NONE', BELOW_QUORUM: 'BELOW_QUORUM', COMPARABLE: 'COMPARABLE', MARKET_INFORMED: 'MARKET_INFORMED', VERIFIED: 'VERIFIED' });
 export const IDENTITY_CONFIDENCE = Object.freeze({ VERY_HIGH: 'VERY_HIGH', HIGH: 'HIGH', MODERATE: 'MODERATE', LOW: 'LOW' });
+
+const evidenceStateOf = (state) => {
+  if (state === PRICE_STATE.VERIFIED_MARKET_VALUE || state === PRICE_STATE.USED_EVIDENCE_ESTIMATE) return EVIDENCE_STATE.VERIFIED_USED_MARKET;
+  if (state === PRICE_STATE.MARKET_INFORMED_ESTIMATE) return EVIDENCE_STATE.MARKET_INFORMED_ESTIMATE;
+  return EVIDENCE_STATE.INSUFFICIENT_EVIDENCE;
+};
 
 /** A kind of object needs a small sample before its comparables say anything. */
 export const MIN_GENERIC_LISTINGS = 3;
@@ -143,33 +165,54 @@ export function identityConfidence(identity, sufficiency) {
  */
 export function resolveV2Price({
   identity, subject, sufficiency, evidence = null, searchOutcome = SEARCH_OUTCOME.NOT_ATTEMPTED,
+  // The factor table. Tests hand in a measured one; production reads the file.
+  resaleFactors = undefined,
 } = {}) {
   const anchor = evidence?.retail_anchor ?? NO_ANCHOR;
-  const finish = (used, usedEvidence) => ({
+  const idConfidence = identityConfidence(identity, sufficiency);
+  const finish = (used, usedEvidence, limitation = null) => ({
     ...used,
     currency: 'ILS',
+    evidence_state: evidenceStateOf(used.state),
+    // What the estimate is waiting for, when there is none. Null when priced.
+    limitation,
     // The new price, beside the value and never inside it.
     retail_anchor: anchor,
     confidence: {
-      identity: identityConfidence(identity, sufficiency),
+      identity: idConfidence,
       pricing: { used_market: usedEvidence, retail_anchor: anchor.strength },
     },
   });
-  const unpriced = (state, reason, extra = {}) => finish({
+  const unpriced = (state, reason, extra = {}, limitation = null) => finish({
     state, low: null, recommended: null, high: null, authority: 'none',
     basis: { kind: BASIS.NONE, listings: 0, sources: 0 }, reason, guard: null, ...extra,
-  }, USED_EVIDENCE.NONE);
+  }, USED_EVIDENCE.NONE, limitation);
 
   if (sufficiency?.decision !== DECISION.SEARCH_NOW) {
-    return unpriced(PRICE_STATE.NEED_MORE_INFORMATION, 'identity_insufficient_for_a_product_price');
+    return unpriced(PRICE_STATE.NEED_MORE_INFORMATION, 'identity_insufficient_for_a_product_price', {}, { code: LIMITATION.IDENTITY, group: null });
   }
   if (searchOutcome !== SEARCH_OUTCOME.COMPLETED || !evidence) {
-    return unpriced(PRICE_STATE.NO_PRICE_EVIDENCE, `search_${String(searchOutcome).toLowerCase()}`);
+    return unpriced(PRICE_STATE.NO_PRICE_EVIDENCE, `search_${String(searchOutcome).toLowerCase()}`, {}, { code: LIMITATION.SEARCH, group: null });
   }
 
   const grade = identity?.condition?.grade ?? null;
   const q = evidence.qualification;
   const sources = q.distinct_sources ?? 0;
+
+  // ── WHAT A MARKET-INFORMED ESTIMATE WOULD NEED, AND WHETHER IT IS HERE ────
+  //
+  // Decided up front so that every unpriced answer below can say which of the
+  // three things is missing: the identity, the shop price, or the measured
+  // factor. A product-level identity that the gate let through is HIGH or
+  // VERY_HIGH by construction (identityConfidence); the factor is the one
+  // input that cannot be earned inside a scan.
+  const estimateIdentity = sufficiency.level === IDENTITY_LEVEL.PRODUCT;
+  const factorLookup = estimateIdentity
+    ? findResaleFactor({ category: identity?.category, object_class: identity?.object_class, condition: grade ?? 'Unknown' }, resaleFactors ?? loadResaleFactors())
+    : null;
+  const limitation = !estimateIdentity ? { code: LIMITATION.IDENTITY, group: null }
+    : (anchor.strength === ANCHOR_STRENGTH.NONE ? { code: LIMITATION.NO_ANCHOR, group: null }
+      : (factorLookup?.factor ? null : { code: LIMITATION.NO_FACTOR, group: factorLookup?.group ?? null, status: factorLookup?.status ?? null }));
 
   // ── A TOKEN WAS MINTED: price from exactly the listings that earned it ────
   const token = q.qualified ? q.token : (q.comparable_qualified ? q.comparable_token : null);
@@ -232,20 +275,51 @@ export function resolveV2Price({
     }
     // The guard declined a price the evidence supported. Its answer stands: a
     // number it refused is not shown under a weaker label.
-    return unpriced(PRICE_STATE.NO_PRICE_EVIDENCE, 'guard_declined_the_market_price', { guard: guardView });
+    return unpriced(PRICE_STATE.NO_PRICE_EVIDENCE, 'guard_declined_the_market_price', { guard: guardView }, { code: LIMITATION.GUARD, group: null });
+  }
+
+  // Every listing here passed the evidence gate for THIS product, under the
+  // name read off the item or a name the results corroborated as the same
+  // product. One such listing is a real asking price for it.
+  const admitted = (evidence.entries ?? []).filter((e) => e.admitted);
+  const usedPrices = admitted.map((e) => e.observation.observed_price).filter((p) => Number.isFinite(p) && p > 0);
+
+  // ── THE MARKET-INFORMED ESTIMATE ───────────────────────────────────────────
+  //
+  // The local shop price for the exact product, scaled by the share of new
+  // that second-hand sellers of this KIND of object were MEASURED to ask, in
+  // this condition; and, when a listing or two for this product was admitted
+  // below the quorum, blended with those. Shown as an estimate, under its own
+  // pricing confidence. It must sit below the new price: an estimate that does
+  // not is refused rather than shown.
+  if (limitation === null) {
+    const f = factorLookup.factor;
+    const est = { low: Math.round(anchor.low * f.p25), mid: Math.round(anchor.median * f.median), high: Math.round(anchor.high * f.p75) };
+    const sorted = [est.mid, ...usedPrices].sort((a, b) => a - b);
+    const recommended = Math.round(median(sorted));
+    const low = Math.min(est.low, ...usedPrices);
+    const high = Math.max(est.high, ...usedPrices);
+    if (recommended > 0 && low > 0 && high < anchor.median) {
+      return finish({
+        state: PRICE_STATE.MARKET_INFORMED_ESTIMATE, low, recommended, high, authority: 'none',
+        basis: {
+          kind: BASIS.MARKET_INFORMED, listings: admitted.length, sources: evidence.used_admitted?.sources ?? sources,
+          anchor_shops: anchor.shops, anchor_median: anchor.median,
+          factor: { group: factorLookup.group, condition: factorLookup.condition, median: f.median, p25: f.p25, p75: f.p75, products: factorLookup.products ?? null },
+        },
+        reason: null, guard: null,
+      }, USED_EVIDENCE.MARKET_INFORMED, null);
+    }
+    return unpriced(PRICE_STATE.NO_PRICE_EVIDENCE, 'estimate_not_below_retail', {}, { code: LIMITATION.NOT_BELOW_RETAIL, group: factorLookup.group });
   }
 
   // ── ADMITTED, BELOW THE FLOORS ──────────────────────────────────────────
   //
-  // Every listing here passed the evidence gate for THIS product, under the
-  // name read off the item or a name the results corroborated as the same
-  // product. One such listing is a real asking price for it. One listing for a
-  // KIND of object says almost nothing about another object of that kind, so a
-  // generic subject needs a small sample.
-  const admitted = (evidence.entries ?? []).filter((e) => e.admitted);
+  // One listing for a KIND of object says almost nothing about another object
+  // of that kind, so a generic subject needs a small sample.
   const floor = sufficiency.level === IDENTITY_LEVEL.GENERIC ? MIN_GENERIC_LISTINGS : 1;
   if (admitted.length >= floor) {
-    const range = rangeOf(admitted.map((e) => e.observation.observed_price), grade);
+    const range = rangeOf(usedPrices, grade);
     if (range) {
       return finish({
         state: PRICE_STATE.USED_EVIDENCE_BELOW_QUORUM, ...range, authority: 'none',
@@ -254,10 +328,10 @@ export function resolveV2Price({
           sources: evidence.used_admitted?.sources ?? sources, set_failures: q.set_failures,
         },
         reason: null, guard: null,
-      }, USED_EVIDENCE.BELOW_QUORUM);
+      }, USED_EVIDENCE.BELOW_QUORUM, limitation);
     }
   }
 
   return unpriced(PRICE_STATE.NO_PRICE_EVIDENCE,
-    q.set_failures?.length ? `no_admitted_listings: ${q.set_failures.join(', ')}` : 'no_admitted_listings');
+    q.set_failures?.length ? `no_admitted_listings: ${q.set_failures.join(', ')}` : 'no_admitted_listings', {}, limitation);
 }

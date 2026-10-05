@@ -338,10 +338,14 @@ describe('V2-9 authority rules V2 must not regress', () => {
     assert.equal((code('evidence.js').match(/ANCHOR_STRENGTH\.STRONG/g) || []).length, 1, 'assigned in one place: the retail anchor');
     assert.ok(!/ANCHOR_STRENGTH\.STRONG/.test(code('pricing.js')), 'the used-market state never reads it');
   });
-  test('V2-9e no used value is derived from a retail price: pricing reads the anchor only to pass it through', () => {
-    const pricing = code('pricing.js');
-    assert.ok(!/anchor\.(low|median|high|prices)/.test(pricing), 'no arithmetic on the anchor');
-    assert.ok(!/ESTIMATED_WORTH|RETAIL_DEPRECIATED|0\.7\b|0\.70\b/.test(pricing));
+  test('V2-9e a used value is derived from a retail price ONLY through a measured factor: no percentage lives in the code', () => {
+    const pricing = code('pricing.js').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
+    // The anchor is multiplied by a factor read from the table, never by a literal.
+    assert.ok(!/anchor\.(low|median|high)\s*\*\s*\d/.test(pricing), 'no literal multiplies the anchor');
+    assert.ok(!/ESTIMATED_WORTH|RETAIL_DEPRECIATED|0\.7\b|0\.70\b|0\.5\b|0\.6\b/.test(pricing));
+    assert.ok(!/conditionMultiplier\([^)]*\)\s*[^;]*anchor/.test(pricing), 'the condition ladder never scales the anchor');
+    const estimate = pricing.slice(pricing.indexOf('if (limitation === null)'), pricing.indexOf('ADMITTED, BELOW THE FLOORS'));
+    assert.ok(estimate.length > 0 && /factorLookup\.factor/.test(estimate) && /anchor\.median \* f\.median/.test(estimate));
     assert.ok(!/valuation-calibration/.test(code('pricing.js') + code('evidence.js') + code('scan.js')), 'the offline harness is not imported');
   });
   test('V2-9d no model output is a number in the valuation: pricing imports no provider client', () => {

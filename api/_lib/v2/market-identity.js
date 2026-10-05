@@ -62,6 +62,10 @@ export const RELATION = Object.freeze({
   SIBLING: 'SIBLING',
   FAMILY: 'FAMILY',
   UNVERIFIED: 'UNVERIFIED',
+  // A text that names ANOTHER model number, once this product's own number is
+  // known. "Ninja CB103 Power Nutri Duo" carries the brand and the one word
+  // that makes the read name distinctive; it is a different product.
+  OTHER_PRODUCT: 'OTHER_PRODUCT',
 });
 /** How many independent sites must connect an alias to the read identity. */
 export const MIN_ALIAS_SITES = 2;
@@ -193,9 +197,16 @@ export function assessMarketIdentity({ identity = null, results = [] } = {}) {
   }).filter((p) => p.site);
 
   // A number that was READ off the item needs no corroboration: it is identity.
-  const readRoots = new Set(identifiersIn([name, ...(identity?.visible_text ?? [])].join(' '))
-    .filter((i) => nameTokens.includes(i.id.toLowerCase()) || nameTokens.includes(i.root.toLowerCase()))
-    .map((i) => i.root));
+  // Either it is part of the read name, or it is the model number the
+  // identity read off a label (identity.js keeps that field only when it was
+  // read and occurs in the visible text).
+  const readNumber = identity?.model_number?.value ?? null;
+  const readRoots = new Set([
+    ...identifiersIn([name, ...(identity?.visible_text ?? [])].join(' '))
+      .filter((i) => nameTokens.includes(i.id.toLowerCase()) || nameTokens.includes(i.root.toLowerCase()))
+      .map((i) => i.root),
+    ...identifiersIn(readNumber).map((i) => i.root),
+  ]);
 
   // ── MODEL NUMBERS ────────────────────────────────────────────────────────
   const connecting = new Map();   // root -> Map(site -> url)
@@ -328,7 +339,11 @@ export function relationOf(text, market) {
   const exactIds = ids.filter((i) => market.exact_roots.includes(i.root));
   const otherIds = ids.filter((i) => !market.exact_roots.includes(i.root));
   if (otherIds.some((i) => market.sibling_roots.includes(i.root))) return RELATION.SIBLING;
-  if (otherIds.length > 0 && exactIds.length === 0) return 'UNKNOWN';       // another product's number
+  // Another product's number. Once THIS product's number is known, a text
+  // that names a different one is a different product, whatever words of the
+  // read name it also carries. Before it is known, the number may yet be this
+  // product's own, and the text is merely unresolved.
+  if (otherIds.length > 0 && exactIds.length === 0) return market.exact_roots.length > 0 ? RELATION.OTHER_PRODUCT : 'UNKNOWN';
   if (exactIds.length > 0) return exactIds.every((i) => i.suffix) ? RELATION.REGIONAL_VARIANT : RELATION.EXACT;
   const hasName = market.name_tokens.length > 0 && market.name_tokens.every((t) => toks.includes(t));
   if (hasBrand && hasName) return RELATION.EXACT;

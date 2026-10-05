@@ -49,4 +49,9 @@ export const MATRIX = [
   ['M unverified alias', M.NINJA_UNVERIFIED, M.RESULTS_UNVERIFIED_ALIAS],
   ['M verified alias', M.NINJA, M.RESULTS_VERIFIED_ALIAS],
   ['foreign', M.NINJA, M.RESULTS_FOREIGN],
+  ['N wrong configuration', M.NINJA, M.RESULTS_WRONG_CONFIGURATION],
+  ['O accessory subject', M.AIRPODS_CASE, M.RESULTS_AIRPODS_CASE],
+  ['P other product', M.NINJA, M.RESULTS_OTHER_PRODUCT],
+  ['Q abroad', M.NINJA, M.RESULTS_ABROAD],
+  ['R locale rows', M.NINJA, M.RESULTS_LOCALE_ROWS],
 ].map(([name, raw, results, provenance]) => ({ name, raw, ...scan(raw, results, provenance ?? provenanceOf(results)) }));

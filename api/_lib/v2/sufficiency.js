@@ -25,6 +25,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { FOLLOWUP, LABEL_FOLLOWUPS, defaultFollowupFor, followupInstruction } from './followup.js';
 import { V2_MAX_FOLLOWUPS } from './config.js';
+import { confidenceOf } from './calibration.js';
 
 export const DECISION = Object.freeze({
   SEARCH_NOW: 'SEARCH_NOW',
@@ -123,7 +124,9 @@ export function decideSufficiency(identity, {
 } = {}) {
   const id = identity && typeof identity === 'object' ? identity : {};
   const model = id.model?.value ?? null;
-  const modelConf = id.model?.confidence ?? 0;
+  // THE CALIBRATED NUMBER: the model's confidence, capped by what its evidence
+  // can carry (calibration.js). A silhouette at 0.98 enters here as 0.8.
+  const modelConf = confidenceOf(id.model);
   const modelRead = !!model && READ.has(id.model?.evidence);
   const rivals = materialRivals(id);
   const topRival = rivals.reduce((m, r) => Math.max(m, r.confidence ?? 0), 0);
@@ -138,7 +141,7 @@ export function decideSufficiency(identity, {
   // A product that is established names its maker: "PlayStation 5" beside a
   // brand the model was only half sure of is still a Sony PlayStation 5.
   const brandOk = !!id.brand?.value
-    && ((id.brand.confidence ?? 0) >= THRESHOLD.BRAND || READ.has(id.brand?.evidence) || modelBasis !== null);
+    && (confidenceOf(id.brand) >= THRESHOLD.BRAND || READ.has(id.brand?.evidence) || modelBasis !== null);
   const mayAsk = followupsUsed < V2_MAX_FOLLOWUPS;
   const alike = pricedAlike(rivals, candidatePrices);
 

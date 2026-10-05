@@ -23,11 +23,29 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { bindObservations } from '../phaseb/search-provenance.js';
 import { providerTextOf } from '../phaseb/market-report.js';
+import { resolveMarketRegion } from '../phaseb/config.js';
 import { qualifyMarketEvidence, canonicalCurrency, DISQUALIFIER, MARKET_CURRENCY } from '../market-evidence.js';
+import { ACCESSORY_NOUNS } from '../pricing-authority.js';
 import { sourceSite } from '../source-site.js';
 import { extractListings, PAGE, BINDING, REFUSED } from './listing-extraction.js';
-import { assessMarketIdentity, RELATION } from './market-identity.js';
+import { assessMarketIdentity, RELATION, tokens } from './market-identity.js';
 import { IDENTITY_LEVEL } from './sufficiency.js';
+import { CONFIGURATION, CONFIGURATIONS, configurationCompatible } from './configuration.js';
+import { SOURCE_TYPE, LOCALE } from './source-type.js';
+
+// ── EVIDENCE TIERS ──────────────────────────────────────────────────────────
+//
+// Not one bucket. What a listing can say about THIS item's used value depends
+// on where it is, what it is for, and whether it is this product:
+//
+//   A  local, second-hand, this exact product, a complete object  → prices it
+//   B  abroad, second-hand, this exact product, complete            → context until a rate source exists
+//   C  a local shop's new price for this exact product              → the replacement anchor
+//   D  this product as sold elsewhere (a regional number)            → context
+//   E  a sibling or the family                                       → never a comparable
+export const TIER = Object.freeze({
+  A: 'A_LOCAL_USED_EXACT', B: 'B_INTERNATIONAL_USED_EXACT', C: 'C_RETAIL_ANCHOR', D: 'D_REGIONAL_VARIANT', E: 'E_SIBLING_OR_FAMILY',
+});
 
 export const BUCKET = Object.freeze({
   DUPLICATE: 'DUPLICATE',
@@ -56,11 +74,20 @@ const median = (sorted) => (sorted.length % 2
   ? sorted[(sorted.length - 1) / 2]
   : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2);
 
+// WHERE a listing is, is a fact about its host (source-type.js), never about
+// the currency symbol beside its number: an international marketplace that
+// shows a converted shekel price is still abroad.
 function classOf(entry) {
-  const local = canonicalCurrency(entry.observation.currency) === MARKET_CURRENCY;
+  const local = entry.locale === LOCALE.LOCAL;
   if (entry.kind === 'used_listing') return local ? EVIDENCE_CLASS.LOCAL_USED : EVIDENCE_CLASS.FOREIGN_USED;
   if (entry.kind === 'new_retail') return local ? EVIDENCE_CLASS.LOCAL_RETAIL : EVIDENCE_CLASS.FOREIGN_RETAIL;
   return EVIDENCE_CLASS.OTHER;
+}
+
+/** Is the photographed object itself an accessory (a case, a strap, a charger)? */
+function subjectIsAccessory(subject) {
+  if (subject?.configuration === CONFIGURATION.ACCESSORY_ONLY) return true;
+  return [...tokens(subject?.object_class), ...tokens(subject?.product_name)].some((t) => ACCESSORY_NOUNS.has(t));
 }
 
 /**
@@ -91,23 +118,41 @@ function subjectForms(subject, market, level) {
  * subjectOf). Returns a report in every case; `qualification.token` is non-null
  * only when one form's whole set earned VERIFIED_MARKET.
  */
-export function assessV2Evidence({ provenance, subject, level, identity = null } = {}) {
+export function assessV2Evidence({ provenance, subject, level, identity = null, region = resolveMarketRegion() } = {}) {
   const t0 = performance.now();
   const results = Array.isArray(provenance?.results) ? provenance.results : [];
   const market = assessMarketIdentity({ identity, results });
-  const { pages, entries, refused } = extractListings(results, { market });
+  const accessorySubject = subjectIsAccessory(subject);
+  // An accessory photographed on its own is sold as "<accessory> only", or
+  // under its own name with nothing said; the gate then requires the noun.
+  const subjectConfiguration = accessorySubject ? CONFIGURATION.ACCESSORY_ONLY : (subject?.configuration ?? CONFIGURATION.UNKNOWN);
+  const { pages, entries, refused } = extractListings(results, { market, region });
   const extractionMs = performance.now() - t0;
   const providerText = providerTextOf({ provenance });
 
   // ── SECOND-HAND: THE EXISTING GATE, ASKED ABOUT EACH CORROBORATED NAME ────
+  //
+  // WHAT NEVER REACHES THE GATE. A sibling's listing: it names another model
+  // of the line and can carry every word of this product's name, and the gate
+  // reads words. Another product's listing: once this product's number is
+  // known, a listing with a different number is a different product. And a
+  // listing of the wrong CONFIGURATION: a base without its jug, a case
+  // without its earbuds, a box — the right name on the wrong object.
+  const compatible = (e) => configurationCompatible(e.configuration, subjectConfiguration);
+  // For a photographed accessory, a listing that does not name the accessory
+  // is selling the host product (the gate's rule, applied to anchors too).
+  const accessoryTokens = [...tokens(subject?.object_class), ...tokens(subject?.product_name)].filter((t) => ACCESSORY_NOUNS.has(t));
+  const namesAccessory = (e) => !accessorySubject || tokens(e.observation.title).some((t) => accessoryTokens.includes(t));
+  // And a listing ABROAD: its price is that market's, converted or not, and
+  // it is never counted as a source in this one. It is kept as context (tier B).
+  const abroad = (e) => e.locale !== LOCALE.LOCAL;
+  const excluded = (e) => e.relation === RELATION.SIBLING || e.relation === RELATION.OTHER_PRODUCT || !compatible(e) || abroad(e);
   const candidates = entries.filter((e) => e.admissible);
   const { bound, unbound } = bindObservations(candidates.map((e) => e.observation), provenance);
-  // A SIBLING'S LISTING IS NEVER HANDED TO THE GATE. A listing that names
-  // another model of the line can carry every word of this product's name, and
-  // the gate reads words. And a name the results corroborated is asked about
-  // only over listings that are, by their own text, EXACTLY this product.
   const entryOf = new Map(candidates.map((e) => [e.observation, e]));
-  const notSibling = bound.filter((o) => entryOf.get(o)?.relation !== RELATION.SIBLING);
+  const notSibling = bound.filter((o) => !excluded(entryOf.get(o)));
+  // A name the results corroborated is asked about only over listings that
+  // are, by their own text, EXACTLY this product.
   const exactOnly = notSibling.filter((o) => entryOf.get(o)?.relation === RELATION.EXACT);
   const runs = subjectForms(subject ?? {}, market, level).map(({ form, subject: s }) => ({
     form, report: qualifyMarketEvidence({ observations: form === 'read_off_item' ? notSibling : exactOnly, subject: s, providerText }),
@@ -126,29 +171,48 @@ export function assessV2Evidence({ provenance, subject, level, identity = null }
   const disqualifiedBy = new Map(qualification.disqualified.map((d) => [d.observation, d.reason]));
   const unboundBy = new Map(unbound.map((u) => [u.observation, u.reason]));
 
-  // ── RETAIL: ONE PRODUCT'S PAGE, THIS PRODUCT, A NEW PRICE, IN THIS MARKET ─
+  // ── RETAIL: THIS PRODUCT, A NEW PRICE, A SHOP IN THIS MARKET, A WHOLE OBJECT ─
+  //
+  // Bound either to one product's own page (result level) or to the row of a
+  // category page that names the product and no other (row-bound). Never a
+  // shop abroad, whatever currency its page shows; never a base, a box or a
+  // part; never refurbished.
   const isAnchor = (e) => level === IDENTITY_LEVEL.PRODUCT
-    && e.kind === 'new_retail' && e.binding === BINDING.RESULT_TITLE && e.page_type === PAGE.SINGLE_PRODUCT
+    && e.kind === 'new_retail' && ((e.binding === BINDING.RESULT_TITLE && e.page_type === PAGE.SINGLE_PRODUCT) || e.row_bound === true)
     && e.relation === RELATION.EXACT && !e.refurbished
-    && canonicalCurrency(e.observation.currency) === MARKET_CURRENCY;
+    && e.locale === LOCALE.LOCAL
+    && canonicalCurrency(e.observation.currency) === MARKET_CURRENCY
+    && compatible(e) && namesAccessory(e);
 
   const labelled = entries.map((e) => {
     const o = e.observation;
     const usedAdmitted = e.admissible && admittedBy.has(keyOf(o));
     const anchor = isAnchor(e);
     const reason = usedAdmitted || anchor ? null
-      : ((e.admissible && e.relation === RELATION.SIBLING ? 'listing_names_a_sibling_model' : null)
+      : ((!compatible(e) ? `configuration_${String(e.configuration).toLowerCase()}` : null)
+        ?? (!namesAccessory(e) ? DISQUALIFIER.HOST_PRODUCT_LISTING : null)
+        ?? (e.admissible && e.relation === RELATION.SIBLING ? 'listing_names_a_sibling_model' : null)
+        ?? (e.admissible && e.relation === RELATION.OTHER_PRODUCT ? 'listing_names_another_model_number' : null)
+        ?? (e.admissible && abroad(e) ? (canonicalCurrency(o.currency) !== MARKET_CURRENCY ? DISQUALIFIER.UNVERIFIED_FX : 'listing_is_outside_the_market') : null)
         ?? disqualifiedBy.get(o) ?? unboundBy.get(o) ?? e.note
         ?? (e.kind === 'new_retail'
           ? (canonicalCurrency(o.currency) !== MARKET_CURRENCY ? 'foreign_currency_is_not_converted'
-            : (e.refurbished ? 'refurbished_is_not_a_new_price' : `retail_price_for_${String(e.relation).toLowerCase()}_identity`))
+            : (e.locale !== LOCALE.LOCAL ? 'shop_is_outside_the_market'
+              : (e.refurbished ? 'refurbished_is_not_a_new_price' : `retail_price_for_${String(e.relation).toLowerCase()}_identity`)))
           // The gate refused the whole set before it read a listing.
           : (e.admissible && qualification.set_failures?.length ? `set_refused: ${qualification.set_failures[0]}` : 'not_a_listing')));
+    const relation = usedAdmitted ? RELATION.EXACT : e.relation;
+    const tier = anchor ? TIER.C
+      : (relation === RELATION.REGIONAL_VARIANT ? TIER.D
+        : ((relation === RELATION.SIBLING || relation === RELATION.FAMILY) ? TIER.E
+          : (relation === RELATION.EXACT && e.kind === 'used_listing' && compatible(e) && namesAccessory(e)
+            ? (e.locale === LOCALE.LOCAL ? TIER.A : TIER.B) : null)));
     return {
       ...e,
       evidence_class: classOf(e),
       // A listing the gate admitted under a corroborated name IS this product.
-      relation: usedAdmitted ? RELATION.EXACT : e.relation,
+      relation,
+      tier,
       admitted: usedAdmitted,
       admitted_as: usedAdmitted ? admittedBy.get(keyOf(o)) : null,
       in_granting_set: usedAdmitted && grantingKeys.has(keyOf(o)),
@@ -176,6 +240,8 @@ export function assessV2Evidence({ provenance, subject, level, identity = null }
     prices: [...bySite].map(([site, e]) => ({
       site, price: e.observation.observed_price, stated_price: e.stated_price,
       includes_delivery: e.includes_delivery, delivery_fee: e.delivery_fee, url: e.observation.source,
+      // How the price was bound, and whether its currency was read or inferred.
+      binding: e.row_bound ? 'category_row' : 'product_page', currency_basis: e.currency_basis,
     })),
   };
 
@@ -235,7 +301,14 @@ export function assessV2Evidence({ provenance, subject, level, identity = null }
       unbound: unbound.length,
       by_class: tally(labelled, 'evidence_class', Object.values(EVIDENCE_CLASS)),
       by_relation: tally(labelled, 'relation', [...Object.values(RELATION), 'UNKNOWN']),
+      by_tier: tally(labelled, 'tier', Object.values(TIER)),
+      by_configuration: tally(labelled, 'configuration', CONFIGURATIONS),
+      by_source_type: tally(accounted, 'source_type', Object.values(SOURCE_TYPE)),
+      configuration_excluded: labelled.filter((e) => !compatible(e)).length,
+      other_product: labelled.filter((e) => e.relation === RELATION.OTHER_PRODUCT).length,
+      locale_inferred_prices: labelled.filter((e) => e.currency_basis !== 'marker').length,
     },
+    subject_configuration: subjectConfiguration,
     distinct_sources: qualification.distinct_sources,
     timings: { extraction_ms: Number(extractionMs.toFixed(2)), qualification_ms: Number(qualificationMs.toFixed(2)) },
   };

@@ -37,7 +37,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { pricedNumbers } from '../phaseb/content-binding.js';
 import { hostOf } from '../phaseb/search-provenance.js';
+import { resolveMarketRegion } from '../phaseb/config.js';
 import { relationOf, rootsIn, tokens, RELATION } from './market-identity.js';
+import { classifyConfiguration } from './configuration.js';
+import { classifySource, SOURCE_TYPE, LOCALE } from './source-type.js';
+import { localePriceCandidates, CURRENCY_BASIS } from './locale-price.js';
 
 export const ROLE = Object.freeze({
   PRODUCT_PRICE: 'PRODUCT_PRICE',
@@ -75,7 +79,6 @@ export const MAX_PER_RESULT = 12;
 export const MAX_OBSERVATIONS = 60;
 const MAX_TITLE = 220;
 const MAX_LABEL = 90;
-const MAX_UNMARKED_SCANNED = 60;
 
 // A listing ends at any of these. A pipe does NOT end one: it separates the
 // cells of a table row or the parts of a page title. So does a run of spaces,
@@ -105,7 +108,10 @@ const LEXICON = Object.freeze({
   priceWord: /מחיר|החל מ|price|from/iu,
   sale: /למכירה|(?<!\p{L})מוכרת?(?!\p{L})|for sale|selling/iu,
   secondHand: /יד\s?שני[יה]ה?|יד\s?2|משומש|second.?hand|\bused\b|pre.?owned/iu,
-  retail: /השוואת מחירים|הוסף לסל|הוספה לסל|במלאי|אחריות יבואן|יבואן רשמי|יבוא רשמי|יבוא מקביל|add to cart|in stock|buy now|price comparison/iu,
+  // "מוכר חיצוני" (an external seller ON a shop) and "נמכר ע״י" (sold by) are
+  // retail-platform phrases. The word "מוכר" inside them is not a person
+  // selling their own blender, and it must not read as sale intent.
+  retail: /השוואת מחירים|הוסף לסל|הוספה לסל|במלאי|אחריות יבואן|יבואן רשמי|יבוא רשמי|יבוא מקביל|מוכר חיצוני|נמכר ע["״]?י|add to cart|in stock|buy now|price comparison|sold by|ships from|fulfilled by/iu,
   refurbished: /מוחדש|מחודש|refurbished|renewed|open.?box/iu,
 });
 
@@ -168,16 +174,9 @@ function withoutDelivery(number, all) {
   return { product_price: number.value - distinct[0], delivery_fee: distinct[0], delivery_option: option.join(' ') };
 }
 
-/** Unmarked amounts that are plainly prices: "from 569", or a price printed twice. */
-function unmarkedPrices(text) {
-  const out = [];
-  for (const m of text.matchAll(/(?<![\p{L}\p{N}.,])(\d{2,3}(?:,\d{3})|\d{2,6})(?:\s+\1)(?![\p{N}])|(?:מחיר|החל מ-?|price|from)\s{0,3}:?\s{0,3}(\d{2,3}(?:,\d{3})|\d{2,6})(?![\p{N}%])/giu)) {
-    const value = Number(String(m[1] ?? m[2]).replace(/,/g, ''));
-    if (Number.isFinite(value) && value > 0) out.push({ value, at: m.index, after: text.slice(m.index + m[0].length, m.index + m[0].length + 80) });
-    if (out.length >= MAX_UNMARKED_SCANNED) break;
-  }
-  return out;
-}
+// Relations that say a text is about this product or its line. An unmarked
+// price beside one of these is listed before the rest, so a reader sees it.
+const NAMED = new Set([RELATION.EXACT, RELATION.REGIONAL_VARIANT, RELATION.SIBLING, RELATION.FAMILY]);
 
 /** What kind of page a result is. Decided from its address, its index, its title and its model numbers. */
 export function pageTypeOf({ url, kind, titleRelation, roots }) {
@@ -198,7 +197,7 @@ export function pageTypeOf({ url, kind, titleRelation, roots }) {
  *
  * Total: any input yields three arrays and never throws.
  */
-export function extractListings(results, { market = null } = {}) {
+export function extractListings(results, { market = null, region = resolveMarketRegion() } = {}) {
   const pages = [];
   const entries = [];
   const refused = [];
@@ -224,6 +223,7 @@ export function extractListings(results, { market = null } = {}) {
     const page = {
       index, url, domain, title: typeof r?.title === 'string' ? r.title.slice(0, MAX_TITLE) : '',
       duplicate: false, page_type: PAGE.OTHER, title_relation: 'UNKNOWN', result_level: false,
+      source_type: SOURCE_TYPE.UNKNOWN, locale: LOCALE.INTERNATIONAL,
       priced_numbers: 0, unmarked_prices: 0, observations: 0, refusals: 0,
     };
     pages.push(page);
@@ -238,8 +238,15 @@ export function extractListings(results, { market = null } = {}) {
     const whole = `${pageTitle}\n${body}`;
     page.title_relation = relationOf(pageTitle, market);
     page.page_type = pageTypeOf({ url, kind, titleRelation: page.title_relation, roots: rootsIn(whole) });
-    const secondHandPage = LEXICON.secondHand.test(pageTitle) || LEXICON.sale.test(pageTitle);
-    const retailPage = LEXICON.retail.test(pageTitle);
+    const source = classifySource({ url, domain, title: pageTitle, text: body, kind, brand: market?.brand ?? null, region });
+    page.source_type = source.source_type;
+    page.locale = source.locale;
+    // A marketplace for second-hand goods is a second-hand page whatever its
+    // title says: its listings are bound strictly, and its prices are asked by
+    // sellers, not shops.
+    const usedMarketplace = page.source_type === SOURCE_TYPE.LOCAL_USED_MARKETPLACE || page.source_type === SOURCE_TYPE.INTERNATIONAL_USED_MARKETPLACE;
+    const secondHandPage = LEXICON.secondHand.test(pageTitle) || LEXICON.sale.test(pageTitle) || usedMarketplace;
+    const retailPage = !usedMarketplace && LEXICON.retail.test(pageTitle);
     page.result_level = page.page_type === PAGE.SINGLE_PRODUCT && !secondHandPage && kind === 'search';
     const refurbished = LEXICON.refurbished.test(pageTitle);
 
@@ -254,12 +261,17 @@ export function extractListings(results, { market = null } = {}) {
       page.refusals += 1;
       refused.push({ url, reason, role: n?.role ?? null, value: n?.value ?? null, currency: n?.currency ?? null, text: String(block).slice(0, 160) });
     };
-    const emit = (n, { title, binding, relation, kindOf, extra = {} }) => {
+    const emit = (n, { title, binding, relation, kindOf, block = '', extra = {} }) => {
       const key = `${url}|${n.value}|${n.currency}`;
       if (seenPrice.has(key)) return;               // the same amount, printed again on the same page
       if (page.observations >= MAX_PER_RESULT || entries.length >= MAX_OBSERVATIONS) { refuse(n, REFUSED.OVER_BUDGET, title); return; }
       seenPrice.add(key);
       page.observations += 1;
+      // WHAT IS BEING SOLD: the whole product, or a base, a box, a part. Read
+      // off the listing's own words; UNKNOWN when it says nothing.
+      // The page's own title speaks for a single listing's page ("… - BASE
+      // ONLY | eBay"); on a page that lists many products it speaks for none.
+      const configuration = classifyConfiguration(`${page.page_type === PAGE.CATEGORY ? '' : pageTitle}\n${title}\n${block}`);
       entries.push({
         observation: {
           source: url, source_domain: domain, listing_id_or_reference: null, title,
@@ -269,10 +281,19 @@ export function extractListings(results, { market = null } = {}) {
           match: { brand: null, model: null, variant: null, confidence: null },
         },
         page_index: index, page_title: pageTitle, page_type: page.page_type,
+        source_type: page.source_type, locale: page.locale,
         binding, shape: binding, role: n.role, relation, kind: kindOf, refurbished,
+        configuration: configuration.configuration, configuration_marker: configuration.marker,
+        // Was the currency read off the page, or inferred from the host?
+        currency_basis: extra.currency_basis ?? CURRENCY_BASIS.MARKER,
+        // A category-page row that names the product: an anchor candidate, bound to its row.
+        row_bound: extra.row_bound === true,
         stated_price: n.value, includes_delivery: n.role === ROLE.PRODUCT_PRICE_WITH_DELIVERY && !extra.product_price,
         delivery_fee: extra.delivery_fee ?? null, delivery_option: extra.delivery_option ?? null,
         sale_intent: kindOf === 'used_listing',
+        // Only a second-hand listing, bound to its own sentence, may reach the
+        // evidence gate. (A locale-inferred price is always new_retail and
+        // row-bound, so it fails this twice over.)
         admissible: kindOf === 'used_listing' && binding === BINDING.SENTENCE,
         note: null,
       });
@@ -302,7 +323,7 @@ export function extractListings(results, { market = null } = {}) {
         for (const { n } of priced) refuse(n, REFUSED.SEVERAL_ON_PAGE, n.block);
       } else {
         for (const { n, extra } of priced) {
-          emit(n, { title: pageTitle, binding: BINDING.RESULT_TITLE, relation: page.title_relation, kindOf: 'new_retail', extra });
+          emit(n, { title: pageTitle, binding: BINDING.RESULT_TITLE, relation: page.title_relation, kindOf: 'new_retail', block: n.block, extra });
         }
       }
     } else {
@@ -326,11 +347,17 @@ export function extractListings(results, { market = null } = {}) {
         const tableRow = words(own).length < 2;
         const title = (tableRow ? cells.filter((c) => c !== own).join(' | ') : own).slice(0, MAX_TITLE);
         if (words(title).length < 2) { refuse({ ...n, role: ROLE.UNKNOWN }, REFUSED.NAKED_PRICE, block); continue; }
-        const retail = retailPage || LEXICON.retail.test(block);
-        const saleIntent = !retail && (LEXICON.secondHand.test(pageTitle) || LEXICON.sale.test(block) || LEXICON.secondHand.test(block));
+        const retail = retailPage || (!usedMarketplace && LEXICON.retail.test(block));
+        const saleIntent = !retail && (secondHandPage || LEXICON.sale.test(block) || LEXICON.secondHand.test(block));
         const kindOf = retail ? 'new_retail' : (saleIntent ? 'used_listing' : 'unknown');
         const before = entries.length;
-        emit(n, { title, binding: tableRow ? BINDING.TABLE_ROW : BINDING.SENTENCE, relation: relationOf(title, market), kindOf });
+        const relation = relationOf(title, market);
+        // A shop's category or comparison page lists many products, one price
+        // beside each name. A retail row on such a page is bound to its row;
+        // whether the row names THIS product is the relation beside it, and
+        // the anchor rule (evidence.js) reads both.
+        const rowBound = kindOf === 'new_retail' && page.page_type === PAGE.CATEGORY;
+        emit(n, { title, binding: tableRow ? BINDING.TABLE_ROW : BINDING.SENTENCE, relation, kindOf, block, extra: { row_bound: rowBound } });
         if (entries.length > before) {
           const e = entries[entries.length - 1];
           e.note = e.admissible ? null
@@ -340,22 +367,36 @@ export function extractListings(results, { market = null } = {}) {
       }
     }
 
-    // A page with no marked amount may still print one. It is not read as a
-    // price — nothing says what currency it is in — and it is not hidden.
+    // A page with no marked amount may still print one. On a shop INSIDE the
+    // market, in the market's own price form, beside this product's own name
+    // or number, it is that shop's price for the product and the currency is
+    // the market's: a retail-anchor candidate, never a used listing, labelled
+    // as inferred (locale-price.js). Everywhere else it is reported and not
+    // used — nothing says what currency it is in — and it is not hidden.
     if (page.priced_numbers === 0) {
-      // Those printed beside THIS product's name are listed first: they are
+      const retailContext = !secondHandPage && (retailPage || LEXICON.retail.test(whole)
+        || [SOURCE_TYPE.LOCAL_RETAIL, SOURCE_TYPE.PRICE_COMPARISON, SOURCE_TYPE.MANUFACTURER].includes(page.source_type));
+      const { candidates, refused: bare } = localePriceCandidates(whole, {
+        market, region, local: page.locale === LOCALE.LOCAL, retail: retailContext,
+      });
+      for (const c of candidates) {
+        emit({ value: c.value, currency: c.currency, role: ROLE.PRODUCT_PRICE }, {
+          title: c.name, binding: BINDING.TABLE_ROW, relation: c.relation, kindOf: 'new_retail', block: c.name,
+          extra: { currency_basis: c.currency_basis, row_bound: true },
+        });
+      }
+      // Those printed beside THIS product's line are listed first: they are
       // the ones a reader would want to know were seen and not used.
-      const found = unmarkedPrices(whole).map((u) => ({ ...u, relation: relationOf(u.after, market) }));
-      const ours = found.filter((u) => u.relation !== 'UNKNOWN');
-      for (const u of [...ours, ...found.filter((x) => !ours.includes(x))].slice(0, MAX_PER_RESULT)) {
+      const ours = bare.filter((u) => NAMED.has(u.relation));
+      for (const u of [...ours, ...bare.filter((x) => !ours.includes(x))].slice(0, MAX_PER_RESULT)) {
         const key = `${u.value}|unmarked`;
         if (refusedHere.has(key)) continue;
         refusedHere.add(key);
         page.unmarked_prices += 1;
         page.refusals += 1;
         refused.push({
-          url, reason: REFUSED.NO_CURRENCY, role: ROLE.UNKNOWN, value: u.value, currency: null,
-          relation: u.relation, text: `${u.value} ${u.after}`.slice(0, 160),
+          url, reason: u.reason === 'not_an_asking_price' ? REFUSED.NOT_ASKING : REFUSED.NO_CURRENCY, role: ROLE.UNKNOWN,
+          value: u.value, currency: null, relation: u.relation, note: u.note ?? null, text: `${u.value} ${u.after}`.slice(0, 160),
         });
       }
     }

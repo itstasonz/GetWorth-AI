@@ -446,21 +446,25 @@ describe('V2-20 the flag: V1 is the path unless the build AND the server say oth
 
 describe('V2-21 what the screen may say', () => {
   const view = code('src/views/ScanV2View.jsx');
-  test('V2-21a every price state the server produces has a headline in both languages, and the reserved one has none', () => {
+  test('V2-21a every price state the server produces has a headline in both languages', () => {
     assert.ok(!view.includes('ESTIMATED_WORTH'), 'the removed state has no headline to show');
     const pricing = read('api/_lib/v2/pricing.js');
     const states = [...pricing.matchAll(/^\s+([A-Z_]+): '\1',/gm)].map((m) => m[1]);
     assert.deepEqual(states, ['VERIFIED_MARKET_VALUE', 'USED_EVIDENCE_ESTIMATE', 'USED_EVIDENCE_BELOW_QUORUM', 'COMPARABLE_MARKET_ESTIMATE', 'MARKET_INFORMED_ESTIMATE', 'NEED_MORE_INFORMATION', 'NO_PRICE_EVIDENCE']);
-    for (const state of states.filter((s) => s !== 'MARKET_INFORMED_ESTIMATE')) {
-      assert.equal((view.match(new RegExp(`${state}: '`, 'g')) || []).length, 2, state);
+    const headlines = [...view.matchAll(/\n\s+states: \{([^}]*)\}/g)].map((m) => m[1]);
+    assert.equal(headlines.length, 2, 'one headline table per language');
+    for (const state of states) for (const table of headlines) assert.match(table, new RegExp(`${state}: '`), state);
+    // Every reason an estimate can be withheld has a sentence in both languages.
+    const limitations = /LIMITATION = Object\.freeze\(\{([^}]*)\}\)/.exec(pricing)[1].match(/'([a-z_]+)'/g).map((s) => s.slice(1, -1));
+    for (const code of limitations.filter((l) => l !== 'search_did_not_complete')) {
+      assert.equal((view.match(new RegExp(`${code}: '`, 'g')) || []).length, 2, code);
     }
-    // The reserved state is not dressed for the screen: no headline, no sentence, no mention.
-    assert.ok(!view.includes('MARKET_INFORMED_ESTIMATE'));
+    assert.match(view, /limitationText && /, 'and it is shown only when there is no number');
   });
   test('V2-21b every priced basis the server can return has a sentence in both languages', () => {
     const pricing = read('api/_lib/v2/pricing.js');
     const kinds = [...pricing.matchAll(/^\s+[A-Z_]+: '([a-z_]+)',$/gm)].map((m) => m[1]).filter((k) => k !== 'none');
-    assert.deepEqual(kinds.sort(), ['admitted_used_listings_below_quorum', 'verified_comparable_listings', 'verified_comparable_listings_range_adjusted', 'verified_used_listings', 'verified_used_listings_range_adjusted']);
+    assert.deepEqual(kinds.sort(), ['admitted_used_listings_below_quorum', 'retail_anchor_times_measured_resale_factor', 'verified_comparable_listings', 'verified_comparable_listings_range_adjusted', 'verified_used_listings', 'verified_used_listings_range_adjusted']);
     for (const kind of kinds) assert.equal((view.match(new RegExp(`${kind}: \\(b\\) =>`, 'g')) || []).length, 2, kind);
     assert.ok(!/new_retail_price|used_listings_for_brand_and_kind/.test(view), 'no sentence for a basis that no longer exists');
   });

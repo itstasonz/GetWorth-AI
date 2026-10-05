@@ -126,16 +126,19 @@ describe('V2-37 the matrix: what each kind of scan is allowed to claim', () => {
     assert.ok(price.guard.moved.length > 0 && price.guard.moved.every((k) => price.guard.range_before[k] !== price.guard.range_after[k]));
     assert.ok(price.guard.range_after.high - price.guard.range_after.low > price.guard.range_before.high - price.guard.range_before.low, 'widened');
   });
-  test('V2-37j the guard-adjusted state is NOT the reserved market-informed estimate, and no fixture produces that', () => {
+  test('V2-37j the guard-adjusted state is NOT the market-informed estimate, and no fixture produces that without a MEASURED factor', () => {
     assert.notEqual(PRICE_STATE.USED_EVIDENCE_ESTIMATE, PRICE_STATE.MARKET_INFORMED_ESTIMATE);
-    assert.ok(!PRODUCED_STATES.includes(PRICE_STATE.MARKET_INFORMED_ESTIMATE));
+    assert.ok(PRODUCED_STATES.includes(PRICE_STATE.MARKET_INFORMED_ESTIMATE), 'it is a state a scan can now end in');
     for (const m of MATRIX) {
+      // The shipped factor table measures no group, so no fixture reaches it: the
+      // state says what it is waiting for instead.
       assert.notEqual(m.price.state, PRICE_STATE.MARKET_INFORMED_ESTIMATE, m.name);
       assert.ok(PRODUCED_STATES.includes(m.price.state), m.name);
     }
-    // No code path in the resolver names the reserved state: it cannot be produced by accident.
+    // The estimate is reached through the factor lookup and nowhere else.
     const code = resolveV2Price.toString().split('\n').filter((l) => !l.trim().startsWith('//')).join('\n');
-    assert.ok(!code.includes('MARKET_INFORMED_ESTIMATE'));
+    assert.equal((code.match(/MARKET_INFORMED_ESTIMATE/g) || []).length, 1);
+    assert.ok(code.indexOf('findResaleFactor') < code.indexOf('MARKET_INFORMED_ESTIMATE'));
     // And the four claims are four states, told apart by the state alone.
     const states = (name) => of(name).price.state;
     assert.equal(new Set([states('C console'), states('H three from two'), states('G one listing'), states('A witness')]).size, 4);
@@ -241,12 +244,17 @@ describe('V2-38 how sure we are what it is, and how well its price is evidenced,
     assert.equal(d.accounting.reconciles, true);
     assert.deepEqual(Object.keys(d.counts.by_class), Object.values(EVIDENCE_CLASS));
     assert.deepEqual(Object.keys(d.counts.by_relation), [...Object.values(RELATION), 'UNKNOWN']);
-    assert.equal(d.retail.length, 1);
-    assert.deepEqual([d.retail[0].outcome, d.retail[0].price, d.retail[0].stated_price, d.retail[0].delivery_fee], ['RETAIL_ANCHOR', 599, 608, 9]);
+    assert.equal(d.retail.length, 2, 'the product page, and the category row that names the product');
+    const page = d.retail.find((r) => r.price === 599);
+    const row = d.retail.find((r) => r.price === 569);
+    assert.deepEqual([page.outcome, page.price, page.stated_price, page.delivery_fee, page.currency_basis], ['RETAIL_ANCHOR', 599, 608, 9, 'marker']);
+    assert.deepEqual([row.outcome, row.binding, row.currency_basis, row.tier], ['RETAIL_ANCHOR', 'category_row', 'site_locale', 'C_RETAIL_ANCHOR']);
     assert.equal(d.extraction_reasons[REFUSED.FEE], 3);
     for (const fee of [9, 29, 55]) assert.ok(d.refused_at_extraction.some((r) => r.value === fee && r.role === ROLE.DELIVERY_FEE), `fee ${fee}`);
-    assert.ok(d.refused_at_extraction.some((r) => r.value === 569 && r.reason === REFUSED.NO_CURRENCY));
+    // The sibling's bare price on the same page stays refused, and says whose it was.
+    assert.ok(d.refused_at_extraction.some((r) => r.value === 550 && r.reason === REFUSED.NO_CURRENCY && r.relation === RELATION.SIBLING));
     assert.equal(d.pages.length, 31);
+    assert.ok(d.pages.every((p) => typeof p.source_type === 'string' && ['local', 'international'].includes(p.locale)));
   });
 });
 

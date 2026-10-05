@@ -24,6 +24,9 @@ export const V2_PURPOSE = Object.freeze({
   HYPOTHESIS: 'CANDIDATE_MODEL',
   ALIAS_SECOND_HAND: 'ALIAS_SECOND_HAND',
   ALIAS_PRICE: 'ALIAS_PRICE',
+  // The read name beside the market's word for "model": reaches the shop and
+  // specification pages that print the number the product is sold under.
+  MODEL_NUMBER: 'MODEL_NUMBER',
 });
 
 /** The one market name worth two of the four queries: a model number first. */
@@ -78,6 +81,9 @@ export function subjectOf(identity, level) {
     family: null,
     model: product ? (identity?.model?.value ?? null) : null,
     variant: product ? (identity?.variant?.value ?? null) : null,
+    model_number: product ? (identity?.model_number?.value ?? null) : null,
+    // What the PHOTOGRAPH shows: a complete object, or a base, a box, a part.
+    configuration: identity?.configuration ?? 'UNKNOWN',
   };
 }
 
@@ -101,20 +107,32 @@ export function planV2Search(identity, level, market) {
     // FOUR QUERIES, TWO NAMES, TWO INTENTS. What was read off the item, and the
     // best guess at what it is sold as; each asked once for second-hand
     // listings and once for a price. The guess is a HYPOTHESIS: it shapes a
-    // search and is matched on only if the results corroborate it.
+    // search and is matched on only if the results corroborate it. A number
+    // READ off the item is not a guess: it is searched as identity.
+    //
+    // THE PRODUCTION WITNESS. The model proposed "Ninja Power Blender Duo Pro"
+    // — the read name with the brand in front — and the two alias queries
+    // de-duplicated against the two name queries, so the search ran on half
+    // its budget. A proposal that restates the read name phrases no new
+    // search; it takes no slot, and the slots are filled from below.
     name = overlapJoin(brand, id.model?.value);
-    const guess = bestHypothesis(id);
+    const read = id.model_number?.value ?? null;
+    const guess = read ? { value: read, kind: 'model_number', read: true } : bestHypothesis(id);
+    const useful = guess && !sameWords(overlapJoin(brand, guess.value), name) ? guess : null;
     add(V2_PURPOSE.SECOND_HAND, join(name, t.second_hand));
     add(V2_PURPOSE.PRICE_CONTEXT, join(name, t.price));
-    if (guess) {
-      const alias = overlapJoin(brand, guess.value);
-      add(V2_PURPOSE.ALIAS_SECOND_HAND, join(alias, t.second_hand), { hypothesis: guess.value });
-      add(V2_PURPOSE.ALIAS_PRICE, join(alias, t.price), { hypothesis: guess.value });
-      hypotheses.push({ model: guess.value, kind: guess.kind, confidence: null });
-    } else {
-      add(V2_PURPOSE.FOR_SALE, join(name, t.for_sale));
-      if (id.local_name) add(V2_PURPOSE.LOCAL_NAME, join(id.local_name, brand, t.second_hand));
+    if (useful) {
+      const alias = overlapJoin(brand, useful.value);
+      const mark = useful.read ? {} : { hypothesis: useful.value };
+      add(V2_PURPOSE.ALIAS_SECOND_HAND, join(alias, t.second_hand), mark);
+      add(V2_PURPOSE.ALIAS_PRICE, join(alias, t.price), mark);
+      if (!useful.read) hypotheses.push({ model: useful.value, kind: useful.kind, confidence: null });
     }
+    // The remaining slots, in order of what they add: the pages that print
+    // the product's number, the for-sale phrasing, the seller's own name for it.
+    if (t.model_number) add(V2_PURPOSE.MODEL_NUMBER, join(name, t.model_number));
+    add(V2_PURPOSE.FOR_SALE, join(name, t.for_sale));
+    if (id.local_name) add(V2_PURPOSE.LOCAL_NAME, join(id.local_name, brand, t.second_hand));
   } else if (level === IDENTITY_LEVEL.CANDIDATES) {
     name = join(brand, id.object_class);
     for (const c of (id.ranked_candidates ?? []).slice(0, MAX_V2_QUERIES - 1)) {

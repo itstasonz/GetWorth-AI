@@ -10,6 +10,7 @@
 // field and without a model, what the new reading may replace and what the
 // first photograph established and keeps.
 // ══════════════════════════════════════════════════════════════════════════════
+import { calibrateField, classifyVisibleText } from './calibration.js';
 
 export const FOLLOWUP = Object.freeze({
   NONE: 'NONE',
@@ -142,19 +143,25 @@ function mergeField(prior, next) {
 export function mergeIdentity(prior, next) {
   if (!prior) return next;
   if (!next) return prior;
-  const brand = mergeField(prior.brand, next.brand);
-  const model = mergeField(prior.model, next.model);
-  const variant = mergeField(prior.variant, next.variant);
+  const brand = calibrateField(mergeField(prior.brand, next.brand), 'brand');
+  const model = calibrateField(mergeField(prior.model, next.model), 'model');
+  const variant = calibrateField(mergeField(prior.variant, next.variant), 'variant');
+  const modelNumber = calibrateField(mergeField(prior.model_number, next.model_number) ?? { value: null, confidence: 0, evidence: 'NONE' }, 'model');
   const modelSettled = wasRead(model);
   const union = (a, b, max) => [...new Set([...(a ?? []), ...(b ?? [])])].slice(0, max);
+  const visibleText = union(prior.visible_text, next.visible_text, 16);
   return {
     category: prior.category ?? next.category,
     object_class: prior.object_class || next.object_class,
     local_name: prior.local_name || next.local_name,
-    visible_text: union(prior.visible_text, next.visible_text, 16),
+    visible_text: visibleText,
+    visible_text_roles: classifyVisibleText({ visible_text: visibleText, brand, model, model_number: modelNumber }),
     brand,
     model,
     variant,
+    model_number: modelNumber,
+    // The first photograph shows what the object is; a close-up of a label does not.
+    configuration: prior.configuration && prior.configuration !== 'UNKNOWN' ? prior.configuration : (next.configuration ?? 'UNKNOWN'),
     // A model that was READ leaves no shortlist to choose from. Otherwise the
     // newer shortlist is the better one, and the older survives an empty one.
     ranked_candidates: modelSettled ? []

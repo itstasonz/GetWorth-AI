@@ -28,6 +28,8 @@ import { FENCE_RULE, fence, promptSafe, promptSafeList } from '../prompt-trust.j
 import { streamResponse } from './openai-stream.js';
 import { FOLLOWUP, FOLLOWUP_TYPES, followupInstruction } from './followup.js';
 import { V2_IDENTIFY_TIMEOUT_MS, V2_IDENTITY_MAX_OUTPUT_TOKENS } from './config.js';
+import { CONFIGURATION, CONFIGURATIONS } from './configuration.js';
+import { calibrateField, classifyVisibleText } from './calibration.js';
 
 export const FIELD_EVIDENCE = Object.freeze(['TEXT_READ', 'LABEL_READ', 'LOGO', 'PACKAGING', 'SHAPE', 'NONE']);
 export const IDENTITY_EVIDENCE = Object.freeze(['MODEL_TEXT_READ', 'BRAND_TEXT_READ', 'LABEL_READ', 'LOGO', 'PACKAGING', 'SHAPE_ONLY']);
@@ -57,6 +59,10 @@ export const V2_IDENTITY_SCHEMA = strict({
   brand: field(),
   model: field(),
   variant: field(),
+  // The manufacturer's number, when it is PRINTED on the item or its label.
+  // Kept only when read (normalizeIdentity): a number from memory is a
+  // hypothesis and belongs below.
+  model_number: field(),
   ranked_candidates: {
     type: 'array', maxItems: MAX_CANDIDATES,
     items: strict({ brand: nullable, model: nullable, variant: nullable, confidence: conf, distinguishing_evidence: nullable }),
@@ -66,6 +72,9 @@ export const V2_IDENTITY_SCHEMA = strict({
     observations: { type: 'array', maxItems: 4, items: { type: 'string', enum: [...CONDITION_SIGNALS] } },
   }),
   identity_evidence: { type: 'array', maxItems: 4, items: { type: 'string', enum: [...IDENTITY_EVIDENCE] } },
+  // What the PHOTOGRAPH shows: the whole product, or a base, a box, a part.
+  // A charging case is not the earbuds, and the search must know which it has.
+  configuration: { type: 'string', enum: [...CONFIGURATIONS] },
   missing_evidence: { type: 'string', enum: [...FOLLOWUP_TYPES] },
   // SEARCH HYPOTHESES, NOT IDENTITY. What is printed on an item is not always
   // what it is sold as: a panel says "POWER BLENDER DUO PRO" and the shops list
@@ -84,9 +93,11 @@ object_class: a plain English noun for the object, e.g. "gaming mouse". null onl
 local_name: what a seller in Israel would call this kind of object in Hebrew, 1-4 words.
 visible_text: exact strings printed on the item. Empty when none.
 brand, model, variant: value, confidence 0-1, and what it rests on. "model" is the name a buyer would search for ("Power Blender Duo Pro", "PlayStation 5", "Air Jordan 1 Mid"); it does not have to be a manufacturer part number. value is null when the photograph does not establish it. evidence is TEXT_READ or LABEL_READ only when the value itself is printed on the item.
+model_number: the manufacturer's model or part number ONLY when it is printed on the item, its label or its packaging ("TB301", "MR0089", "A2633"). value is null when none is visible; never from memory.
 ranked_candidates: when the model is not established, up to ${MAX_CANDIDATES} products it could be, most likely first, each with at most six words on what would tell it apart. Empty when the model is established or nothing narrows it.
 condition: visible condition only. Unknown when the photograph does not show it.
 identity_evidence: what the identity rests on.
+configuration: what the photograph shows. COMPLETE: the whole product. BASE_ONLY: the main unit without its jug, cups, controller or other parts. ACCESSORY_ONLY: only a case, charger, strap, cup, remote or other accessory. BOX_ONLY: packaging alone. REPLACEMENT_PART: a part. BUNDLE: several units. PARTS: visibly broken. UNKNOWN when it cannot be told.
 missing_evidence: the ONE further photograph that would settle the exact model, or NONE when it is settled or no photograph could settle it.
 market_hypotheses: names or model numbers this exact product is SOLD under that are NOT printed on it, from your own knowledge, most likely first. They are guesses used only to search. Empty when you know none.`;
 
@@ -127,6 +138,7 @@ Do not estimate a price. Do not explain.`;
 
 // ── NORMALISATION ───────────────────────────────────────────────────────────
 const UNKNOWN = /^(unidentified|unknown|none|n\/a|null|generic|unbranded|no brand)$/i;
+const READ_EVIDENCE = new Set(['TEXT_READ', 'LABEL_READ']);
 const text = (v, max = 80) => {
   const s = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
   return s && !UNKNOWN.test(s) ? s.slice(0, max) : null;
@@ -163,9 +175,16 @@ export function normalizeIdentity(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
   const visibleText = [...new Set((Array.isArray(r.visible_text) ? r.visible_text : [])
     .map((v) => text(v, 60)).filter(Boolean))].slice(0, MAX_VISIBLE_TEXT);
-  const brand = normalizeField(r.brand, visibleText);
-  const model = normalizeField(r.model, visibleText);
-  const variant = normalizeField(r.variant, visibleText);
+  const brand = calibrateField(normalizeField(r.brand, visibleText), 'brand');
+  const model = calibrateField(normalizeField(r.model, visibleText), 'model');
+  const variant = calibrateField(normalizeField(r.variant, visibleText), 'variant');
+  // A model number is identity only when it was READ: normalizeField has
+  // already lowered a "read" claim the text does not bear to SHAPE, and a
+  // number that was not read is not kept at all.
+  const numberRead = normalizeField(r.model_number, visibleText);
+  const modelNumber = calibrateField(READ_EVIDENCE.has(numberRead.evidence) && /\p{N}/u.test(numberRead.value ?? '')
+    ? { ...numberRead, value: numberRead.value.replace(/^(?:m\/n|model|p\/n|דגם)\s*[:.]?\s*/iu, '').trim().slice(0, 24) || null }
+    : { value: null, confidence: 0, evidence: 'NONE' }, 'model');
 
   const seen = new Set();
   const candidates = [];
@@ -190,9 +209,12 @@ export function normalizeIdentity(raw) {
     object_class: text(r.object_class, 60),
     local_name: text(r.local_name, 40),
     visible_text: visibleText,
+    visible_text_roles: classifyVisibleText({ visible_text: visibleText, brand, model, model_number: modelNumber }),
     brand,
     model,
     variant,
+    model_number: modelNumber,
+    configuration: oneOf(r.configuration, CONFIGURATIONS, CONFIGURATION.UNKNOWN),
     ranked_candidates: candidates.slice(0, MAX_CANDIDATES),
     condition: {
       grade: oneOf(r.condition?.grade, CONDITION_GRADES, 'Unknown'),

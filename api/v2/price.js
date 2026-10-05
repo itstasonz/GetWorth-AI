@@ -16,7 +16,7 @@ import { admit, json, nodeHandler } from '../_lib/v2/http.js';
 import { resolveV2Model, V2_KEY_ENV } from '../_lib/v2/config.js';
 import { runV2Price } from '../_lib/v2/scan.js';
 import { verifyScanState } from '../_lib/v2/state.js';
-import { describeSearch, describeEvidence } from '../_lib/v2/report.js';
+import { describeSearch, describeEvidence, ledgerLine } from '../_lib/v2/report.js';
 import { resolveMarketRegion } from '../_lib/phaseb/config.js';
 
 // Must stay a literal: Vercel reads it statically.
@@ -40,6 +40,12 @@ async function handleRequest(req) {
     marketRegion: resolveMarketRegion(),
     safetyIdentifier: `gw-${scanUuid}`,
   });
+
+  // THE LEDGER, ONCE, IN THE LOG. The production witness could not be
+  // reconstructed because nothing about its results outlived the response.
+  // One bounded line per priced scan: counts, every page's fate, the priced
+  // rows, the timings. No secret and no user id travel in it.
+  console.log(`[V2Price] ${ledgerLine(scanUuid, result)}`);
 
   return json({
     scan_uuid: scanUuid,

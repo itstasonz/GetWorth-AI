@@ -148,4 +148,58 @@ export const RESULTS_FOREIGN = [
   result('https://www.boardabroad.com/listing/7', 'Ninja Power Blender Duo Pro for sale - 90 USD | Used', 'Used, works'),
 ];
 
-export { result, used, shop };
+export { result, used, shop, CONNECTS_TB301 };
+
+// ── N. THE RIGHT NAME ON THE WRONG OBJECT ───────────────────────────────────
+// A base without its jug, a cup, a box: each carries the exact product's name
+// and number. One complete set and one shop selling the base alone.
+export const RESULTS_WRONG_CONFIGURATION = [
+  ...CONNECTS_TB301,
+  used('boardone', 71, 'Ninja TB301 Power Blender Duo Pro base only למכירה 150 ש"ח | לוח יד שניה', 'מנוע בלבד ללא קנקן'),
+  used('boardtwo', 72, 'Ninja TB301 כוס בלבד למכירה 40 ש"ח | לוח יד שנייה'),
+  used('boardthree', 73, 'Ninja TB301 Power Blender Duo Pro קופסה בלבד למכירה 20 ₪ | יד 2'),
+  used('boardone', 74, 'Ninja TB301 Power Blender Duo Pro complete set למכירה 350 ש"ח | לוח יד שניה'),
+  shop('shopone', 'tb301-base', 'Ninja TB301 Motor Base Only | שופ וואן', 'מחיר: 299 ₪ במלאי'),
+];
+
+// ── O. THE SUBJECT IS THE ACCESSORY ─────────────────────────────────────────
+export const AIRPODS_CASE = answer({
+  category: 'Electronics', object_class: 'charging case', local_name: 'נרתיק טעינה',
+  visible_text: ['AirPods Pro 2'],
+  brand: f('Apple', 0.95, 'LOGO'), model: f('AirPods Pro 2', 0.9, 'TEXT_READ'),
+  identity_evidence: ['LOGO', 'MODEL_TEXT_READ'], configuration: 'ACCESSORY_ONLY',
+});
+export const RESULTS_AIRPODS_CASE = [
+  used('boardone', 81, 'Apple AirPods Pro 2 למכירה 450 ש"ח | לוח יד שניה', 'כמו חדשות'),
+  used('boardtwo', 82, 'Apple AirPods Pro 2 charging case only למכירה 150 ש"ח | לוח יד שנייה'),
+  used('boardthree', 83, 'Apple AirPods Pro 2 נרתיק טעינה למכירה 140 ₪ | יד 2'),
+  shop('shopone', 'airpods-pro-2-case', 'Apple AirPods Pro 2 MagSafe charging case | שופ וואן', 'מחיר: 390 ₪ במלאי'),
+  shop('shoptwo', 'airpods-pro-2', 'Apple AirPods Pro 2 | שופ טו', 'מחיר: 899 ₪ במלאי'),
+];
+
+// ── P. ANOTHER PRODUCT'S NUMBER, WITH THE ONE DISTINCTIVE WORD ──────────────
+export const RESULTS_OTHER_PRODUCT = [
+  ...CONNECTS_TB301,
+  used('boardone', 91, 'Ninja CB103 Power Nutri Duo למכירה 346 ש"ח | לוח יד שניה'),
+  used('boardtwo', 92, 'Ninja TB301 Power Blender Duo Pro למכירה 380 ש"ח | לוח יד שנייה'),
+];
+
+// ── Q. A MARKETPLACE ABROAD, SHOWING A CONVERTED PRICE ──────────────────────
+export const RESULTS_ABROAD = [
+  ...CONNECTS_TB301,
+  result('https://il.ebay.com/itm/123456789', 'Ninja TB301 Power Blender Duo Pro | eBay', '* Ninja TB301 Power Blender Duo Pro - Black ... ILS 622.13 Used'),
+  result('https://www.craigslist.org/pasadena/1', 'Ninja Detect Duo Power Blender Pro TB301 - Complete Set - $50 (Pasadena) - by owner - sale', 'good used condition'),
+  result('https://www.ebay.com/itm/987654321', 'Ninja Detect Power Blender Duo Pro with BlendSense - TB301 - BASE ONLY | eBay', 'US $45.00 Used'),
+  // The converted price in the title, and a shop abroad quoting shekels: both still abroad.
+  result('https://il.ebay.com/itm/2', 'Ninja TB301 Power Blender Duo Pro למכירה ILS 622 Used | eBay', 'works, light wear'),
+  result('https://www.shopabroad.com/p/tb301', 'Ninja TB301 Power Blender Duo Pro | Shop Abroad', 'מחיר: 620 ₪ add to cart ships from abroad'),
+];
+
+// ── R. A SHOP'S CATEGORY ROWS, IN THE MARKET'S OWN PRICE FORM ───────────────
+export const RESULTS_LOCALE_ROWS = [
+  ...CONNECTS_TB301,
+  result('https://www.shopone.co.il/c/ninja', 'NINJA | מוצרי חשמל למטבח | שופ וואן',
+    'החל מ- 550 550   NINJA בלנדר שייקר Ninja TB303 DETECT (2) משלוח חינם הוספה לסל החל מ- 569 569   NINJA בלנדר ושייקר TB301 משלוח חינם נמכר ע״י מ.   החל מ- 448 448 799 799 בתוקף עד 30.09.2026 NINJA בלנדר Ninja TB301 Detect Duo Pro הוספה לסל'),
+  result('https://www.shopabroad.com/c/ninja', 'Ninja blenders | Shop Abroad', 'from 299 299 Ninja TB301 Power Blender Duo Pro add to cart'),
+  result('https://www.forumone.co.il/forums/blenders', 'דיון על בלנדרים | פורום', 'קניתי Ninja TB301 ב 569 569 וזה מעולה'),
+];

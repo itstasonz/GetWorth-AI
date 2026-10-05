@@ -86,22 +86,30 @@ describe('V2-30 A · the production witness: read as one thing, sold as another'
     assert.deepEqual(prices(siblings), [389, 418]);
     assert.ok(siblings.every((e) => e.evidence_class === EVIDENCE_CLASS.LOCAL_RETAIL && !e.retail_anchor && !e.admitted));
   });
-  test('V2-30f a price printed with no currency marker is reported, with what it stood beside, and not used', () => {
+  test('V2-30f a shop inside the market printing the exact product’s price without a currency sign is a row-bound anchor; everything else bare stays refused', () => {
+    // "החל מ- 569 569 NINJA בלנדר ושייקר TB301": the second shop's price for the product.
+    const ours = evidence.entries.find((e) => e.observation.observed_price === 569);
+    assert.deepEqual([ours.kind, ours.relation, ours.binding, ours.row_bound, ours.currency_basis, ours.retail_anchor, ours.admissible, ours.observation.currency],
+      ['new_retail', RELATION.EXACT, BINDING.TABLE_ROW, true, 'site_locale', true, false, 'ILS']);
+    // The sibling's bare price on the same page is reported, with whose it was, and not used.
     const unmarked = evidence.refused.filter((r) => r.reason === REFUSED.NO_CURRENCY);
-    const ours = unmarked.find((r) => r.value === 569);
-    assert.equal(ours.relation, RELATION.EXACT);
-    assert.equal(ours.currency, null);
-    assert.ok(!prices(evidence.entries).includes(569));
+    const sibling = unmarked.find((r) => r.value === 550);
+    assert.equal(sibling.relation, RELATION.SIBLING);
+    assert.equal(sibling.currency, null);
+    assert.ok(!prices(evidence.entries).includes(550));
     assert.equal(evidence.counts.unmarked_prices, unmarked.length);
+    assert.equal(evidence.counts.locale_inferred_prices, 1);
   });
-  test('V2-30g the result: identified, no used market, one shop’s new price — and no number for the used value', () => {
+  test('V2-30g the result: identified, no used market, two shops’ new price — no number for the used value, and what the estimate waits for', () => {
     assert.equal(price.state, PRICE_STATE.NO_PRICE_EVIDENCE);
     for (const k of ['low', 'recommended', 'high']) assert.equal(price[k], null);
     assert.equal(price.retail_anchor.kind, 'RETAIL_REPLACEMENT_ANCHOR');
-    assert.deepEqual([price.retail_anchor.strength, price.retail_anchor.shops, price.retail_anchor.low, price.retail_anchor.high], [ANCHOR_STRENGTH.SINGLE_SOURCE, 1, 599, 599]);
+    assert.deepEqual([price.retail_anchor.strength, price.retail_anchor.shops, price.retail_anchor.low, price.retail_anchor.high], [ANCHOR_STRENGTH.STRONG, 2, 569, 599]);
     assert.equal(price.confidence.identity.level, IDENTITY_CONFIDENCE.VERY_HIGH);
-    assert.deepEqual(price.confidence.pricing, { used_market: USED_EVIDENCE.NONE, retail_anchor: ANCHOR_STRENGTH.SINGLE_SOURCE });
+    assert.deepEqual(price.confidence.pricing, { used_market: USED_EVIDENCE.NONE, retail_anchor: ANCHOR_STRENGTH.STRONG });
     assert.equal(evidence.counts.by_class.LOCAL_USED, 0);
+    assert.equal(price.evidence_state, 'INSUFFICIENT_EVIDENCE');
+    assert.deepEqual([price.limitation.code, price.limitation.group], ['no_calibrated_resale_factor', 'home:blender:Good']);
   });
   test('V2-30h the whole deterministic half runs inside the latency budget', () => {
     assert.ok(evidence.timings.extraction_ms + evidence.timings.qualification_ms < 100, JSON.stringify(evidence.timings));
@@ -269,12 +277,16 @@ describe('V2-33 result-level binding is for one product’s own page, and nowher
     assert.equal(entries.length, 0);
     assert.deepEqual(refused.map((r) => [r.value, r.reason]), [[599, REFUSED.SEVERAL_ON_PAGE], [549, REFUSED.SEVERAL_ON_PAGE]]);
   });
-  test('V2-33e K · a category page with many prices contributes no anchor', () => {
+  test('V2-33e K · a category page: the row that names the product is a row-bound anchor; bare prices beside no name are not', () => {
     const { evidence, price } = MATRIX.find((m) => m.name === 'K category page');
     assert.ok(evidence.pages.every((p) => p.page_type === PAGE.CATEGORY && !p.result_level));
     const ours = evidence.entries.find((e) => e.observation.observed_price === 599);
-    assert.deepEqual([ours.kind, ours.relation, ours.binding, ours.retail_anchor], ['new_retail', RELATION.EXACT, BINDING.SENTENCE, false]);
-    assert.equal(price.retail_anchor.strength, ANCHOR_STRENGTH.NONE);
+    assert.deepEqual([ours.kind, ours.relation, ours.binding, ours.row_bound, ours.retail_anchor, ours.admissible],
+      ['new_retail', RELATION.EXACT, BINDING.SENTENCE, true, true, false]);
+    // The other products' prices on the same page are other products' prices.
+    assert.ok(evidence.entries.filter((e) => e !== ours).every((e) => !e.retail_anchor));
+    assert.equal(price.retail_anchor.strength, ANCHOR_STRENGTH.SINGLE_SOURCE);
+    assert.equal(price.retail_anchor.prices[0].binding, 'category_row');
     assert.equal(evidence.counts.admitted, 0);
     assert.ok(evidence.refused.some((r) => r.value === 569 && r.reason === REFUSED.NAKED_PRICE));
   });
@@ -399,7 +411,7 @@ describe('V2-35 every result ends in exactly one bucket', () => {
   });
   test('V2-35b the witness: 31 results = 6 duplicates + 20 without price data + 5 price candidates', () => {
     assert.deepEqual(MATRIX[0].evidence.accounting, {
-      total: 31, buckets: { DUPLICATE: 6, NO_PRICE_DATA: 20, REFUSED_AT_EXTRACTION: 1, QUALIFIER_REJECTED: 3, ADMITTED: 1 },
+      total: 31, buckets: { DUPLICATE: 6, NO_PRICE_DATA: 20, REFUSED_AT_EXTRACTION: 0, QUALIFIER_REJECTED: 3, ADMITTED: 2 },
       price_candidates: 5, reconciles: true,
     });
   });

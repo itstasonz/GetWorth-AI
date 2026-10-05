@@ -62,9 +62,13 @@ export function describeEvidence(evidence) {
   const q = evidence.qualification;
   const row = (e) => ({
     class: e.evidence_class,
+    tier: e.tier ?? null,
     relation: e.relation,
+    configuration: e.configuration ?? null,
+    source_type: e.source_type ?? null,
+    currency_basis: e.currency_basis ?? null,
     role: e.role,
-    binding: e.binding,
+    binding: e.row_bound ? 'category_row' : e.binding,
     page_type: e.page_type,
     domain: e.observation.source_domain,
     url: clip(e.observation.source, 300),
@@ -102,9 +106,34 @@ export function describeEvidence(evidence) {
       url: clip(r.url, 300), text: clip(r.text),
     })),
     pages: evidence.pages.slice(0, 40).map((p) => ({
-      bucket: p.bucket, page_type: p.page_type, title_relation: p.title_relation, result_level: p.result_level,
+      bucket: p.bucket, page_type: p.page_type, source_type: p.source_type ?? null, locale: p.locale ?? null,
+      title_relation: p.title_relation, result_level: p.result_level,
       domain: p.domain, title: clip(p.title, 80),
     })),
+    subject_configuration: evidence.subject_configuration ?? null,
     timings: evidence.timings,
   };
+}
+
+/**
+ * The ledger in one bounded line, for the server log: enough to reconstruct a
+ * scan's evidence after the fact, which the production witness could not be.
+ * Counts, every page's bucket and type, and the priced rows. No key, no token,
+ * no user id; listing text is third-party page text and is clipped.
+ */
+export function ledgerLine(scanUuid, result) {
+  const ev = result?.evidence ?? null;
+  const v = result?.valuation ?? null;
+  const p = result?.search?.provenance ?? null;
+  return JSON.stringify({
+    scan: String(scanUuid ?? '').slice(0, 8),
+    state: v?.state ?? null, evidence_state: v?.evidence_state ?? null, limitation: v?.limitation?.code ?? null,
+    identity_confidence: v?.confidence?.identity?.level ?? null, anchor: v?.retail_anchor ? [v.retail_anchor.strength, v.retail_anchor.shops, v.retail_anchor.low, v.retail_anchor.high] : null,
+    plan: (result?.plan?.queries ?? []).map((q) => q.purpose), queries: (p?.queries ?? []).length, actions: p?.search_call_count ?? 0,
+    results: p?.results?.length ?? 0, exact: ev?.market?.exact_roots ?? [], corroborated: ev?.market?.corroborated ?? [],
+    accounting: ev?.accounting?.buckets ?? null, tiers: ev?.counts?.by_tier ?? null, configurations: ev?.counts?.by_configuration ?? null,
+    pages: (ev?.pages ?? []).slice(0, 40).map((pg) => [pg.domain, pg.bucket, pg.source_type, pg.title_relation]),
+    rows: (ev?.entries ?? []).slice(0, 16).map((e) => [e.observation.source_domain, e.observation.observed_price, e.observation.currency, e.kind, e.relation, e.configuration, e.tier, e.admitted ? 'ADMITTED' : (e.retail_anchor ? 'ANCHOR' : 'REJECTED'), e.reason, clip(e.observation.title, 60)]),
+    timings: result?.timings ?? null,
+  });
 }
