@@ -181,3 +181,80 @@ An item is ready when: every record group exists · cohort A–D · special case
 - Builds with the V2 flag off and on succeed; bundle scan finds no key, no state secret, no allowlist, no V2 environment name, no provider host, no manifest field.
 - Dry run of the committed manifest: 44 items, 0 runnable (no photograph), PROFILE A $0.71 est / $1.07 max, PROFILE B $1.28 / $1.86, max runtime 22 min. Replay of the witness capture: zero network calls. `--live` alone is refused.
 - Zero paid or live provider calls were made. Production unchanged. Recognition and valuation rules unchanged.
+
+---
+
+## 15. M3 — dataset capture workflow, preflight set, launch gate (2026-10-05)
+
+**Built on** `fa7e441` (M2, pushed to `origin/scan-engine-v2`; `origin/main` unchanged at b3888a5). No recognition or valuation behaviour changed. No paid call was made. The 44-item benchmark and the preflight were **not** run.
+
+### 15.1 The capture helper (development only)
+
+`npm run bench:capture` starts `scripts/dev/benchmark-capture.mjs`: a dependency-free Node HTTP server on 127.0.0.1:8790 (add `--lan` to open it on the phone over the local network, so the phone's camera feeds the file picker directly) serving one page, `scripts/dev/benchmark-capture.html`. `npm run bench:capture:preflight` does the same for the preflight set.
+
+The page shows one item at a time — `BENCHMARK 01 / 44`, category, cohort, the item name, the photograph requirement and status — with a **Capture / Choose Photo** input, the follow-up input for the two items that have one, the ground-truth fields (highlighted where the physical item must confirm them; brand and product family are shown pre-filled and not highlighted), a provenance tick-row under every field (PHYSICAL_LABEL, PACKAGING, OWNER_KNOWLEDGE, PURCHASE_RECORD, SERIAL_MODEL_LABEL, MANUFACTURER_REFERENCE, OTHER; a value may carry several), the condition list (New … Parts, Unknown), notes, an optional valuation-truth section, **Save benchmark item**, and Prev / Next. An empty field is UNKNOWN and is accepted; a confirmed value without a provenance is refused (400; mutant B11).
+
+**What the helper writes, per photograph:** the master exactly as received (no recompression) at `photo.photo_path`, with `photo.master = { path, sha256, format, bytes, width, height, imported_at }` (pixel size read from the JPEG/PNG/WEBP headers in the server); and, when the file is 150 KB or larger, the PWA-prepared derivative the page makes in the browser with the PWA's own rule (longest side 1280 px, JPEG 0.82) at `photo.prepared`. The live run sends the prepared derivative when one exists, otherwise the master as-is, and the capture records `input.image_sha256` (what went in), `input.master_sha256` and `input.preparation` (mutant B12). The two follow-up photographs are separate files and separate records (`followup_master`, `followup_prepared`).
+
+**What the helper writes, per confirmation:** the identity fields as confirmed, `ground_truth_provenance` per field, `condition`, `ground_truth_source = "confirmed by the founder from the physical item on <date> (capture helper) …"`, and the valuation class when given. Readiness (`npm run bench:market:readiness`) then re-hashes every file and refuses an item whose photograph changed after import.
+
+### 15.2 Why it cannot reach Production, and why it cannot reach a provider
+
+- It lives under `scripts/dev/`. Vite builds from `index.html` and `src/`; Vercel serves `dist/` and deploys `api/` as functions. Nothing under `index.html`, `vite.config.js`, `vercel.json`, `src/`, `api/` or `public/` references it (CH-2a), and the built `dist/` carries no trace of it (CH-2b, plus the bundle scan in §15.10).
+- The server imports `node:http`, `node:fs`, `node:crypto`, `node:path`, `node:url` and nothing else: no `fetch(`, no `http.request`, no `https`, no engine module, no provider host (CH-1d, static). The page fetches only relative `/helper/…` paths. Every test in the suite runs with a global fetch that throws; none fired (CH-5g).
+- It never calls `/api/v2/identify`, `/api/v2/price`, OpenAI, web search, eBay or FX, because it has no code that could.
+
+### 15.3 The leakage boundary, kept
+
+The live engine door is unchanged in shape: `runEngine({ photoBase64, followupPhotoBase64, env, model, apiKey })`. The provenance record, like every other truth field, reaches only the scorer (BM-2a/2c; mutant B07 still killed). The capture's `input` block carries hashes, never a truth value.
+
+### 15.4 The follow-up protocol, through the real engine door
+
+`runEngine` sends the follow-up photograph **only** when the first photograph's decision is NEED_FOLLOWUP (CH-4a: an obvious item makes one identity call and the follow-up image never leaves even though it was on file; CH-4b: an ambiguous item makes two, the second carrying the follow-up; mutant B08). The engine result keeps `first` (the first photograph's own result) beside `identify` (the final one); the row records `first_photo`, `followup_requested`, `followup_expected`, `followup_as_expected`, `followup_supplied`, `followup_result`; the capture records `identity.first_photo` and `identity.followup`. `unnecessary_followup` is judged on the first photograph.
+
+### 15.5 The preflight set — `tests/fixtures/scan-v2/preflight-5.json`
+
+Five slots, every item `excluded_from_benchmark: true` (the manifest too; a manifest that mixes excluded and benchmark items is refused — CH-3b, mutant B10): (1) obvious branded appliance (the Ninja witness is convenient), (2) obvious electronics product, (3) obvious consumer product, (4) generic item, (5) configuration / adversarial item. Slots 2–5 are the founder's choice; their truth is recorded in the helper. The preflight report is tagged `excluded_from_benchmark: true, counts_toward_benchmark: false` and is never merged with the 44.
+
+**Preflight dry run (`npm run bench:preflight`)**, PROFILE A, once the five photographs exist:
+
+| measure | value |
+|---|---|
+| calls | identity 5 · follow-up 0 · search actions 5 · eBay 0 · FX 0 · other 0 |
+| expected cost | **$0.08** |
+| maximum cost | **$0.12** |
+| maximum runtime | **150 s** (30 s / item); expected ≈ 45 s |
+
+The paid preflight is **not run**. Its command, once approved: `node --env-file=.env.local scripts/market-benchmark.mjs --manifest tests/fixtures/scan-v2/preflight-5.json --live --approve-usd 0.08 --ceiling-usd 0.12 --allow-dirty` with `SCAN_ENGINE_V2_BENCHMARK_LIVE=yes` (`--allow-dirty` only because the preflight is not a measurement; the baseline never gets it).
+
+### 15.6 The cost ceiling that actually stops calls
+
+`liveGate` takes `--approve-usd` (at least the estimate) and `--ceiling-usd` (defaults to the plan's maximum, never below the approval). `runLive` keeps a **conservative** ledger: every identity call at the ceiling rate ($0.006), every search action at $0.01 + token ceiling $0.008, actual provider cost where larger. Before each item it checks `spent + perItemMaximum > ceiling` and, if so, stops **before** the call, names the skipped items, and writes the report with what completed (CH-5a; mutant B09). It never exceeds the authorised amount silently.
+
+### 15.7 Freeze, completion, no retries
+
+`npm run bench:market:freeze` (and every live run, into `freeze.json`) records: git SHA and branch, engine version, manifest SHA-256, per-item photo hashes (master, prepared, follow-up) and a photo-set SHA-256, model name, search profiles and count, eBay/FX flags, identify / search / market-budget timeouts, max follow-ups, image preparation rule, provider hosts, and which flags were present (values of flags only; no key — CH-5d). A live run **refuses** when any frozen path (`api/_lib/v2`, `api/v2`, the three benchmark scripts, `tests/fixtures/scan-v2`) has uncommitted changes, unless `--allow-dirty` (preflight only).
+
+During a run: items go in manifest order; a failed item (timeout, recognition failure, no evidence, rejection) is a row with its failure class and the run continues (CH-5b); a thrown runner aborts the run and marks it `valid: false` with the item and error. There is no retry path in the code. Every item's `gw-market-capture/2` file answers §19 of the order offline.
+
+### 15.8 The baseline, when its gates open
+
+Gates: 46 photographs stored by the helper · 44 confirmations · `readiness = 44/44` · preflight infrastructure proven · frozen paths clean at the tested SHA. Then, exactly once:
+
+```
+SCAN_ENGINE_V2_BENCHMARK_LIVE=yes node --env-file=.env.local scripts/market-benchmark.mjs --live --approve-usd 0.71 --ceiling-usd 1.07 --out benchmark-out/baseline-<sha>
+```
+
+PROFILE A, one search profile (`local`), 44 items, no eBay, no second profile. Expected $0.71; hard ceiling $1.07; maximum runtime 22 min. After it: the frozen report, the failure distribution by class, then the Profile-2 and eBay experiments on the misses only (§9).
+
+### 15.9 Status today
+
+- Photographs: **0 / 46** benchmark, **0 / 5** preflight. Human truth confirmed: **0 / 44** (43 pending; the Ninja witness identity confirmed, photograph not yet stored). Readiness: **0 / 44**.
+- The helper, the preflight set, the ceiling, the freeze and the follow-up protocol are implemented and tested; nothing was run live.
+
+### 15.10 Validation record
+
+- Full suite: 1,768 tests · 1,767 pass · 0 fail · 1 pre-existing skip (reputation integration). Benchmark suites: BM 28 / 28, CH 18 / 18.
+- V2 mutation harness: 180 / 180 killed (5 new: B08 follow-up sent unasked, B09 ceiling never stops, B10 preflight mixes into the benchmark, B11 truth without provenance, B12 prepared derivative ignored), both controls behave. Provider harness: 46 / 46, 0 survived.
+- Builds with the V2 flag off and on succeed; bundle scan of dist/ finds no key, no state secret, no allowlist, no V2 environment name, no provider host, no manifest field, and no trace of the capture helper (benchmark-capture, helper/manifest, PHYSICAL_LABEL, gw-benchmark-manifest).
+- Secret scan of every M3 change: clean. Zero paid or live provider calls. Production unchanged. Recognition and valuation rules unchanged.

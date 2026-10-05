@@ -436,11 +436,12 @@ V2_MUTANTS.push(
 
 // ── GW-BENCHMARK-001: THE BENCHMARK'S OWN RULES (the engine never sees the truth; retail never scores a used value)
 const BMK = 'scripts/market-benchmark.mjs';
+const BML = 'scripts/market-benchmark-live.mjs';
 const BMR = 'scripts/market-benchmark-report.mjs';
 V2_MUTANTS.push(
   { id: 'B01-RETAIL-SCORES-A-USED-VALUE', file: BMR, invariant: 'a retail-only reference never scores a used valuation',
     find: "export const SCORABLE_GT = Object.freeze(new Set(['A', 'B', 'C']));", replace: "export const SCORABLE_GT = Object.freeze(new Set(['A', 'B', 'C', 'D']));" },
-  { id: 'B02-LIVE-WITHOUT-THE-WORD', file: BMK, invariant: 'a live run needs the environment word, not only the flag and the approval',
+  { id: 'B02-LIVE-WITHOUT-THE-WORD', file: BML, invariant: 'a live run needs the environment word, not only the flag and the approval',
     find: "  if (env[LIVE_ENV] !== 'yes') return { allowed: false, reason: `${LIVE_ENV} must be exactly 'yes'` };", replace: '  if (false) return { allowed: false, reason: null };' },
   { id: 'B03-PENDING-TRUTH-IS-READY', file: BMR, invariant: 'ground truth a person has not confirmed does not make an item ready',
     find: "    if (!item.ground_truth_source || /^pending/i.test(item.ground_truth_source)) problems.push('ground truth not yet confirmed by a person');",
@@ -448,9 +449,24 @@ V2_MUTANTS.push(
   { id: 'B04-COHORT-D-CHARGED-WITH-PRICING', file: BMR, invariant: 'configuration and generic cohorts are never charged a pricing failure',
     find: '  if (cohort === COHORT.D || cohort === COHORT.C) return null;', replace: '  if (false) return null;' },
   { id: 'B05-FOLLOWUP-NEVER-UNNECESSARY', file: BMR, invariant: 'a follow-up asked of an obvious item is counted',
-    find: "  const unnecessaryFollowup = exp.exact_model_expected === true && decision === 'NEED_FOLLOWUP';", replace: '  const unnecessaryFollowup = false;' },
+    find: '  const unnecessaryFollowup = exp.exact_model_expected === true && followupRequested;', replace: '  const unnecessaryFollowup = false;' },
   { id: 'B06-SECOND-PROFILE-COSTS-NOTHING', file: BMK, invariant: 'the cost plan charges one search action per profile',
     find: '  const searchActions = items.length * profiles.length;', replace: '  const searchActions = items.length;' },
-  { id: 'B07-THE-ENGINE-DOOR-LEAKS', file: BMK, invariant: 'nothing but the photograph and the environment passes through the engine door',
+  { id: 'B07-THE-ENGINE-DOOR-LEAKS', file: BML, invariant: 'nothing but the photograph and the environment passes through the engine door',
     find: "followupPhotoBase64: followup ? followup.toString('base64') : null, env, model, apiKey,", replace: "followupPhotoBase64: followup ? followup.toString('base64') : null, env, model, apiKey, hint: item.identity," },
+);
+
+// ── GW-BENCHMARK-001 M3: THE CAPTURE HELPER, THE FOLLOW-UP PROTOCOL, THE CEILING, THE PREFLIGHT BOUNDARY
+const CAP = 'scripts/dev/benchmark-capture.mjs';
+V2_MUTANTS.push(
+  { id: 'B08-FOLLOWUP-SENT-UNASKED', file: BML, invariant: 'the follow-up photograph leaves only when the engine asks for it',
+    find: "  if (first.ok && first.sufficiency.decision === 'NEED_FOLLOWUP' && followupPhotoBase64) {", replace: '  if (followupPhotoBase64) {' },
+  { id: 'B09-CEILING-NEVER-STOPS', file: BML, invariant: 'the hard ceiling stops the run before the call that could exceed it',
+    find: '    if (state.spent_conservative_usd + perItem > gate.ceiling) {', replace: '    if (false) {' },
+  { id: 'B10-PREFLIGHT-MIXES-INTO-THE-BENCHMARK', file: BMK, invariant: 'an excluded item cannot sit in a benchmark manifest',
+    find: '    if ((i.excluded_from_benchmark === true) !== excluded) throw new Error(`${i.benchmark_id}: excluded_from_benchmark must match the manifest (${excluded})`);', replace: '    if (false) throw new Error(i.benchmark_id);' },
+  { id: 'B11-TRUTH-WITHOUT-PROVENANCE', file: CAP, invariant: 'a confirmed ground-truth value records how it was established',
+    find: '        if (v !== null && v !== \'\' && p.length === 0) throw Object.assign(new Error(`${f}: a confirmed value needs a provenance`), { status: 400 });', replace: '        if (false) throw new Error(f);' },
+  { id: 'B12-PREPARED-DERIVATIVE-IGNORED', file: BML, invariant: 'the PWA-prepared derivative is what goes in when the helper stored one',
+    find: "  const primary = pick(item, 'prepared_path_resolved', 'photo_path_resolved');", replace: "  const primary = { path: item.photo.photo_path_resolved, preparation: 'master_as_is' };" },
 );

@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Benchmark capture (development only)</title>
+<style>
+  :root { --ink:#1b1b1b; --muted:#6b6b6b; --line:#ddd; --need:#fff4d6; --need-line:#e0a800; --ok:#e6f6ea; --bg:#fafafa; }
+  body { margin:0; padding:16px; font:16px/1.4 system-ui, sans-serif; color:var(--ink); background:var(--bg); max-width:720px; margin-inline:auto; }
+  h1 { font-size:18px; margin:0 0 4px; } .muted { color:var(--muted); font-size:14px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px; margin:12px 0; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; } .grow { flex:1 1 auto; }
+  label { display:block; font-size:13px; color:var(--muted); margin-top:10px; }
+  input[type=text], select, textarea { width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--line); border-radius:8px; font:inherit; }
+  .need { background:var(--need); border-color:var(--need-line); } .fixed { background:#f3f3f3; }
+  .tag { display:inline-block; padding:2px 8px; border-radius:99px; font-size:12px; background:#eee; } .tag.ok { background:var(--ok); } .tag.miss { background:var(--need); }
+  button { padding:10px 16px; border-radius:8px; border:1px solid var(--line); background:#fff; font:inherit; cursor:pointer; } button.primary { background:var(--ink); color:#fff; border-color:var(--ink); }
+  .prov { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; } .prov label { display:inline-flex; gap:4px; align-items:center; font-size:12px; margin:0; padding:2px 6px; border:1px solid var(--line); border-radius:6px; }
+  img.preview { max-width:100%; max-height:260px; border-radius:8px; border:1px solid var(--line); }
+  .status { font-size:13px; margin-top:6px; min-height:1.2em; }
+</style>
+</head>
+<body>
+<h1 id="title">Benchmark capture</h1>
+<div class="muted" id="banner">Development only. This page talks to the local helper and to nothing else.</div>
+
+<div class="card">
+  <div class="row"><strong id="counter"></strong><span class="grow"></span><button id="prev">◀ Prev</button><button id="next">Next ▶</button></div>
+  <div class="row" style="margin-top:8px"><span id="category"></span> · <span id="cohort"></span> · <span id="special" class="muted"></span></div>
+  <div style="margin-top:6px"><strong id="item"></strong></div>
+  <div class="muted" id="notes"></div>
+</div>
+
+<div class="card" id="photos">
+  <div class="row"><strong>Primary photograph</strong> <span id="primaryTag" class="tag miss">missing</span></div>
+  <div class="muted" id="photoNotes"></div>
+  <div class="row" style="margin-top:8px"><input type="file" id="primaryFile" accept="image/*" capture="environment"><span class="status" id="primaryStatus"></span></div>
+  <img id="primaryPreview" class="preview" hidden>
+  <div id="followupBlock" hidden>
+    <div class="row" style="margin-top:14px"><strong>Follow-up photograph</strong> <span id="followupTag" class="tag miss">missing</span> <span class="muted">separate file; shown to the engine only if it asks</span></div>
+    <div class="row" style="margin-top:8px"><input type="file" id="followupFile" accept="image/*" capture="environment"><span class="status" id="followupStatus"></span></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="row"><strong>Ground truth</strong> <span id="confirmTag" class="tag miss">not confirmed</span></div>
+  <div class="muted">Highlighted fields need your confirmation from the physical item. Leave a field empty for UNKNOWN. Tick how each value was established.</div>
+  <div id="fields"></div>
+  <label>Condition (after inspecting the item)</label><select id="condition"></select>
+  <label>Condition notes</label><input type="text" id="condition_notes">
+  <label>Notes</label><input type="text" id="itemNotes">
+  <details style="margin-top:10px"><summary class="muted">Valuation ground truth (optional now; a separate pass later)</summary>
+    <label>Class</label><select id="gtClass"><option value="">— not recorded —</option></select>
+    <label>Reference ₪ (classes A–C)</label><input type="text" id="gtRef" inputmode="decimal">
+    <label>Retail reference ₪ (class D)</label><input type="text" id="gtRetail" inputmode="decimal">
+    <label>Methodology / evidence (URLs, amounts, dates)</label><textarea id="gtMethod" rows="2"></textarea>
+  </details>
+  <div class="row" style="margin-top:12px"><button class="primary" id="save">Save benchmark item</button><span class="status" id="saveStatus"></span></div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const COHORT = { A: 'A — Obvious', B: 'B — Family / ambiguous', C: 'C — Generic', D: 'D — Configuration / adversarial' };
+  const LABEL = { brand: 'Brand', product_family: 'Product family', exact_model: 'Exact model', model_number: 'Model number', variant: 'Variant', capacity_size: 'Capacity / size', color: 'Colour', configuration: 'Configuration' };
+  const DEFINITIONAL = new Set(['brand', 'product_family']); // pre-filled and verified by the plan; shown, not asked
+  let data = null, idx = 0;
+
+  const api = async (path, opts) => { const r = await fetch(path, opts); const j = await r.json(); if (!r.ok) throw new Error(j.error || r.status); return j; };
+  const load = async () => { data = await api('/helper/manifest'); $('title').textContent = data.name || 'Benchmark capture'; if (data.excluded_from_benchmark) $('banner').textContent += ' PREFLIGHT SET: excluded from the benchmark.'; render(); };
+
+  // The PWA's rule, reproduced: skip under 150 KB, cap the longest side at 1280 px, JPEG 0.82.
+  const prepare = (file) => new Promise((resolve, reject) => {
+    if (file.size / 1024 < 150) { resolve(null); return; }
+    const img = new Image();
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > 1280 || h > 1280) { const r = Math.min(1280 / w, 1280 / h); w = Math.round(w * r); h = Math.round(h * r); }
+      const c = document.createElement('canvas'); c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      c.toBlob((b) => (b ? resolve(b) : reject(new Error('canvas gave no image'))), 'image/jpeg', 0.82);
+    };
+    img.onerror = () => reject(new Error('could not decode the photograph'));
+    img.src = URL.createObjectURL(file);
+  });
+  const upload = async (kind, blob) => api(`/helper/photo?id=${encodeURIComponent(data.items[idx].benchmark_id)}&kind=${kind}`, { method: 'POST', body: blob });
+  const sendPhoto = async (file, kind, statusEl) => {
+    statusEl.textContent = 'storing the original…';
+    const master = await upload(kind, file);
+    statusEl.textContent = `master ${master.format} ${master.width}×${master.height} ${(master.bytes / 1024).toFixed(0)} KB · preparing the PWA derivative…`;
+    const derived = await prepare(file);
+    if (derived) { const p = await upload(kind === 'primary' ? 'prepared' : 'followup_prepared', derived); statusEl.textContent += ` prepared ${p.width}×${p.height} ${(p.bytes / 1024).toFixed(0)} KB`; }
+    else statusEl.textContent += ' (under 150 KB: sent as-is, like the PWA)';
+    await load();
+  };
+  $('primaryFile').onchange = (e) => e.target.files[0] && sendPhoto(e.target.files[0], 'primary', $('primaryStatus')).catch((err) => { $('primaryStatus').textContent = `failed: ${err.message}`; });
+  $('followupFile').onchange = (e) => e.target.files[0] && sendPhoto(e.target.files[0], 'followup', $('followupStatus')).catch((err) => { $('followupStatus').textContent = `failed: ${err.message}`; });
+
+  const provBox = (field, chosen) => `<div class="prov">${data.enums.PROVENANCE.map((p) => `<label><input type="checkbox" data-prov="${field}" value="${p}" ${chosen.includes(p) ? 'checked' : ''}>${p.replace(/_/g, ' ').toLowerCase()}</label>`).join('')}</div>`;
+  function render() {
+    const it = data.items[idx], st = data.status[idx];
+    $('counter').textContent = `BENCHMARK ${String(idx + 1).padStart(2, '0')} / ${data.items.length}`;
+    $('category').textContent = `${it.category.replace(/_/g, ' ')} / ${it.subcategory}`;
+    $('cohort').textContent = COHORT[it.cohort] || it.cohort;
+    $('special').textContent = it.special_case !== 'complete_product' ? it.special_case.replace(/_/g, ' ') : '';
+    $('item').textContent = it.market_identity?.canonical_market_name || [it.identity.brand, it.identity.exact_model || it.identity.product_family].filter(Boolean).join(' ') || it.benchmark_id;
+    $('notes').textContent = it.notes || '';
+    $('photoNotes').textContent = `Required: ${st.followup_required ? 'primary + follow-up' : 'primary photo'}. ${it.photo.photo_notes || ''}`;
+    $('primaryTag').textContent = st.primary ? `stored${st.prepared ? ' + prepared' : ''}` : 'missing'; $('primaryTag').className = `tag ${st.primary ? 'ok' : 'miss'}`;
+    $('primaryPreview').hidden = !st.primary; if (st.primary) $('primaryPreview').src = `/helper/photo-file?id=${encodeURIComponent(it.benchmark_id)}&t=${Date.now()}`;
+    $('followupBlock').hidden = !st.followup_required;
+    $('followupTag').textContent = st.followup ? 'stored' : 'missing'; $('followupTag').className = `tag ${st.followup ? 'ok' : 'miss'}`;
+    $('confirmTag').textContent = st.confirmed ? 'confirmed' : 'not confirmed'; $('confirmTag').className = `tag ${st.confirmed ? 'ok' : 'miss'}`;
+    $('primaryStatus').textContent = ''; $('followupStatus').textContent = ''; $('saveStatus').textContent = '';
+    const prov = it.ground_truth_provenance || {};
+    $('fields').innerHTML = data.enums.TRUTH_FIELDS.map((f) => {
+      const v = it.identity[f]; // every field stays editable; a definitional one is simply not highlighted
+      const need = !(DEFINITIONAL.has(f) && v) && !st.confirmed;
+      const control = f === 'configuration'
+        ? `<select id="f_${f}" class="${need ? 'need' : ''}"><option value="">UNKNOWN</option>${data.enums.CONFIGURATIONS.map((c) => `<option ${v === c ? 'selected' : ''}>${c}</option>`).join('')}</select>`
+        : `<input type="text" id="f_${f}" class="${need ? 'need' : (DEFINITIONAL.has(f) ? 'fixed' : '')}" value="${(v ?? '').toString().replace(/"/g, '&quot;')}" placeholder="UNKNOWN">`;
+      return `<label>${LABEL[f]}${need ? ' — confirm' : ''}</label>${control}${provBox(f, prov[f] || [])}`;
+    }).join('');
+    $('condition').innerHTML = `<option value="">— choose after inspecting —</option>${data.enums.CONDITIONS.map((c) => `<option ${it.condition?.condition === c ? 'selected' : ''}>${c}</option>`).join('')}`;
+    $('condition_notes').value = it.condition?.condition_notes || ''; $('itemNotes').value = it.notes || '';
+    $('gtClass').innerHTML = `<option value="">— not recorded —</option>${data.enums.GT_CLASSES.map((c) => `<option ${it.valuation_ground_truth?.class === c ? 'selected' : ''}>${c}</option>`).join('')}`;
+    $('gtRef').value = it.valuation_ground_truth?.reference_ils ?? ''; $('gtRetail').value = it.valuation_ground_truth?.retail_reference_ils ?? ''; $('gtMethod').value = it.valuation_ground_truth?.methodology ?? '';
+  }
+  $('save').onclick = async () => {
+    const it = data.items[idx];
+    const identity = {}, provenance = {};
+    for (const f of data.enums.TRUTH_FIELDS) {
+      identity[f] = $(`f_${f}`).value.trim() || null;
+      provenance[f] = [...document.querySelectorAll(`input[data-prov="${f}"]:checked`)].map((x) => x.value);
+    }
+    const num = (s) => (s.trim() === '' ? null : Number(s));
+    const body = { identity, provenance, condition: $('condition').value || null, condition_notes: $('condition_notes').value || null, notes: $('itemNotes').value,
+      valuation_ground_truth: { class: $('gtClass').value || null, reference_ils: num($('gtRef').value), retail_reference_ils: num($('gtRetail').value), methodology: $('gtMethod').value || null } };
+    try { await api(`/helper/truth?id=${encodeURIComponent(it.benchmark_id)}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); $('saveStatus').textContent = 'saved'; await load(); }
+    catch (err) { $('saveStatus').textContent = `not saved: ${err.message}`; }
+  };
+  $('prev').onclick = () => { idx = (idx - 1 + data.items.length) % data.items.length; render(); window.scrollTo(0, 0); };
+  $('next').onclick = () => { idx = (idx + 1) % data.items.length; render(); window.scrollTo(0, 0); };
+  load().catch((err) => { $('banner').textContent = `helper unreachable: ${err.message}`; });
+})();
+</script>
+</body>
+</html>

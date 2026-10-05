@@ -40,7 +40,8 @@ export function percentiles(values) {
  * `identify` / `price` are the engine's own results; `timings` the measured
  * wall-clock; `failure` is left null here and set by `classifyFailure`.
  */
-export function scoreItem({ item, identify, price, timings = {} }) {
+export function scoreItem({ item, identify, first = null, price, timings = {} }) {
+  const firstRes = first ?? identify;
   const gt = item.identity ?? {};
   const exp = item.expected_recognition ?? {};
   const vgt = item.valuation_ground_truth ?? {};
@@ -61,7 +62,10 @@ export function scoreItem({ item, identify, price, timings = {} }) {
   const modelCorrect = exp.exact_model_expected ? exactModel === true
     : (exp.family_only_acceptable ? (exactModel === true || familyOk === true) : (exp.generic_only_acceptable ? level !== 'product' : exactModel));
   const configCorrect = gt.configuration === 'COMPLETE' ? COMPLETE_LIKE.has(engineConfig) : (same(engineConfig, gt.configuration) || (gt.configuration_alternatives ?? []).some((c) => same(engineConfig, c)));
-  const unnecessaryFollowup = exp.exact_model_expected === true && decision === 'NEED_FOLLOWUP';
+  const firstDecision = firstRes?.sufficiency?.decision ?? null;
+  const followupRequested = firstDecision === 'NEED_FOLLOWUP';
+  const followupExpected = exp.decision === 'NEED_FOLLOWUP';
+  const unnecessaryFollowup = exp.exact_model_expected === true && followupRequested;
   const mustNotBe = item.must_not_be ? !(contains(engineModel, item.must_not_be) || contains(engineBrand, item.must_not_be)) : null;
   const knownNumbers = item.market_identity?.known_model_numbers ?? [];
   const exactRoots = ev?.market?.exact_roots ?? [];
@@ -76,7 +80,10 @@ export function scoreItem({ item, identify, price, timings = {} }) {
     brand_engine: engineBrand, brand_truth: gt.brand ?? null, brand_correct: brandCorrect,
     model_engine: engineModel, model_truth: gt.exact_model ?? null, exact_model_correct: exactModel, family_acceptable: familyOk, model_correct: modelCorrect,
     configuration_engine: engineConfig, configuration_truth: gt.configuration ?? null, configuration_correct: configCorrect,
-    decision, level, expected_decision: exp.decision ?? null, decision_as_expected: exp.decision ? decision === exp.decision : null,
+    decision, level, expected_decision: exp.decision ?? null, decision_as_expected: exp.decision ? firstDecision === exp.decision : null,
+    first_photo: { decision: firstDecision, level: firstRes?.sufficiency?.level ?? null, brand: firstRes?.identity?.brand?.value ?? null, model: firstRes?.identity?.model?.value ?? null },
+    followup_requested: followupRequested, followup_expected: followupExpected, followup_as_expected: followupRequested === followupExpected,
+    followup_supplied: firstRes !== identify && identify !== null, followup_result: firstRes !== identify && identify ? { decision, level, brand: engineBrand, model: engineModel } : null,
     unnecessary_followup: unnecessaryFollowup, must_not_be_respected: mustNotBe,
     recognition_correct: brandCorrect && modelCorrect === true && configCorrect && !unnecessaryFollowup && mustNotBe !== false,
     identity_latency_ms: identify?.timings?.identity_complete_ms ?? timings.identity_ms ?? null,
@@ -166,6 +173,8 @@ export function summarizeCohort(rows) {
       model_correct_or_acceptable: frac(r, (x) => x.model_correct === true),
       configuration_correct: frac(r, (x) => x.configuration_correct),
       unnecessary_followup: frac(r, (x) => x.unnecessary_followup),
+      followup_requested: frac(r, (x) => x.followup_requested),
+      followup_as_expected: frac(r, (x) => x.followup_as_expected),
       decision_as_expected: frac(r.filter((x) => x.decision_as_expected !== null), (x) => x.decision_as_expected),
       must_not_be_respected: frac(r.filter((x) => x.must_not_be_respected !== null), (x) => x.must_not_be_respected),
       identity_latency_ms: percentiles(measured.map((x) => x.identity_latency_ms)),
@@ -261,7 +270,10 @@ export function datasetReadiness(manifest, { readFile } = {}) {
       if (buf) {
         const head = [...buf.subarray(0, 4)];
         const loads = buf.length >= 512 && MAGIC.some((m) => m.every((b, i) => head[i] === b));
-        photo = { present: true, loads, bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex'), followup_sha256: null };
+        photo = { present: true, loads, bytes: buf.length, sha256: createHash('sha256').update(buf).digest('hex'), prepared_sha256: null, followup_sha256: null };
+        if (item.photo?.master?.sha256 && item.photo.master.sha256 !== photo.sha256) problems.push('photograph changed since it was imported');
+        const pp = item.photo?.prepared_path_resolved ?? item.photo?.prepared?.path;
+        if (pp) { try { const pb = readFile(pp); if (pb) photo.prepared_sha256 = createHash('sha256').update(pb).digest('hex'); if (pb && item.photo?.prepared?.sha256 && item.photo.prepared.sha256 !== photo.prepared_sha256) problems.push('prepared derivative changed since it was made'); } catch { problems.push('prepared derivative missing'); } }
         const fp = item.photo?.followup_photo_path_resolved ?? item.photo?.followup_photo_path;
         if (fp) { try { const fb = readFile(fp); if (fb) photo.followup_sha256 = createHash('sha256').update(fb).digest('hex'); else problems.push('follow-up photograph missing'); } catch { problems.push('follow-up photograph missing'); } }
         if (!loads) problems.push('photograph does not load as a JPEG, PNG or WEBP');
@@ -274,7 +286,7 @@ export function datasetReadiness(manifest, { readFile } = {}) {
     ready_items: items.filter((i) => i.ready).length,
     photos_present: items.filter((i) => i.photo.present).length, photos_loading: items.filter((i) => i.photo.loads).length,
     missing_photos: items.filter((i) => !i.photo.present).map((i) => i.id),
-    hashes: Object.fromEntries(items.filter((i) => i.photo.sha256).map((i) => [i.id, i.photo.followup_sha256 ? { photo: i.photo.sha256, followup: i.photo.followup_sha256 } : i.photo.sha256])),
+    hashes: Object.fromEntries(items.filter((i) => i.photo.sha256).map((i) => [i.id, { master: i.photo.sha256, prepared: i.photo.prepared_sha256 ?? null, followup: i.photo.followup_sha256 ?? null }])),
     items,
   };
 }

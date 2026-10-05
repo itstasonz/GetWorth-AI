@@ -45,6 +45,7 @@ const SUITES = [
   'tests/scan-v2-market-data.test.mjs',
   'tests/scan-v2-orchestrator.test.mjs',
   'tests/scan-v2-benchmark.test.mjs',
+  'tests/scan-v2-capture-helper.test.mjs',
   'tests/scan-v2-endpoints.test.mjs',
   // The client half: the photograph's path from the shutter to the request.
   'tests/scan-v2-client.test.mjs',
@@ -75,6 +76,8 @@ function mirror() {
   cpSync(join(REPO, 'scripts/valuation-calibration.mjs'), join(SCRATCH, 'scripts/valuation-calibration.mjs'));
   cpSync(join(REPO, 'scripts/market-benchmark.mjs'), join(SCRATCH, 'scripts/market-benchmark.mjs'));
   cpSync(join(REPO, 'scripts/market-benchmark-report.mjs'), join(SCRATCH, 'scripts/market-benchmark-report.mjs'));
+  cpSync(join(REPO, 'scripts/market-benchmark-live.mjs'), join(SCRATCH, 'scripts/market-benchmark-live.mjs'));
+  cpSync(join(REPO, 'scripts/dev'), join(SCRATCH, 'scripts/dev'), { recursive: true });
   // The benchmark suite holds that no npm script runs the benchmark live.
   cpSync(join(REPO, 'package.json'), join(SCRATCH, 'package.json'));
   for (const s of SUITES) cpSync(join(REPO, s), join(SCRATCH, s));

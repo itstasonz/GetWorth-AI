@@ -112,9 +112,9 @@ describe('BM-2 the engine never sees the truth', () => {
     assert.ok(bodies.length >= 1 && bodies.every((b) => b.includes('AAAA') && !b.includes(CANARY)));
   });
   test('BM-2c static: the engine door and the replay door read no item, manifest or truth field; the engine modules never mention the benchmark', () => {
-    const src = readFileSync(join(REPO, 'scripts/market-benchmark.mjs'), 'utf8');
+    const sources = { runEngine: readFileSync(join(REPO, 'scripts/market-benchmark-live.mjs'), 'utf8'), replayEngine: readFileSync(join(REPO, 'scripts/market-benchmark.mjs'), 'utf8') };
     for (const name of ['runEngine', 'replayEngine']) {
-      const body = fnSource(src, name);
+      const body = fnSource(sources[name], name);
       for (const word of ['item', 'manifest', 'ground_truth', 'market_identity', 'expected', 'truth', 'must_not_be', 'known_', 'reference', 'cohort']) assert.ok(!body.includes(word), `${name} mentions ${word}`);
     }
     assert.equal(replayEngine.length, 1, 'replayEngine takes the capture and nothing else');
@@ -203,7 +203,7 @@ describe('BM-5 replay: the whole engine over a persisted capture, zero network; 
   test('BM-5b a /2 capture built from the engine result holds every section the order lists, no secret, and replays to the same row', async () => {
     const c1 = loadCaptures(CAPTURES).get('appl-ninja-tb301');
     const result = await replayEngine(c1);
-    const cap = buildCapture({ item: { benchmark_id: 'appl-ninja-tb301' }, imageHash: 'a'.repeat(64), build: 'deadbeef', config: { model: 'replay', profiles: ['local'], ebay: false, fx: false }, engine: result, finalResult: { valuation: result.price.valuation } });
+    const cap = buildCapture({ item: { benchmark_id: 'appl-ninja-tb301' }, input: { image_sha256: 'a'.repeat(64), master_sha256: 'b'.repeat(64), preparation: 'master_as_is' }, build: 'deadbeef', config: { model: 'replay', profiles: ['local'], ebay: false, fx: false }, engine: result, finalResult: { valuation: result.price.valuation } });
     assert.equal(cap.format, CAPTURE_FORMAT);
     for (const k of ['item_id', 'captured_at', 'build', 'input', 'configuration', 'timings', 'identity', 'providers', 'observations', 'dedupe', 'independence', 'qualification', 'valuation', 'final_result', 'fx']) assert.ok(k in cap, k);
     assert.equal(cap.input.image_sha256, 'a'.repeat(64));
@@ -361,7 +361,7 @@ describe('BM-9 dataset readiness: photographs load, hashes recorded, truth confi
     const readFile = (p) => { if (!files[p]) throw new Error('ENOENT'); return files[p]; };
     const r = datasetReadiness({ items: [ready(), { ...ready(), benchmark_id: 'p', photo: { ...ready().photo, photo_path: 'photos/png.jpg', photo_path_resolved: 'photos/png.jpg' } }, { ...ready(), benchmark_id: 't', photo: { ...ready().photo, photo_path: 'photos/txt.jpg', photo_path_resolved: 'photos/txt.jpg' } }] }, { readFile });
     assert.deepEqual([r.items_total, r.ready_items, r.photos_present, r.photos_loading, r.ready], [3, 2, 3, 2, false]);
-    assert.equal(r.hashes['leak-probe'].length, 64);
+    assert.equal(r.hashes['leak-probe'].master.length, 64);
     assert.deepEqual(r.items[2].problems, ['photograph does not load as a JPEG, PNG or WEBP']);
   });
   test('BM-9b each gap alone blocks: missing photograph, pending source, no class, class B without a reference, two expected levels, unknown configuration', () => {

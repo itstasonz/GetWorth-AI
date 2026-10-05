@@ -4,42 +4,35 @@
 //
 //   node scripts/market-benchmark.mjs [--manifest <m>]                      DRY RUN (default): what a live run would call
 //   node scripts/market-benchmark.mjs --readiness                            is the dataset ready? photographs, hashes, truth
+//   node scripts/market-benchmark.mjs --freeze                               the record of what a run would measure (SHA, hashes, config)
 //   node scripts/market-benchmark.mjs --replay <captures dir> [--out <dir>]  the engine over persisted captures; no network
-//   node --env-file=.env.local scripts/market-benchmark.mjs --live --approve-usd <n> [--only id,id] [--profiles a,b] [--out <dir>]
-//   node scripts/market-benchmark.mjs --compare <baseline dir> --replay <variant dir>   incremental effect of a variant run
+//   node scripts/market-benchmark.mjs --replay <variant dir> --compare <baseline dir>   incremental effect of a variant run
+//   node --env-file=.env.local scripts/market-benchmark.mjs --live --approve-usd <est> [--ceiling-usd <max>] [--only id,id] [--profiles a,b] [--out <dir>]
 //
-// THE ENGINE NEVER SEES THE TRUTH. `runEngine` takes a photograph and the
-// environment, and nothing else; the manifest's identity, aliases and
-// reference prices reach only the scorer (market-benchmark-report.mjs). The
-// benchmark suite proves that mechanically.
+// THE ENGINE NEVER SEES THE TRUTH. `runEngine` (market-benchmark-live.mjs)
+// takes a photograph and the environment, and nothing else; the manifest's
+// identity, aliases and reference prices reach only the scorer
+// (market-benchmark-report.mjs). The benchmark suite proves that mechanically.
 //
 // LIVE is the only mode that may call a provider, and it refuses unless
 // --live is given, --approve-usd is at least the estimate, and
 // SCAN_ENGINE_V2_BENCHMARK_LIVE is exactly 'yes'. npm test never passes those.
-//
-// CAPTURE FORMAT gw-market-capture/2, one file per item: input image hash,
-// build SHA, configuration, timestamps, recognition raw + normalised, every
-// provider's raw response, timings and executed queries, normalised
-// observations, dedupe and qualification decisions, the valuation and the
-// final user-facing result. No secret. A `raw` may be { "$ref": "<file>#/<pointer>" }.
-// Format /1 captures (identity raw + provider raws) still replay.
+// A manifest marked excluded_from_benchmark (the preflight set) runs the same
+// machinery and its report says it counts toward nothing.
 // ══════════════════════════════════════════════════════════════════════════════
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
-import { createHash } from 'node:crypto';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scoreItem, buildReport, datasetReadiness, missesOf, compareRuns } from './market-benchmark-report.mjs';
+import { RATE, MAX_RUNTIME_PER_ITEM_S, liveGate, runLive, freezeRecord } from './market-benchmark-live.mjs';
+
+export { RATE, MAX_RUNTIME_PER_ITEM_S, LIVE_ENV, CAPTURE_FORMAT, liveGate, liveItem, runEngine, buildCapture, sha256, chargeOf, perItemMaximum, freezeRecord, runLive, FROZEN_PATHS } from './market-benchmark-live.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, '..');
 const imp = (p) => import(pathToFileURL(join(REPO, p)).href);
 
-export const MODE = Object.freeze({ DRY_RUN: 'dry-run', READINESS: 'readiness', REPLAY: 'replay', LIVE: 'live', COMPARE: 'compare' });
-export const LIVE_ENV = 'SCAN_ENGINE_V2_BENCHMARK_LIVE';
-export const CAPTURE_FORMAT = 'gw-market-capture/2';
-/** USD, estimates from the witness's measured usage; a live run records actuals. `max` is the ceiling a run is approved against. */
-export const RATE = Object.freeze({ identity_call: 0.003, identity_call_max: 0.006, search_action: 0.01, search_tokens: 0.003, search_tokens_max: 0.008, ebay_call: 0, fx_call: 0 });
-export const MAX_RUNTIME_PER_ITEM_S = 30;
+export const MODE = Object.freeze({ DRY_RUN: 'dry-run', READINESS: 'readiness', FREEZE: 'freeze', REPLAY: 'replay', LIVE: 'live', COMPARE: 'compare' });
 export const DEFAULT_MANIFEST = join(REPO, 'tests/fixtures/scan-v2/benchmark-44.json');
 
 // ── MANIFEST AND CAPTURES ───────────────────────────────────────────────────
@@ -48,11 +41,20 @@ export function loadManifest(path = DEFAULT_MANIFEST) {
   if (m.format !== 'gw-benchmark-manifest/2' || !Array.isArray(m.items)) throw new Error('not a gw-benchmark-manifest/2');
   const base = dirname(resolve(path));
   const abs = (p) => (p ? resolve(base, p) : null);
+  const excluded = m.excluded_from_benchmark === true;
+  for (const i of m.items) {
+    if ((i.excluded_from_benchmark === true) !== excluded) throw new Error(`${i.benchmark_id}: excluded_from_benchmark must match the manifest (${excluded})`);
+  }
   return {
-    ...m, path: resolve(path),
+    ...m, path: resolve(path), excluded_from_benchmark: excluded,
     items: m.items.map((i) => ({
-      ...i,
-      photo: { ...i.photo, photo_path_resolved: abs(i.photo?.photo_path), followup_photo_path_resolved: abs(i.photo?.followup_photo_path ?? null), present: i.photo?.photo_path ? existsSync(abs(i.photo.photo_path)) : false },
+      ...i, excluded_from_benchmark: excluded,
+      photo: {
+        ...i.photo,
+        photo_path_resolved: abs(i.photo?.photo_path), prepared_path_resolved: abs(i.photo?.prepared?.path ?? null),
+        followup_photo_path_resolved: abs(i.photo?.followup_photo_path ?? null), followup_prepared_path_resolved: abs(i.photo?.followup_prepared?.path ?? null),
+        present: i.photo?.photo_path ? existsSync(abs(i.photo.photo_path)) : false,
+      },
     })),
   };
 }
@@ -76,7 +78,6 @@ export function loadCaptures(dir) {
   }
   return out;
 }
-export const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
 // ── THE PLAN ────────────────────────────────────────────────────────────────
 function callsFor(items, { profiles, ebayEnabled, fxEnabled }) {
@@ -103,52 +104,10 @@ export function planRun(manifest, { ebayEnabled = false, fxEnabled = false, only
     profile_b_two_search_profiles: callsFor(list, { profiles: ['local', 'local_used_domains'], ebayEnabled, fxEnabled }),
   });
   return {
-    mode: MODE.DRY_RUN, manifest: manifest.path, items: items.length, runnable: runnable.length,
+    mode: MODE.DRY_RUN, manifest: manifest.path, excluded_from_benchmark: manifest.excluded_from_benchmark === true, items: items.length, runnable: runnable.length,
     missing_photos: items.filter((i) => !i.photo.present).map((i) => i.benchmark_id),
     runnable_today: both(runnable), full_manifest: both(items), rates_usd: RATE,
     first_live_configuration: 'profile_a_one_search_profile',
-  };
-}
-
-// ── THE ENGINE, SEEN ONLY THROUGH THIS DOOR ─────────────────────────────────
-/**
- * Identify, then price, from a photograph. THE ONLY ARGUMENTS ARE THE
- * PHOTOGRAPH(S) AND THE ENVIRONMENT: no item, no label, no expectation, no
- * reference price. A follow-up photograph is sent only when the engine asks.
- */
-export async function runEngine({ photoBase64, followupPhotoBase64 = null, env, model, apiKey, providers = null, fx = null, fetchImpl = fetch, safetyIdentifier = 'gw-bench' }) {
-  const { runV2Identify, runV2Price } = await imp('api/_lib/v2/scan.js');
-  const t0 = Date.now();
-  let identify = await runV2Identify({ image: photoBase64, model, apiKey, safetyIdentifier, fetchImpl });
-  let followup = null;
-  if (identify.ok && identify.sufficiency.decision === 'NEED_FOLLOWUP' && followupPhotoBase64) {
-    followup = await runV2Identify({ image: followupPhotoBase64, priorState: { identity: identify.identity, sufficiency: identify.sufficiency, followups_used: identify.followups_used }, model, apiKey, safetyIdentifier, fetchImpl });
-    if (followup.ok) identify = followup;
-  }
-  const identityMs = Date.now() - t0;
-  let price = null;
-  if (identify.ok && identify.sufficiency.decision === 'SEARCH_NOW') {
-    price = await runV2Price({ state: { identity: identify.identity, sufficiency: identify.sufficiency, followups_used: identify.followups_used ?? 0 }, model, apiKey, safetyIdentifier, fetchImpl, providers, fx, env });
-  }
-  return { identify, followup, price, timings: { identity_ms: identityMs, total_ms: Date.now() - t0 } };
-}
-
-export function buildCapture({ item, imageHash, followupHash = null, build, config, engine, finalResult }) {
-  const { identify, followup, price, timings } = engine;
-  return {
-    format: CAPTURE_FORMAT, item_id: item.benchmark_id, captured_at: new Date().toISOString(), build,
-    input: { image_sha256: imageHash, followup_image_sha256: followupHash, photo_count: followupHash ? 2 : 1 },
-    configuration: config, timings,
-    identity: { request: { model: config.model, image_bytes: null }, raw: identify.identity ?? null, normalized: identify.identity ?? null, sufficiency: identify.sufficiency ?? null, ok: identify.ok, failure: identify.failure ?? null, timings: identify.timings ?? null, usage: identify.calls?.usage ?? null,
-      followup: followup ? { raw: followup.identity ?? null, sufficiency: followup.sufficiency ?? null, timings: followup.timings ?? null } : null },
-    providers: (price?.market_data?.raw_ledger ?? []).map((r) => ({ provider: r.provider, profile: r.profile, status: r.status, request: { profile: r.profile, queries: r.raw?.plan?.queries?.map((q) => q.text) ?? null }, executed_queries: r.raw?.search?.provenance?.queries ?? null,
-      raw: r.provider === 'openai_web_search' ? { output: r.raw?.search?.raw_output ?? null, provenance: r.raw?.search?.provenance ?? null } : r.raw,
-      timings: r.raw?.search?.timings ?? null, elapsed_ms: r.elapsed_ms ?? null, started_at: r.started_at, first_result_at: r.first_result_at ?? null, completed_at: r.completed_at, error_class: r.error_class ?? null, result_count: r.result_count ?? 0, normalized_count: r.normalized_count ?? 0, billed: r.billed, cost_usd: r.cost_usd })),
-    observations: price?.market_data?.observations ?? [], dedupe: price?.market_data?.dedupe ?? null, independence: price?.market_data?.independence ?? null,
-    qualification: price?.evidence ? { market: price.evidence.market, accounting: price.evidence.accounting, counts: price.evidence.counts, entries: price.evidence.entries.map((e) => ({ domain: e.observation.source_domain, price: e.observation.observed_price, currency: e.observation.currency, kind: e.kind, relation: e.relation, configuration: e.configuration, tier: e.tier, admitted: e.admitted, anchor: e.retail_anchor, reason: e.reason })) } : null,
-    valuation: price?.valuation ?? null,
-    final_result: finalResult,
-    fx: price?.market_data?.fx ? { ...price.market_data.fx, table: price.market_data.fx_table ?? null } : null,
   };
 }
 
@@ -190,8 +149,11 @@ export async function replayEngine(capture) {
   const { runV2Price } = await imp('api/_lib/v2/scan.js');
   const { createFxSource, parseBoiRates } = await imp('api/_lib/v2/market/fx.js');
   const t0 = Date.now();
+  const firstRaw = capture.identity?.first_photo?.raw ?? capture.identity?.raw;
+  const firstIdentity = normalizeIdentity(firstRaw);
+  const first = { ok: true, identity: firstIdentity, sufficiency: decideSufficiency(firstIdentity), timings: capture.identity?.first_photo?.timings ?? capture.identity?.timings ?? null };
   const identity = normalizeIdentity(capture.identity?.raw);
-  const sufficiency = decideSufficiency(identity);
+  const sufficiency = decideSufficiency(identity, { followupsUsed: capture.identity?.followup_supplied ? 1 : 0 });
   const identify = { ok: true, identity, sufficiency, timings: capture.identity?.timings ?? null };
   const providers = (await Promise.all((capture.providers ?? []).map(replayProvider))).filter(Boolean);
   const fxSeed = capture.fx?.table ?? (capture.fx?.raw ? parseBoiRates(capture.fx.raw, Date.parse(capture.fx.retrieved_at ?? capture.captured_at)) : null);
@@ -199,50 +161,32 @@ export async function replayEngine(capture) {
   const price = sufficiency.decision === 'SEARCH_NOW'
     ? await runV2Price({ state: { identity, sufficiency, followups_used: 0 }, model: 'replay', apiKey: 'replay', fetchImpl: refuse, providers, fx, env: {} }) : null;
   const identityMs = capture.identity?.timings?.identity_complete_ms ?? capture.timings?.identity_ms ?? 0;
-  return { identify, followup: null, price, timings: { total_ms: Date.now() - t0 + identityMs, identity_ms: identityMs } };
+  return { first, identify, followup: capture.identity?.followup_supplied ? identify : null, price, timings: { total_ms: Date.now() - t0 + identityMs, identity_ms: identityMs } };
 }
 /** Replay one item and score it. The scorer is the only reader of `item`. */
 export async function replayItem(item, capture) {
   const result = await replayEngine(capture);
-  return scoreItem({ item, identify: result.identify, price: result.price, timings: result.timings });
+  return scoreItem({ item, identify: result.identify, first: result.first, price: result.price, timings: result.timings });
 }
 
-// ── LIVE ────────────────────────────────────────────────────────────────────
-export function liveGate({ argv, env, plan }) {
-  if (!argv.includes('--live')) return { allowed: false, reason: 'not --live' };
-  const i = argv.indexOf('--approve-usd');
-  const approved = i >= 0 ? Number(argv[i + 1]) : NaN;
-  const estimate = plan.runnable_today?.profile_a_one_search_profile?.estimated_cost_usd ?? 0;
-  if (!(approved >= estimate)) return { allowed: false, reason: `--approve-usd must be at least ${estimate}` };
-  if (env[LIVE_ENV] !== 'yes') return { allowed: false, reason: `${LIVE_ENV} must be exactly 'yes'` };
-  if (plan.runnable === 0) return { allowed: false, reason: 'no item has a photograph' };
-  return { allowed: true, reason: null };
-}
-/** One live item. `engine` is injectable so the leakage test can watch what reaches it. */
-export async function liveItem(item, { env, engine = runEngine, readFile = readFileSync, model, apiKey, build = 'local', config = {} }) {
-  const image = readFile(item.photo.photo_path_resolved);
-  const followup = item.photo.followup_photo_path_resolved && existsSync(item.photo.followup_photo_path_resolved) ? readFile(item.photo.followup_photo_path_resolved) : null;
-  const result = await engine({ photoBase64: image.toString('base64'), followupPhotoBase64: followup ? followup.toString('base64') : null, env, model, apiKey, safetyIdentifier: `gw-bench-${sha256(image).slice(0, 12)}` });
-  const { describeSearch, describeEvidence, describeMarketData } = await imp('api/_lib/v2/report.js');
-  const finalResult = result.price ? { valuation: result.price.valuation, search: describeSearch(result.price.plan, result.price.search), evidence: describeEvidence(result.price.evidence), market_data: describeMarketData(result.price.market_data) } : { identity: result.identify.identity, sufficiency: result.identify.sufficiency };
-  const capture = buildCapture({ item, imageHash: sha256(image), followupHash: followup ? sha256(followup) : null, build, config, engine: result, finalResult });
-  const row = scoreItem({ item, identify: result.identify, price: result.price, timings: result.timings });
-  return { capture, row };
-}
-
+// ── MAIN ────────────────────────────────────────────────────────────────────
 async function main(argv = process.argv.slice(2), env = process.env) {
   const flag = (n) => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : null);
   const manifest = loadManifest(flag('--manifest') ?? DEFAULT_MANIFEST);
   const only = flag('--only')?.split(',').map((s) => s.trim()).filter(Boolean) ?? null;
   const { ebayConfig } = await imp('api/_lib/v2/market/ebay-provider.js');
-  const plan = planRun(manifest, { ebayEnabled: ebayConfig(env).enabled, fxEnabled: String(env.SCAN_ENGINE_V2_FX_ENABLED).toLowerCase() === 'true', only });
+  const { resolveV2Model, V2_KEY_ENV, resolveSearchProfiles } = await imp('api/_lib/v2/config.js');
+  const runEnv = flag('--profiles') ? { ...env, SCAN_ENGINE_V2_SEARCH_PROFILES: flag('--profiles') } : env;
+  const config = { model: resolveV2Model(runEnv), profiles: resolveSearchProfiles(runEnv), ebay: ebayConfig(runEnv).enabled, fx: String(runEnv.SCAN_ENGINE_V2_FX_ENABLED).toLowerCase() === 'true' };
+  const plan = planRun(manifest, { ebayEnabled: config.ebay, fxEnabled: config.fx, only });
   const print = (o) => { process.stdout.write(`${JSON.stringify(o, null, 2)}\n`); return o; };
 
   if (argv.includes('--readiness')) {
     const r = datasetReadiness(manifest, { readFile: (p) => readFileSync(p) });
     if (Object.keys(r.hashes).length) writeFileSync(join(dirname(manifest.path), 'photo-hashes.json'), JSON.stringify(r.hashes, null, 1));
-    return print({ mode: MODE.READINESS, ...r });
+    return print({ mode: MODE.READINESS, excluded_from_benchmark: manifest.excluded_from_benchmark, ...r });
   }
+  if (argv.includes('--freeze')) return print({ mode: MODE.FREEZE, ...(await freezeRecord({ manifest, env: runEnv, config })) });
   if (argv.includes('--replay')) {
     const captures = loadCaptures(resolve(flag('--replay')));
     const rows = [];
@@ -254,29 +198,18 @@ async function main(argv = process.argv.slice(2), env = process.env) {
       for (const item of manifest.items) { const c = base.get(item.benchmark_id); if (c) baseRows.push(await replayItem(item, c)); }
       return print({ mode: MODE.COMPARE, baseline_items: baseRows.length, variant_items: rows.length, misses_in_baseline: missesOf(baseRows), comparison: compareRuns(baseRows, rows), network_calls: 0 });
     }
-    const out = { mode: MODE.REPLAY, captures: captures.size, ...report, misses_for_profile_2_experiment: missesOf(report.rows), network_calls: 0 };
+    const out = { mode: MODE.REPLAY, excluded_from_benchmark: manifest.excluded_from_benchmark, captures: captures.size, ...report, misses_for_profile_2_experiment: missesOf(report.rows), network_calls: 0 };
     if (flag('--out')) { mkdirSync(resolve(flag('--out')), { recursive: true }); writeFileSync(join(resolve(flag('--out')), 'report.json'), JSON.stringify(out, null, 1)); }
     return print(out);
   }
   const gate = liveGate({ argv, env, plan });
   if (!gate.allowed) return print({ ...plan, live_refused: argv.includes('--live') ? gate.reason : null, note: 'DRY RUN. No call was made.' });
 
-  // LIVE. Reached only through the gate.
-  const { resolveV2Model, V2_KEY_ENV, resolveSearchProfiles } = await imp('api/_lib/v2/config.js');
+  // LIVE. Reached only through the gate. A dirty frozen path makes the measurement meaningless: refuse.
+  const freeze = await freezeRecord({ manifest, env: runEnv, config });
+  if (freeze.frozen_paths_dirty.length && !argv.includes('--allow-dirty')) return print({ live_refused: 'frozen paths have uncommitted changes', frozen_paths_dirty: freeze.frozen_paths_dirty, note: 'commit or stash them, or pass --allow-dirty for a preflight that is not a measurement' });
   const outDir = resolve(flag('--out') ?? join(REPO, 'benchmark-out', new Date().toISOString().replace(/[:.]/g, '-')));
-  mkdirSync(outDir, { recursive: true });
-  const runEnv = flag('--profiles') ? { ...env, SCAN_ENGINE_V2_SEARCH_PROFILES: flag('--profiles') } : env;
-  const config = { model: resolveV2Model(runEnv), profiles: resolveSearchProfiles(runEnv), ebay: ebayConfig(runEnv).enabled, fx: String(runEnv.SCAN_ENGINE_V2_FX_ENABLED).toLowerCase() === 'true' };
-  const build = runEnv.VERCEL_GIT_COMMIT_SHA ?? runEnv.GIT_SHA ?? 'local';
-  const rows = [];
-  for (const item of manifest.items.filter((i) => i.photo.present && (!only || only.includes(i.benchmark_id)))) {
-    const { capture, row } = await liveItem(item, { env: runEnv, model: config.model, apiKey: runEnv[V2_KEY_ENV], build, config });
-    writeFileSync(join(outDir, `${item.benchmark_id}.capture.json`), JSON.stringify(capture, null, 1));
-    rows.push(row);
-  }
-  const out = { mode: MODE.LIVE, out_dir: outDir, build, configuration: config, ...buildReport(rows), misses_for_profile_2_experiment: missesOf(rows) };
-  writeFileSync(join(outDir, 'report.json'), JSON.stringify(out, null, 1));
-  return print(out);
+  return print(await runLive({ manifest, env: runEnv, gate, only, outDir, model: config.model, apiKey: runEnv[V2_KEY_ENV], config, build: freeze.git_sha ?? 'local', log: (line) => process.stderr.write(`${line}\n`) }));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
