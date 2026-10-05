@@ -304,6 +304,12 @@ yad2: `docs/audits/GW-YAD2-ACCESS-001.md`. No contact made.
 
 Validation (final, unloaded): full suite 1,729 tests · 1,728 pass · 0 fail · 1 pre-existing skip; V2 mutation harness 168 / 168 killed (23 M1 mutants); provider harness and guard/UI/sanitizer harnesses unchanged; builds with the V2 flag off and on; bundle scan: no key, no state secret, no allowlist, none of the new environment names or hosts. Waterfall (OR-6a, 300 ms deadline): fast local evidence stops the lower tier early; retail + international, one timeout, one failure and no evidence each complete inside the deadline with every provider in the ledger. Zero paid or live provider calls; Production unchanged.
 
+## 9B. M2 — benchmark dataset and readiness (2026-10-05)
+
+The manifest became a ground-truth record (gw-benchmark-manifest/2: photo, identity, condition, expected recognition level, market identity, special case, source, valuation class A–E), the runner gained readiness, capture format /2, cohort reporting, the failure taxonomy, the PROFILE A / B cost plan and the two prepared experiments, and the engine door was proven closed to the truth. Everything is in `docs/audits/GW-BENCHMARK-001.md`. Still not run; 44 photographs missing.
+
+---
+
 ## 10. Exact next implementation milestone (awaiting approval)
 
 **Milestone M1 — "Two profiles, one orchestrator, measured discovery":**

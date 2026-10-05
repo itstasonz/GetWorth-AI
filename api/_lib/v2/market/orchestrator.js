@@ -193,6 +193,8 @@ export async function runMarketData({
     early_stop: earlyStopState,
     ledger: ledger.map(({ raw, observations, ...rest }) => ({ ...rest, observations: observations?.length ?? 0 })),
     raw_ledger: ledger,
+    // The rate table the conversions used, for the benchmark capture; the endpoint never sends it.
+    fx_table: fxTable ?? null,
     timings: { started_at: t0, elapsed_ms: elapsed, deadline_ms: deadlineMs, within_deadline: elapsed <= deadlineMs + 250 },
     calls: {
       search_actions: provenance.search_call_count,

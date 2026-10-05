@@ -74,6 +74,9 @@ function mirror() {
   mkdirSync(join(SCRATCH, 'scripts'), { recursive: true });
   cpSync(join(REPO, 'scripts/valuation-calibration.mjs'), join(SCRATCH, 'scripts/valuation-calibration.mjs'));
   cpSync(join(REPO, 'scripts/market-benchmark.mjs'), join(SCRATCH, 'scripts/market-benchmark.mjs'));
+  cpSync(join(REPO, 'scripts/market-benchmark-report.mjs'), join(SCRATCH, 'scripts/market-benchmark-report.mjs'));
+  // The benchmark suite holds that no npm script runs the benchmark live.
+  cpSync(join(REPO, 'package.json'), join(SCRATCH, 'package.json'));
   for (const s of SUITES) cpSync(join(REPO, s), join(SCRATCH, s));
 }
 

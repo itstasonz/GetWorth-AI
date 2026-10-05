@@ -433,3 +433,24 @@ V2_MUTANTS.push(
   { id: 'S02-SECOND-PROFILE-ON-BY-DEFAULT', file: CFG, invariant: 'the second profile is off unless the environment names it',
     find: '  return known.length ? [...new Set([SEARCH_PROFILE.LOCAL, ...known])] : [SEARCH_PROFILE.LOCAL];', replace: '  return [SEARCH_PROFILE.LOCAL, SEARCH_PROFILE.LOCAL_USED_DOMAINS];' },
 );
+
+// ── GW-BENCHMARK-001: THE BENCHMARK'S OWN RULES (the engine never sees the truth; retail never scores a used value)
+const BMK = 'scripts/market-benchmark.mjs';
+const BMR = 'scripts/market-benchmark-report.mjs';
+V2_MUTANTS.push(
+  { id: 'B01-RETAIL-SCORES-A-USED-VALUE', file: BMR, invariant: 'a retail-only reference never scores a used valuation',
+    find: "export const SCORABLE_GT = Object.freeze(new Set(['A', 'B', 'C']));", replace: "export const SCORABLE_GT = Object.freeze(new Set(['A', 'B', 'C', 'D']));" },
+  { id: 'B02-LIVE-WITHOUT-THE-WORD', file: BMK, invariant: 'a live run needs the environment word, not only the flag and the approval',
+    find: "  if (env[LIVE_ENV] !== 'yes') return { allowed: false, reason: `${LIVE_ENV} must be exactly 'yes'` };", replace: '  if (false) return { allowed: false, reason: null };' },
+  { id: 'B03-PENDING-TRUTH-IS-READY', file: BMR, invariant: 'ground truth a person has not confirmed does not make an item ready',
+    find: "    if (!item.ground_truth_source || /^pending/i.test(item.ground_truth_source)) problems.push('ground truth not yet confirmed by a person');",
+    replace: "    if (!item.ground_truth_source) problems.push('ground truth not yet confirmed by a person');" },
+  { id: 'B04-COHORT-D-CHARGED-WITH-PRICING', file: BMR, invariant: 'configuration and generic cohorts are never charged a pricing failure',
+    find: '  if (cohort === COHORT.D || cohort === COHORT.C) return null;', replace: '  if (false) return null;' },
+  { id: 'B05-FOLLOWUP-NEVER-UNNECESSARY', file: BMR, invariant: 'a follow-up asked of an obvious item is counted',
+    find: "  const unnecessaryFollowup = exp.exact_model_expected === true && decision === 'NEED_FOLLOWUP';", replace: '  const unnecessaryFollowup = false;' },
+  { id: 'B06-SECOND-PROFILE-COSTS-NOTHING', file: BMK, invariant: 'the cost plan charges one search action per profile',
+    find: '  const searchActions = items.length * profiles.length;', replace: '  const searchActions = items.length;' },
+  { id: 'B07-THE-ENGINE-DOOR-LEAKS', file: BMK, invariant: 'nothing but the photograph and the environment passes through the engine door',
+    find: "followupPhotoBase64: followup ? followup.toString('base64') : null, env, model, apiKey,", replace: "followupPhotoBase64: followup ? followup.toString('base64') : null, env, model, apiKey, hint: item.identity," },
+);

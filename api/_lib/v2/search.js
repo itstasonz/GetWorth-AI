@@ -103,6 +103,8 @@ export async function runV2Search({
     return {
       outcome: provenance.search_performed ? SEARCH_OUTCOME.COMPLETED : SEARCH_OUTCOME.NO_SEARCH_RECORDED,
       provenance,
+      // The completed output items as the API sent them: the benchmark persists them so a run can be replayed without a second paid call.
+      raw_output: res.items,
       timings: { ...res.timings, results_available_ms: resultsAt },
       usage: res.usage,
       failure: null,

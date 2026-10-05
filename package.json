@@ -22,6 +22,7 @@
     "bench:scan-v2": "node scripts/scan-v2-benchmark.mjs",
     "bench:market": "node scripts/market-benchmark.mjs",
     "bench:market:replay": "node scripts/market-benchmark.mjs --replay tests/fixtures/scan-v2/captures",
+    "bench:market:readiness": "node scripts/market-benchmark.mjs --readiness",
     "calibrate:valuation": "node scripts/valuation-calibration.mjs",
     "test:mutation:sanitizer": "node tests/mutations/sanitizer-run.mjs",
     "test:mutation:ui": "node tests/mutations/ui-run.mjs",

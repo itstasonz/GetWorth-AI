@@ -1,62 +1,2862 @@
 {
-  "format": "gw-benchmark-manifest/1",
-  "note": "The 44-item evaluation set of GW-MARKET-DATA-001 §7: four items per category. PHOTOS ARE NOT IN THE REPOSITORY: `photo` is the path a photograph must be placed at (relative to this file) before a live run; the runner refuses to run an item live without one. `ground_truth` prices are to be recorded by a person reading a public listing in a browser on the day of the run, with the URL and date; null until then. Nothing here is a measurement.",
-  "market": "IL",
-  "photos_dir": "photos",
-  "items": [
-    { "id": "phone-iphone-13-128", "category": "phones", "label": "Apple iPhone 13 128GB", "photo": "photos/phone-iphone-13-128.jpg", "expect": { "brand": "Apple", "model": "iPhone 13", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "phone-galaxy-s23", "category": "phones", "label": "Samsung Galaxy S23 256GB", "photo": "photos/phone-galaxy-s23.jpg", "expect": { "brand": "Samsung", "model": "Galaxy S23", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "phone-pixel-8", "category": "phones", "label": "Google Pixel 8 128GB", "photo": "photos/phone-pixel-8.jpg", "expect": { "brand": "Google", "model": "Pixel 8", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "phone-back-only-no-label", "category": "phones", "label": "Android phone, back cover only visible, no logo readable (adversarial)", "photo": "photos/phone-back-only-no-label.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "NEED_FOLLOWUP", "level": "brand_class" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "hw-rtx-4070", "category": "computer_hardware", "label": "NVIDIA GeForce RTX 4070 (board partner card, model label visible)", "photo": "photos/hw-rtx-4070.jpg", "expect": { "brand": null, "model": "GeForce RTX 4070", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "hw-logitech-superlight", "category": "computer_hardware", "label": "Logitech G Pro X Superlight, top view only (sibling-dense)", "photo": "photos/hw-logitech-superlight.jpg", "expect": { "brand": "Logitech", "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "NEED_FOLLOWUP", "level": "brand_class" }, "followup_photo": "photos/hw-logitech-superlight-label.jpg", "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "hw-dell-u2722d", "category": "computer_hardware", "label": "Dell U2722D 27\" monitor with the rear label", "photo": "photos/hw-dell-u2722d.jpg", "expect": { "brand": "Dell", "model": "U2722D", "model_number": "U2722D", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "hw-macbook-air-m2", "category": "computer_hardware", "label": "Apple MacBook Air M2 13\" (About screen photographed)", "photo": "photos/hw-macbook-air-m2.jpg", "expect": { "brand": "Apple", "model": "MacBook Air M2", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "game-ps5-slim", "category": "gaming", "label": "Sony PlayStation 5 Slim (disc) console", "photo": "photos/game-ps5-slim.jpg", "expect": { "brand": "Sony", "model": "PlayStation 5 Slim", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "game-xbox-series-x", "category": "gaming", "label": "Microsoft Xbox Series X", "photo": "photos/game-xbox-series-x.jpg", "expect": { "brand": "Microsoft", "model": "Xbox Series X", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "game-switch-oled", "category": "gaming", "label": "Nintendo Switch OLED with dock and Joy-Cons", "photo": "photos/game-switch-oled.jpg", "expect": { "brand": "Nintendo", "model": "Switch OLED", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "game-dualsense-only", "category": "gaming", "label": "PS5 DualSense controller alone (accessory, not the console)", "photo": "photos/game-dualsense-only.jpg", "expect": { "brand": "Sony", "model": "DualSense", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product", "must_not_be": "PlayStation 5 console" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "audio-sony-xm5", "category": "audio", "label": "Sony WH-1000XM5 headphones", "photo": "photos/audio-sony-xm5.jpg", "expect": { "brand": "Sony", "model": "WH-1000XM5", "model_number": "WH-1000XM5", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "audio-airpods-pro-2", "category": "audio", "label": "Apple AirPods Pro 2 with case, open", "photo": "photos/audio-airpods-pro-2.jpg", "expect": { "brand": "Apple", "model": "AirPods Pro 2", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "audio-airpods-case-only", "category": "audio", "label": "AirPods Pro 2 charging case, empty (configuration case)", "photo": "photos/audio-airpods-case-only.jpg", "expect": { "brand": "Apple", "model": "AirPods Pro 2", "model_number": null, "configuration": "ACCESSORY_ONLY", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "audio-jbl-flip-6", "category": "audio", "label": "JBL Flip 6 speaker", "photo": "photos/audio-jbl-flip-6.jpg", "expect": { "brand": "JBL", "model": "Flip 6", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "appl-ninja-tb301", "category": "small_appliances", "label": "Ninja Power Blender Duo Pro (the production witness)", "photo": "photos/appl-ninja-tb301.jpg", "expect": { "brand": "Ninja", "model": "Power Blender Duo Pro", "model_number": null, "market_model_number": "TB301", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "appl-nespresso-vertuo-next", "category": "small_appliances", "label": "Nespresso Vertuo Next coffee machine", "photo": "photos/appl-nespresso-vertuo-next.jpg", "expect": { "brand": "Nespresso", "model": "Vertuo Next", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "appl-dyson-v11", "category": "small_appliances", "label": "Dyson V11 cordless vacuum", "photo": "photos/appl-dyson-v11.jpg", "expect": { "brand": "Dyson", "model": "V11", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "appl-generic-kettle", "category": "small_appliances", "label": "Stainless electric kettle, no visible brand", "photo": "photos/appl-generic-kettle.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "generic" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "perf-dior-sauvage-edp", "category": "perfume", "label": "Dior Sauvage Eau de Parfum 100 ml", "photo": "photos/perf-dior-sauvage-edp.jpg", "expect": { "brand": "Dior", "model": "Sauvage Eau de Parfum", "model_number": null, "variant": "100ml", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "perf-dior-sauvage-edt-60", "category": "perfume", "label": "Dior Sauvage Eau de Toilette 60 ml (variant of the above)", "photo": "photos/perf-dior-sauvage-edt-60.jpg", "expect": { "brand": "Dior", "model": "Sauvage Eau de Toilette", "model_number": null, "variant": "60ml", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product", "must_not_be": "Sauvage Eau de Parfum" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "perf-chanel-bleu", "category": "perfume", "label": "Bleu de Chanel EDT 100 ml", "photo": "photos/perf-chanel-bleu.jpg", "expect": { "brand": "Chanel", "model": "Bleu de Chanel", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "perf-empty-bottle", "category": "perfume", "label": "Empty Sauvage bottle (configuration case)", "photo": "photos/perf-empty-bottle.jpg", "expect": { "brand": "Dior", "model": "Sauvage", "model_number": null, "configuration": "BOX_ONLY", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "shoe-jordan-1-mid", "category": "shoes", "label": "Air Jordan 1 Mid, recognisable colourway, no box", "photo": "photos/shoe-jordan-1-mid.jpg", "expect": { "brand": "Nike", "model": "Air Jordan 1 Mid", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "shoe-af1-07", "category": "shoes", "label": "Nike Air Force 1 '07 white", "photo": "photos/shoe-af1-07.jpg", "expect": { "brand": "Nike", "model": "Air Force 1", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "shoe-adidas-samba", "category": "shoes", "label": "Adidas Samba OG", "photo": "photos/shoe-adidas-samba.jpg", "expect": { "brand": "Adidas", "model": "Samba OG", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "shoe-box-only", "category": "shoes", "label": "Jordan 1 shoebox, closed, no shoes (configuration case)", "photo": "photos/shoe-box-only.jpg", "expect": { "brand": "Nike", "model": "Air Jordan 1", "model_number": null, "configuration": "BOX_ONLY", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "watch-gshock-ga2100", "category": "watches", "label": "Casio G-Shock GA-2100", "photo": "photos/watch-gshock-ga2100.jpg", "expect": { "brand": "Casio", "model": "G-Shock GA-2100", "model_number": "GA-2100", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "watch-seiko-5-srpd", "category": "watches", "label": "Seiko 5 Sports SRPD (dial only; reference is on the caseback)", "photo": "photos/watch-seiko-5-srpd.jpg", "expect": { "brand": "Seiko", "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "NEED_FOLLOWUP", "level": "brand_class" }, "followup_photo": "photos/watch-seiko-5-srpd-caseback.jpg", "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "watch-apple-s9-45", "category": "watches", "label": "Apple Watch Series 9 45mm (About screen)", "photo": "photos/watch-apple-s9-45.jpg", "expect": { "brand": "Apple", "model": "Apple Watch Series 9", "model_number": null, "variant": "45mm", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "watch-tissot-prx", "category": "watches", "label": "Tissot PRX 40 quartz", "photo": "photos/watch-tissot-prx.jpg", "expect": { "brand": "Tissot", "model": "PRX", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "tool-dewalt-dcd796-bare", "category": "tools", "label": "DeWalt DCD796 drill, bare tool, label visible", "photo": "photos/tool-dewalt-dcd796-bare.jpg", "expect": { "brand": "DeWalt", "model": "DCD796", "model_number": "DCD796", "configuration": "BASE_ONLY", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "tool-bosch-gsr12v-kit", "category": "tools", "label": "Bosch GSR 12V-15 in its case with two batteries (kit)", "photo": "photos/tool-bosch-gsr12v-kit.jpg", "expect": { "brand": "Bosch", "model": "GSR 12V-15", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "tool-makita-dga452", "category": "tools", "label": "Makita DGA452 angle grinder", "photo": "photos/tool-makita-dga452.jpg", "expect": { "brand": "Makita", "model": "DGA452", "model_number": "DGA452", "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "tool-generic-hammer", "category": "tools", "label": "Claw hammer, no brand", "photo": "photos/tool-generic-hammer.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "generic" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "furn-ikea-kallax-4x4", "category": "furniture", "label": "IKEA Kallax 4×4 shelf, white", "photo": "photos/furn-ikea-kallax-4x4.jpg", "expect": { "brand": "IKEA", "model": "Kallax", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "furn-ikea-billy", "category": "furniture", "label": "IKEA Billy bookcase", "photo": "photos/furn-ikea-billy.jpg", "expect": { "brand": "IKEA", "model": "Billy", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "furn-generic-chair", "category": "furniture", "label": "Wooden dining chair, no brand (must not become IKEA)", "photo": "photos/furn-generic-chair.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "generic", "must_not_be": "IKEA" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "furn-corner-sofa", "category": "furniture", "label": "Grey corner sofa, no brand", "photo": "photos/furn-corner-sofa.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "generic" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-
-    { "id": "home-brita-jug", "category": "household", "label": "Brita Marella water filter jug", "photo": "photos/home-brita-jug.jpg", "expect": { "brand": "Brita", "model": "Marella", "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "home-tefal-pan-28", "category": "household", "label": "Tefal 28 cm frying pan", "photo": "photos/home-tefal-pan-28.jpg", "expect": { "brand": "Tefal", "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "brand_class" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "home-laundry-basket", "category": "household", "label": "Plastic laundry basket, no brand", "photo": "photos/home-laundry-basket.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "COMPLETE", "decision": "SEARCH_NOW", "level": "generic" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } },
-    { "id": "home-two-objects", "category": "household", "label": "A kettle and a toaster in one frame (adversarial: multiple objects)", "photo": "photos/home-two-objects.jpg", "expect": { "brand": null, "model": null, "model_number": null, "configuration": "UNKNOWN", "decision": "NEED_FOLLOWUP", "level": "generic", "must_not_be": "a confident single product" }, "ground_truth": { "retail_ils": null, "used_asking_ils": null, "used_url": null, "observed_on": null } }
-  ]
+ "format": "gw-benchmark-manifest/2",
+ "name": "GW-BENCHMARK-001 — 44 items, four per category, Israel",
+ "market": "IL",
+ "created": "2026-10-05",
+ "description": "Ground-truth records for the Scan Engine V2 end-to-end benchmark. Every field a person can verify from the physical item. The engine never reads this file: scripts/market-benchmark.mjs hands it the photograph only.",
+ "leakage_rule": "identity, market_identity, must_not_be, valuation_ground_truth and notes reach only the scorer. tests/scan-v2-benchmark.test.mjs proves no field of this record appears in a provider query or recognition prompt.",
+ "unknown_rule": "null means unknown, not zero. Fields are filled by a person from the physical item or a recorded observation; nothing here is guessed. candidate_model_numbers_unverified are hints for the person to verify, never truth.",
+ "cohorts": {
+  "A": "obvious identifiable items (brand and model readable)",
+  "B": "identifiable family, ambiguous model (a follow-up or a family-level answer is right)",
+  "C": "generic / low-identity items (no brand; a generic answer is right)",
+  "D": "configuration / adversarial cases (reported separately, never in a cohort A number)"
+ },
+ "valuation_ground_truth_classes": {
+  "A": "RECENT_SOLD_EVIDENCE: a sold / completed local price within 90 days, recorded with source and date",
+  "B": "MULTIPLE_LOCAL_ASKING_PRICES: three or more local asking prices for the same configuration, recorded with URL and date; the reference is their median",
+  "C": "HUMAN_VERIFIED_RANGE: a person with market knowledge records a low/high; the reference is the midpoint",
+  "D": "RETAIL_ONLY: only a new price exists; it is recorded under retail_reference_ils and NEVER scores a used valuation",
+  "E": "NO_RELIABLE_VALUE: no defensible value; the engine is right to decline"
+ },
+ "photo_capture_checklist": [
+  "phone camera, handheld, ordinary room light, no studio setup, no catalog or web image",
+  "one item per frame except home-two-objects; the item fills most of the frame; the brand and model text readable where the photo_notes say so",
+  "the configuration as described: bare tool without battery, empty case, closed box, empty bottle",
+  "export at the PWA size: longest side about 1280 px, JPEG about 82 % quality; file name exactly as photo_path",
+  "for the two follow-up items, the second file named exactly as followup_photo_path",
+  "after placing a photograph, fill condition, colour, capacity and any variant from the item; replace ground_truth_source with how it was confirmed",
+  "record price ground truth separately and later: URL, amount, date, and the class A–E it earns; never fill a reference you did not observe"
+ ],
+ "items": [
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "phone-iphone-13-128",
+   "cohort": "A",
+   "category": "phones",
+   "subcategory": "smartphone",
+   "photo": {
+    "photo_path": "photos/phone-iphone-13-128.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "front, screen on the Settings > General > About page showing the model name and capacity; or the back with the Apple logo plus a second About photo",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Apple",
+    "brand_alternatives": [],
+    "product_family": "iPhone",
+    "exact_model": "iPhone 13",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "128GB",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Apple iPhone 13 128GB",
+    "known_aliases": [
+     "iPhone 13",
+     "אייפון 13"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "A2633",
+     "A2482",
+     "A2634",
+     "A2635"
+    ],
+    "regional_name": "אייפון 13"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "several yad2 asking prices for the same capacity are expected to exist; a person records them with URL and date"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "phone-galaxy-s23",
+   "cohort": "A",
+   "category": "phones",
+   "subcategory": "smartphone",
+   "photo": {
+    "photo_path": "photos/phone-galaxy-s23.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "Settings > About phone screen showing model name and number, or the back with the Samsung wordmark plus the About screen",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Samsung",
+    "brand_alternatives": [],
+    "product_family": "Galaxy S",
+    "exact_model": "Galaxy S23",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "256GB",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Samsung Galaxy S23 256GB",
+    "known_aliases": [
+     "Galaxy S23",
+     "גלקסי S23"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "SM-S911B",
+     "SM-S911U"
+    ],
+    "regional_name": "סמסונג גלקסי S23"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "phone-pixel-8",
+   "cohort": "A",
+   "category": "phones",
+   "subcategory": "smartphone",
+   "photo": {
+    "photo_path": "photos/phone-pixel-8.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "Settings > About phone showing \"Pixel 8\" and storage, or the back with the G logo plus the About screen",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Google",
+    "brand_alternatives": [],
+    "product_family": "Pixel",
+    "exact_model": "Pixel 8",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "128GB",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Google Pixel 8 128GB",
+    "known_aliases": [
+     "Pixel 8",
+     "פיקסל 8"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "GKWS6",
+     "G9BQD"
+    ],
+    "regional_name": "גוגל פיקסל 8"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "thin local supply is expected; may end as class C or E"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "ambiguity case: scores on NOT guessing; the actual phone is recorded by the founder so an over-confident guess can be checked",
+   "benchmark_id": "phone-back-only-no-label",
+   "cohort": "B",
+   "category": "phones",
+   "subcategory": "smartphone",
+   "photo": {
+    "photo_path": "photos/phone-back-only-no-label.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_back_no_label",
+    "photo_notes": "the back of an Android phone in a plain case or with the logo hidden; no screen, no label",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": "Android smartphone",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": true,
+    "generic_only_acceptable": false,
+    "decision": "NEED_FOLLOWUP",
+    "level": "brand_class",
+    "note": "the right answer is to ask for the About screen, not to name a model"
+   },
+   "market_identity": {
+    "canonical_market_name": null,
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "other",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "no value can be verified for an unidentified phone"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "brand_alternatives is filled with the board partner (ASUS / MSI / Gigabyte / …) once the physical card is known; either brand counts",
+   "benchmark_id": "hw-rtx-4070",
+   "cohort": "A",
+   "category": "computer_hardware",
+   "subcategory": "graphics_card",
+   "photo": {
+    "photo_path": "photos/hw-rtx-4070.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_with_label",
+    "photo_notes": "the card out of the case with the model sticker (board partner name and \"RTX 4070\") readable",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "NVIDIA",
+    "brand_alternatives": [],
+    "product_family": "GeForce RTX 40",
+    "exact_model": "GeForce RTX 4070",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "12GB",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "NVIDIA GeForce RTX 4070",
+    "known_aliases": [
+     "RTX 4070"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "sibling-dense: the first photo alone cannot separate it from the G Pro Wireless / Superlight 2",
+   "benchmark_id": "hw-logitech-superlight",
+   "cohort": "B",
+   "category": "computer_hardware",
+   "subcategory": "mouse",
+   "photo": {
+    "photo_path": "photos/hw-logitech-superlight.jpg",
+    "photo_count": 2,
+    "photo_type": "single_item_top_view",
+    "photo_notes": "top view only: the G logo visible, no model text; the follow-up is the underside label",
+    "followup_photo_path": "photos/hw-logitech-superlight-label.jpg"
+   },
+   "identity": {
+    "brand": "Logitech",
+    "brand_alternatives": [],
+    "product_family": "G Pro",
+    "exact_model": "G Pro X Superlight",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": true,
+    "generic_only_acceptable": false,
+    "decision": "NEED_FOLLOWUP",
+    "level": "brand_class",
+    "exact_model_expected_after_followup": true
+   },
+   "market_identity": {
+    "canonical_market_name": "Logitech G Pro X Superlight",
+    "known_aliases": [
+     "Pro X Superlight",
+     "GPX Superlight"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "910-005878",
+     "910-005880"
+    ],
+    "regional_name": null
+   },
+   "special_case": "other",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "hw-dell-u2722d",
+   "cohort": "A",
+   "category": "computer_hardware",
+   "subcategory": "monitor",
+   "photo": {
+    "photo_path": "photos/hw-dell-u2722d.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_with_label",
+    "photo_notes": "rear regulatory label with the model \"U2722D\" readable; a second frame of the front is optional",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Dell",
+    "brand_alternatives": [],
+    "product_family": "UltraSharp",
+    "exact_model": "U2722D",
+    "model_number": "U2722D",
+    "variant": null,
+    "capacity_size": "27 inch",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Dell UltraSharp U2722D",
+    "known_aliases": [
+     "Dell U2722D"
+    ],
+    "known_model_numbers": [
+     "U2722D"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "hw-macbook-air-m2",
+   "cohort": "A",
+   "category": "computer_hardware",
+   "subcategory": "laptop",
+   "photo": {
+    "photo_path": "photos/hw-macbook-air-m2.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the About This Mac window on screen (chip, memory, storage) with the laptop visible",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Apple",
+    "brand_alternatives": [],
+    "product_family": "MacBook Air",
+    "exact_model": "MacBook Air M2 13-inch",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Apple MacBook Air M2 13\"",
+    "known_aliases": [
+     "MacBook Air M2",
+     "מקבוק אייר M2"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "A2681"
+    ],
+    "regional_name": "מקבוק אייר M2"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "memory and storage must be recorded from About This Mac; they move the price"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "game-ps5-slim",
+   "cohort": "A",
+   "category": "gaming",
+   "subcategory": "console",
+   "photo": {
+    "photo_path": "photos/game-ps5-slim.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the console standing, disc slot visible; the model label on the back is the follow-up if asked",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Sony",
+    "brand_alternatives": [],
+    "product_family": "PlayStation 5",
+    "exact_model": "PlayStation 5 Slim",
+    "model_number": null,
+    "variant": "disc edition",
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Sony PlayStation 5 Slim (disc)",
+    "known_aliases": [
+     "PS5 Slim",
+     "פלייסטיישן 5 סלים"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "CFI-2016",
+     "CFI-2015"
+    ],
+    "regional_name": "פלייסטיישן 5 סלים"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "controller included or not must be recorded: it is a configuration question"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "game-xbox-series-x",
+   "cohort": "A",
+   "category": "gaming",
+   "subcategory": "console",
+   "photo": {
+    "photo_path": "photos/game-xbox-series-x.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the console standing with the Xbox logo; the rear label is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Microsoft",
+    "brand_alternatives": [],
+    "product_family": "Xbox Series",
+    "exact_model": "Xbox Series X",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "1TB",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Microsoft Xbox Series X 1TB",
+    "known_aliases": [
+     "Xbox Series X",
+     "אקסבוקס סריס X"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "1882"
+    ],
+    "regional_name": "אקסבוקס סריס X"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "game-switch-oled",
+   "cohort": "A",
+   "category": "gaming",
+   "subcategory": "console",
+   "photo": {
+    "photo_path": "photos/game-switch-oled.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "console in the dock with both Joy-Cons attached; the OLED wordmark on the dock or the box if present",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Nintendo",
+    "brand_alternatives": [],
+    "product_family": "Switch",
+    "exact_model": "Switch OLED",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Nintendo Switch OLED",
+    "known_aliases": [
+     "Switch OLED",
+     "נינטנדו סוויץ OLED"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "HEG-001"
+    ],
+    "regional_name": "נינטנדו סוויץ' OLED"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": "PlayStation 5 console",
+   "notes": "adversarial: the controller is a complete product in itself and must not be priced as the console it belongs to",
+   "benchmark_id": "game-dualsense-only",
+   "cohort": "D",
+   "category": "gaming",
+   "subcategory": "controller",
+   "photo": {
+    "photo_path": "photos/game-dualsense-only.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the controller alone on a table; no console in frame",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Sony",
+    "brand_alternatives": [],
+    "product_family": "DualSense",
+    "exact_model": "DualSense Wireless Controller",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Sony DualSense Wireless Controller",
+    "known_aliases": [
+     "DualSense",
+     "PS5 controller",
+     "שלט PS5"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "CFI-ZCT1W"
+    ],
+    "regional_name": "שלט פלייסטיישן 5"
+   },
+   "special_case": "sibling_trap",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "audio-sony-xm5",
+   "cohort": "A",
+   "category": "audio",
+   "subcategory": "headphones",
+   "photo": {
+    "photo_path": "photos/audio-sony-xm5.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "headphones on a table with the Sony wordmark; the model text inside the headband is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Sony",
+    "brand_alternatives": [],
+    "product_family": "WH-1000X",
+    "exact_model": "WH-1000XM5",
+    "model_number": "WH-1000XM5",
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Sony WH-1000XM5",
+    "known_aliases": [
+     "XM5",
+     "Sony XM5"
+    ],
+    "known_model_numbers": [
+     "WH-1000XM5"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "audio-airpods-pro-2",
+   "cohort": "A",
+   "category": "audio",
+   "subcategory": "earbuds",
+   "photo": {
+    "photo_path": "photos/audio-airpods-pro-2.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_open",
+    "photo_notes": "the case open with both earbuds inside; the charging port (Lightning or USB-C) visible in a second frame if possible",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Apple",
+    "brand_alternatives": [],
+    "product_family": "AirPods Pro",
+    "exact_model": "AirPods Pro 2",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Apple AirPods Pro (2nd generation)",
+    "known_aliases": [
+     "AirPods Pro 2",
+     "AirPods Pro 2nd gen",
+     "איירפודס פרו 2"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "A2698",
+     "A2699",
+     "A2700",
+     "A3047",
+     "A3048",
+     "A3049"
+    ],
+    "regional_name": "איירפודס פרו 2"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "variant (Lightning vs USB-C) is recorded from the case port"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "configuration case: scored on configuration = ACCESSORY_ONLY and on NOT producing the full-set valuation",
+   "benchmark_id": "audio-airpods-case-only",
+   "cohort": "D",
+   "category": "audio",
+   "subcategory": "earbuds",
+   "photo": {
+    "photo_path": "photos/audio-airpods-case-only.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_open",
+    "photo_notes": "the AirPods Pro 2 charging case open and EMPTY; no earbuds in frame",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Apple",
+    "brand_alternatives": [],
+    "product_family": "AirPods Pro",
+    "exact_model": "AirPods Pro 2",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "ACCESSORY_ONLY",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Apple AirPods Pro (2nd generation) charging case",
+    "known_aliases": [
+     "AirPods Pro 2 case",
+     "MagSafe charging case"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "accessory_only",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "a case alone sells for a fraction of the set; retail of the set must never score it"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "audio-jbl-flip-6",
+   "cohort": "A",
+   "category": "audio",
+   "subcategory": "speaker",
+   "photo": {
+    "photo_path": "photos/audio-jbl-flip-6.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "speaker on a table, the JBL logo and the \"Flip 6\" text on the end cap readable",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "JBL",
+    "brand_alternatives": [],
+    "product_family": "Flip",
+    "exact_model": "Flip 6",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "JBL Flip 6",
+    "known_aliases": [
+     "Flip 6",
+     "רמקול JBL Flip 6"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "JBLFLIP6"
+    ],
+    "regional_name": null
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "appl-ninja-tb301",
+   "cohort": "A",
+   "category": "small_appliances",
+   "subcategory": "blender",
+   "photo": {
+    "photo_path": "photos/appl-ninja-tb301.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the production witness photograph: the base with the jug attached, \"NINJA\" and \"POWER BLENDER DUO PRO\" readable on the base",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Ninja",
+    "brand_alternatives": [],
+    "product_family": "Detect / BlendSense",
+    "exact_model": "Power Blender Duo Pro",
+    "model_number": "TB301",
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": "Good",
+    "condition_notes": "as the founder reported for the witness scan"
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Ninja Detect Duo Power Blender Pro TB301",
+    "known_aliases": [
+     "Ninja Power Blender Duo Pro",
+     "Ninja BlendSense Power Blender Duo Pro",
+     "Ninja Detect Duo"
+    ],
+    "known_model_numbers": [
+     "TB301"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "בלנדר נינג'ה TB301"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "founder-confirmed production witness scan of 2026-09-30 (GW-SCAN-V2-001 §2: identity confirmed, 2 Israeli retail shops at ₪569/₪599); the photograph is not yet copied into the fixture directory",
+   "valuation_ground_truth": {
+    "class": "D",
+    "status": "RECORDED",
+    "expected_class": "D",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": 584,
+    "evidence": [
+     {
+      "kind": "retail_asking",
+      "amount_ils": 569,
+      "source": "Israeli retail shop 1 (witness evidence ledger, GW-SCAN-V2-001 §2)",
+      "observed_on": "2026-09-30"
+     },
+     {
+      "kind": "retail_asking",
+      "amount_ils": 599,
+      "source": "Israeli retail shop 2 (witness evidence ledger)",
+      "observed_on": "2026-09-30"
+     }
+    ],
+    "methodology": "RETAIL_ONLY: median of two Israeli retail asking prices seen in the witness scan. No used evidence was found (0 of 16 results admitted). This value must never score a used valuation.",
+    "observed_on": "2026-09-30",
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "appl-nespresso-vertuo-next",
+   "cohort": "A",
+   "category": "small_appliances",
+   "subcategory": "coffee_machine",
+   "photo": {
+    "photo_path": "photos/appl-nespresso-vertuo-next.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the machine from the front with the Nespresso and Vertuo marks; the base label (ENV120 / GCV1) is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Nespresso",
+    "brand_alternatives": [],
+    "product_family": "Vertuo",
+    "exact_model": "Vertuo Next",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Nespresso Vertuo Next",
+    "known_aliases": [
+     "Vertuo Next",
+     "נספרסו ורטו נקסט"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "ENV120",
+     "GCV1"
+    ],
+    "regional_name": "נספרסו ורטו נקסט"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "appl-dyson-v11",
+   "cohort": "A",
+   "category": "small_appliances",
+   "subcategory": "vacuum",
+   "photo": {
+    "photo_path": "photos/appl-dyson-v11.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the whole stick vacuum; the V11 marking on the body and the variant (Absolute / Animal / Torque Drive) if printed",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Dyson",
+    "brand_alternatives": [],
+    "product_family": "V-series cordless",
+    "exact_model": "V11",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Dyson V11",
+    "known_aliases": [
+     "Dyson V11 Absolute",
+     "Dyson V11 Animal",
+     "דייסון V11"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "דייסון V11"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "the variant must be recorded; it moves the price and the engine is not required to read it from the body"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "appl-generic-kettle",
+   "cohort": "C",
+   "category": "small_appliances",
+   "subcategory": "kettle",
+   "photo": {
+    "photo_path": "photos/appl-generic-kettle.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "a stainless electric kettle with no visible brand",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": "electric kettle",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": true,
+    "decision": "SEARCH_NOW",
+    "level": "generic"
+   },
+   "market_identity": {
+    "canonical_market_name": "electric kettle (unbranded)",
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "קומקום חשמלי"
+   },
+   "special_case": "generic_item",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "generic: a range at most; no exact comparables exist"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "perf-dior-sauvage-edp",
+   "cohort": "A",
+   "category": "perfume",
+   "subcategory": "fragrance",
+   "photo": {
+    "photo_path": "photos/perf-dior-sauvage-edp.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the bottle front with \"Sauvage\", \"Eau de Parfum\" and the 100 ml marking readable; fill level visible",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Dior",
+    "brand_alternatives": [],
+    "product_family": "Sauvage",
+    "exact_model": "Sauvage Eau de Parfum",
+    "model_number": null,
+    "variant": "Eau de Parfum",
+    "capacity_size": "100ml",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Dior Sauvage Eau de Parfum 100ml",
+    "known_aliases": [
+     "Sauvage EDP",
+     "דיור סובאז' EDP"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "דיור סובאז'"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "fill level is condition; a person records it"
+   }
+  },
+  {
+   "must_not_be": "Sauvage Eau de Parfum",
+   "notes": "variant trap: same bottle shape as the EDP; concentration and size must both be read",
+   "benchmark_id": "perf-dior-sauvage-edt-60",
+   "cohort": "D",
+   "category": "perfume",
+   "subcategory": "fragrance",
+   "photo": {
+    "photo_path": "photos/perf-dior-sauvage-edt-60.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the bottle front with \"Eau de Toilette\" and the 60 ml marking readable",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Dior",
+    "brand_alternatives": [],
+    "product_family": "Sauvage",
+    "exact_model": "Sauvage Eau de Toilette",
+    "model_number": null,
+    "variant": "Eau de Toilette",
+    "capacity_size": "60ml",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Dior Sauvage Eau de Toilette 60ml",
+    "known_aliases": [
+     "Sauvage EDT"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "דיור סובאז' EDT"
+   },
+   "special_case": "sibling_trap",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "perf-chanel-bleu",
+   "cohort": "A",
+   "category": "perfume",
+   "subcategory": "fragrance",
+   "photo": {
+    "photo_path": "photos/perf-chanel-bleu.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the bottle front with \"BLEU DE CHANEL\", the concentration and the 100 ml marking",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Chanel",
+    "brand_alternatives": [],
+    "product_family": "Bleu de Chanel",
+    "exact_model": "Bleu de Chanel Eau de Toilette",
+    "model_number": null,
+    "variant": "Eau de Toilette",
+    "capacity_size": "100ml",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Bleu de Chanel Eau de Toilette 100ml",
+    "known_aliases": [
+     "Bleu de Chanel EDT",
+     "בלו דה שאנל"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "בלו דה שאנל"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "configuration case: the engine must not report COMPLETE; BOX_ONLY (container only) or PARTS both count",
+   "benchmark_id": "perf-empty-bottle",
+   "cohort": "D",
+   "category": "perfume",
+   "subcategory": "fragrance",
+   "photo": {
+    "photo_path": "photos/perf-empty-bottle.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "an EMPTY Sauvage bottle, the empty fill level clearly visible against light",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Dior",
+    "brand_alternatives": [],
+    "product_family": "Sauvage",
+    "exact_model": "Sauvage",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "BOX_ONLY",
+    "configuration_alternatives": [
+     "PARTS"
+    ]
+   },
+   "condition": {
+    "condition": "Parts",
+    "condition_notes": "empty container"
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Dior Sauvage (empty bottle)",
+    "known_aliases": [
+     "Sauvage empty bottle"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "box_only",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "an empty bottle has collector value at most; a full-bottle price must never score it"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "shoe-jordan-1-mid",
+   "cohort": "A",
+   "category": "shoes",
+   "subcategory": "sneakers",
+   "photo": {
+    "photo_path": "photos/shoe-jordan-1-mid.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_side",
+    "photo_notes": "the pair from the side, Wings logo visible; the size tag inside the tongue (style code) is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Nike",
+    "brand_alternatives": [],
+    "product_family": "Air Jordan 1",
+    "exact_model": "Air Jordan 1 Mid",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Nike Air Jordan 1 Mid",
+    "known_aliases": [
+     "Jordan 1 Mid",
+     "AJ1 Mid",
+     "ג'ורדן 1 מיד"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "ג'ורדן 1"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "colourway, style code and size are recorded from the tongue tag; they move the price"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "shoe-af1-07",
+   "cohort": "A",
+   "category": "shoes",
+   "subcategory": "sneakers",
+   "photo": {
+    "photo_path": "photos/shoe-af1-07.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_side",
+    "photo_notes": "the pair from the side, white; the tongue tag with the style code is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Nike",
+    "brand_alternatives": [],
+    "product_family": "Air Force 1",
+    "exact_model": "Air Force 1 '07",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": "white",
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Nike Air Force 1 '07 White",
+    "known_aliases": [
+     "Air Force 1",
+     "AF1",
+     "אייר פורס 1"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "CW2288-111"
+    ],
+    "regional_name": "אייר פורס 1"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "shoe-adidas-samba",
+   "cohort": "A",
+   "category": "shoes",
+   "subcategory": "sneakers",
+   "photo": {
+    "photo_path": "photos/shoe-adidas-samba.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_side",
+    "photo_notes": "the pair from the side; the tongue tag is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Adidas",
+    "brand_alternatives": [],
+    "product_family": "Samba",
+    "exact_model": "Samba OG",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Adidas Samba OG",
+    "known_aliases": [
+     "Samba",
+     "אדידס סמבה"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "B75806",
+     "B75807"
+    ],
+    "regional_name": "אדידס סמבה"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "C",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "configuration case: the label names the shoe; the frame holds only a box",
+   "benchmark_id": "shoe-box-only",
+   "cohort": "D",
+   "category": "shoes",
+   "subcategory": "sneakers",
+   "photo": {
+    "photo_path": "photos/shoe-box-only.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_box",
+    "photo_notes": "a closed Jordan shoebox with the label; NO shoes in frame",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Nike",
+    "brand_alternatives": [],
+    "product_family": "Air Jordan 1",
+    "exact_model": "Air Jordan 1",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "BOX_ONLY",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Nike Air Jordan 1 (box only)",
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "box_only",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "a box alone must never receive the shoe price"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "watch-gshock-ga2100",
+   "cohort": "A",
+   "category": "watches",
+   "subcategory": "digital_analog",
+   "photo": {
+    "photo_path": "photos/watch-gshock-ga2100.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the dial with \"G-SHOCK\" and \"GA-2100\" readable on the face; the caseback is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Casio",
+    "brand_alternatives": [],
+    "product_family": "G-Shock",
+    "exact_model": "GA-2100",
+    "model_number": "GA-2100",
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Casio G-Shock GA-2100",
+    "known_aliases": [
+     "CasiOak",
+     "G-Shock GA2100",
+     "ג'י שוק GA-2100"
+    ],
+    "known_model_numbers": [
+     "GA-2100"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "קסיו ג'י שוק"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "the colour suffix (-1A1, -1A, …) is recorded from the caseback"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "watch-seiko-5-srpd",
+   "cohort": "B",
+   "category": "watches",
+   "subcategory": "automatic",
+   "photo": {
+    "photo_path": "photos/watch-seiko-5-srpd.jpg",
+    "photo_count": 2,
+    "photo_type": "single_item_front",
+    "photo_notes": "the dial only: \"SEIKO 5 SPORTS\" readable, no reference; the follow-up is the caseback with the reference",
+    "followup_photo_path": "photos/watch-seiko-5-srpd-caseback.jpg"
+   },
+   "identity": {
+    "brand": "Seiko",
+    "brand_alternatives": [],
+    "product_family": "Seiko 5 Sports",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": true,
+    "generic_only_acceptable": false,
+    "decision": "NEED_FOLLOWUP",
+    "level": "brand_class",
+    "exact_model_expected_after_followup": true
+   },
+   "market_identity": {
+    "canonical_market_name": "Seiko 5 Sports SRPD",
+    "known_aliases": [
+     "Seiko 5 Sports",
+     "סייקו 5"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "סייקו 5"
+   },
+   "special_case": "other",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "the SRPDxx reference is filled into exact_model and known_model_numbers from the caseback"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "watch-apple-s9-45",
+   "cohort": "A",
+   "category": "watches",
+   "subcategory": "smartwatch",
+   "photo": {
+    "photo_path": "photos/watch-apple-s9-45.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the watch with Settings > General > About on screen (model name and case size)",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Apple",
+    "brand_alternatives": [],
+    "product_family": "Apple Watch",
+    "exact_model": "Apple Watch Series 9",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "45mm",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Apple Watch Series 9 45mm",
+    "known_aliases": [
+     "Apple Watch S9",
+     "אפל ווטש סדרה 9"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [
+     "A2980",
+     "A2984"
+    ],
+    "regional_name": "אפל ווטש 9"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "GPS vs Cellular and the case material are recorded from About"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "watch-tissot-prx",
+   "cohort": "A",
+   "category": "watches",
+   "subcategory": "quartz",
+   "photo": {
+    "photo_path": "photos/watch-tissot-prx.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the dial with \"TISSOT\" and \"PRX\" readable; the caseback reference is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Tissot",
+    "brand_alternatives": [],
+    "product_family": "PRX",
+    "exact_model": "PRX 40 quartz",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "40mm",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Tissot PRX 40mm Quartz",
+    "known_aliases": [
+     "Tissot PRX",
+     "טיסו PRX"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "טיסו PRX"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "the full reference (T137.410.xx) and dial colour are recorded from the caseback"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "configuration case: the same model number is sold as a kit; the frame shows the bare tool",
+   "benchmark_id": "tool-dewalt-dcd796-bare",
+   "cohort": "D",
+   "category": "tools",
+   "subcategory": "drill",
+   "photo": {
+    "photo_path": "photos/tool-dewalt-dcd796-bare.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_with_label",
+    "photo_notes": "the drill alone, NO battery, NO charger, NO case; the model label \"DCD796\" readable",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "DeWalt",
+    "brand_alternatives": [],
+    "product_family": "XR 18V",
+    "exact_model": "DCD796",
+    "model_number": "DCD796",
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "BASE_ONLY",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "DeWalt DCD796 (bare tool)",
+    "known_aliases": [
+     "DCD796N",
+     "DeWalt DCD796 body only"
+    ],
+    "known_model_numbers": [
+     "DCD796"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "מקדחה דוולט DCD796"
+   },
+   "special_case": "base_only",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "kit listings (with batteries) must not score the bare tool"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "tool-bosch-gsr12v-kit",
+   "cohort": "A",
+   "category": "tools",
+   "subcategory": "drill",
+   "photo": {
+    "photo_path": "photos/tool-bosch-gsr12v-kit.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_open_case",
+    "photo_notes": "the open case with the driver, two batteries and the charger; the model label readable",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Bosch",
+    "brand_alternatives": [],
+    "product_family": "GSR 12V",
+    "exact_model": "GSR 12V-15",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Bosch GSR 12V-15 Professional (kit)",
+    "known_aliases": [
+     "GSR 12V-15",
+     "בוש GSR 12V-15"
+    ],
+    "known_model_numbers": [
+     "GSR 12V-15"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "מברגה בוש 12V"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "configuration is recorded at capture time: with battery = COMPLETE, without = BASE_ONLY",
+   "benchmark_id": "tool-makita-dga452",
+   "cohort": "A",
+   "category": "tools",
+   "subcategory": "angle_grinder",
+   "photo": {
+    "photo_path": "photos/tool-makita-dga452.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_with_label",
+    "photo_notes": "the grinder with the model label \"DGA452\" readable; battery present or not is recorded",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Makita",
+    "brand_alternatives": [],
+    "product_family": "LXT 18V",
+    "exact_model": "DGA452",
+    "model_number": "DGA452",
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": null,
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Makita DGA452",
+    "known_aliases": [
+     "DGA452Z",
+     "מקיטה DGA452"
+    ],
+    "known_model_numbers": [
+     "DGA452"
+    ],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "משחזת מקיטה DGA452"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "tool-generic-hammer",
+   "cohort": "C",
+   "category": "tools",
+   "subcategory": "hand_tool",
+   "photo": {
+    "photo_path": "photos/tool-generic-hammer.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "a claw hammer with no brand marking",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": "claw hammer",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": true,
+    "decision": "SEARCH_NOW",
+    "level": "generic"
+   },
+   "market_identity": {
+    "canonical_market_name": "claw hammer (unbranded)",
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "פטיש"
+   },
+   "special_case": "generic_item",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": "furniture with a product name: expected to have local used supply but no model number in listings",
+   "benchmark_id": "furn-ikea-kallax-4x4",
+   "cohort": "A",
+   "category": "furniture",
+   "subcategory": "shelving",
+   "photo": {
+    "photo_path": "photos/furn-ikea-kallax-4x4.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the whole 4×4 unit from the front; the IKEA article sticker inside a cube is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "IKEA",
+    "brand_alternatives": [],
+    "product_family": "KALLAX",
+    "exact_model": "KALLAX 4x4",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "147x147 cm",
+    "color": "white",
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "IKEA KALLAX shelving unit 147x147 cm white",
+    "known_aliases": [
+     "Kallax 4x4",
+     "Kallax 16 cubes",
+     "קאלקס"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "כוורת קאלקס"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "the article number is recorded from the sticker"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "furn-ikea-billy",
+   "cohort": "A",
+   "category": "furniture",
+   "subcategory": "bookcase",
+   "photo": {
+    "photo_path": "photos/furn-ikea-billy.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the bookcase from the front; width and colour recorded; the article sticker is the follow-up",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "IKEA",
+    "brand_alternatives": [],
+    "product_family": "BILLY",
+    "exact_model": "BILLY bookcase",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "IKEA BILLY bookcase",
+    "known_aliases": [
+     "Billy",
+     "ספריית בילי"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "ספריית בילי"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "B",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "width (40 / 80 cm) and colour are recorded; they move the price"
+   }
+  },
+  {
+   "must_not_be": "IKEA",
+   "notes": "the engine must not attach a brand that is not in the photograph",
+   "benchmark_id": "furn-generic-chair",
+   "cohort": "C",
+   "category": "furniture",
+   "subcategory": "chair",
+   "photo": {
+    "photo_path": "photos/furn-generic-chair.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "a wooden dining chair with no label",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": "wooden dining chair",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": true,
+    "decision": "SEARCH_NOW",
+    "level": "generic"
+   },
+   "market_identity": {
+    "canonical_market_name": "wooden dining chair (unbranded)",
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "כיסא עץ"
+   },
+   "special_case": "generic_item",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "furn-corner-sofa",
+   "cohort": "C",
+   "category": "furniture",
+   "subcategory": "sofa",
+   "photo": {
+    "photo_path": "photos/furn-corner-sofa.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "a grey corner sofa, whole piece in frame, no label",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": "corner sofa",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": "grey",
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": true,
+    "decision": "SEARCH_NOW",
+    "level": "generic"
+   },
+   "market_identity": {
+    "canonical_market_name": "corner sofa (unbranded)",
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "ספה פינתית"
+   },
+   "special_case": "generic_item",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "home-brita-jug",
+   "cohort": "A",
+   "category": "household",
+   "subcategory": "water_filter",
+   "photo": {
+    "photo_path": "photos/home-brita-jug.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "the jug with the Brita logo and the Marella name on the lid or body",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Brita",
+    "brand_alternatives": [],
+    "product_family": "Marella",
+    "exact_model": "Marella",
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": true,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "product"
+   },
+   "market_identity": {
+    "canonical_market_name": "Brita Marella water filter jug",
+    "known_aliases": [
+     "Brita Marella",
+     "קנקן בריטה"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "קנקן בריטה מארלה"
+   },
+   "special_case": "complete_product",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "D",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "low-value item: retail will exist, used supply is expected to be thin"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "home-tefal-pan-28",
+   "cohort": "B",
+   "category": "household",
+   "subcategory": "cookware",
+   "photo": {
+    "photo_path": "photos/home-tefal-pan-28.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_top_view",
+    "photo_notes": "the pan from above with the Tefal thermo-spot; the range name on the base is NOT shown",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": "Tefal",
+    "brand_alternatives": [],
+    "product_family": "frying pan",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": "28 cm",
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": true,
+    "generic_only_acceptable": false,
+    "decision": "SEARCH_NOW",
+    "level": "brand_class"
+   },
+   "market_identity": {
+    "canonical_market_name": "Tefal 28 cm frying pan",
+    "known_aliases": [
+     "מחבת טפאל 28"
+    ],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "מחבת טפאל"
+   },
+   "special_case": "other",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": "brand known, range unknown; a range at most"
+   }
+  },
+  {
+   "must_not_be": null,
+   "notes": null,
+   "benchmark_id": "home-laundry-basket",
+   "cohort": "C",
+   "category": "household",
+   "subcategory": "storage",
+   "photo": {
+    "photo_path": "photos/home-laundry-basket.jpg",
+    "photo_count": 1,
+    "photo_type": "single_item_front",
+    "photo_notes": "a plastic laundry basket, no brand",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": "laundry basket",
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "COMPLETE",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": true,
+    "decision": "SEARCH_NOW",
+    "level": "generic"
+   },
+   "market_identity": {
+    "canonical_market_name": "plastic laundry basket (unbranded)",
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": "סל כביסה"
+   },
+   "special_case": "generic_item",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  },
+  {
+   "must_not_be": "a confident single product",
+   "notes": "adversarial: scored on asking, and on not reporting a product-level identity; the two actual appliances are recorded so an answer can be checked",
+   "benchmark_id": "home-two-objects",
+   "cohort": "D",
+   "category": "household",
+   "subcategory": "multiple",
+   "photo": {
+    "photo_path": "photos/home-two-objects.jpg",
+    "photo_count": 1,
+    "photo_type": "multiple_items",
+    "photo_notes": "a kettle and a toaster side by side in one frame, both fully visible, neither dominant",
+    "followup_photo_path": null
+   },
+   "identity": {
+    "brand": null,
+    "brand_alternatives": [],
+    "product_family": null,
+    "exact_model": null,
+    "model_number": null,
+    "variant": null,
+    "capacity_size": null,
+    "color": null,
+    "configuration": "UNKNOWN",
+    "configuration_alternatives": []
+   },
+   "condition": {
+    "condition": null,
+    "condition_notes": null
+   },
+   "expected_recognition": {
+    "exact_model_expected": false,
+    "family_only_acceptable": false,
+    "generic_only_acceptable": true,
+    "decision": "NEED_FOLLOWUP",
+    "level": "generic",
+    "note": "the right answer is to ask which object; not to pick one confidently"
+   },
+   "market_identity": {
+    "canonical_market_name": null,
+    "known_aliases": [],
+    "known_model_numbers": [],
+    "candidate_model_numbers_unverified": [],
+    "regional_name": null
+   },
+   "special_case": "multiple_objects",
+   "ground_truth_source": "pending: the founder photographs the physical item and confirms every identity field from it",
+   "valuation_ground_truth": {
+    "class": null,
+    "status": "PENDING_HUMAN_COLLECTION",
+    "expected_class": "E",
+    "reference_ils": null,
+    "reference_low_ils": null,
+    "reference_high_ils": null,
+    "retail_reference_ils": null,
+    "evidence": [],
+    "methodology": null,
+    "observed_on": null,
+    "note": null
+   }
+  }
+ ]
 }

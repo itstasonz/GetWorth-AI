@@ -139,6 +139,8 @@ export async function runV2Price({
     market_data: {
       ledger: md.ledger, early_stop: md.early_stop, dedupe: md.dedupe, independence: md.independence, fx: md.fx, cached: md.cached,
       observations: md.observations, timings: md.timings, calls: md.calls,
+      // Every provider report with its raw response: the benchmark persists it; the endpoint never sends it (report.js picks its fields).
+      raw_ledger: md.raw_ledger, fx_table: md.fx_table ?? null,
     },
     calls: { identity: 0, search: md.calls.search_actions || (plan.queries.length > 0 && search.billed ? 1 : 0), usage: search.usage, billed: search.billed, providers: md.calls.billed_providers, cost_usd: md.calls.cost_usd },
   };
