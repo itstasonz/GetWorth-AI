@@ -376,8 +376,14 @@ describe('V2-18 isolation: V2 beside V1, not inside it', () => {
       assert.deepEqual(reached, [], `${entry} reaches V2`);
     }
   });
+  // Every module of the V2 tree, including the market data layer under market/.
+  const v2Modules = () => {
+    const walk = (dir) => readdirSync(resolvePath(REPO, dir), { withFileTypes: true })
+      .flatMap((d) => (d.isDirectory() ? walk(`${dir}/${d.name}`) : (d.name.endsWith('.js') ? [`${dir}/${d.name}`] : [])));
+    return walk('api/_lib/v2').concat(['api/v2/identify.js', 'api/v2/price.js']);
+  };
   test('V2-18b V2 takes exactly one symbol from the V1 scan handler: the JWT verifier', () => {
-    const v2 = readdirSync(resolvePath(REPO, 'api/_lib/v2')).map((f) => `api/_lib/v2/${f}`).concat(['api/v2/identify.js', 'api/v2/price.js']);
+    const v2 = v2Modules();
     const importers = v2.filter((f) => /from\s*'[^']*\/analyze\.js'/.test(readFileSync(resolvePath(REPO, f), 'utf8')));
     assert.deepEqual(importers, ['api/_lib/v2/http.js']);
     const m = /import\s*\{([^}]*)\}\s*from\s*'\.\.\/\.\.\/analyze\.js'/.exec(readFileSync(resolvePath(REPO, 'api/_lib/v2/http.js'), 'utf8'));
@@ -402,10 +408,19 @@ describe('V2-18 isolation: V2 beside V1, not inside it', () => {
       assert.equal(Number(m[1]), V2_FUNCTION_MAX_DURATION_S);
     }
   });
-  test('V2-18e the only provider host V2 can reach is OpenAI, in one module', () => {
-    const v2 = readdirSync(resolvePath(REPO, 'api/_lib/v2')).map((f) => `api/_lib/v2/${f}`).concat(['api/v2/identify.js', 'api/v2/price.js']);
-    const withHost = v2.filter((f) => /https?:\/\/(?!localhost|get-worth-ai)/.test(
-      readFileSync(resolvePath(REPO, f), 'utf8').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')));
-    assert.deepEqual(withHost, ['api/_lib/v2/openai-stream.js']);
+  test('V2-18e every host V2 can reach lives in exactly one module, and each module names only its own', () => {
+    // The three hosts of the engine: the model and search provider, the
+    // international used-market API, and the central bank's rate feed. A
+    // fourth host is a new provider, and it needs a line here on purpose.
+    const HOSTS = {
+      'api/_lib/v2/openai-stream.js': ['api.openai.com'],
+      'api/_lib/v2/market/ebay-provider.js': ['api.ebay.com'],
+      'api/_lib/v2/market/fx.js': ['www.boi.org.il'],
+    };
+    const hostsIn = (f) => [...new Set([...readFileSync(resolvePath(REPO, f), 'utf8').split('\n').filter((l) => !l.trim().startsWith('//')).join('\n')
+      .matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map((m) => m[1].toLowerCase()).filter((h) => !/^(localhost|get-worth-ai)/.test(h)))];
+    const withHost = v2Modules().filter((f) => hostsIn(f).length > 0).sort();
+    assert.deepEqual(withHost, Object.keys(HOSTS).sort());
+    for (const [f, hosts] of Object.entries(HOSTS)) assert.deepEqual(hostsIn(f), hosts, f);
   });
 });

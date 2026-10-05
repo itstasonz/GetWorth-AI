@@ -115,6 +115,37 @@ export function describeEvidence(evidence) {
   };
 }
 
+/** The market data layer's half: every provider's fate, the observations, the independence counts. */
+export function describeMarketData(md) {
+  if (!md) return null;
+  const obs = (o) => ({
+    provider: o.provider, retrievals: (o.retrievals ?? []).map((r) => `${r.provider}${r.profile ? `:${r.profile}` : ''}`),
+    origin: o.origin_site, source_type: o.source_type, locale: o.locale, market: o.market,
+    relation: o.relation, configuration: o.configuration, condition: o.condition, status: o.listing_status, sale_type: o.sale_type,
+    price: o.price, currency: o.currency, currency_basis: o.currency_basis, price_type: o.price_type,
+    converted_ils: o.converted?.ils ?? null, fx_refused: o.converted?.refused ?? null, fx_rate_date: o.converted?.proof?.timestamp ?? null,
+    observed_at: o.observed_at, freshness: o.freshness, from_cache: o.from_cache,
+    qualification: o.qualification_state, tier: o.tier, reason: o.rejection_reason,
+    duplicates_folded: o.duplicates_folded ?? 0, syndicated_from: o.syndicated_from ?? null,
+    title: clip(o.title, 100), url: clip(o.url, 200),
+  });
+  return {
+    ledger: (md.ledger ?? []).map((r) => ({
+      provider: r.provider, profile: r.profile, classes: r.classes, status: r.status, error_class: r.error_class, error: clip(r.error, 120),
+      started_at: r.started_at, first_result_at: r.first_result_at, completed_at: r.completed_at, elapsed_ms: r.elapsed_ms,
+      result_count: r.result_count, normalized_count: r.normalized_count, billed: r.billed, cost_usd: r.cost_usd,
+    })),
+    early_stop: md.early_stop,
+    dedupe: md.dedupe?.counts ?? null,
+    independence: md.independence,
+    fx: md.fx,
+    cached: md.cached,
+    timings: md.timings,
+    calls: md.calls,
+    observations: (md.observations ?? []).slice(0, 24).map(obs),
+  };
+}
+
 /**
  * The ledger in one bounded line, for the server log: enough to reconstruct a
  * scan's evidence after the fact, which the production witness could not be.
@@ -132,6 +163,9 @@ export function ledgerLine(scanUuid, result) {
     plan: (result?.plan?.queries ?? []).map((q) => q.purpose), queries: (p?.queries ?? []).length, actions: p?.search_call_count ?? 0,
     results: p?.results?.length ?? 0, exact: ev?.market?.exact_roots ?? [], corroborated: ev?.market?.corroborated ?? [],
     accounting: ev?.accounting?.buckets ?? null, tiers: ev?.counts?.by_tier ?? null, configurations: ev?.counts?.by_configuration ?? null,
+    providers: (result?.market_data?.ledger ?? []).map((r) => [r.provider, r.profile, r.status, r.elapsed_ms, r.result_count]),
+    independence: result?.market_data?.independence?.admitted ?? null,
+    early_stop: result?.market_data?.early_stop?.triggered ?? false,
     pages: (ev?.pages ?? []).slice(0, 40).map((pg) => [pg.domain, pg.bucket, pg.source_type, pg.title_relation]),
     rows: (ev?.entries ?? []).slice(0, 16).map((e) => [e.observation.source_domain, e.observation.observed_price, e.observation.currency, e.kind, e.relation, e.configuration, e.tier, e.admitted ? 'ADMITTED' : (e.retail_anchor ? 'ANCHOR' : 'REJECTED'), e.reason, clip(e.observation.title, 60)]),
     timings: result?.timings ?? null,

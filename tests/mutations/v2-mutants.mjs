@@ -370,3 +370,66 @@ V2_MUTANTS.push(
     find: "  const modelNumber = calibrateField(READ_EVIDENCE.has(numberRead.evidence) && /\\p{N}/u.test(numberRead.value ?? '')",
     replace: "  const modelNumber = calibrateField(/\\p{N}/u.test(numberRead.value ?? '')" },
 );
+
+// ── GW-MARKET-DATA-001 M1: THE OBSERVATION, DEDUPE, INDEPENDENCE, FX, CACHE, ORCHESTRATOR, PROVIDERS
+const OBS = 'api/_lib/v2/market/observation.js';
+const DDP = 'api/_lib/v2/market/dedupe.js';
+const FXM = 'api/_lib/v2/market/fx.js';
+const CCH = 'api/_lib/v2/market/cache.js';
+const ORC = 'api/_lib/v2/market/orchestrator.js';
+const PRV = 'api/_lib/v2/market/provider.js';
+const EBY = 'api/_lib/v2/market/ebay-provider.js';
+const SPV = 'api/_lib/v2/market/search-provider.js';
+V2_MUTANTS.push(
+  { id: 'D01-LISTING-KEY-IGNORES-ORIGIN', file: OBS, invariant: 'a listing key is namespaced by its origin site, never by the provider',
+    find: "  const site = origin_site ?? 'unknown';", replace: "  const site = 'any';" },
+  { id: 'D02-FINGERPRINT-IGNORES-WORDS', file: DDP, invariant: 'the fallback fingerprint reads the title: different words are different listings',
+    find: '  return { key: `fp:${o.origin_site}|${title}|${o.price}|${o.currency}|${o.configuration}${seller}`, method: \'fingerprint\' };',
+    replace: '  return { key: `fp:${o.origin_site}|${o.price}|${o.currency}|${o.configuration}${seller}`, method: \'fingerprint\' };' },
+  { id: 'D03-FINGERPRINT-IGNORES-SELLER', file: DDP, invariant: 'two sellers of one product at one price are two listings',
+    find: "  const seller = o.seller_ref ? `|s:${norm(o.seller_ref)}` : '';", replace: "  const seller = '';" },
+  { id: 'D04-SYNDICATION-ON-WORDS-ALONE', file: DDP, invariant: 'syndication is recorded only on a seller or id signal, never on words and price alone',
+    find: '  if (!title || !o.price || !o.currency || !who) return null;', replace: "  if (!title || !o.price || !o.currency) return null;\n  const whoOrNone = who ?? 'none';" },
+  { id: 'I01-A-RETRIEVAL-IS-A-PROVIDER', file: DDP, invariant: 'two profiles of one provider are two retrievals of one provider',
+    find: '    for (const r of o.retrievals ?? []) { providers.add(r.provider); retrievals.add(`${r.provider}|${r.profile ?? \'\'}`); }',
+    replace: '    for (const r of o.retrievals ?? []) { providers.add(`${r.provider}|${r.profile ?? \'\'}`); retrievals.add(`${r.provider}|${r.profile ?? \'\'}`); }' },
+  { id: 'I02-REJECTED-COUNTS-TOWARD-QUORUM', file: DDP, invariant: 'quorum and diversity read qualified observations only',
+    find: 'export function sourceIndependence(observations, { qualified = (o) => o.qualification_state === QUALIFICATION.ADMITTED } = {}) {',
+    replace: 'export function sourceIndependence(observations, { qualified = () => true } = {}) {' },
+  { id: 'N01-RETAIL-IS-AN-ASKING-PRICE', file: OBS, invariant: 'a shop price is RETAIL, never an asking price',
+    find: '    price_type: retail ? PRICE_TYPE.RETAIL : (entry.kind === \'used_listing\' ? PRICE_TYPE.ASKING : PRICE_TYPE.UNKNOWN),',
+    replace: '    price_type: entry.kind === \'used_listing\' || retail ? PRICE_TYPE.ASKING : PRICE_TYPE.UNKNOWN,' },
+  { id: 'F01-STALE-RATE-CONVERTS', file: FXM, invariant: 'a rate older than the limit is refused, not used',
+    find: '  if (!(age <= maxAgeMs)) return { ok: false, reason: FX_REFUSAL.STALE, rate_date: rateDate ?? null };', replace: '' },
+  { id: 'F02-UNSUPPORTED-CURRENCY-DEFAULTS', file: FXM, invariant: 'a currency the bank does not publish has no rate',
+    find: '  if (!row) return { ok: false, reason: FX_REFUSAL.UNSUPPORTED };', replace: '  if (!row) return { ok: true, converted_ils: value, proof: null, identity: true };' },
+  { id: 'F03-FEED-CALLED-WHEN-OFF', file: FXM, invariant: 'no call is made unless the feed is enabled',
+    find: "      if (!enabled) return { status: 'NOT_CONFIGURED', table: cached?.table ?? null, error: null };", replace: '' },
+  { id: 'C01-EXPIRED-CACHE-IS-CURRENT', file: CCH, invariant: 'an expired entry is never served as current',
+    find: '      const expired = now() - new Date(entry.stored_at).getTime() > ttlMs;', replace: '      const expired = false;' },
+  { id: 'C02-CACHED-ROW-KEEPS-ITS-QUALIFICATION', file: CCH, invariant: 'a cached observation is context, never a live qualification',
+    find: "          qualification_state: 'CONTEXT',", replace: '' },
+  { id: 'O01-EARLY-STOP-ON-RESULTS', file: ORC, invariant: 'early stopping runs on qualified evidence, never on result counts',
+    find: '    if (!ev.qualification?.qualified) return;', replace: '    if ((ev.pages?.length ?? 0) === 0) return;' },
+  { id: 'O02-EARLY-STOP-ABORTS-DISCOVERY', file: ORC, invariant: 'a provider that could still raise the verdict is never aborted',
+    find: '      if (done || !p.classes.every((cls) => LOWER_TIER_CLASSES.has(cls))) continue;', replace: '      if (done) continue;' },
+  { id: 'O03-ABROAD-LISTING-ADMITTED', file: ORC, invariant: 'a listing provider abroad yields context, never an admitted comparable',
+    find: '    qualification_state: exact && used && compatible ? QUALIFICATION.CONTEXT : QUALIFICATION.REJECTED,',
+    replace: '    qualification_state: exact && used && compatible ? QUALIFICATION.ADMITTED : QUALIFICATION.REJECTED,' },
+  { id: 'O04-WRONG-CONFIGURATION-IS-TIER-B', file: ORC, invariant: 'a base or a part abroad is not a tier-B comparable',
+    find: '    tier: exact && used && compatible ? (o.locale === \'local\' ? TIER.A : TIER.B) : null,', replace: '    tier: exact && used ? (o.locale === \'local\' ? TIER.A : TIER.B) : null,' },
+  { id: 'P01-A-FAILING-PROVIDER-FAILS-THE-SCAN', file: PRV, invariant: 'a provider that throws is a report, never a rejection',
+    find: '    const cls = classifyProviderError(err, { timedOut, aborted: controller.signal.aborted });', replace: '    throw err;' },
+  { id: 'P02-TIMEOUT-NOT-RECORDED', file: PRV, invariant: 'a provider that misses its deadline is TIMED_OUT, by name',
+    find: '  if (timedOut) return finish(PROVIDER_STATUS.TIMED_OUT, { error_class: ERROR_CLASS.TIMEOUT, raw: result.raw ?? null, billed: result.billed === true });', replace: '' },
+  { id: 'E01-EBAY-CLAIMS-SOLD-PRICES', file: EBY, invariant: 'what the Browse API gives is an asking price; no sold price is claimed',
+    find: '      price_type: PRICE_TYPE.ASKING,', replace: '      price_type: PRICE_TYPE.SOLD,' },
+  { id: 'E02-EBAY-CALLS-WITHOUT-CREDENTIALS', file: EBY, invariant: 'no call is made unless the provider is on with both credentials',
+    find: "      if (!config.enabled) return { status: PROVIDER_STATUS.NOT_CONFIGURED, error: 'ebay provider is off or has no credentials' };", replace: '' },
+  { id: 'E03-SELLER-HANDLE-TRAVELS', file: EBY, invariant: 'a seller handle never leaves the provider; only a non-reversible reference does',
+    find: '  return `ebay:${h.toString(16)}`;', replace: '  return `ebay:${s}`;' },
+  { id: 'S01-NARROWED-PROFILE-SEARCHES-THE-OPEN-WEB', file: SPV, invariant: 'the second profile narrows the search to the market’s used-marketplace hosts',
+    find: "        allowedDomains: narrowed ? hosts[ctx.market?.id] ?? [] : [],", replace: '        allowedDomains: [],' },
+  { id: 'S02-SECOND-PROFILE-ON-BY-DEFAULT', file: CFG, invariant: 'the second profile is off unless the environment names it',
+    find: '  return known.length ? [...new Set([SEARCH_PROFILE.LOCAL, ...known])] : [SEARCH_PROFILE.LOCAL];', replace: '  return [SEARCH_PROFILE.LOCAL, SEARCH_PROFILE.LOCAL_USED_DOMAINS];' },
+);

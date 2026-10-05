@@ -203,8 +203,8 @@ export async function harness() {
   const state = {
     refunds: 0, charged: true,
     anthropic: null, openai: null, vision: null,
-    voyage: null,
-    rpcLog: [], otherLog: [], providerCalls: { anthropic: 0, openai: 0, vision: 0, voyage: 0 },
+    voyage: null, ebay: null,
+    rpcLog: [], otherLog: [], providerCalls: { anthropic: 0, openai: 0, vision: 0, voyage: 0, ebay: 0 },
     unknownHosts: [],
   };
 
@@ -274,6 +274,17 @@ export async function harness() {
       if (r && r.throw) throw r.throw;
       return jsonRes(r?.body ?? { data: [{ embedding: new Array(8).fill(0) }] }, r?.status ?? 200);
     }
+    // MARKET DATA LAYER (GW-MARKET-DATA-001 M1). eBay is PHASE_B in the
+    // inventory — reachable from /api/v2/price only, never from the V1 scan
+    // handler this harness drives — so a call landing here IS the finding:
+    // counted, answered with no items, and never a synthetic success.
+    if (isHost('api.ebay.com')) {
+      state.providerCalls.ebay++;
+      const r = state.ebay ? await state.ebay(body, url, init) : null;
+      if (r instanceof Response) return r;
+      if (r && r.throw) throw r.throw;
+      return jsonRes(r?.body ?? { itemSummaries: [] }, r?.status ?? 200);
+    }
 
     // ── Supabase ──
     if (isHost('fake.supabase.co') && pathOf(url).includes('/rpc/check_and_increment_scan_rate')) {
@@ -323,6 +334,7 @@ export async function harness() {
     openai: (fn) => { state.openai = fn; },
     vision: (fn) => { state.vision = fn; },
     voyage: (fn) => { state.voyage = fn; },
+    ebay: (fn) => { state.ebay = fn; },
     charged: (v) => { state.charged = v; },
     // Clears the responder, leaving the module-scope dispatcher in place so a
     // module-scope capture taken by an ALREADY-IMPORTED module stays observable.

@@ -1,0 +1,38 @@
+{
+  "format": "gw-market-capture/1",
+  "item_id": "appl-ninja-tb301",
+  "captured_at": "2026-09-30T12:45:33.841Z",
+  "build": "6531b46",
+  "note": "A replay capture assembled from the persisted production witness. The identity's `raw` is the normalised identity of the witness (the raw vision JSON was not persisted at the time); the search provider's raw output is the API's own output array, referenced from the committed witness file so it is not duplicated. Every other field is as a live run would write it.",
+  "identity": {
+    "request": { "model": "gpt-5.6-luna", "image_bytes": 0, "note": "image not stored" },
+    "raw": {
+      "category": "Home", "object_class": "blender", "local_name": "בלנדר",
+      "visible_text": ["NINJA", "BLENDSENSE", "POWER BLENDER DUO PRO"],
+      "brand": { "value": "Ninja", "confidence": 0.99, "evidence": "TEXT_READ" },
+      "model": { "value": "Power Blender Duo Pro", "confidence": 0.98, "evidence": "TEXT_READ" },
+      "variant": { "value": null, "confidence": 0, "evidence": "NONE" },
+      "model_number": { "value": null, "confidence": 0, "evidence": "NONE" },
+      "ranked_candidates": [],
+      "condition": { "grade": "Good", "observations": ["clean"] },
+      "identity_evidence": ["BRAND_TEXT_READ", "MODEL_TEXT_READ"],
+      "configuration": "COMPLETE",
+      "missing_evidence": "NONE",
+      "market_hypotheses": { "aliases": ["Ninja Power Blender Duo Pro", "Ninja BlendSense Power Blender Duo Pro"], "model_numbers": [] }
+    },
+    "timings": { "identity_complete_ms": 3100, "identity_first_event_ms": 1200 },
+    "usage": null
+  },
+  "providers": [
+    {
+      "provider": "openai_web_search",
+      "profile": "local",
+      "request": { "model": "gpt-5.6-luna", "queries": ["Ninja Power Blender Duo Pro יד שנייה", "Ninja Power Blender Duo Pro מחיר", "Ninja Detect Duo Power Blender Pro TB301 מחיר", "Ninja Detect TB301 יד שנייה"], "allowed_domains": [] },
+      "raw": { "output": { "$ref": "../ninja-witness-search.raw.json#/output" } },
+      "timings": { "headers_ms": 1797, "first_event_ms": 1799, "results_available_ms": 6030, "total_ms": 6361 },
+      "billed": true,
+      "cost_usd": 0.02
+    }
+  ],
+  "fx": null
+}

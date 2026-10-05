@@ -55,6 +55,11 @@ export async function runV2Search({
   apiKey,
   timeoutMs = V2_SEARCH_TIMEOUT_MS,
   safetyIdentifier = null,
+  // A second PROFILE of the same provider narrows the search to these hosts
+  // (the market's own used marketplaces). Data from the market, never a site
+  // named here. Empty means the open web, as before.
+  allowedDomains = [],
+  signal = null,
   fetchImpl = fetch,
 } = {}) {
   const empty = extractSearchProvenance([]);
@@ -62,6 +67,7 @@ export async function runV2Search({
     return { outcome: SEARCH_OUTCOME.NOT_ATTEMPTED, provenance: empty, timings: null, usage: null, failure: null, stopped_early: false, billed: false };
   }
 
+  const domains = (Array.isArray(allowedDomains) ? allowedDomains : []).map((d) => String(d).trim().toLowerCase()).filter(Boolean).slice(0, 100);
   const body = {
     model,
     input: [{ role: 'user', content: [{ type: 'input_text', text: buildSearchPrompt(plan) }] }],
@@ -69,7 +75,7 @@ export async function runV2Search({
     ...(safetyIdentifier ? { safety_identifier: safetyIdentifier } : {}),
     reasoning: { effort: 'low' },
     max_output_tokens: V2_SEARCH_MAX_OUTPUT_TOKENS,
-    tools: [buildSearchTool(market)],
+    tools: [{ ...buildSearchTool(market), ...(domains.length ? { filters: { allowed_domains: domains } } : {}) }],
     tool_choice: SEARCH_TOOL_CHOICE,
     include: [...SEARCH_INCLUDE],
   };
@@ -92,7 +98,7 @@ export async function runV2Search({
   };
 
   try {
-    const res = await streamResponse({ stage: 'v2_search', body, apiKey, timeoutMs, onEvent, fetchImpl });
+    const res = await streamResponse({ stage: 'v2_search', body, apiKey, timeoutMs, onEvent, signal, fetchImpl });
     const provenance = extractSearchProvenance(res.items);
     return {
       outcome: provenance.search_performed ? SEARCH_OUTCOME.COMPLETED : SEARCH_OUTCOME.NO_SEARCH_RECORDED,

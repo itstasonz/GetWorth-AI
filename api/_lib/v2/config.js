@@ -82,3 +82,23 @@ export const V2_SEARCH_MAX_OUTPUT_TOKENS = 400;
 export const V2_STATE_TTL_MS = 15 * 60 * 1000;
 /** A scan asks for ONE more photograph, once. */
 export const V2_MAX_FOLLOWUPS = 1;
+
+// ── THE MARKET DATA LAYER ───────────────────────────────────────────────────
+//
+// What the orchestrator may spend after the identity is on screen, in wall-
+// clock, across every provider running in parallel. A provider that misses it
+// is a ledger row with a status, not a failed scan.
+export const V2_MARKET_BUDGET_MS = 4_500;
+/** Which profiles of the search provider run. 'local' alone is today's engine. */
+export const V2_SEARCH_PROFILES_ENV = 'SCAN_ENGINE_V2_SEARCH_PROFILES';
+export const SEARCH_PROFILE = Object.freeze({ LOCAL: 'local', LOCAL_USED_DOMAINS: 'local_used_domains' });
+export function resolveSearchProfiles(env = process.env) {
+  const raw = String(env?.[V2_SEARCH_PROFILES_ENV] ?? '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const known = raw.filter((p) => Object.values(SEARCH_PROFILE).includes(p));
+  return known.length ? [...new Set([SEARCH_PROFILE.LOCAL, ...known])] : [SEARCH_PROFILE.LOCAL];
+}
+// The hosts a market's second-hand goods are listed on. DATA, per market: the
+// second search profile narrows the provider's index to them. It is a recall
+// experiment until the benchmark shows it finds listings the open search does
+// not; nothing downstream treats these hosts as more trustworthy.
+export const LOCAL_USED_HOSTS = Object.freeze({ IL: Object.freeze(['yad2.co.il', 'market2.co.il']) });

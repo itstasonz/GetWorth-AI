@@ -294,6 +294,16 @@ Wall-clock is bounded by the slowest *parallel* provider, not their sum. Early s
 
 ---
 
+## 9A. M1 — implemented (2026-10-05)
+
+Under `api/_lib/v2/market/`: `observation.js` (the normalised observation; `observationFromEntry` adapts today's extraction entries), `provider.js` (contract, `runProvider` total under a deadline with an abort signal, failure classes), `dedupe.js` (origin-namespaced listing key → canonical URL → conservative fingerprint; syndication only on a seller/id signal; `sourceIndependence` counts providers, retrievals and origins separately over QUALIFIED observations), `orchestrator.js` (parallel fan-out, `mergeProvenance`, tier-ordered early stop on a qualified tier-A token, listing resolution against the pages' market identity, FX attachment, cache write-through, a ledger row per provider), `search-provider.js` (today's search as a discovery provider in two profiles; `local_used_domains` is OFF by default and sends `filters.allowed_domains` = `LOCAL_USED_HOSTS[market]`), `ebay-provider.js` (Browse API boundary, off without `SCAN_ENGINE_V2_EBAY_ENABLED` + credentials; sold prices stated as unavailable), `fx.js` (Bank of Israel feed behind `SCAN_ENGINE_V2_FX_ENABLED`, dated proofs the gate re-verifies, stale/unsupported/unavailable refused), `cache.js` (key by canonical market identity; observations with `observed_at`; CACHED rows are context, expired rows visible and never current; in-memory store, durable store staged behind the same interface). `runV2Price` runs through the orchestrator; with one profile it is the previous engine (OR-1a). `report.js` describes the market-data half; the ledger line names every provider's fate.
+
+Benchmark: `tests/fixtures/scan-v2/benchmark-44.json` (44 items, 4 × 11 categories, configuration and adversarial cases, ground truth null until a person records it, photographs not yet in the repository), `scripts/market-benchmark.mjs` (dry-run default; replay over `gw-market-capture/1` files with `$ref`; live gated by `--live`, `--approve-usd` ≥ estimate and `SCAN_ENGINE_V2_BENCHMARK_LIVE=yes`; refuses with no photograph), replay fixture for the witness. Dry-run of the full manifest: 46 identity calls, 44 search actions (88 with the second profile), 0 eBay, 0 FX; estimated $0.71 (one profile) / $1.28 (two); max runtime 22 min.
+
+yad2: `docs/audits/GW-YAD2-ACCESS-001.md`. No contact made.
+
+Validation (final, unloaded): full suite 1,729 tests · 1,728 pass · 0 fail · 1 pre-existing skip; V2 mutation harness 168 / 168 killed (23 M1 mutants); provider harness and guard/UI/sanitizer harnesses unchanged; builds with the V2 flag off and on; bundle scan: no key, no state secret, no allowlist, none of the new environment names or hosts. Waterfall (OR-6a, 300 ms deadline): fast local evidence stops the lower tier early; retail + international, one timeout, one failure and no evidence each complete inside the deadline with every provider in the ledger. Zero paid or live provider calls; Production unchanged.
+
 ## 10. Exact next implementation milestone (awaiting approval)
 
 **Milestone M1 — "Two profiles, one orchestrator, measured discovery":**

@@ -33,6 +33,8 @@ export async function streamResponse({
   apiKey = process.env.OPENAI_API_KEY,
   timeoutMs = 20_000,
   onEvent = null,
+  // An outer abort (the market-data orchestrator's early stop or deadline).
+  signal = null,
   // A default parameter, evaluated at CALL time, so a test harness that
   // replaces globalThis.fetch is what runs (see phaseb/openai-client.js).
   fetchImpl = fetch,
@@ -43,6 +45,8 @@ export async function streamResponse({
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener('abort', () => controller.abort(), { once: true });
   const t0 = Date.now();
   const at = () => Date.now() - t0;
   const timings = { headers_ms: null, first_event_ms: null, first_output_ms: null, total_ms: null };

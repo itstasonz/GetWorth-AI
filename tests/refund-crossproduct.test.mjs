@@ -234,7 +234,7 @@ import { discoverModules } from './helpers/provider-scan.mjs';
 const ANALYZE = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
 const OPENAI_LIB = readFileSync(new URL('../api/_lib/openai-recognition.js', import.meta.url), 'utf8');
 
-const PROVIDER_HOSTS = ['api.anthropic.com', 'api.openai.com', 'vision.googleapis.com', 'api.voyageai.com'];
+const PROVIDER_HOSTS = ['api.anthropic.com', 'api.openai.com', 'vision.googleapis.com', 'api.voyageai.com', 'api.ebay.com'];
 
 // ── Source resolution helpers ───────────────────────────────────────────────
 
@@ -475,6 +475,12 @@ const INVENTORY = [
   // the daily scan quota — an open item for V2, and the reason it is
   // allowlist-only.
   { file: 'api/_lib/v2/openai-stream.js', fn: 'streamResponse', host: 'api.openai.com', ledger: 'PHASE_B' },
+  // MARKET DATA LAYER (GW-MARKET-DATA-001 M1) — eBay's Browse API, reached only
+  // from /api/v2/price through the orchestrator, off unless switched on with
+  // credentials. Two helpers name the host: the token call and the search.
+  // Free API; its calls are counted in the orchestrator's ledger, not billed.
+  { file: 'api/_lib/v2/market/ebay-provider.js', fn: 'ebayAppToken',     host: 'api.ebay.com', ledger: 'PHASE_B' },
+  { file: 'api/_lib/v2/market/ebay-provider.js', fn: 'ebayBrowseSearch', host: 'api.ebay.com', ledger: 'PHASE_B' },
 ];
 
 // Provider helpers deliberately kept with NO reachable caller. Empty, and that

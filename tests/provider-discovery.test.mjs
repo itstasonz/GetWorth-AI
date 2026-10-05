@@ -74,11 +74,19 @@ const PROBE = new URL('./fixtures/provider-probe/', import.meta.url);
 //               risk; conflating the two is how an allowlist entry becomes an
 //               egress target by accident.
 //   DEV       — local development only.
+//   PUBLIC_DATA — a free public data feed with no account and no bill (the
+//               central bank's exchange rates). Not a provider in the billing
+//               sense; still an egress target, still named here on purpose.
 const HOST_REGISTRY = {
   'api.anthropic.com':       'PROVIDER',
   'api.openai.com':          'PROVIDER',
   'vision.googleapis.com':   'PROVIDER',
   'api.voyageai.com':        'PROVIDER',
+  // SCAN ENGINE V2 market data layer (GW-MARKET-DATA-001 M1). Behind
+  // SCAN_ENGINE_V2_EBAY_ENABLED and credentials; off by default.
+  'api.ebay.com':            'PROVIDER',
+  // Bank of Israel representative rates, behind SCAN_ENGINE_V2_FX_ENABLED.
+  'www.boi.org.il':          'PUBLIC_DATA',
   'get-worth-ai.vercel.app': 'INBOUND',
   localhost:                 'DEV',
 };
