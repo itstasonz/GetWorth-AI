@@ -289,3 +289,61 @@ describe('CH-5 the frozen run', () => {
   });
   test('CH-5g nothing in this file reached the network', () => { assert.equal(attempted.length, 0); });
 });
+
+// ── CH-6 THE PREFLIGHT GATE, THE RESERVATION, AND REPLAY VERIFICATION ───────
+import { preflightReadiness, compareReplay, REPLAY_DETERMINISTIC_FIELDS } from '../scripts/market-benchmark-report.mjs';
+describe('CH-6 preflight readiness, the per-item reservation under the $0.12 ceiling, and replay verification', () => {
+  const PF = join(REPO, 'tests/fixtures/scan-v2/preflight-5.json');
+  test('CH-6a the committed preflight set: excluded, five slots, no product prescribed, no benchmark id, not ready until photographed and confirmed', () => {
+    const pf = loadManifest(PF);
+    const r = preflightReadiness(pf, { readFile: () => { throw new Error('ENOENT'); }, benchmarkIds: loadManifest().items.map((i) => i.benchmark_id) });
+    assert.deepEqual([r.manifest_excluded, r.items_total, r.all_excluded, r.benchmark_items_mixed_in, r.ready, r.ready_items], [true, 5, true, [], false, 0]);
+    assert.ok(pf.items.every((i) => i.identity.brand === null && i.identity.exact_model === null), 'no slot names a product');
+    assert.ok(pf.natural_photo_rule.includes('no label'));
+  });
+  test('CH-6b a mixed-in benchmark id, a missing provenance, a replaced master: each is named', () => {
+    const ds = scratchDataset();
+    try {
+      const store = openManifest(ds.manifest);
+      store.acceptPhoto('it-ps5', 'primary', JPEG);
+      store.confirm('it-ps5', { identity: { brand: 'Sony', exact_model: 'PlayStation 5' }, provenance: { brand: ['PHYSICAL_LABEL'], exact_model: ['OWNER_KNOWLEDGE'] }, condition: 'Good' });
+      const raw = JSON.parse(readFileSync(ds.manifest, 'utf8'));
+      raw.excluded_from_benchmark = true; for (const i of raw.items) i.excluded_from_benchmark = true;
+      raw.items[0].identity.product_family = 'PlayStation 5';            // confirmed in the file, but no provenance for it
+      raw.items[0].photo.prepared = { ...raw.items[0].photo.master, path: raw.items[0].photo.photo_path }; // the derivative "replaced" the master
+      writeFileSync(ds.manifest, JSON.stringify(raw));
+      const r = preflightReadiness(loadManifest(ds.manifest), { readFile: (p) => readFileSync(p), benchmarkIds: ['it-logi'] });
+      assert.ok(r.items[0].problems.includes('product_family: confirmed without a provenance'));
+      assert.ok(r.items[0].problems.includes('the derivative replaced the master'));
+      assert.deepEqual(r.benchmark_items_mixed_in, ['it-logi']);
+      assert.ok(r.items[1].problems.includes('a benchmark item is mixed into the preflight set'));
+      assert.equal(r.ready, false);
+    } finally { rmSync(ds.dir, { recursive: true, force: true }); }
+  });
+  test('CH-6c five items whose every call costs the ceiling rate fit exactly under $0.12; a sixth would not begin; the reservation is checked BEFORE the call', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gw-pf-')); mkdirSync(join(dir, 'photos'));
+    try {
+      const ids = ['p1', 'p2', 'p3', 'p4', 'p5', 'p6'];
+      const m = { format: 'gw-benchmark-manifest/2', name: 'pf', market: 'IL', excluded_from_benchmark: true, items: ids.map((id) => ({ ...item(id), excluded_from_benchmark: true })) };
+      writeFileSync(join(dir, 'manifest.json'), JSON.stringify(m));
+      for (const id of ids) writeFileSync(join(dir, `photos/${id}.jpg`), JPEG);
+      const started = [];
+      // One mock per run (its identity queue is consumed in order); every item answers as a PS5 with one billed search action, i.e. the ceiling rate ($0.024).
+      const engineFor = () => { const fetchImpl = mockV2Provider({ identities: ids.map(() => RAW.PS5), results: RESULTS_PS5_VERIFIED }); return async (args) => { started.push(args.safetyIdentifier); return runEngine({ ...args, fetchImpl }); }; };
+      const five = await runLive({ manifest: loadManifest(join(dir, 'manifest.json')), env: {}, gate: { allowed: true, approved: 0.08, ceiling: 0.12 }, only: ids.slice(0, 5), outDir: join(dir, 'out5'), model: 'test-model', apiKey: 'k', config: { model: 'test-model', profiles: ['local'], ebay: false, fx: false }, build: 't', engine: engineFor() });
+      assert.deepEqual([five.cost.items_completed, five.cost.stopped_by_ceiling, five.cost.spent_conservative_usd <= 0.12, five.excluded_from_benchmark, five.counts_toward_benchmark], [5, false, true, true, false]);
+      assert.equal(perItemMaximum(1), 0.024);
+      const six = await runLive({ manifest: loadManifest(join(dir, 'manifest.json')), env: {}, gate: { allowed: true, approved: 0.08, ceiling: 0.12 }, outDir: join(dir, 'out6'), model: 'test-model', apiKey: 'k', config: { model: 'test-model', profiles: ['local'], ebay: false, fx: false }, build: 't', engine: engineFor() });
+      assert.deepEqual([six.cost.items_completed, six.cost.stopped_by_ceiling, six.cost.stopped_before, six.cost.items_skipped, six.cost.reserved_usd], [5, true, 'p6', ['p6'], 0.024]);
+      assert.equal(started.length, 10, 'the sixth item never reached the engine');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  test('CH-6d replay verification names every deterministic field that differs, and none when the rows agree', () => {
+    const a = { id: 'x', brand_engine: 'Sony', model_engine: 'PS5', decision: 'SEARCH_NOW', raw_results: 10, qualified_exact_comparables: 3, valuation_state: 'VERIFIED_MARKET_VALUE', recommended_ils: 1500, total_latency_ms: 5000 };
+    const same = compareReplay([a], [{ ...a, total_latency_ms: 20 }]);
+    assert.deepEqual([same.items_compared, same.matching, same.mismatching], [1, 1, []]);
+    const diff = compareReplay([a], [{ ...a, recommended_ils: 1400, raw_results: 9 }]);
+    assert.deepEqual(diff.mismatching[0].mismatches.map((m) => m.field).sort(), ['raw_results', 'recommended_ils']);
+    assert.ok(REPLAY_DETERMINISTIC_FIELDS.includes('qualified_exact_comparables') && !REPLAY_DETERMINISTIC_FIELDS.includes('total_latency_ms'));
+  });
+});

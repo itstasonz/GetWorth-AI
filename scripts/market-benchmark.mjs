@@ -23,7 +23,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { scoreItem, buildReport, datasetReadiness, missesOf, compareRuns } from './market-benchmark-report.mjs';
+import { scoreItem, buildReport, datasetReadiness, preflightReadiness, missesOf, compareRuns, compareReplay } from './market-benchmark-report.mjs';
 import { RATE, MAX_RUNTIME_PER_ITEM_S, liveGate, runLive, freezeRecord } from './market-benchmark-live.mjs';
 
 export { RATE, MAX_RUNTIME_PER_ITEM_S, LIVE_ENV, CAPTURE_FORMAT, liveGate, liveItem, runEngine, buildCapture, sha256, chargeOf, perItemMaximum, freezeRecord, runLive, FROZEN_PATHS } from './market-benchmark-live.mjs';
@@ -184,6 +184,10 @@ async function main(argv = process.argv.slice(2), env = process.env) {
   if (argv.includes('--readiness')) {
     const r = datasetReadiness(manifest, { readFile: (p) => readFileSync(p) });
     if (Object.keys(r.hashes).length) writeFileSync(join(dirname(manifest.path), 'photo-hashes.json'), JSON.stringify(r.hashes, null, 1));
+    if (manifest.excluded_from_benchmark) {
+      const benchmarkIds = loadManifest(DEFAULT_MANIFEST).items.map((i) => i.benchmark_id);
+      return print({ mode: MODE.READINESS, excluded_from_benchmark: true, preflight: preflightReadiness(manifest, { readFile: (p) => readFileSync(p), benchmarkIds }), dataset: r });
+    }
     return print({ mode: MODE.READINESS, excluded_from_benchmark: manifest.excluded_from_benchmark, ...r });
   }
   if (argv.includes('--freeze')) return print({ mode: MODE.FREEZE, ...(await freezeRecord({ manifest, env: runEnv, config })) });
@@ -198,7 +202,8 @@ async function main(argv = process.argv.slice(2), env = process.env) {
       for (const item of manifest.items) { const c = base.get(item.benchmark_id); if (c) baseRows.push(await replayItem(item, c)); }
       return print({ mode: MODE.COMPARE, baseline_items: baseRows.length, variant_items: rows.length, misses_in_baseline: missesOf(baseRows), comparison: compareRuns(baseRows, rows), network_calls: 0 });
     }
-    const out = { mode: MODE.REPLAY, excluded_from_benchmark: manifest.excluded_from_benchmark, captures: captures.size, ...report, misses_for_profile_2_experiment: missesOf(report.rows), network_calls: 0 };
+    const liveReport = existsSync(join(resolve(flag('--replay')), 'report.json')) ? JSON.parse(readFileSync(join(resolve(flag('--replay')), 'report.json'), 'utf8')) : null;
+    const out = { mode: MODE.REPLAY, excluded_from_benchmark: manifest.excluded_from_benchmark, captures: captures.size, ...report, misses_for_profile_2_experiment: missesOf(report.rows), replay_verification: liveReport?.rows ? compareReplay(liveReport.rows, report.rows) : null, network_calls: 0 };
     if (flag('--out')) { mkdirSync(resolve(flag('--out')), { recursive: true }); writeFileSync(join(resolve(flag('--out')), 'report.json'), JSON.stringify(out, null, 1)); }
     return print(out);
   }

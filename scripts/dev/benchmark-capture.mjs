@@ -20,6 +20,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from '
 import { createHash } from 'node:crypto';
 import { dirname, resolve, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { networkInterfaces } from 'node:os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const PROVENANCE = Object.freeze(['PHYSICAL_LABEL', 'PACKAGING', 'OWNER_KNOWLEDGE', 'PURCHASE_RECORD', 'SERIAL_MODEL_LABEL', 'MANUFACTURER_REFERENCE', 'OTHER']);
@@ -176,6 +177,10 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const port = Number(flag('--port') ?? 8790);
   const host = argv.includes('--lan') ? '0.0.0.0' : '127.0.0.1';
   createCaptureServer(openManifest(manifest)).listen(port, host, () => {
-    process.stdout.write(`capture helper for ${basename(manifest)} at http://${host === '0.0.0.0' ? '<this machine\'s LAN address>' : '127.0.0.1'}:${port}/  (development only; no outbound request is ever made)\n`);
+    // Physical adapters first: a virtual switch (Hyper-V, VirtualBox, VMware, WSL) is not what the phone can reach.
+    const virtual = (name) => /^(vEthernet|VirtualBox|VMware|WSL|Hyper-V|docker|vboxnet|vmnet)/i.test(name);
+    const lan = Object.entries(networkInterfaces()).sort(([x], [y]) => Number(virtual(x)) - Number(virtual(y))).flatMap(([, l]) => l).filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => `http://${a.address}:${port}/`);
+    const urls = host === '0.0.0.0' ? [`http://127.0.0.1:${port}/`, ...lan] : [`http://127.0.0.1:${port}/`];
+    process.stdout.write(`capture helper for ${basename(manifest)} (development only; no outbound request is ever made)\n${urls.map((u) => `  ${u}`).join('\n')}\n${host === '0.0.0.0' ? '  open a LAN address on the phone (same Wi-Fi); the first LAN address is the physical adapter; virtual switches are listed last\n' : '  add --lan to open it from the phone\n'}`);
   });
 }

@@ -462,7 +462,7 @@ V2_MUTANTS.push(
   { id: 'B08-FOLLOWUP-SENT-UNASKED', file: BML, invariant: 'the follow-up photograph leaves only when the engine asks for it',
     find: "  if (first.ok && first.sufficiency.decision === 'NEED_FOLLOWUP' && followupPhotoBase64) {", replace: '  if (followupPhotoBase64) {' },
   { id: 'B09-CEILING-NEVER-STOPS', file: BML, invariant: 'the hard ceiling stops the run before the call that could exceed it',
-    find: '    if (state.spent_conservative_usd + perItem > gate.ceiling) {', replace: '    if (false) {' },
+    find: '    if (state.spent_conservative_usd + reserve > gate.ceiling) {', replace: '    if (false) {' },
   { id: 'B10-PREFLIGHT-MIXES-INTO-THE-BENCHMARK', file: BMK, invariant: 'an excluded item cannot sit in a benchmark manifest',
     find: '    if ((i.excluded_from_benchmark === true) !== excluded) throw new Error(`${i.benchmark_id}: excluded_from_benchmark must match the manifest (${excluded})`);', replace: '    if (false) throw new Error(i.benchmark_id);' },
   { id: 'B11-TRUTH-WITHOUT-PROVENANCE', file: CAP, invariant: 'a confirmed ground-truth value records how it was established',

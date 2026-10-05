@@ -243,6 +243,54 @@ export function compareRuns(baselineRows, variantRows) {
   };
 }
 
+// ── PREFLIGHT READINESS AND REPLAY VERIFICATION ─────────────────────────────
+/**
+ * The preflight set tests machinery, not the engine: it is ready when every
+ * item is present, excluded, photographed with valid hashes, confirmed where
+ * knowable with a provenance per confirmed field, and no benchmark id is in it.
+ */
+export function preflightReadiness(manifest, { readFile, benchmarkIds = [] } = {}) {
+  const base = datasetReadiness(manifest, { readFile });
+  const ids = new Set(benchmarkIds);
+  const items = (manifest.items ?? []).map((item, i) => {
+    const r = base.items[i];
+    const problems = [];
+    if (item.excluded_from_benchmark !== true) problems.push('not excluded from the benchmark');
+    if (ids.has(item.benchmark_id)) problems.push('a benchmark item is mixed into the preflight set');
+    if (!r.photo.present) problems.push('photograph missing');
+    else if (!r.photo.loads) problems.push('photograph does not load');
+    if (r.problems.includes('photograph changed since it was imported')) problems.push('photograph hash does not match the recorded import');
+    if (r.problems.includes('prepared derivative changed since it was made')) problems.push('prepared derivative hash does not match');
+    if (item.photo?.master?.sha256 && item.photo?.prepared?.path && item.photo.prepared.path === item.photo.photo_path) problems.push('the derivative replaced the master');
+    if (item.photo?.followup_photo_path && !r.photo.followup_sha256) problems.push('follow-up photograph missing');
+    if (!item.ground_truth_source || /^pending/i.test(item.ground_truth_source)) problems.push('ground truth not confirmed by a person');
+    const prov = item.ground_truth_provenance ?? {};
+    for (const f of ['brand', 'product_family', 'exact_model', 'model_number', 'variant', 'capacity_size', 'color', 'configuration']) {
+      if (item.identity?.[f] !== null && item.identity?.[f] !== undefined && !(prov[f]?.length) && !/^pending/i.test(item.ground_truth_source ?? '')) problems.push(`${f}: confirmed without a provenance`);
+    }
+    return { id: item.benchmark_id, excluded: item.excluded_from_benchmark === true, photo: r.photo, problems, ready: problems.length === 0 };
+  });
+  return {
+    manifest_excluded: manifest.excluded_from_benchmark === true, items_total: items.length, items_expected: 5,
+    ready: manifest.excluded_from_benchmark === true && items.length === 5 && items.every((i) => i.ready),
+    ready_items: items.filter((i) => i.ready).length, photos_present: items.filter((i) => i.photo.present).length,
+    all_excluded: items.every((i) => i.excluded), benchmark_items_mixed_in: items.filter((i) => ids.has(i.id)).map((i) => i.id),
+    hashes: base.hashes, items,
+  };
+}
+/** Replay against a stored live report: the deterministic fields must agree item by item. */
+export const REPLAY_DETERMINISTIC_FIELDS = Object.freeze(['brand_engine', 'model_engine', 'configuration_engine', 'decision', 'level', 'raw_results', 'normalized_observations', 'duplicate_observations', 'exact_product_observations', 'retail_anchor_coverage', 'qualified_exact_comparables', 'distinct_sources', 'valuation_state', 'valuation_tier', 'recommended_ils', 'low_ils', 'high_ils', 'limitation']);
+export function compareReplay(liveRows, replayRows) {
+  const live = new Map(liveRows.map((r) => [r.id, r]));
+  const items = replayRows.map((r) => {
+    const l = live.get(r.id);
+    if (!l) return { id: r.id, missing_in_live: true, mismatches: [] };
+    const mismatches = REPLAY_DETERMINISTIC_FIELDS.filter((k) => JSON.stringify(l[k] ?? null) !== JSON.stringify(r[k] ?? null)).map((k) => ({ field: k, live: l[k] ?? null, replay: r[k] ?? null }));
+    return { id: r.id, missing_in_live: false, mismatches };
+  });
+  return { items_compared: items.filter((i) => !i.missing_in_live).length, matching: items.filter((i) => !i.missing_in_live && i.mismatches.length === 0).length, mismatching: items.filter((i) => i.mismatches.length).map((i) => ({ id: i.id, mismatches: i.mismatches })), fields: REPLAY_DETERMINISTIC_FIELDS };
+}
+
 // ── READINESS ───────────────────────────────────────────────────────────────
 const MAGIC = [[0xFF, 0xD8, 0xFF], [0x89, 0x50, 0x4E, 0x47], [0x52, 0x49, 0x46, 0x46]];
 const REQUIRED_ITEM_FIELDS = ['benchmark_id', 'cohort', 'category', 'subcategory', 'photo', 'identity', 'condition', 'expected_recognition', 'market_identity', 'special_case', 'ground_truth_source', 'valuation_ground_truth'];

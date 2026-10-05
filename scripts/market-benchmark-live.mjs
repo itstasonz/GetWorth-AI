@@ -59,8 +59,8 @@ export function chargeOf(result) {
   const ledger = result.price?.calls?.cost_usd ?? 0;
   return Number((identityCalls * RATE.identity_call_max + Math.max(ledger, searchActions * RATE.search_action) + searchActions * RATE.search_tokens_max).toFixed(4));
 }
-/** The most one item can cost under a configuration: the number the ceiling check uses before each call. */
-export const perItemMaximum = (profiles) => Number((2 * RATE.identity_call_max + profiles * (RATE.search_action + RATE.search_tokens_max)).toFixed(4));
+/** The most one item can cost under a configuration: what the ceiling check RESERVES before the item's first call. A second identity call is reserved only when a follow-up photograph is on file. */
+export const perItemMaximum = (profiles, hasFollowup = false) => Number(((hasFollowup ? 2 : 1) * RATE.identity_call_max + profiles * (RATE.search_action + RATE.search_tokens_max)).toFixed(4));
 
 // ── THE CAPTURE ─────────────────────────────────────────────────────────────
 export function buildCapture({ item, input, build, config, engine, finalResult }) {
@@ -149,10 +149,12 @@ export async function runLive({ manifest, env, gate, only = null, outDir, model,
   const freeze = await freezeRecord({ manifest, env, config });
   writeFileSync(join(outDir, 'freeze.json'), JSON.stringify(freeze, null, 1));
   const items = manifest.items.filter((i) => i.photo.present && (!only || only.includes(i.benchmark_id)));
-  const perItem = perItemMaximum(config.profiles?.length ?? 1);
+  const profiles = config.profiles?.length ?? 1;
   const rows = []; const state = { spent_conservative_usd: 0, ceiling_usd: gate.ceiling, approved_usd: gate.approved, stopped_by_ceiling: false, items_completed: 0, items_skipped: [], infrastructure_error: null, valid: true };
   for (const item of items) {
-    if (state.spent_conservative_usd + perItem > gate.ceiling) { state.stopped_by_ceiling = true; state.items_skipped = items.slice(rows.length).map((i) => i.benchmark_id); break; }
+    // RESERVE before the first call of the item: if what this item could cost would cross the ceiling, no call begins.
+    const reserve = perItemMaximum(profiles, !!item.photo?.followup_photo_path);
+    if (state.spent_conservative_usd + reserve > gate.ceiling) { state.stopped_by_ceiling = true; state.stopped_before = item.benchmark_id; state.reserved_usd = reserve; state.items_skipped = items.slice(rows.length).map((i) => i.benchmark_id); break; }
     let out;
     try { out = await liveItem(item, { env, engine, model, apiKey, build, config }); }
     catch (err) { state.infrastructure_error = { item: item.benchmark_id, error: String(err?.stack ?? err).slice(0, 600) }; state.valid = false; state.items_skipped = items.slice(rows.length).map((i) => i.benchmark_id); break; }
