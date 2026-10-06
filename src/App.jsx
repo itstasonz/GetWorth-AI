@@ -28,6 +28,13 @@ const LazyResultsView = React.lazy(() => import('./views/CameraResultsView').the
 // Scan Engine V2's own screen. Loaded only when a V2 scan is active, which needs
 // the build flag AND the server's per-account enrolment (src/lib/scanV2.js).
 const LazyScanV2View = React.lazy(() => import('./views/ScanV2View'));
+// Scan Lab: private benchmark capture for one allowlisted account. Written as a
+// direct `import.meta.env` read so a build made WITHOUT the flag drops the
+// screen from the bundle altogether. With the flag, the screen is public code
+// holding no data: every read and write is authorized by /api/scan-lab.
+const LazyScanLabView = import.meta.env.VITE_SCAN_LAB_ENABLED === 'true'
+  ? React.lazy(() => import('./views/ScanLabView'))
+  : null;
 const LazyInboxView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.InboxView })));
 const LazyChatView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.ChatView })));
 const LazyMyListingsView = React.lazy(() => import('./views/SellViews').then(m => ({ default: m.MyListingsView })));
@@ -322,7 +329,7 @@ function AppShell() {
   // handles popping to the correct parent view with proper state restoration.
   // reset() is intentionally NOT used here — it clears activeChat/pipeline state
   // which is wrong for a simple "go back one level" action.
-  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orders', 'orderDetail', 'admin', 'notifications', 'analytics']);
+  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orders', 'orderDetail', 'admin', 'notifications', 'analytics', 'scanLab']);
   const isBackView = BACK_VIEWS.has(view);
   const BACK_LABELS = {
     detail:        lang === 'he' ? 'עיון'    : 'Browse',
@@ -332,6 +339,7 @@ function AppShell() {
     admin:         lang === 'he' ? 'ניהול'  : 'Admin',
     notifications: lang === 'he' ? 'הזמנות' : 'Orders',
     analytics:     lang === 'he' ? 'פרופיל' : 'Profile',
+    scanLab:       lang === 'he' ? 'פרופיל' : 'Profile',
   };
   const headerLabel = isBackView
     ? (BACK_LABELS[view] ?? (lang === 'he' ? 'חזרה' : 'Back'))
@@ -649,6 +657,7 @@ function AppShell() {
               {view === 'listing' && <LazyListingFlowView />}
               {view === 'analytics' && <LazyAnalyticsView />}
               {view === 'admin' && <LazyAdminPanel />}
+              {view === 'scanLab' && LazyScanLabView && <LazyScanLabView />}
               {view === 'orders' && <LazyOrdersView />}
               {view === 'orderDetail' && <LazyOrderDetailView />}
               {view === 'notifications' && <LazyNotificationsView />}

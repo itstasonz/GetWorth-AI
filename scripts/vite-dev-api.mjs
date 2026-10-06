@@ -79,6 +79,9 @@ const ROUTES = [
   ['/api/submit-candidate', '../api/submit-candidate.js'],
   ['/api/v2/identify', '../api/v2/identify.js'],
   ['/api/v2/price', '../api/v2/price.js'],
+  // Scan Lab (private benchmark capture). Off unless SCAN_LAB_ENABLED is 'true'
+  // and the account is in SCAN_LAB_USER_IDS; it calls no provider.
+  ['/api/scan-lab', '../api/scan-lab.js'],
 ];
 
 export default function devApi({ envFile = '.env.local' } = {}) {

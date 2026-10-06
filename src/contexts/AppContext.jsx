@@ -255,7 +255,10 @@ function useRealtimeChannel(userId, channelKey, buildChannel, onRecover) {
 // Perf: skips decode+resize if raw image is already under 150KB
 // Modern browsers auto-handle EXIF orientation on canvas draw
 // ═══════════════════════════════════════════════════════
-function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
+// EXPORTED for Scan Lab, which stores the derivative THIS function makes beside
+// the original so the benchmark is fed what a scan is fed. Adding the export
+// changes nothing on the scan path.
+export function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
   const t0 = performance.now();
   // Perf: skip compression entirely if image is already small enough
   const rawKB = Math.round(dataUrl.length * 0.75 / 1024);
@@ -432,7 +435,9 @@ function assessCanvasPixels(canvas) {
  * Resolves to null when the image cannot be inspected; only an explicit
  * `ok: false` is a rejection.
  */
-function assessImageDataUrl(dataUrl, { timeoutMs = 4000 } = {}) {
+// EXPORTED for Scan Lab, which applies this same check to the derivative it
+// stores. Adding the export changes nothing on the scan path.
+export function assessImageDataUrl(dataUrl, { timeoutMs = 4000 } = {}) {
   return new Promise((resolve) => {
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
       resolve({ ok: false, reason: 'not_an_image_data_url' }); return;

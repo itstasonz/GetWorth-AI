@@ -13,6 +13,7 @@ import { STAT_COLORS, timeAgo } from '../lib/utils';
 // 0.6 in CameraResultsView, so glass panels were different weights on
 // adjacent screens. Key names are unchanged, so no call site moved.
 import { STITCH } from '../lib/tokens';
+import { isScanLabAvailable } from '../lib/scanLab';
 
 export function AuthView() {
   const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset, updatePassword } = useApp();
@@ -212,9 +213,21 @@ export function ProfileView() {
     loadOrders,
     valuations, valuationsLoading, loadValuations, deleteValuation, clearAllValuations,
     myReviews: myReviewsRaw, loadMyReviews, myReviewsLoading, myReviewsError, myReviewsTotal,
+    getFreshToken,
   } = useApp();
 
   const myReviews = myReviewsRaw || [];
+
+  // Scan Lab's entry is shown only after the SERVER has said this account is
+  // enrolled. A build without the flag never asks. In a build with it, every
+  // signed-in profile asks once and anyone not enrolled gets a bare 403.
+  const [scanLabOpen, setScanLabOpen] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!user?.id) { setScanLabOpen(false); return undefined; }
+    isScanLabAvailable({ userId: user.id, getToken: getFreshToken }).then((ok) => { if (alive) setScanLabOpen(ok); });
+    return () => { alive = false; };
+  }, [user?.id, getFreshToken]);
 
   const avatarInputRef = useRef(null);
   const verifyInputRef = useRef(null);
@@ -883,6 +896,29 @@ export function ProfileView() {
               ? <ChevronRight className="w-5 h-5 rotate-180" style={{ color: STITCH.onSurfaceVariant }} />
               : <ChevronRight className="w-5 h-5" style={{ color: STITCH.onSurfaceVariant }} />
             }
+          </button>
+        )}
+
+        {/* Scan Lab — private benchmark capture; rendered only for the enrolled account */}
+        {scanLabOpen && (
+          <button
+            onClick={() => setView('scanLab')}
+            className="w-full flex items-center justify-between px-6 py-4 transition-colors active:scale-[0.99]"
+            style={{ borderTop: `1px solid ${STITCH.surfaceContainerHigh}` }}
+          >
+            <div className="flex items-center gap-4">
+              <div
+                className="h-10 w-10 rounded-full flex items-center justify-center"
+                style={{ background: STITCH.surfaceContainerHighest, color: STITCH.primary }}
+              >
+                <Scan className="w-5 h-5" />
+              </div>
+              <div className="text-left">
+                <span className="block font-medium text-sm" style={{ color: STITCH.onSurface }}>Scan Lab</span>
+                <span className="block text-meta" style={{ color: STITCH.onSurfaceVariant }}>Private benchmark capture</span>
+              </div>
+            </div>
+            <ChevronRight className={`w-5 h-5 ${rtl ? 'rotate-180' : ''}`} style={{ color: STITCH.onSurfaceVariant }} />
           </button>
         )}
           </div>
