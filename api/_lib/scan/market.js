@@ -35,6 +35,7 @@ export const EVIDENCE_MATCHES = Object.freeze(['exact', 'close_comparable', 'sib
 export const EVIDENCE_MARKETS = Object.freeze(['IL', 'INTL']);
 export const EVIDENCE_CONDITIONS = Object.freeze([...CONDITIONS, 'unknown']);
 export const EVIDENCE_PAGES = Object.freeze(['listing', 'search_or_category', 'shop_product', 'price_guide', 'other']);
+export const EVIDENCE_STOCK = Object.freeze(['in_stock', 'out_of_stock', 'unknown']);
 export const MARKET_STAGES = Object.freeze(['local', 'expand']);
 export const MAX_EVIDENCE = 12;
 
@@ -55,6 +56,8 @@ export const MARKET_SCHEMA = strict({
       condition: { type: 'string', enum: [...EVIDENCE_CONDITIONS] },
       page: { type: 'string', enum: [...EVIDENCE_PAGES] },
       listed: { type: ['string', 'null'] },
+      stock: { type: 'string', enum: [...EVIDENCE_STOCK] },
+      shipping: { type: ['number', 'null'] },
     }),
   },
 });
@@ -125,13 +128,17 @@ ${SEARCH[stage] ?? SEARCH.local}
 - When exact_model_established is "no", search for what IS established (the family), including each model listed under could_also_be.
 
 EVIDENCE — every usable price you found, up to ${MAX_EVIDENCE}: second-hand prices first, then new prices, then the closest results that do not qualify
-- url: the page's exact URL as the search returned it. title: the listing or page title, at most ten words. price and currency: exactly as shown on the page; do not convert and do not round.
+- EACH ITEM IS ONE LISTING. Its url, title, price, condition and date are all read from the SAME result, card or row. Never take a product's name from one place and a price from another. On a page that lists several products, report a price only for the row that names it; when you cannot tell which price belongs to which product, leave it out. Every price is checked against the page's own text, and one that does not sit beside its product is discarded.
+- Prefer a page for one listing over a page that lists many.
+- url: the page's exact URL as the search returned it. title: the listing's OWN title, copied exactly as the page shows it, in its own language (its first ten words): do not translate it, tidy it or describe it. price and currency: exactly as shown on the page; do not convert and do not round.
 - kind: used_listing (an asking price for a used unit), sold (a completed sale), refurbished (a shop's renewed, ex-display or returned unit: "מחודש", "מציאון", "renewed" — never new_retail), new_retail (a shop's price for a new unit), price_guide (a published average of sold prices), other.
 - A new price in Israel is the price WITH VAT. Many Israeli shops show a second, lower "Eilat" price without VAT: never report that one. Where a comparison page shows a range of shops, report the lowest price.
 - match: exact (this product, this configuration), close_comparable (the same product in another colour or capacity, or the directly comparable model), sibling_model (a different model of the family), accessory, part, box_only, bundle (sold together with other things), irrelevant. When exact_model_established is "no", a listing for one of the models named under could_also_be is close_comparable, not sibling_model: it is one of the things this item may be.
 - market: IL when the SELLER or shop is in Israel, otherwise INTL. A global marketplace showing shekels (il.ebay.com) is INTL.
 - condition: the condition the listing itself states — new_sealed (new, sealed or unused), like_new (barely used, no visible wear), good (normal use, light wear, working), fair (clear wear or small defects, working), poor (heavy wear, damage or partly working) — or unknown when it does not say. A shop's new unit is new_sealed.
 - page: listing (one seller's own listing page), search_or_category (a search, category or browse page that lists many items: the price is one line of a list), shop_product (a shop's page for the product), price_guide, other.
+- stock: for a shop's new unit, in_stock or out_of_stock as the page says; unknown when it does not say, and for everything that is not a shop's unit.
+- shipping: the shipping charge shown for THIS listing, in the same currency as its price; null when the page shows none. Never add it to the price.
 - listed: the date the LISTING was posted or last updated, as YYYY-MM-DD, only when the page shows it (a date, or "3 days ago" worked out from today). null when the page shows no date. Never the date of your search, and never a guess. An expired or archived ad is still evidence: report it with the date it shows.
 - Example for a Ninja TB301 blender: a shop selling a new TB301 for ₪599 is new_retail / exact; a used TB301 at ₪450 is used_listing / exact; a replacement pitcher at ₪180 is part; a Ninja CB103 at ₪300 is sibling_model; a blade at ₪70 is accessory.
 - Classify honestly: a wrong "exact" changes the owner's price. An empty list is a correct answer when nothing usable was found.`;

@@ -79,6 +79,8 @@ export function WrongItemSheet({ open, onClose, onSubmit, identity, copy, rtl })
 function Source({ e, copy }) {
   const original = e.currency === 'ILS' ? formatPrice(e.price) : `${e.price.toLocaleString()} ${e.currency}`;
   const converted = e.currency !== 'ILS' && e.price_ils ? copy.approx(formatPrice(e.price_ils)) : null;
+  // What the listing charges to send it, when the page said: shown beside the price it is not part of.
+  const shipping = e.shipping ? copy.shipping(e.currency === 'ILS' ? formatPrice(e.shipping) : `${e.shipping.toLocaleString()} ${e.currency}`) : null;
   const facts = [
     copy.kinds[e.kind] ?? copy.kinds.other,
     copy.matches[e.match] ?? null,
@@ -102,6 +104,7 @@ function Source({ e, copy }) {
         <span className="shrink-0 text-end">
           <bdi dir="ltr" className="block text-label text-text-primary">{original}</bdi>
           {converted && <bdi dir="ltr" className="block text-meta text-text-muted">{converted}</bdi>}
+          {shipping && <span className="block text-meta text-text-muted"><Bidi>{shipping}</Bidi></span>}
         </span>
       </a>
     </li>
@@ -127,7 +130,9 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
             <p className="text-body-sm text-text-secondary">{copy.fromIsrael(il)} · {copy.fromAbroad(intl)}</p>
           )}
           {range && <p>{copy.relevantRange}: {copy.range(range)}</p>}
-          {v.retail_new_ils && <p>{copy.newInIsrael}: <bdi dir="ltr">{formatPrice(v.retail_new_ils)}</bdi></p>}
+          {v.retail_new_ils && (
+            <p>{copy.newInIsrael}: <bdi dir="ltr">{formatPrice(v.retail_new_ils)}</bdi>{v.retail_new_in_stock === false ? ` ${copy.outOfStock}` : ''}</p>
+          )}
           {priced && <p>{copy.confidenceLine}: {copy.levels[v.price_confidence] ?? copy.levels.low}</p>}
         </div>
 
@@ -138,12 +143,14 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
             {v.dispersed && <p>{copy.dispersedWhy}</p>}
             {v.intl_adjusted === true && <p>{copy.intlAdjusted(v.intl_scale)}</p>}
             {v.intl_adjusted === false && <p>{copy.intlUnadjusted}</p>}
+            {intl > 0 && <p>{copy.abroadNoShipping}</p>}
             <p>{copy.how}</p>
             <p>{copy.conditionsHow}</p>
           </div>
         )}
 
         <div className="space-y-1 text-body-sm text-text-secondary">
+          {(counts.unbound ?? 0) > 0 && <p>{copy.unbound(counts.unbound)}</p>}
           {(counts.abroad_unused ?? 0) > 0 && <p>{copy.abroadUnused(counts.abroad_unused)}</p>}
           {aside > 0 && <p>{copy.setAside(aside)}</p>}
           {v.searched?.date && <p>{copy.searchedOn(v.searched.date)}</p>}

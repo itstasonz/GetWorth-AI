@@ -31,7 +31,7 @@ import { normalizeIdentity } from '../api/_lib/scan/identify.js';
 import { resetFxCache, parseBoiRates } from '../api/_lib/scan/fx.js';
 import { extractSearchProvenance } from '../api/_lib/phaseb/search-provenance.js';
 import * as CFG from '../api/_lib/scan/config.js';
-import { RAW_IDENTITY, RAW_MARKET, RAW_EXPAND, PAGE_TEXT, SOURCES, TODAY, NOW, BOI_JSON, searchItems, fakeProvider } from './helpers/core-scan-fakes.mjs';
+import { RAW_IDENTITY, RAW_MARKET, RAW_EXPAND, PAGE_TEXT, SOURCES, TODAY, NOW, BOI_JSON, searchItems, pageTexts, fakeProvider } from './helpers/core-scan-fakes.mjs';
 
 // Listing dates, each a class of age on TODAY (2026-10-06).
 const CURRENT = '2026-09-20';
@@ -41,7 +41,9 @@ const ARCHIVED = '2023-01-01';
 
 let serial = 0;
 /** A verified reference as the pool holds it: by default an Israeli used listing for the exact item, with no date on it. */
-const item = (over = {}) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 300, currency: 'ILS', price_ils: over.price ?? 300, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, binding: 'url', seen: TODAY, ...over }; };
+const item = (over = {}) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 300, currency: 'ILS', price_ils: over.price ?? 300, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, binding: 'strong', seen: TODAY, ...over }; };
+/** The item the fixtures are about. */
+const ITEM = { identity: normalizeIdentity(RAW_IDENTITY), answer: null };
 const il = (price, over) => item({ price, ...over });
 const abroad = (price, over) => item({ price, currency: 'USD', market: 'INTL', domain: 'used.example.com', ...over });
 const shop = (price, over) => item({ price, kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', ...over });
@@ -102,13 +104,13 @@ describe('LM-1 where a price is from, what page it was on, and how old the listi
     assert.equal(listedDate('last week', 'last week', TODAY), null);
   });
   test('LM-1d the day we looked never becomes the day it was listed', () => {
-    const reached = extractSearchProvenance(searchItems(Object.values(SOURCES), { text: PAGE_TEXT }));
+    const reached = extractSearchProvenance(searchItems(Object.values(SOURCES), { text: pageTexts(RAW_MARKET, PAGE_TEXT) }));
     const fx = parseBoiRates(BOI_JSON);
-    const { evidence } = verifyEvidence(RAW_MARKET.evidence, reached, fx, TODAY);
+    const { evidence } = verifyEvidence(RAW_MARKET.evidence, reached, fx, TODAY, ITEM);
     assert.deepEqual(evidence.map((e) => [e.listed, e.seen]), [['2026-10-01', TODAY], [null, TODAY], [null, TODAY]]);
     // The model reports the day of the search as the listing date: the page says otherwise, so there is no date.
     const lying = RAW_MARKET.evidence.map((e) => ({ ...e, listed: TODAY }));
-    assert.deepEqual(verifyEvidence(lying, reached, fx, TODAY).evidence.map((e) => e.listed), [null, null, null]);
+    assert.deepEqual(verifyEvidence(lying, reached, fx, TODAY, ITEM).evidence.map((e) => e.listed), [null, null, null]);
     const v = value(evidence);
     assert.deepEqual(v.evidence.filter((e) => e.used).map((e) => e.freshness).sort(), ['current', 'unknown']);
   });
@@ -125,8 +127,8 @@ describe('LM-1 where a price is from, what page it was on, and how old the listi
     assert.equal(freshnessOf(null, TODAY, true), 'archived');
     assert.equal(freshnessOf(CURRENT, TODAY, true), 'current', 'a date the page shows still decides');
     const url = 'https://www.ad.co.il/ad/12130905';
-    const reached = extractSearchProvenance(searchItems([url], { text: { [url]: 'Logitech G Pro Wireless 400 ש"ח · זוהי מודעת ארכיון' } }));
-    const [e] = verifyEvidence([{ ...RAW_MARKET.evidence[1], url, price: 400, listed: null }], reached, parseBoiRates(BOI_JSON), TODAY).evidence;
+    const reached = extractSearchProvenance(searchItems([url], { text: { [url]: 'Logitech G Pro X Superlight 400 ש"ח · זוהי מודעת ארכיון' } }));
+    const [e] = verifyEvidence([{ ...RAW_MARKET.evidence[1], url, price: 400, listed: null }], reached, parseBoiRates(BOI_JSON), TODAY, ITEM).evidence;
     assert.deepEqual([e.archived, e.listed, e.seen], [true, null, TODAY]);
     const v = value([e]);
     assert.deepEqual([v.evidence[0].freshness, v.evidence[0].weight, v.local_strength], ['archived', WEIGHT.freshness.archived, 0]);
@@ -134,6 +136,7 @@ describe('LM-1 where a price is from, what page it was on, and how old the listi
   test('LM-1f evidence kept from an earlier search is read by today\'s rules', () => {
     const kept = requalify({ url: 'https://il.ebay.com/b/Logitech/bn_21829535', domain: 'il.ebay.com', price: 56, price_ils: 56, kind: 'used_listing', match: 'exact', market: 'IL' });
     assert.deepEqual([kept.market, kept.page, kept.listed, kept.archived, kept.price], ['INTL', 'search_or_category', null, false, 56]);
+    assert.deepEqual([kept.binding, kept.binding_reason], ['weak', 'kept_from_before_binding_was_checked'], 'and it holds no proof its price was ever tied to its product');
     assert.deepEqual(requalify(kept), kept, 'and reading it twice changes nothing');
   });
 });
@@ -283,22 +286,21 @@ describe('LM-3 the first Production scan, replayed (2026-10-06, a wireless gamin
     assert.equal(Math.round((89 * 0.9) / 0.9 / 5) * 5, 90, 'taking the lower neighbour as the centre gave the ₪90 on the screen');
     assert.equal(Math.round(weightedQuantile(deployed, 0.5)), 175, 'the same weights, split fairly, land between the two markets');
   });
-  test('LM-3b the same evidence now: the pages are seen for what they are, and the price says how little it knows', () => {
+  test('LM-3b the same evidence now: nothing stored shows that any of these prices belonged to this mouse, so none is priced from', () => {
+    // Each record says a page was reached and that the number was somewhere in its text. The text was not kept.
+    // The ₪300 came off a category page of many listings; the eBay prices off browse pages. That is not a listing.
     const evidence = stored.map(requalify);
-    assert.deepEqual(evidence.map((e) => [e.market, e.page]), [['IL', 'search_or_category'], ['IL', 'listing'], ['INTL', 'search_or_category'], ['INTL', 'search_or_category'], ['IL', 'other']]);
+    assert.deepEqual(evidence.map((e) => [e.market, e.page, e.binding]), [
+      ['IL', 'search_or_category', 'weak'], ['IL', 'listing', 'weak'], ['INTL', 'search_or_category', 'weak'], ['INTL', 'search_or_category', 'weak'], ['IL', 'other', 'weak'],
+    ]);
     const v = value(evidence);
-    // Israel: 300 off a category page, undated: weight 1 x 0.6 x 0.7 = 0.42, value 270.
-    // Abroad: 89 and 56 off browse pages, undated, not scaled: 0.25 x 0.6 x 0.7 = 0.105 each, values 80.1 and 50.4.
-    // The Israeli price holds two thirds of the weight: centre 270. The range reaches down toward the rest.
-    assert.deepEqual(band(v.prices.good), { list: 300, low: 140, high: 290 });
-    assert.deepEqual([v.status, v.price_confidence, v.dispersed, v.local_strength, v.local_drives, v.basis], ['priced', 'low', true, 0.42, false, BASIS.ITEM]);
-    assert.deepEqual(v.reference_range, { low: 56, high: 300 });
-    assert.deepEqual([v.counts.resale, v.counts.il_used_exact, v.counts.intl_used_exact, v.counts.set_aside, v.retail_new_ils], [3, 1, 2, 1, 400]);
-    assert.deepEqual(v.evidence.filter((e) => e.set_aside === SET_ASIDE.ABOVE_NEW).map((e) => e.price), [430]);
-    assert.deepEqual(v.evidence.filter((e) => e.used).map((e) => [e.price, e.weight, e.freshness]), [[300, 0.42, 'unknown'], [89, 0.11, 'unknown'], [56, 0.11, 'unknown']]);
+    assert.deepEqual([v.status, v.withdrawn, v.prices, v.price_confidence], ['insufficient_evidence', 'no_verified_second_hand_reference', null, null]);
+    assert.deepEqual([v.counts.resale, v.counts.unbound, v.counts.not_comparable, v.retail_new_ils], [0, 5, 0, null], 'the new price is held to the same rule');
+    assert.ok(v.evidence.every((e) => !e.used && e.set_aside === SET_ASIDE.UNBOUND));
   });
   test('LM-3c and the search would not have stopped there', () => {
-    assert.ok(localStrength(stored.map(requalify), { today: TODAY }) < LOCAL_STRENGTH.drives);
+    assert.equal(localStrength(stored.map(requalify), { today: TODAY }), 0);
+    assert.ok(0 < LOCAL_STRENGTH.drives);
   });
 });
 

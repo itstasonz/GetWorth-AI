@@ -28,7 +28,7 @@ import { parseBoiRates, toIls } from '../api/_lib/scan/fx.js';
 import { signScanToken, verifyScanToken, TOKEN_ERROR } from '../api/_lib/scan/token.js';
 import { CONDITIONS, TOKEN_TTL_MS } from '../api/_lib/scan/config.js';
 import { CONDITION_LADDER } from '../api/_lib/valuation-guard.js';
-import { RAW_IDENTITY, RAW_MARKET, GOOD_BAND, SOURCES, PAGE_TEXT, TODAY, searchItems, BOI_JSON } from './helpers/core-scan-fakes.mjs';
+import { RAW_IDENTITY, RAW_MARKET, GOOD_BAND, SOURCES, PAGE_TEXT, TODAY, searchItems, pageTexts, BOI_JSON } from './helpers/core-scan-fakes.mjs';
 
 const FX = parseBoiRates(BOI_JSON);                 // 1 USD = 3.5 ILS, 1 EUR = 4.0 ILS
 const reached = (urls = Object.values(SOURCES), opts) => extractSearchProvenance(searchItems(urls, opts));
@@ -37,9 +37,11 @@ const raw = (over) => ({ url: SOURCES.IL_USED_1, title: 't', price: 260, currenc
 const CURRENT = '2026-09-20';
 let serial = 0;
 /** A verified evidence item, as the pool holds it. */
-const item = (over) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 260, currency: 'ILS', price_ils: over?.price ?? 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, binding: 'url', seen: TODAY, ...over }; };
+const item = (over) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 260, currency: 'ILS', price_ils: over?.price ?? 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, binding: 'strong', seen: TODAY, ...over }; };
 const value = (evidence, opts = {}) => buildValuation({ evidence, today: TODAY, ...opts });
-const pool = () => verifyEvidence(RAW_MARKET.evidence, reached(undefined, { text: PAGE_TEXT }), FX, TODAY).evidence;
+/** The item the fixtures are about, and each page saying what its own listing costs. */
+const ITEM = { identity: normalizeIdentity(RAW_IDENTITY), answer: null };
+const pool = () => verifyEvidence(RAW_MARKET.evidence, reached(undefined, { text: pageTexts(RAW_MARKET, PAGE_TEXT) }), FX, TODAY, ITEM).evidence;
 
 describe('CS-1 QUALIFY — evidence must be a page the search reached', () => {
   test('CS-1a a price on a reached page stands; one on an unreached page counts for nothing', () => {
@@ -56,10 +58,14 @@ describe('CS-1 QUALIFY — evidence must be a page the search reached', () => {
     assert.equal(pageKey('https://WWW.Example.co.il/item/1/?utm_source=x#top'), 'example.co.il/item/1');
     assert.equal(verifyEvidence([raw({ url: `${SOURCES.IL_USED_1}?utm_source=openai` })], reached(), FX).evidence.length, 1);
   });
-  test('CS-1d the binding says whether the price itself was in what the search returned', () => {
-    const p = reached([SOURCES.IL_USED_1, SOURCES.IL_USED_2], { text: { [SOURCES.IL_USED_1]: 'מחיר: ₪260 במצב טוב' } });
-    const { evidence } = verifyEvidence([raw(), raw({ url: SOURCES.IL_USED_2, price: 250 })], p, FX);
-    assert.deepEqual(evidence.map((e) => e.binding), ['content', 'url']);
+  test('CS-1d a reached page is not yet a price: each record says whether the page ties its price to the product (core-scan-binding)', () => {
+    const p = reached([SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL], { text: { [SOURCES.IL_USED_1]: 'Logitech G Pro X Superlight ₪260 במצב טוב', [SOURCES.IL_USED_2]: 'מחיר: ₪250 במצב טוב' } });
+    const { evidence, unverified } = verifyEvidence([raw(), raw({ url: SOURCES.IL_USED_2, price: 250 }), raw({ url: SOURCES.IL_RETAIL, price: 240 })], p, FX, TODAY, ITEM);
+    assert.deepEqual(evidence.map((e) => [e.binding, e.binding_reason]), [
+      ['strong', 'product_and_price_are_one_listing'], ['weak', 'product_not_named_beside_the_price'], ['weak', 'price_not_shown_with_its_currency'],
+    ]);
+    assert.equal(unverified, 0, 'all three pages were reached; reaching a page is a different question');
+    assert.equal(value(evidence).counts.resale, 1, 'and only the tied price is priced from');
   });
   test('CS-1e the server converts a foreign price with the bank rate and keeps it beside the original', () => {
     const { evidence } = verifyEvidence([raw({ url: SOURCES.INTL_USED, price: 70, currency: 'USD', market: 'INTL' })], reached(), FX, '2026-10-06');
@@ -394,7 +400,7 @@ describe('CS-7 identity: unknown is allowed, and a claim to have read something 
     walk(IDENTITY_SCHEMA, 'identity');
     walk(MARKET_SCHEMA, 'market');
     assert.deepEqual(Object.keys(MARKET_SCHEMA.properties), ['evidence']);
-    assert.deepEqual(Object.keys(MARKET_SCHEMA.properties.evidence.items.properties), ['url', 'title', 'price', 'currency', 'kind', 'match', 'market', 'condition', 'page', 'listed']);
+    assert.deepEqual(Object.keys(MARKET_SCHEMA.properties.evidence.items.properties), ['url', 'title', 'price', 'currency', 'kind', 'match', 'market', 'condition', 'page', 'listed', 'stock', 'shipping']);
   });
 });
 

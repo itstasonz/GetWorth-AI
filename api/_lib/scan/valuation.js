@@ -5,6 +5,11 @@
 // second-hand evidence leads, and everything else is weighed by how much it
 // says about that:
 //
+//   BOUND       before anything is weighed: a price takes part only when the
+//               page's own text ties it to the product it is claimed for
+//               (binding.js). A price that is merely on a page that also names
+//               the product is counted as found, shown as unused, and moves
+//               nothing — second-hand reference or new-price anchor alike.
 //   WEIGH       each second-hand reference counts by FIVE things at once:
 //                 where      Israel, or abroad (and abroad counts for less
 //                            still when it could not be brought to Israeli
@@ -37,6 +42,7 @@
 import { CONDITION_LADDER } from '../valuation-guard.js';
 import { CONDITIONS } from './config.js';
 import { freshnessOf } from './evidence.js';
+import { isBound } from './binding.js';
 
 export { pageKey, verifyEvidence, mergeEvidence, requalify } from './evidence.js';
 
@@ -88,7 +94,7 @@ export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
  */
 export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 });
 /** Why a reference that qualifies took no part in the price. */
-export const SET_ASIDE = Object.freeze({ ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient' });
+export const SET_ASIDE = Object.freeze({ ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product' });
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
 const SOLD_KINDS = new Set(['sold', 'price_guide']);
@@ -115,14 +121,24 @@ export function roundNice(n) {
   return Math.max(step, Math.round(v / step) * step);
 }
 
-const isResale = (e, basis) => RESALE_KINDS.has(e.kind) && MATCHES[basis].has(e.match);
-const isNewPrice = (e, market) => e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && e.market === market && !!e.price_ils;
-/** The new price in a market: the exact item's when the search found one, else the close comparable's. */
+// What a price WOULD be, were it tied to its product — and what it IS, when it is.
+const resaleLike = (e, basis) => RESALE_KINDS.has(e.kind) && MATCHES[basis].has(e.match);
+const anchorLike = (e, market) => e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && e.market === market && !!e.price_ils;
+const isResale = (e, basis) => resaleLike(e, basis) && isBound(e);
+const isNewPrice = (e, market) => anchorLike(e, market) && isBound(e);
+/**
+ * The new price in a market: the exact item's when the search found one, else
+ * the close comparable's. A shop that has it today says more about today's new
+ * price than a page for a unit that is out of stock, so stocked offers are
+ * used when there are any, and the answer says which it was.
+ */
 function newPrice(evidence, market) {
   const all = evidence.filter((e) => isNewPrice(e, market));
   const exact = all.filter((e) => e.match === 'exact');
   const use = exact.length ? exact : all;
-  return use.length ? median(use.map((e) => e.price_ils)) : null;
+  const stocked = use.filter((e) => e.stock !== 'out_of_stock');
+  const from = stocked.length ? stocked : use;
+  return from.length ? { price: median(from.map((e) => e.price_ils)), inStock: stocked.length > 0 } : null;
 }
 
 // ── WEIGH AND NORMALIZE ─────────────────────────────────────────────────────
@@ -132,8 +148,9 @@ function newPrice(evidence, market) {
  * and why it was set aside when it was.
  */
 export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null } = {}) {
-  const anchorIl = newPrice(evidence, 'IL');
-  const anchorIntl = newPrice(evidence, 'INTL');
+  const il = newPrice(evidence, 'IL');
+  const anchorIl = il?.price ?? null;
+  const anchorIntl = newPrice(evidence, 'INTL')?.price ?? null;
   // Abroad is not Israel. Converting the currency does not convert the market.
   // The level is taken from the same item's NEW price in both markets when both
   // are known; otherwise foreign prices stay as converted and count for less.
@@ -177,7 +194,7 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     const mad = median(kept.map((p) => Math.abs(p.value - med)));
     if (mad > 0) for (const p of kept) if ((0.6745 * Math.abs(p.value - med)) / mad > MAD_THRESHOLD) p.dropped = SET_ASIDE.OUTLIER;
   }
-  return { points, anchorIl, scale, local, localDrives };
+  return { points, anchorIl, anchorInStock: il ? il.inStock : null, scale, local, localDrives };
 }
 
 // ── AGGREGATE ───────────────────────────────────────────────────────────────
@@ -286,7 +303,9 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     const similar = normalizeReferences(evidence, { basis: BASIS.SIMILAR, today: day });
     if (similar.points.some((p) => !p.dropped)) { basis = BASIS.SIMILAR; norm = similar; }
   }
-  const { points, anchorIl, scale, localDrives } = norm;
+  const { points, anchorIl, anchorInStock, scale, localDrives } = norm;
+  // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
+  const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || anchorLike(e, 'IL') || anchorLike(e, 'INTL'))));
   const kept = points.filter((p) => !p.dropped);
   const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
@@ -305,7 +324,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
         freshness: freshnessOf(e.listed, day, e.archived),
         used: !!p && !p.dropped,
         weight: p && !p.dropped ? round2(p.weight) : 0,
-        set_aside: p?.dropped ?? (p || anchor ? null : 'not_comparable'),
+        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (p || anchor ? null : 'not_comparable')),
       };
     })),
     counts: {
@@ -316,7 +335,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       intl_used_close: count((e) => e.market !== 'IL' && e.match !== 'exact'),
       sold: count((e) => SOLD_KINDS.has(e.kind)),
       retail_il: evidence.filter((e) => isNewPrice(e, 'IL')).length,
-      not_comparable: evidence.filter((e) => e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match)).length,
+      not_comparable: evidence.filter((e) => !loose.has(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
+      unbound: loose.size,
       // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.
       abroad_unused: unused,
       set_aside: points.length - kept.length - unused,
@@ -324,6 +344,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     },
     basis,
     retail_new_ils: anchorIl ? roundNice(anchorIl) : null,
+    // false when every shop page behind the new price showed the item out of stock: an older price, not today's.
+    retail_new_in_stock: anchorIl ? anchorInStock : null,
     // The references priced from, as they were found: the spread a person would see looking at the same pages.
     reference_range: prices.length ? { low: Math.min(...prices), high: Math.max(...prices) } : null,
     local_strength: round2(localWeight(kept)),

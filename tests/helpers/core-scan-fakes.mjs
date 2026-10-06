@@ -54,20 +54,34 @@ export const NOW = Date.UTC(2026, 9, 6, 9, 0, 0);
  */
 export const RAW_MARKET = Object.freeze({
   evidence: [
-    { url: SOURCES.IL_USED_1, title: 'Logitech G Pro X Superlight יד שנייה', price: 260, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01' },
-    { url: SOURCES.IL_USED_2, title: 'G Pro X Superlight משומש', price: 250, currency: '₪', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown', page: 'listing', listed: null },
-    { url: SOURCES.IL_RETAIL, title: 'Logitech G Pro X Superlight חדש', price: 549, currency: 'ILS', kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null },
+    { url: SOURCES.IL_USED_1, title: 'Logitech G Pro X Superlight יד שנייה', price: 260, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', stock: 'unknown', shipping: null },
+    { url: SOURCES.IL_USED_2, title: 'G Pro X Superlight משומש', price: 250, currency: '₪', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown', page: 'listing', listed: null, stock: 'unknown', shipping: null },
+    { url: SOURCES.IL_RETAIL, title: 'Logitech G Pro X Superlight חדש', price: 549, currency: 'ILS', kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null, stock: 'in_stock', shipping: null },
   ],
 });
 /** What the wider search returns: a completed sale abroad, and the new price abroad that lets it be scaled. */
 export const RAW_EXPAND = Object.freeze({
   evidence: [
-    { url: SOURCES.INTL_USED, title: 'Logitech G Pro X Superlight used', price: 70, currency: 'USD', kind: 'sold', match: 'exact', market: 'INTL', condition: 'unknown', page: 'listing', listed: null },
-    { url: SOURCES.INTL_NEW, title: 'Logitech G Pro X Superlight', price: 110, currency: 'USD', kind: 'new_retail', match: 'exact', market: 'INTL', condition: 'new_sealed', page: 'shop_product', listed: null },
+    { url: SOURCES.INTL_USED, title: 'Logitech G Pro X Superlight used', price: 70, currency: 'USD', kind: 'sold', match: 'exact', market: 'INTL', condition: 'unknown', page: 'listing', listed: null, stock: 'unknown', shipping: null },
+    { url: SOURCES.INTL_NEW, title: 'Logitech G Pro X Superlight', price: 110, currency: 'USD', kind: 'new_retail', match: 'exact', market: 'INTL', condition: 'new_sealed', page: 'shop_product', listed: null, stock: 'in_stock', shipping: null },
   ],
 });
 /** What the search returned as the text of each page: the first listing shows its price and the day it was posted. */
-export const PAGE_TEXT = Object.freeze({ [SOURCES.IL_USED_1]: 'Logitech G Pro X Superlight · ₪260 · פורסם 01/10/2026' });
+export const PAGE_TEXT = Object.freeze({ [SOURCES.IL_USED_1]: 'Logitech G Pro X Superlight יד שנייה · ₪260 · פורסם 01/10/2026' });
+
+const SIGN = { ILS: '₪', '₪': '₪', NIS: '₪', USD: '$', EUR: '€', GBP: '£' };
+/** One listing as a search result shows it: its own title and its price, side by side. */
+export const rowText = (e) => `${e.title} ${SIGN[String(e.currency).toUpperCase()] ?? ''}${e.price}`;
+/**
+ * The text a search returns for the pages behind an answer: each page given
+ * explicitly keeps its text; every other page gets its listing's own row. A
+ * test that is ABOUT what a page says passes its own text and `rows: false`.
+ */
+export function pageTexts(answer, given = {}) {
+  const out = { ...given };
+  for (const e of answer?.evidence ?? []) if (!(e.url in out)) out[e.url] = rowText(e);
+  return out;
+}
 
 /** What the server computes from RAW_MARKET on TODAY: worked out by hand in the valuation suite. */
 export const GOOD_BAND = Object.freeze({ list: 260, low: 190, high: 260 });
@@ -118,7 +132,7 @@ export const BOI_JSON = { exchangeRates: [
  * `expand` (nothing found, unless a test says otherwise). `calls` records every
  * request, and for a market request which stage it was.
  */
-export function fakeProvider({ identities = [RAW_IDENTITY], markets = [RAW_MARKET], expand = [{ evidence: [] }], reached = Object.values(SOURCES), pageText = PAGE_TEXT, status = null, expandStatus = null, searched = true, fx = BOI_JSON } = {}) {
+export function fakeProvider({ identities = [RAW_IDENTITY], markets = [RAW_MARKET], expand = [{ evidence: [] }], reached = Object.values(SOURCES), pageText = PAGE_TEXT, rows = true, status = null, expandStatus = null, searched = true, fx = BOI_JSON } = {}) {
   const calls = [];
   let i = 0;
   let m = 0;
@@ -136,9 +150,10 @@ export function fakeProvider({ identities = [RAW_IDENTITY], markets = [RAW_MARKE
     const refused = status ?? (stage === 'expand' ? expandStatus : null);
     if (refused) return new Response(JSON.stringify({ error: { message: 'upstream said no' } }), { status: refused });
     const answer = () => (stage === 'expand' ? expand[Math.min(x++, expand.length - 1)] : markets[Math.min(m++, markets.length - 1)]);
+    const said = kind === 'market' ? answer() : null;
     const items = kind === 'identity'
       ? [message(identities[Math.min(i++, identities.length - 1)])]
-      : [...(searched ? searchItems(reached, { text: pageText }) : []), message(answer())];
+      : [...(searched ? searchItems(reached, { text: rows ? pageTexts(said, pageText) : pageText }) : []), message(said)];
     return new Response(sse(completed(items, body.model)), { status: 200, headers: { 'content-type': 'text/event-stream' } });
   };
   fetchImpl.calls = calls;

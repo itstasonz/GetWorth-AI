@@ -194,7 +194,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
     const NEW_URL = 'https://market.example.co.il/ads/999';
     await run(fakeProvider(), store);
     resetMarketCache();
-    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 'Superlight יד שנייה', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null }] }], reached: [NEW_URL] });
+    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 'Logitech G Pro X Superlight יד שנייה', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null }] }], reached: [NEW_URL] });
     const second = await run(later, store, { now: at(T0 + 3 * 3_600_000) });
     assert.equal(later.of('market').length, 1);
     assert.equal(second.reused, false);
@@ -208,7 +208,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
     await run(fakeProvider(), store);
     resetMarketCache();
     const NEW_URL = 'https://market.example.co.il/ads/999';
-    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 't', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null }] }], reached: [NEW_URL] });
+    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 'G Pro X Superlight', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null }] }], reached: [NEW_URL] });
     const r = await run(later, store, { now: at(T0 + CFG.MARKET_POOL_MS + 60_000) });
     assert.equal(r.valuation.counts.resale, 1);
   });
@@ -243,7 +243,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
 describe('CE-2F an item known only by its family is priced from the family', () => {
   const SIBLINGS = { evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match: 'sibling_model', market: 'IL', condition: 'new_sealed', page: 'listing', listed: null })) };
   const family = normalizeIdentity({ ...RAW_IDENTITY, canonical_name: 'apple airpods pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], followup: { kind: 'photo', affects: 'identity', question: 'Take a close-up photo of the text inside the lid', options: [] } });
-  const run = (identity) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [SIBLINGS] }), store: fakeStore(), scanUuid: UUID });
+  const run = (identity) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [SIBLINGS], pageText: {} }), store: fakeStore(), scanUuid: UUID });
   test('CE-2Fa listings the model called "sibling" price an item whose generation is unknown, as an approximate range', async () => {
     const r = await run(family);
     assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.price_confidence, r.valuation.counts.resale], [SCAN_STATUS.PRICED, true, true, 'low', 3]);
@@ -255,7 +255,7 @@ describe('CE-2F an item known only by its family is priced from the family', () 
     assert.deepEqual([r.status, r.valuation.basis, r.valuation.approximate, r.valuation.price_confidence], [SCAN_STATUS.PRICED, 'similar_models', true, 'low']);
   });
   test('CE-2Fc the market prompt tells the model which models a family-level item may be', async () => {
-    const fetchImpl = fakeProvider({ markets: [SIBLINGS] });
+    const fetchImpl = fakeProvider({ markets: [SIBLINGS], pageText: {} });
     resetMarketCache();
     await runPrice({ identity: family, model: 'm', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID });
     const prompt = fetchImpl.of('market')[0].body.input[0].content[0].text;
@@ -515,7 +515,7 @@ describe('CE-5 what a scan leaves behind', () => {
     { url: 'https://a.example.co.il/1', price: 260, currency: 'ILS', price_ils: 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good' },
     { url: 'https://a.example.co.il/2', price: 250, currency: 'ILS', price_ils: 250, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown' },
     { url: 'https://a.example.co.il/3', price: 549, currency: 'ILS', price_ils: 549, kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed' },
-  ] });
+  ].map((e) => ({ ...e, binding: 'strong' })) });
   test('CE-5a a priced scan writes real numbers in order; an unpriced one writes none, never 0', () => {
     const row = buildValuationRow({ id: 'v', userId: 'u', scanUuid: UUID, identity, lang: 'he', valuation: pricedValuation });
     const good = pricedValuation.prices.good;

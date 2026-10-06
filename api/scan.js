@@ -143,7 +143,7 @@ export function createScanHandler({
           identity_confidence: identity.identity_confidence, category: identity.category, counts: result.valuation?.counts ?? null,
           identify_ms: prior.identify_ms ?? null, market_ms: result.call?.ms ?? null, first_search_ms: result.call?.first_search_ms ?? null,
           tool_calls: result.call?.tool_calls ?? null, stages: result.call?.stages ?? null, usage: result.call?.usage ?? null, model: result.call?.model ?? null,
-          basis: result.valuation?.basis ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null,
+          basis: result.valuation?.basis ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null, unbound: result.valuation?.counts?.unbound ?? null,
           reused: result.reused === true, stale: result.stale === true, approximate: result.valuation?.approximate === true,
           revisions: prior.revisions ?? 0, answered: !!answer, client_elapsed_before_price_ms: clientMs,
         }),

@@ -82,6 +82,12 @@ export const SCAN_COPY = {
     fromAbroad: (n) => `Abroad: ${n}`,
     relevantRange: 'Price range of these listings',
     newInIsrael: 'New in Israel',
+    outOfStock: '(out of stock)',
+    unbound: (n) => (n === 1
+      ? '1 price was found on a page where it could not be tied to this item for certain, so it was not used.'
+      : `${n} prices were found on pages where they could not be tied to this item for certain, so they were not used.`),
+    shipping: (amount) => `+ ${amount} shipping`,
+    abroadNoShipping: 'Prices from abroad do not include shipping to Israel.',
     confidenceLine: 'Confidence',
     similarWhy: 'No listing was found for this exact model; the price is from similar models of the same family.',
     approximateWhy: 'The exact model is not confirmed, so the listings are for the product family.',
@@ -151,6 +157,12 @@ export const SCAN_COPY = {
     fromAbroad: (n) => `חו״ל: ${n}`,
     relevantRange: 'טווח המחירים במודעות',
     newInIsrael: 'מחיר חדש בישראל',
+    outOfStock: '(אזל מהמלאי)',
+    unbound: (n) => (n === 1
+      ? 'נמצא מחיר אחד שלא ניתן היה לשייך בוודאות לפריט הזה, ולכן לא נכלל.'
+      : `נמצאו ${n} מחירים שלא ניתן היה לשייך בוודאות לפריט הזה, ולכן לא נכללו.`),
+    shipping: (amount) => `+ ${amount} משלוח`,
+    abroadNoShipping: 'מחירים מחו״ל אינם כוללים משלוח לישראל.',
     confidenceLine: 'רמת ביטחון',
     similarWhy: 'לא נמצאה מודעה לדגם המדויק; המחיר מבוסס על דגמים דומים מאותה משפחה.',
     approximateWhy: 'הדגם המדויק לא אומת, ולכן המודעות הן של משפחת המוצר.',

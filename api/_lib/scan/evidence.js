@@ -7,6 +7,9 @@
 //
 //   REAL        a price counts only if the search tool's own record shows the
 //               page was reached.
+//   WHOSE       and only if the text the search returned for that page shows
+//               the price beside the product it is claimed for (binding.js).
+//               A number that is merely somewhere on the page is not evidence.
 //   WHERE       Israel or abroad. A global marketplace is abroad even when it
 //               shows shekels on an Israel-facing storefront; an .il site is
 //               Israel.
@@ -21,7 +24,8 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { hostOf } from '../phaseb/search-provenance.js';
 import { toIls } from './fx.js';
-import { EVIDENCE_KINDS, EVIDENCE_MATCHES, EVIDENCE_CONDITIONS, EVIDENCE_PAGES } from './market.js';
+import { EVIDENCE_KINDS, EVIDENCE_MATCHES, EVIDENCE_CONDITIONS, EVIDENCE_PAGES, EVIDENCE_STOCK } from './market.js';
+import { bindPrice, BOUND, BIND_REASON } from './binding.js';
 
 export const FRESHNESS = Object.freeze(['current', 'recent', 'older', 'archived', 'unknown']);
 /** A listing's age, in days, at which it stops being each class. */
@@ -35,12 +39,6 @@ export function pageKey(raw) {
   const m = /^https?:\/\/([^\s/?#]+)([^\s?#]*)/i.exec(String(raw ?? '').trim());
   const host = m ? hostOf(m[1]) : null;
   return host ? `${host}${m[2].replace(/\/+$/, '')}`.toLowerCase() : null;
-}
-
-function priceInText(price, pageText) {
-  if (!pageText) return false;
-  const grouped = String(Math.round(price)).replace(/\B(?=(\d{3})+(?!\d))/g, '[,.\\s]?');
-  return new RegExp(`(^|[^\\d])${grouped}([^\\d]|$)`).test(pageText);
 }
 
 // ── WHERE ───────────────────────────────────────────────────────────────────
@@ -172,18 +170,25 @@ export function freshnessOf(listed, today, archived = false) {
  * Returns the evidence that stands and how many claims named a page the search
  * never reached. `seen` is the day of retrieval; `listed` is the listing's own
  * date. They are separate fields and one never becomes the other.
+ *
+ * `item` is { identity, answer }: what the price has to belong to. Each record
+ * carries how well the page's own text ties its price to that product
+ * (`binding`); only a tied price may later be priced from.
  */
-export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null) {
+export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, item = null) {
   const reached = new Map();
   for (const url of Array.isArray(provenance?.sources) ? provenance.sources : []) {
     const key = pageKey(url);
     if (key && !reached.has(key)) reached.set(key, url);
   }
   const pageText = new Map();
+  const pageTitle = new Map();
   for (const r of Array.isArray(provenance?.results) ? provenance.results : []) {
     const key = pageKey(r?.url);
+    // The title and the snippet each on a line of their own: two lines are two rows.
     const body = [r?.title, r?.text].filter((v) => typeof v === 'string').join('\n');
     if (key && body) pageText.set(key, `${pageText.get(key) ?? ''}\n${body}`);
+    if (key && typeof r?.title === 'string' && r.title.trim() && !pageTitle.has(key)) pageTitle.set(key, r.title);
   }
 
   const evidence = [];
@@ -201,6 +206,10 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null) 
     const url = reached.get(key);
     const domain = hostOf(url);
     const ils = toIls(price, currency, fx);
+    const page = pageTypeOf(url, e?.page);
+    const claimed = EVIDENCE_MATCHES.includes(e?.match) ? e.match : 'irrelevant';
+    const shipping = finite(e?.shipping);
+    const bound = bindPrice({ price, currency, title: e?.title, match: claimed, shipping }, { type: page, title: pageTitle.get(key), text: pageText.get(key) }, item?.identity, item?.answer);
     evidence.push({
       url,
       domain,
@@ -209,13 +218,20 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null) 
       currency,
       price_ils: ils ? Math.round(ils) : null,
       kind: EVIDENCE_KINDS.includes(e?.kind) ? e.kind : 'other',
-      match: EVIDENCE_MATCHES.includes(e?.match) ? e.match : 'irrelevant',
+      // What the row itself shows wins over what was claimed for it: "exact" beside another size is a comparable.
+      match: bound.match ?? claimed,
+      ...(bound.match && bound.match !== claimed ? { match_claimed: claimed } : {}),
       market: localityOf(domain, e?.market),
       condition: EVIDENCE_CONDITIONS.includes(e?.condition) ? e.condition : 'unknown',
-      page: pageTypeOf(url, e?.page),
+      page,
+      binding: bound.level,
+      binding_reason: bound.reason,
+      // A shop's stock, and a listing's shipping, as the page states them. Kept with the price they qualify.
+      stock: EVIDENCE_STOCK.includes(e?.stock) ? e.stock : 'unknown',
+      shipping,
+      shipping_ils: shipping ? Math.round(toIls(shipping, currency, fx) ?? 0) || null : null,
       listed: listedDate(e?.listed, pageText.get(key), seen),
       archived: isArchived(url, pageText.get(key)),
-      binding: priceInText(price, pageText.get(key)) ? 'content' : 'url',
       seen,
     });
   }
@@ -226,12 +242,19 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null) 
  * Evidence kept from an earlier search, read by today's rules: where it is from
  * and what kind of page it was are settled from its address again, so research
  * gathered before a rule existed is not exempt from it. Its prices, its
- * classification and its listing date are left exactly as they were verified.
+ * classification and its listing date are left exactly as they were verified,
+ * and so is whether its price was ever tied to its product: that can only be
+ * shown from the page text of the day, which is not kept.
  */
 export function requalify(e) {
   if (!e || typeof e !== 'object' || !e.url) return e;
   const domain = e.domain ?? hostOf(e.url);
-  return { ...e, market: localityOf(domain, e.market), page: pageTypeOf(e.url, e.page), listed: e.listed ?? null, archived: e.archived === true || isArchived(e.url, null) };
+  // Research kept from before a price had to be tied to its product holds no proof that it was: it does not count.
+  const proven = Object.values(BOUND).includes(e.binding);
+  return {
+    ...e, market: localityOf(domain, e.market), page: pageTypeOf(e.url, e.page), listed: e.listed ?? null, archived: e.archived === true || isArchived(e.url, null),
+    binding: proven ? e.binding : BOUND.WEAK, binding_reason: proven ? e.binding_reason ?? null : BIND_REASON.LEGACY,
+  };
 }
 
 /**

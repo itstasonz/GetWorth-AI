@@ -400,4 +400,34 @@ describe('CV-4 the two sheets', () => {
     assert.match(said, /The Israeli listings were enough to price this, so 1 price from abroad was not used\./);
     assert.doesNotMatch(said, /set aside|could not be adjusted/);
   });
+  test('CV-4e prices that could not be tied to the item are said to be unused; an out-of-stock new price says so; shipping sits beside its price', async () => {
+    const v = {
+      ...VALUATION, retail_new_in_stock: false, counts: { ...VALUATION.counts, unbound: 2 },
+      evidence: VALUATION.evidence.map((e, k) => (k === 1 ? { ...e, shipping: 26, shipping_ils: 91 } : e)),
+    };
+    await settle(await open({ identify: [identified()], price: [pricedAnswer(v)] }));
+    await click(button('Why this price?'));
+    const dialog = container.querySelector('[role="dialog"]');
+    const said = dialog.textContent;
+    assert.match(said, /2 prices were found on pages where they could not be tied to this item for certain, so they were not used\./);
+    assert.match(said, /New in Israel: ₪550 \(out of stock\)/);
+    assert.match(said, /Prices from abroad do not include shipping to Israel\./);
+    const links = [...dialog.querySelectorAll('a')];
+    assert.match(links[1].textContent, /70 USD/);
+    assert.match(links[1].textContent, /\+ 26 USD shipping/, 'shown beside the price, never added to it');
+    assert.doesNotMatch(links[0].textContent, /shipping/);
+  });
+  test('CV-4f the same in Hebrew, and nothing of it when there is nothing to say', async () => {
+    const v = { ...VALUATION, retail_new_in_stock: false, counts: { ...VALUATION.counts, unbound: 1 } };
+    await settle(await open({ identify: [identified()], price: [pricedAnswer(v)] }, { lang: 'he' }));
+    await click(button('למה המחיר הזה?'));
+    const said = container.querySelector('[role="dialog"]').textContent;
+    assert.match(said, /נמצא מחיר אחד שלא ניתן היה לשייך בוודאות לפריט הזה, ולכן לא נכלל\./);
+    assert.match(said, /מחיר חדש בישראל: ₪550 \(אזל מהמלאי\)/);
+    await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
+    await act(async () => { scan.scanStore.reset(); });
+    await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
+    await click(button('Why this price?'));
+    assert.doesNotMatch(container.querySelector('[role="dialog"]').textContent, /could not be tied|out of stock|\+ .* shipping/);
+  });
 });

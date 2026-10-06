@@ -173,7 +173,7 @@ export async function runPrice({
   /** One search stage: its verified evidence joins what is in hand. Throws what the provider threw. */
   const search = async (stage) => {
     const { raw, provenance, meta } = await researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0 });
-    const verified = verifyEvidence(raw?.evidence, provenance, fx, today);
+    const verified = verifyEvidence(raw?.evidence, provenance, fx, today, { identity, answer });
     found = mergeEvidence(found, verified.evidence);
     unverified += verified.unverified;
     queries += provenance.queries?.length ?? 0;
