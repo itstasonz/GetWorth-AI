@@ -86,7 +86,7 @@ is_sellable_item: false only when there is no physical item a person could sell 
 visible_text: the strings printed on the item or its label that identify it, at most ${MAX_VISIBLE_TEXT}. Empty when none.
 category: the closest category.
 item_type: a plain English noun for the object ("gaming mouse", "blender", "office chair").
-brand, product_family, model, model_number, variant, color, size_or_capacity: each null unless the photograph supports it. "model" is the name a buyer searches for; "model_number" is a manufacturer code and only when you READ it in the photograph.
+brand, product_family, model, model_number, variant, color, size_or_capacity: each null unless the photograph supports it. "model" is the name a buyer searches for; "model_number" is a manufacturer code and only when you READ it in the photograph. "color" is a plain colour word in ${out}; brand and model names are never translated.
 configuration: complete_item, base_only (main unit without a part it is normally sold with), accessory, part, box_only (packaging without the product), bundle (several items sold together), or unknown.
 included_items: what is visibly included when that matters to the price (charger, case, earbuds, lid, box). Empty otherwise.
 alternatives: when the exact model is not established, up to ${MAX_ALTERNATIVES} products it could be, most likely first. "distinguishing" is at most six words, or null.

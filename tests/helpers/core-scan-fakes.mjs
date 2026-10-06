@@ -41,19 +41,35 @@ export const SOURCES = Object.freeze({
   IL_USED_2: 'https://market.example.co.il/ads/222',
   IL_RETAIL: 'https://www.shop.example.co.il/p/superlight',
   INTL_USED: 'https://www.used.example.com/itm/333',
+  INTL_NEW: 'https://www.shop.example.com/p/superlight',
 });
 
-/** What the market step's model returns: prices it found and what each is. No valuation. */
+/** The day the fixtures were "searched": the suites run every market step on this date, so no listing ages with the calendar. */
+export const TODAY = '2026-10-06';
+export const NOW = Date.UTC(2026, 9, 6, 9, 0, 0);
+
+/**
+ * What the market step's model returns for the ISRAELI search: prices it found
+ * and what each is. No valuation. One listing shows its date, one does not.
+ */
 export const RAW_MARKET = Object.freeze({
   evidence: [
-    { url: SOURCES.IL_USED_1, title: 'Logitech G Pro X Superlight יד שנייה', price: 260, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good' },
-    { url: SOURCES.IL_USED_2, title: 'G Pro X Superlight משומש', price: 250, currency: '₪', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown' },
-    { url: SOURCES.IL_RETAIL, title: 'Logitech G Pro X Superlight חדש', price: 549, currency: 'ILS', kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed' },
-    { url: SOURCES.INTL_USED, title: 'Logitech G Pro X Superlight used', price: 70, currency: 'USD', kind: 'sold', match: 'exact', market: 'INTL', condition: 'unknown' },
+    { url: SOURCES.IL_USED_1, title: 'Logitech G Pro X Superlight יד שנייה', price: 260, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01' },
+    { url: SOURCES.IL_USED_2, title: 'G Pro X Superlight משומש', price: 250, currency: '₪', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown', page: 'listing', listed: null },
+    { url: SOURCES.IL_RETAIL, title: 'Logitech G Pro X Superlight חדש', price: 549, currency: 'ILS', kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null },
   ],
 });
+/** What the wider search returns: a completed sale abroad, and the new price abroad that lets it be scaled. */
+export const RAW_EXPAND = Object.freeze({
+  evidence: [
+    { url: SOURCES.INTL_USED, title: 'Logitech G Pro X Superlight used', price: 70, currency: 'USD', kind: 'sold', match: 'exact', market: 'INTL', condition: 'unknown', page: 'listing', listed: null },
+    { url: SOURCES.INTL_NEW, title: 'Logitech G Pro X Superlight', price: 110, currency: 'USD', kind: 'new_retail', match: 'exact', market: 'INTL', condition: 'new_sealed', page: 'shop_product', listed: null },
+  ],
+});
+/** What the search returned as the text of each page: the first listing shows its price and the day it was posted. */
+export const PAGE_TEXT = Object.freeze({ [SOURCES.IL_USED_1]: 'Logitech G Pro X Superlight · ₪260 · פורסם 01/10/2026' });
 
-/** What the server computes from RAW_MARKET at 3.5 ILS/USD: worked out by hand in the valuation suite. */
+/** What the server computes from RAW_MARKET on TODAY: worked out by hand in the valuation suite. */
 export const GOOD_BAND = Object.freeze({ list: 260, low: 190, high: 260 });
 
 const band = (list, low, high, basis = 'adjusted') => ({ list, low, high, basis });
@@ -97,12 +113,16 @@ export const BOI_JSON = { exchangeRates: [
 
 /**
  * A `fetch` that plays OpenAI (identity, then market) and the exchange-rate feed.
- * `identities` and `markets` are answered in order; `calls` records every request.
+ * `identities` are answered in order. The market step is asked in stages: the
+ * Israeli search is answered from `markets` in order, the wider search from
+ * `expand` (nothing found, unless a test says otherwise). `calls` records every
+ * request, and for a market request which stage it was.
  */
-export function fakeProvider({ identities = [RAW_IDENTITY], markets = [RAW_MARKET], reached = Object.values(SOURCES), pageText = {}, status = null, searched = true, fx = BOI_JSON } = {}) {
+export function fakeProvider({ identities = [RAW_IDENTITY], markets = [RAW_MARKET], expand = [{ evidence: [] }], reached = Object.values(SOURCES), pageText = PAGE_TEXT, status = null, expandStatus = null, searched = true, fx = BOI_JSON } = {}) {
   const calls = [];
   let i = 0;
   let m = 0;
+  let x = 0;
   const fetchImpl = async (url, init = {}) => {
     const href = String(url);
     if (href.includes('boi.org.il')) {
@@ -111,15 +131,19 @@ export function fakeProvider({ identities = [RAW_IDENTITY], markets = [RAW_MARKE
     }
     const body = JSON.parse(init.body);
     const kind = Array.isArray(body.tools) ? 'market' : 'identity';
-    calls.push({ kind, url: href, body, headers: init.headers });
-    if (status) return new Response(JSON.stringify({ error: { message: 'upstream said no' } }), { status });
+    const stage = kind === 'market' ? (/SEARCH — LOOK FURTHER/.test(body.input[0].content[0].text) ? 'expand' : 'local') : null;
+    calls.push({ kind, stage, url: href, body, headers: init.headers });
+    const refused = status ?? (stage === 'expand' ? expandStatus : null);
+    if (refused) return new Response(JSON.stringify({ error: { message: 'upstream said no' } }), { status: refused });
+    const answer = () => (stage === 'expand' ? expand[Math.min(x++, expand.length - 1)] : markets[Math.min(m++, markets.length - 1)]);
     const items = kind === 'identity'
       ? [message(identities[Math.min(i++, identities.length - 1)])]
-      : [...(searched ? searchItems(reached, { text: pageText }) : []), message(markets[Math.min(m++, markets.length - 1)])];
+      : [...(searched ? searchItems(reached, { text: pageText }) : []), message(answer())];
     return new Response(sse(completed(items, body.model)), { status: 200, headers: { 'content-type': 'text/event-stream' } });
   };
   fetchImpl.calls = calls;
   fetchImpl.of = (kind) => calls.filter((c) => c.kind === kind);
+  fetchImpl.stages = () => calls.filter((c) => c.kind === 'market').map((c) => c.stage);
   return fetchImpl;
 }
 

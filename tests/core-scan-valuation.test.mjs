@@ -7,6 +7,8 @@
 // count, the price is CALCULATED from the references that stand, the same
 // evidence always gives the same price, confidence is earned, and a condition's
 // price says when it is an adjustment rather than something listings showed.
+// How much each reference is worth — where it is from, how old, what page — is
+// tests/core-scan-local-market.test.mjs.
 //
 // Pure functions and fixtures. No network, no credit.
 //
@@ -17,7 +19,7 @@ import assert from 'node:assert/strict';
 
 import {
   roundNice, pageKey, verifyEvidence, mergeEvidence, normalizeReferences, weightedQuantile, aggregate, priceConfidence,
-  buildValuation, marketKey, WITHDRAWN, CONDITION_FACTOR, NEGOTIATION,
+  buildValuation, marketKey, WITHDRAWN, BASIS, CONDITION_FACTOR, NEGOTIATION,
 } from '../api/_lib/scan/valuation.js';
 import { normalizeIdentity, buildIdentityPrompt, IDENTITY_SCHEMA, occursInText } from '../api/_lib/scan/identify.js';
 import { buildMarketPrompt, MARKET_SCHEMA } from '../api/_lib/scan/market.js';
@@ -26,16 +28,18 @@ import { parseBoiRates, toIls } from '../api/_lib/scan/fx.js';
 import { signScanToken, verifyScanToken, TOKEN_ERROR } from '../api/_lib/scan/token.js';
 import { CONDITIONS, TOKEN_TTL_MS } from '../api/_lib/scan/config.js';
 import { CONDITION_LADDER } from '../api/_lib/valuation-guard.js';
-import { RAW_IDENTITY, RAW_MARKET, GOOD_BAND, SOURCES, searchItems, BOI_JSON } from './helpers/core-scan-fakes.mjs';
+import { RAW_IDENTITY, RAW_MARKET, GOOD_BAND, SOURCES, PAGE_TEXT, TODAY, searchItems, BOI_JSON } from './helpers/core-scan-fakes.mjs';
 
 const FX = parseBoiRates(BOI_JSON);                 // 1 USD = 3.5 ILS, 1 EUR = 4.0 ILS
 const reached = (urls = Object.values(SOURCES), opts) => extractSearchProvenance(searchItems(urls, opts));
-const raw = (over) => ({ url: SOURCES.IL_USED_1, title: 't', price: 260, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', ...over });
+const raw = (over) => ({ url: SOURCES.IL_USED_1, title: 't', price: 260, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, ...over });
+/** A listing posted sixteen days before TODAY: current. */
+const CURRENT = '2026-09-20';
 let serial = 0;
 /** A verified evidence item, as the pool holds it. */
-const item = (over) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 260, currency: 'ILS', price_ils: over?.price ?? 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', binding: 'url', seen: '2026-10-06', ...over }; };
-const value = (evidence, opts = {}) => buildValuation({ evidence, ...opts });
-const pool = () => verifyEvidence(RAW_MARKET.evidence, reached(), FX, '2026-10-06').evidence;
+const item = (over) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 260, currency: 'ILS', price_ils: over?.price ?? 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, binding: 'url', seen: TODAY, ...over }; };
+const value = (evidence, opts = {}) => buildValuation({ evidence, today: TODAY, ...opts });
+const pool = () => verifyEvidence(RAW_MARKET.evidence, reached(undefined, { text: PAGE_TEXT }), FX, TODAY).evidence;
 
 describe('CS-1 QUALIFY — evidence must be a page the search reached', () => {
   test('CS-1a a price on a reached page stands; one on an unreached page counts for nothing', () => {
@@ -64,8 +68,8 @@ describe('CS-1 QUALIFY — evidence must be a page the search reached', () => {
   });
   test('CS-1f a claim with no price, no page or no currency is not evidence; an unknown label is not trusted', () => {
     assert.equal(verifyEvidence([raw({ price: 0 }), raw({ url: 'not a url' }), raw({ currency: '' })], reached(), FX).evidence.length, 0);
-    const [e] = verifyEvidence([raw({ kind: 'bargain', match: 'perfect', condition: 'mint', market: 'MARS' })], reached(), FX).evidence;
-    assert.deepEqual([e.kind, e.match, e.condition, e.market], ['other', 'irrelevant', 'unknown', 'INTL']);
+    const [e] = verifyEvidence([raw({ url: SOURCES.INTL_NEW, kind: 'bargain', match: 'perfect', condition: 'mint', market: 'MARS', page: 'front page', listed: 'recently' })], reached(), FX).evidence;
+    assert.deepEqual([e.kind, e.match, e.condition, e.market, e.page, e.listed], ['other', 'irrelevant', 'unknown', 'INTL', 'other', null]);
   });
 });
 
@@ -90,9 +94,9 @@ describe('CS-2 irrelevant results never reach the price', () => {
     const all = NINJA();
     assert.deepEqual(value(all).prices, value(all.filter((e) => e.match === 'exact')).prices);
   });
-  test('CS-2c when only parts and siblings were found there is no price, and the new price is context', () => {
-    const v = value(NINJA().filter((e) => !(e.kind === 'used_listing' && e.match === 'exact')));
-    assert.deepEqual([v.status, v.withdrawn, v.prices, v.price_confidence, v.retail_new_ils], ['insufficient_evidence', WITHDRAWN.NO_RESALE_EVIDENCE, null, null, 600]);
+  test('CS-2c when only parts and accessories were found there is no price, and the new price is context', () => {
+    const v = value(NINJA().filter((e) => e.kind === 'new_retail' || e.match === 'part'));
+    assert.deepEqual([v.status, v.withdrawn, v.prices, v.price_confidence, v.retail_new_ils, v.counts.not_comparable], ['insufficient_evidence', WITHDRAWN.NO_RESALE_EVIDENCE, null, null, 600, 2]);
   });
 });
 
@@ -100,17 +104,20 @@ describe('CS-2F when only the family is known, the family\'s models are its comp
   // The real evidence of a live scan (2026-10-06): AirPods Pro, generation not established. The model
   // found three Israeli listings for AirPods Pro 2 and called each a sibling model.
   const AIRPODS = () => [300, 450, 650].map((price) => item({ price, kind: 'used_listing', match: 'sibling_model', condition: 'new_sealed' }));
-  test('CS-2Fa for an item whose exact model IS known, a sibling model never counts', () => {
+  test('CS-2Fa for an item whose exact model IS known, a sibling model is used only when nothing else was found, and never as this item\'s own price', () => {
     const v = value(AIRPODS());
-    assert.deepEqual([v.status, v.counts.resale, v.counts.not_comparable], ['insufficient_evidence', 0, 3]);
+    assert.deepEqual([v.status, v.basis, v.approximate, v.price_confidence, v.counts.resale], ['priced', BASIS.SIMILAR, true, 'low', 3]);
+    const withExact = value([...AIRPODS(), item({ price: 500 })]);
+    assert.deepEqual([withExact.basis, withExact.approximate, withExact.counts.resale, withExact.counts.not_comparable], [BASIS.ITEM, false, 1, 3]);
   });
   test('CS-2Fb at family level the same listings price the family: approximate, low confidence, worked by hand', () => {
     // Each asking price x0.9, then from new-sealed to its "good" equivalent (/1.4286): 189, 283.5, 409.5.
-    // Equal weights: the centre is 283.5. Three references: 232-309. Asking price max(315, 309).
+    // Equal weights: the centre is 283.5. The range is where the weight lies: down to 189, up by the most
+    // a range may reach (+40%): 397. Asking price max(283.5 / 0.9, 397).
     const v = value(AIRPODS(), { familyLevel: true, approximate: true });
-    assert.deepEqual([v.status, v.approximate, v.family_level, v.price_confidence], ['priced', true, true, 'low']);
+    assert.deepEqual([v.status, v.basis, v.approximate, v.family_level, v.price_confidence], ['priced', BASIS.FAMILY, true, true, 'low']);
     assert.deepEqual([v.counts.resale, v.counts.il_used_close, v.counts.il_used_exact, v.counts.not_comparable], [3, 3, 0, 0]);
-    assert.deepEqual({ list: v.prices.good.list, low: v.prices.good.low, high: v.prices.good.high }, { list: 320, low: 230, high: 310 });
+    assert.deepEqual({ list: v.prices.good.list, low: v.prices.good.low, high: v.prices.good.high }, { list: 400, low: 190, high: 400 });
     assert.equal(v.prices.new_sealed.basis, 'listings', 'the listings themselves were new and sealed');
     assert.equal(v.prices.good.basis, 'adjusted');
   });
@@ -120,7 +127,7 @@ describe('CS-2F when only the family is known, the family\'s models are its comp
     assert.deepEqual([v.status, v.counts.resale, v.counts.not_comparable], ['insufficient_evidence', 0, 5]);
   });
   test('CS-2Fd a price for a family is never "high", however many Israeli listings agree', () => {
-    const three = () => [item({ price: 300 }), item({ price: 310 }), item({ price: 320 })];
+    const three = () => [item({ price: 300, listed: CURRENT }), item({ price: 310, listed: CURRENT }), item({ price: 320, listed: CURRENT })];
     assert.equal(value(three()).price_confidence, 'high');
     assert.equal(value(three(), { familyLevel: true }).price_confidence, 'medium');
   });
@@ -131,21 +138,20 @@ describe('CS-2F when only the family is known, the family\'s models are its comp
 });
 
 describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way every time', () => {
-  test('CS-3a the worked example: three references to one centre, by hand', () => {
-    // 260 and 250 are Israeli asking prices: x0.9 = 234 and 225 (weight 1 each).
-    // 70 USD is a completed sale abroad: 245 ILS, not an asking price (weight 0.5 x 1.25).
-    // Weighted median of [225, 234, 245] = 234. Three references: range -18% / +9%.
-    // Asking price = max(234 / 0.9, high) = 260.
+  test('CS-3a the worked example: two Israeli listings to one centre, by hand', () => {
+    // 260 and 250 are Israeli asking prices: x0.9 = 234 and 225. The first shows it was posted five days
+    // ago (weight 1); the second shows no date (weight 0.6). Weighted median of [225, 234] = 234.
+    // Two references: range -18% / +9%. Asking price = max(234 / 0.9, high) = 260.
     const v = value(pool());
     assert.equal(v.status, 'priced');
     assert.deepEqual({ list: v.prices.good.list, low: v.prices.good.low, high: v.prices.good.high }, GOOD_BAND);
-    assert.equal(v.price_confidence, 'medium');
-    assert.equal(v.intl_adjusted, false, 'no new price abroad was found, so the foreign sale is converted, not scaled');
+    assert.deepEqual([v.price_confidence, v.local_strength, v.local_drives, v.retail_new_ils], ['medium', 1.6, true, 550]);
+    assert.equal(v.intl_adjusted, null, 'nothing from abroad took part');
   });
   test('CS-3b the same evidence always gives the same valuation, in any order', () => {
     const e = pool();
     const a = value(e);
-    for (const order of [[...e].reverse(), [e[2], e[0], e[3], e[1]], [e[1], e[3], e[0], e[2]]]) {
+    for (const order of [[...e].reverse(), [e[2], e[0], e[1]], [e[1], e[2], e[0]]]) {
       const b = value(order);
       assert.deepEqual(b.prices, a.prices);
       assert.deepEqual([b.price_confidence, b.retail_new_ils, b.counts], [a.price_confidence, a.retail_new_ils, a.counts]);
@@ -190,12 +196,13 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     const few = value([300, 3000].map((price) => item({ price, kind: 'sold' })));
     assert.equal(few.counts.resale, 2);
   });
-  test('CS-3h stronger evidence weighs more: Israel before abroad, exact before comparable', () => {
-    const centre = (list) => aggregate(normalizeReferences(list).points).centre;
+  test('CS-3h the centre is where half the weight lies, not where half the listings are', () => {
+    const centre = (list) => aggregate(normalizeReferences(list, { today: TODAY }).points).centre;
     const il = item({ price: 400, kind: 'sold' });
     const abroad = () => item({ price: 100, price_ils: 200, currency: 'USD', market: 'INTL', kind: 'sold' });
     assert.equal(centre([il, abroad()]), 400, 'one Israeli sale outweighs one sale abroad');
-    assert.equal(centre([il, abroad(), abroad(), abroad()]), 200, 'but not three of them');
+    assert.equal(centre([il, abroad(), abroad(), abroad()]), 400, 'and three of them: a count is not a weight');
+    assert.equal(centre([il, abroad(), abroad(), abroad(), abroad(), abroad()]), 200, 'enough evidence abroad does move it');
     const pts = [{ value: 10, weight: 1, evidence: { url: 'b' } }, { value: 10, weight: 1, evidence: { url: 'a' } }, { value: 30, weight: 5, evidence: { url: 'c' } }];
     assert.equal(weightedQuantile(pts, 0.5), 30);
     assert.equal(weightedQuantile(pts, 0.1), 10);
@@ -219,17 +226,18 @@ describe('CS-4 thin evidence is priced, and says it is thin', () => {
     const g = v.prices.good;
     assert.ok(g.low <= 450 * 0.76 && g.high >= 450 * 1.1, `one reference gets the widest range, got ${g.low}-${g.high}`);
   });
-  test('CS-4b the ladder of confidence is the evidence mix, nothing else', () => {
+  test('CS-4b the ladder of confidence is the evidence, nothing else', () => {
     const conf = (list, extra) => value(list, extra).price_confidence;
-    const il = (price, over) => item({ price, ...over });
-    const abroad = (price) => item({ price, price_ils: price, currency: 'USD', market: 'INTL', kind: 'sold' });
+    const il = (price, over) => item({ price, listed: CURRENT, ...over });
+    const abroad = (price) => item({ price, price_ils: price, currency: 'USD', market: 'INTL', kind: 'sold', listed: CURRENT });
     assert.equal(conf([il(300), il(310), il(320)]), 'high');
-    assert.equal(conf([il(300), il(310), il(700)]), 'medium', 'three Israeli prices that disagree are not "high"');
-    assert.equal(conf([il(300), il(310, { match: 'close_comparable' }), il(320, { match: 'close_comparable' })]), 'medium', 'needs two exact');
+    assert.equal(conf([il(300), il(310), il(700)]), 'low', 'three Israeli prices that disagree this much are not even "medium"');
+    assert.equal(conf([il(300), il(310, { match: 'close_comparable' }), il(320, { match: 'close_comparable' })]), 'medium', 'one exact listing and two comparables are not "high"');
     assert.equal(conf([il(300), il(320)]), 'medium');
-    assert.equal(conf([il(300), abroad(280), abroad(290)]), 'medium');
+    assert.equal(conf([il(300), abroad(280), abroad(290)]), 'medium', 'one Israeli listing, backed by sales abroad that agree with it');
     assert.equal(conf([abroad(280), abroad(290), abroad(300)]), 'low', 'abroad alone, unscaled, is low');
-    assert.equal(conf([il(300)]), 'low');
+    assert.equal(conf([il(300)]), 'low', 'one reference is never more than low');
+    assert.equal(conf([il(300, { kind: 'sold' })]), 'low');
     assert.equal(priceConfidence({ kept: [], scale: null, approximate: false }), 'low');
   });
   test('CS-4c an open question about the exact model caps confidence at low and marks the price approximate', () => {
@@ -367,10 +375,10 @@ describe('CS-7 identity: unknown is allowed, and a claim to have read something 
     assert.match(m, /SECOND-HAND IN ISRAEL RIGHT NOW/);
     assert.match(m, /Today is 2026-10-06/);
     assert.match(m, /You do NOT set a price/);
-    assert.match(m, /Never invent a listing, a sold price or a page/);
+    assert.match(m, /Never invent a listing, a sold price, a date or a page/);
     assert.match(m, /do not convert and do not round/);
     assert.match(m, /owner_answered: 256 GB/);
-    assert.match(m, /Israeli second-hand prices for this exact item/);
+    assert.match(m, /SEARCH — ISRAEL FIRST/);
   });
   test('CS-7h both schemas are strict, and the market schema has no field a valuation could hide in', () => {
     const walk = (s, path) => {
@@ -386,7 +394,7 @@ describe('CS-7 identity: unknown is allowed, and a claim to have read something 
     walk(IDENTITY_SCHEMA, 'identity');
     walk(MARKET_SCHEMA, 'market');
     assert.deepEqual(Object.keys(MARKET_SCHEMA.properties), ['evidence']);
-    assert.deepEqual(Object.keys(MARKET_SCHEMA.properties.evidence.items.properties), ['url', 'title', 'price', 'currency', 'kind', 'match', 'market', 'condition']);
+    assert.deepEqual(Object.keys(MARKET_SCHEMA.properties.evidence.items.properties), ['url', 'title', 'price', 'currency', 'kind', 'match', 'market', 'condition', 'page', 'listed']);
   });
 });
 

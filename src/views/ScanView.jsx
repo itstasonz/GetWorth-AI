@@ -27,8 +27,8 @@ import { formatPrice } from '../lib/utils';
 import {
   scanStore, STAGE, CONDITIONS, bandFor, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
 } from '../lib/coreScan';
-import { scanCopy } from '../lib/scanCopy';
-import { WrongItemSheet, WhyPriceSheet } from '../components/ScanSheets';
+import { scanCopy, localColor } from '../lib/scanCopy';
+import { WrongItemSheet, WhyPriceSheet, Bidi } from '../components/ScanSheets';
 
 /** A line that says what is happening right now. */
 function Working({ children }) {
@@ -40,16 +40,18 @@ function Working({ children }) {
 }
 
 /** What the item is, as specific as the photograph allowed and no more. */
-function Identity({ identity, copy, done }) {
-  const details = [identity.color, identity.size_or_capacity].filter(Boolean).join(' · ');
+function Identity({ identity, copy, done, lang }) {
+  // A colour is a description and is shown in the screen's language; a brand or model name never is.
+  const details = [localColor(identity.color, lang), identity.size_or_capacity].filter(Boolean).join(' · ');
   return (
     <div className="space-y-1">
-      <h1 className="text-title-lg text-text-primary flex items-start gap-2" dir="auto">
+      {/* The heading follows the screen's direction; a brand or model name inside it keeps its own order. */}
+      <h1 className="text-title-lg text-text-primary flex items-start gap-2">
         {done && <Check className="w-5 h-5 mt-1 shrink-0 text-success" aria-hidden="true" />}
-        <span>{identity.display_name}</span>
+        <span><Bidi>{identity.display_name}</Bidi></span>
       </h1>
-      {details && <p className="text-body text-text-secondary" dir="auto">{details}</p>}
-      {identity.uncertainty_note && <p className="text-body-sm text-text-muted" dir="auto">{identity.uncertainty_note}</p>}
+      {details && <p className="text-body text-text-secondary"><Bidi>{details}</Bidi></p>}
+      {identity.uncertainty_note && <p className="text-body-sm text-text-muted"><Bidi>{identity.uncertainty_note}</Bidi></p>}
       <p className="text-body-sm text-text-secondary">
         {copy.identityConfidence}: <span className="font-semibold text-text-primary">{copy.levels[identity.identity_confidence] ?? copy.levels.low}</span>
       </p>
@@ -62,11 +64,11 @@ function Question({ question: f, copy, lang, onPhoto, onUpload }) {
   return (
     <div className="rounded-container border border-subtle bg-surface p-4 space-y-3">
       <p className="text-label text-text-muted">{copy.refine}</p>
-      <p className="text-title-sm text-text-primary" dir="auto">{f.question}</p>
+      <p className="text-title-sm text-text-primary"><Bidi>{f.question}</Bidi></p>
       {f.kind === 'choice' ? (
         <div className="flex flex-wrap gap-2">
           {f.options.map((option, index) => (
-            <Chip key={option} onClick={() => answerQuestion(index, lang)}><span dir="auto">{option}</span></Chip>
+            <Chip key={option} onClick={() => answerQuestion(index, lang)}><Bidi>{option}</Bidi></Chip>
           ))}
           <Chip onClick={dismissQuestion}>{copy.notSure}</Chip>
         </div>
@@ -81,15 +83,29 @@ function Question({ question: f, copy, lang, onPhoto, onUpload }) {
   );
 }
 
-/** The condition, chosen by the owner. The scan's own reading is a starting point. */
+/**
+ * The condition, chosen by the owner. The scan's own reading is a starting point.
+ *
+ * Five choices in ONE row of five equal columns, on any phone: a wrapping row
+ * left the last choice alone on a second line. Each is a full-height tap target
+ * with a short label; the full name is its accessible name.
+ */
 function ConditionPicker({ condition, identity, copy, adjusted = false }) {
   const seen = CONDITIONS.includes(identity.visible_condition) ? copy.conditions[identity.visible_condition] : null;
   return (
     <div className="space-y-2">
       <p className="text-label text-text-muted" id="scan-condition-label">{copy.conditionLabel}</p>
-      <div className="flex flex-wrap gap-2" role="group" aria-labelledby="scan-condition-label">
+      <div className="grid grid-cols-5 gap-1" role="group" aria-labelledby="scan-condition-label">
         {CONDITIONS.map((c) => (
-          <Chip key={c} selected={c === condition} onClick={() => setScanCondition(c)}>{copy.conditions[c]}</Chip>
+          <button
+            key={c} type="button" aria-pressed={c === condition} aria-label={copy.conditions[c]} onClick={() => setScanCondition(c)}
+            className={[
+              'min-h-tap px-1 rounded-control text-label text-center leading-tight state-layer transition-colors duration-quick',
+              c === condition ? 'bg-action-primary text-on-action font-semibold' : 'bg-surface-high text-text-secondary border border-subtle font-medium',
+            ].join(' ')}
+          >
+            {copy.conditionShort[c]}
+          </button>
         ))}
       </div>
       {seen && <p className="text-body-sm text-text-muted">{copy.appears(seen)}</p>}
@@ -113,8 +129,10 @@ export default function ScanView() {
   const band = bandFor(s.valuation, s.condition);
   const settled = s.stage === STAGE.PRICED || s.stage === STAGE.INSUFFICIENT;
   const question = openQuestion(s);
-  // The exact model is still an open question that moves the price: show a range for the family, not one number.
+  // A range, not one number, whenever one number would claim too much: the exact model is still an open
+  // question that moves the price, or the prices found disagree with each other.
   const approximate = s.valuation?.approximate === true;
+  const rough = approximate || s.valuation?.dispersed === true;
   const counts = s.valuation?.counts ?? {};
   const israeli = (counts.il_used_exact ?? 0) + (counts.il_used_close ?? 0);
   const photo = s.images[s.images.length - 1] ?? (s.active ? null : images?.[0]);
@@ -136,18 +154,18 @@ export default function ScanView() {
 
         {looking && <Working>{named ? copy.lookingAgain : copy.analyzing}</Working>}
 
-        {named && !looking && <Identity identity={identity} copy={copy} done={s.stage !== STAGE.ERROR} />}
+        {named && !looking && <Identity identity={identity} copy={copy} lang={lang} done={s.stage !== STAGE.ERROR} />}
 
         {s.stage === STAGE.PRICING && <Working>{copy.pricing}</Working>}
 
         {s.stage === STAGE.PRICED && band && (
           <div className="space-y-4">
             <div className="space-y-1">
-              {approximate ? (
+              {rough ? (
                 <>
                   <p className="text-label text-text-muted">{copy.approxLabel}</p>
                   <p className="text-display text-text-primary">{copy.range(band)}</p>
-                  <p className="text-body-sm text-text-secondary">{copy.approxNote}</p>
+                  {approximate && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_models' ? copy.similarNote : copy.approxNote}</p>}
                 </>
               ) : (
                 <>
@@ -164,16 +182,18 @@ export default function ScanView() {
               {/* Thin evidence is said out loud, beside the price it weakens. */}
               {(counts.resale ?? 0) < 3 && <p className="text-body-sm text-text-muted">{copy.thin(counts.resale ?? 0)}</p>}
               {(counts.resale ?? 0) > 0 && israeli === 0 && <p className="text-body-sm text-text-muted">{copy.abroadOnly}</p>}
+              {s.valuation.dispersed && <p className="text-body-sm text-text-muted">{copy.dispersed}</p>}
             </div>
-            <ConditionPicker condition={s.condition} identity={identity} copy={copy} adjusted={band.basis === 'adjusted'} />
-            <Btn primary fullWidth size="lg" onClick={sellFromScan}>{approximate ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list))}</Btn>
+            {/* Every reference is brought to Good condition; any other choice is the ladder applied to that. */}
+            <ConditionPicker condition={s.condition} identity={identity} copy={copy} adjusted={s.condition !== 'good'} />
+            <Btn primary fullWidth size="lg" onClick={sellFromScan}>{rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list))}</Btn>
           </div>
         )}
 
         {s.stage === STAGE.INSUFFICIENT && (
           <div className="space-y-4">
             <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
-              <p className="text-body text-text-primary" dir="auto">{copy.insufficient(identity.display_name)}</p>
+              <p className="text-body text-text-primary"><Bidi>{copy.insufficient(identity.display_name)}</Bidi></p>
               {s.valuation?.retail_new_ils && (
                 <p className="text-body-sm text-text-secondary">{copy.retailContext(formatPrice(s.valuation.retail_new_ils))}</p>
               )}

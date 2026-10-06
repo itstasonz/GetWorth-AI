@@ -1,57 +1,74 @@
 // ══════════════════════════════════════════════════════════════════════════════
 // CORE SCAN — THE SERVER PRICES. THE MODEL DOES NOT.
 //
-// The market step's model searches, extracts and classifies. It returns a list
-// of prices it found, each with what it is. It returns NO valuation. Everything
-// from there to the number on the screen happens here, in pure functions:
+// The question is what an item sells for SECOND-HAND IN ISRAEL. So Israeli
+// second-hand evidence leads, and everything else is weighed by how much it
+// says about that:
 //
-//   QUALIFY     a price counts only if the search tool's own record shows its
-//               page was reached, and only if it is this item or a close
-//               comparable. Accessories, parts, boxes and bundles never count.
-//               A sibling model never counts for an item whose exact model is
-//               known; when only the FAMILY is known, the family's members are
-//               what there is to compare with, and the price says it is for
-//               the family.
-//   NORMALIZE   every second-hand reference is brought to one common footing:
-//               shekels, Israeli price level, "good" condition, selling price.
-//   AGGREGATE   outliers are removed where that is defensible, stronger
-//               evidence weighs more, and the centre is a weighted median.
-//   PRICE       an expected selling range around that centre, a natural asking
-//               price above it, and each other condition by an explicit ladder.
+//   WEIGH       each second-hand reference counts by FIVE things at once:
+//                 where      Israel, or abroad (and abroad counts for less
+//                            still when it could not be brought to Israeli
+//                            price level)
+//                 match      this item, a close comparable, a family member
+//                 freshness  the LISTING's age: current, recent, unknown,
+//                            older, archived
+//                 kind       a completed sale, an asking price, refurbished
+//                 page       one seller's listing, or a price read off a list
+//               Two cheap listings abroad do not outvote one good Israeli
+//               listing because 2 > 1; an old archived Israeli ad does not
+//               outvote current evidence because it is Israeli.
+//   LOCAL       when the Israeli evidence is good enough on its own (two or
+//   DRIVES      three listings that stand, not old ones), the price is worked
+//               out from Israel ALONE. Prices abroad are then context: shown,
+//               not used. Abroad joins the arithmetic only when Israel is thin.
+//   NORMALIZE   every reference is brought to shekels, Israeli price level,
+//               "good" condition and a selling price.
+//   AGGREGATE   outliers go where that is defensible; the centre is the
+//               weighted median; the range is where the weight of the evidence
+//               actually lies, so evidence that disagrees gives a wide range.
+//   CONFIDENCE  is earned by local weight and agreement, and lost to dispersion.
 //
-// THE SAME EVIDENCE ALWAYS PRODUCES THE SAME VALUATION. There is no randomness
-// and no model here, so a price can only change when the evidence does.
+// THE SAME EVIDENCE ALWAYS PRODUCES THE SAME VALUATION, in any order. There is
+// no model and no randomness here.
 //
-// Every constant below is a stated assumption, not a discovered fact. They are
+// Every number below is a stated assumption, not a discovered fact. They are
 // few, conservative and in one place so they can be read and argued with.
 // ══════════════════════════════════════════════════════════════════════════════
-import { hostOf } from '../phaseb/search-provenance.js';
 import { CONDITION_LADDER } from '../valuation-guard.js';
-import { toIls } from './fx.js';
 import { CONDITIONS } from './config.js';
-import { EVIDENCE_KINDS, EVIDENCE_MATCHES, EVIDENCE_CONDITIONS } from './market.js';
+import { freshnessOf } from './evidence.js';
+
+export { pageKey, verifyEvidence, mergeEvidence, requalify } from './evidence.js';
 
 export const WITHDRAWN = Object.freeze({
   NO_SEARCH: 'no_search_recorded',
   NO_RESALE_EVIDENCE: 'no_verified_second_hand_reference',
 });
+/** What the valuation rests on. */
+export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR: 'similar_models' });
 
 // ── THE STATED ASSUMPTIONS ──────────────────────────────────────────────────
 /**
- * What each condition sells for relative to "good".
- *
- * The app's own condition ladder (valuation-guard.js CONDITION_LADDER: the
- * discount from new for sealed / like new / used / poor), re-based on "good",
- * which is what a normal used listing is. "fair" sits halfway between used and
- * poor. It is used in both directions: to bring a listing stated as "like new"
- * down to its "good" equivalent, and to derive the other conditions' prices.
+ * What each condition sells for relative to "good": the app's own condition
+ * ladder (valuation-guard.js: the discount from new for sealed / like new /
+ * used / poor), re-based on "good", with "fair" halfway between used and poor.
  */
 const LADDER = { new_sealed: CONDITION_LADDER.newSealed, like_new: CONDITION_LADDER.likeNew, good: CONDITION_LADDER.used, fair: (CONDITION_LADDER.used + CONDITION_LADDER.poor) / 2, poor: CONDITION_LADDER.poor };
 export const CONDITION_FACTOR = Object.freeze(Object.fromEntries(CONDITIONS.map((c) => [c, (1 - LADDER[c]) / (1 - LADDER.good)])));
-/** An asking price is not a selling price: what a listing asks, less the usual negotiation. */
+/**
+ * An asking price is not a selling price. Listings are asking prices, and this
+ * is the allowance for the usual negotiation: a conservative round figure, not
+ * a measured one. A completed sale is taken as it is.
+ */
 export const NEGOTIATION = 0.9;
-/** How much a reference counts. Israel before abroad, exact before comparable, a completed sale before an asking price. */
-export const WEIGHT = Object.freeze({ IL_exact: 1, IL_close: 0.6, INTL_exact: 0.5, INTL_close: 0.3, sold_bonus: 1.25 });
+/** How much a second-hand reference counts: the product of one factor from each group. */
+export const WEIGHT = Object.freeze({
+  where: Object.freeze({ IL: 1, INTL_scaled: 0.4, INTL: 0.25 }),
+  match: Object.freeze({ exact: 1, close_comparable: 0.6, sibling_model: 0.4 }),
+  freshness: Object.freeze({ current: 1, recent: 0.85, unknown: 0.6, older: 0.4, archived: 0.15 }),
+  kind: Object.freeze({ sold: 1.2, price_guide: 1, used_listing: 1, refurbished: 0.8 }),
+  page: Object.freeze({ listing: 1, price_guide: 1, shop_product: 0.9, search_or_category: 0.7, other: 0.6 }),
+});
 /** A used unit asking more than the shop's price for a new one is not a second-hand reference. */
 const ABOVE_NEW = 1.05;
 /** Israeli price level relative to abroad, when the same item's new price is known in both: kept within sane bounds. */
@@ -59,19 +76,36 @@ const SCALE_BOUNDS = [0.8, 2];
 /** Median-absolute-deviation outlier rule, applied only when there is a distribution to be an outlier from. */
 const MAD_THRESHOLD = 3.5;
 const MAD_MIN_SAMPLE = 4;
-/** The expected selling range around the centre, by how much evidence there is: [below, above]. */
-const RANGE = Object.freeze({ one: [0.25, 0.12], few: [0.18, 0.09], min: [0.08, 0.04], max: [0.3, 0.25] });
+/** The expected selling range around the centre: the least it may be by how much evidence there is, and the most. */
+const RANGE = Object.freeze({ one: [0.25, 0.12], few: [0.18, 0.09], many: [0.08, 0.04], max: [0.5, 0.4] });
+/** Where the weight of the evidence spans more than this (P90 / P10), the evidence disagrees. */
+export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
+/**
+ * Local weight, in the units of WEIGHT: a current exact Israeli listing weighs 1.
+ *   drives  from here the Israeli evidence prices the item alone (and the search does not go abroad)
+ *   high    what a confident price needs: about three good current Israeli listings
+ *   medium  one good current listing's worth, among at least two references
+ */
+export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 });
+/** Why a reference that qualifies took no part in the price. */
+export const SET_ASIDE = Object.freeze({ ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient' });
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
 const SOLD_KINDS = new Set(['sold', 'price_guide']);
-const USABLE_MATCHES = new Set(['exact', 'close_comparable']);
-/** May a reference with this match be priced from? At family level, the family's other models are its comparables. */
-const usableMatch = (match, familyLevel) => USABLE_MATCHES.has(match) || (familyLevel && match === 'sibling_model');
+const MATCHES = Object.freeze({
+  [BASIS.ITEM]: new Set(['exact', 'close_comparable']),
+  [BASIS.FAMILY]: new Set(['exact', 'close_comparable', 'sibling_model']),
+  [BASIS.SIMILAR]: new Set(['exact', 'close_comparable', 'sibling_model']),
+});
+const ANCHOR_MATCHES = MATCHES[BASIS.ITEM];
 
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
-const text = (v, max) => (typeof v === 'string' && v.replace(/\s+/g, ' ').trim() ? v.replace(/\s+/g, ' ').trim().slice(0, max) : null);
+/** Israeli evidence that can lead: a listing known to be old is Israeli, and still says little about today. */
+const leads = (p) => p.evidence.market === 'IL' && p.freshness !== 'older' && p.freshness !== 'archived';
+const localWeight = (points) => points.filter(leads).reduce((sum, p) => sum + p.weight, 0);
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const round2 = (v) => Math.round(v * 100) / 100;
 
 /** A natural price: ₪290, ₪900, ₪1,250. Never ₪847. */
 export function roundNice(n) {
@@ -81,89 +115,8 @@ export function roundNice(n) {
   return Math.max(step, Math.round(v / step) * step);
 }
 
-/** Host and path of a page, without the visit's own decoration. */
-export function pageKey(raw) {
-  const m = /^https?:\/\/([^\s/?#]+)([^\s?#]*)/i.exec(String(raw ?? '').trim());
-  const host = m ? hostOf(m[1]) : null;
-  return host ? `${host}${m[2].replace(/\/+$/, '')}`.toLowerCase() : null;
-}
-
-function priceInText(price, pageText) {
-  if (!pageText) return false;
-  const grouped = String(Math.round(price)).replace(/\B(?=(\d{3})+(?!\d))/g, '[,.\\s]?');
-  return new RegExp(`(^|[^\\d])${grouped}([^\\d]|$)`).test(pageText);
-}
-
-// ── QUALIFY ─────────────────────────────────────────────────────────────────
-/**
- * Bind each claimed price to the search record.
- *
- * Returns the evidence that stands — each with `binding` ('content' when the
- * price itself is in the text the search returned for that page, 'url' when the
- * page was reached) and the date it was seen — and how many claims named a page
- * the search never reached. The shekel conversion is kept beside the original.
- */
-export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null) {
-  const reached = new Map();
-  for (const url of Array.isArray(provenance?.sources) ? provenance.sources : []) {
-    const key = pageKey(url);
-    if (key && !reached.has(key)) reached.set(key, url);
-  }
-  const pageText = new Map();
-  for (const r of Array.isArray(provenance?.results) ? provenance.results : []) {
-    const key = pageKey(r?.url);
-    const body = [r?.title, r?.text].filter((v) => typeof v === 'string').join('\n');
-    if (key && body) pageText.set(key, `${pageText.get(key) ?? ''}\n${body}`);
-  }
-
-  const evidence = [];
-  const dedupe = new Set();
-  let unverified = 0;
-  for (const e of Array.isArray(rawEvidence) ? rawEvidence : []) {
-    const price = finite(e?.price);
-    const key = pageKey(e?.url);
-    if (!price || !key || !provenance?.search_performed || !reached.has(key)) { unverified += 1; continue; }
-    const currency = /^(ils|nis|₪|ש"?ח|שקל.*)$/i.test(String(e?.currency ?? '').trim()) ? 'ILS' : String(e?.currency ?? '').trim().toUpperCase().slice(0, 3);
-    if (!/^[A-Z]{3}$/.test(currency)) { unverified += 1; continue; }
-    const id = `${key}|${price}|${currency}`;
-    if (dedupe.has(id)) continue;
-    dedupe.add(id);
-    const ils = toIls(price, currency, fx);
-    evidence.push({
-      url: reached.get(key),
-      domain: hostOf(reached.get(key)),
-      title: text(e?.title, 120),
-      price,
-      currency,
-      price_ils: ils ? Math.round(ils) : null,
-      kind: EVIDENCE_KINDS.includes(e?.kind) ? e.kind : 'other',
-      match: EVIDENCE_MATCHES.includes(e?.match) ? e.match : 'irrelevant',
-      market: e?.market === 'IL' ? 'IL' : 'INTL',
-      condition: EVIDENCE_CONDITIONS.includes(e?.condition) ? e.condition : 'unknown',
-      binding: priceInText(price, pageText.get(key)) ? 'content' : 'url',
-      seen,
-    });
-  }
-  return { evidence, unverified };
-}
-
-/**
- * Earlier evidence for the same item joined with what this search found: the
- * newer sighting of a page wins, and the pool is bounded. A valuation that
- * rests on more references moves less with whichever listings happened to
- * appear today.
- */
-export function mergeEvidence(fresh, earlier, max = 16) {
-  const byPage = new Map();
-  for (const e of [...(Array.isArray(fresh) ? fresh : []), ...(Array.isArray(earlier) ? earlier : [])]) {
-    const id = `${pageKey(e?.url)}|${e?.price}|${e?.currency}`;
-    if (e?.url && !byPage.has(id)) byPage.set(id, e);
-  }
-  return [...byPage.values()].slice(0, max);
-}
-
-const isResale = (e, familyLevel = false) => RESALE_KINDS.has(e.kind) && usableMatch(e.match, familyLevel);
-const isNewPrice = (e, market) => e.kind === 'new_retail' && USABLE_MATCHES.has(e.match) && e.market === market && !!e.price_ils;
+const isResale = (e, basis) => RESALE_KINDS.has(e.kind) && MATCHES[basis].has(e.match);
+const isNewPrice = (e, market) => e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && e.market === market && !!e.price_ils;
 /** The new price in a market: the exact item's when the search found one, else the close comparable's. */
 function newPrice(evidence, market) {
   const all = evidence.filter((e) => isNewPrice(e, market));
@@ -172,89 +125,132 @@ function newPrice(evidence, market) {
   return use.length ? median(use.map((e) => e.price_ils)) : null;
 }
 
-// ── NORMALIZE ───────────────────────────────────────────────────────────────
+// ── WEIGH AND NORMALIZE ─────────────────────────────────────────────────────
 /**
  * Each second-hand reference as a selling price in shekels, at Israeli price
- * level, in "good" condition — with its weight, and why it was set aside when
- * it was.
+ * level, in "good" condition — with its weight, the reasons for that weight,
+ * and why it was set aside when it was.
  */
-export function normalizeReferences(evidence, { familyLevel = false } = {}) {
+export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null } = {}) {
   const anchorIl = newPrice(evidence, 'IL');
   const anchorIntl = newPrice(evidence, 'INTL');
-  // Abroad is not Israel. The level is taken from the same item's new price in
-  // both markets when both are known; otherwise foreign prices are left as
-  // converted, and the valuation says so.
+  // Abroad is not Israel. Converting the currency does not convert the market.
+  // The level is taken from the same item's NEW price in both markets when both
+  // are known; otherwise foreign prices stay as converted and count for less.
   const scale = anchorIl && anchorIntl ? clamp(anchorIl / anchorIntl, ...SCALE_BOUNDS) : null;
 
   const points = [];
   for (const e of evidence) {
-    if (!isResale(e, familyLevel) || !e.price_ils) continue;
+    if (!isResale(e, basis) || !e.price_ils) continue;
     // A listing that does not state its condition is taken as a normal used one; a refurbished unit as like new.
     const stated = CONDITIONS.includes(e.condition);
     const condition = stated ? e.condition : (e.kind === 'refurbished' ? 'like_new' : 'good');
-    const selling = SOLD_KINDS.has(e.kind) ? e.price_ils : e.price_ils * NEGOTIATION;
-    const local = e.market === 'IL' ? selling : selling * (scale ?? 1);
-    const value = local / CONDITION_FACTOR[condition];
-    const weight = WEIGHT[`${e.market}_${e.match === 'exact' ? 'exact' : 'close'}`] * (SOLD_KINDS.has(e.kind) ? WEIGHT.sold_bonus : 1);
+    const asking = !SOLD_KINDS.has(e.kind);
+    const selling = asking ? e.price_ils * NEGOTIATION : e.price_ils;
+    const abroad = e.market !== 'IL';
+    const local = abroad ? selling * (scale ?? 1) : selling;
+    const freshness = freshnessOf(e.listed, today, e.archived);
+    const factors = {
+      where: WEIGHT.where[abroad ? (scale ? 'INTL_scaled' : 'INTL') : 'IL'],
+      match: WEIGHT.match[e.match] ?? WEIGHT.match.sibling_model,
+      freshness: WEIGHT.freshness[freshness],
+      kind: WEIGHT.kind[e.kind] ?? 1,
+      page: WEIGHT.page[e.page] ?? WEIGHT.page.other,
+    };
     // A used unit priced above a new one is a different thing: a bundle, a mislabelled new unit, a mistake.
-    const aboveNew = anchorIl && (e.market === 'IL' ? e.price_ils : e.price_ils * (scale ?? 1)) > anchorIl * ABOVE_NEW;
-    points.push({ evidence: e, value, weight, condition, stated, dropped: aboveNew ? 'above_new_price' : null });
+    const aboveNew = anchorIl && (abroad ? e.price_ils * (scale ?? 1) : e.price_ils) > anchorIl * ABOVE_NEW;
+    points.push({
+      evidence: e, value: local / CONDITION_FACTOR[condition], condition, stated, freshness, asking,
+      weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page, factors,
+      dropped: aboveNew ? SET_ASIDE.ABOVE_NEW : null,
+    });
   }
+
+  // LOCAL DRIVES. Good Israeli evidence prices an Israeli item by itself; what was found abroad is then context.
+  const local = localWeight(points.filter((p) => !p.dropped));
+  const localDrives = local >= LOCAL_STRENGTH.drives;
+  if (localDrives) for (const p of points) if (!p.dropped && p.evidence.market !== 'IL') p.dropped = SET_ASIDE.LOCAL_SUFFICIENT;
 
   const kept = points.filter((p) => !p.dropped);
   if (kept.length >= MAD_MIN_SAMPLE) {
     const med = median(kept.map((p) => p.value));
     const mad = median(kept.map((p) => Math.abs(p.value - med)));
-    if (mad > 0) for (const p of kept) if ((0.6745 * Math.abs(p.value - med)) / mad > MAD_THRESHOLD) p.dropped = 'outlier';
+    if (mad > 0) for (const p of kept) if ((0.6745 * Math.abs(p.value - med)) / mad > MAD_THRESHOLD) p.dropped = SET_ASIDE.OUTLIER;
   }
-  return { points, anchorIl, scale };
+  return { points, anchorIl, scale, local, localDrives };
 }
 
 // ── AGGREGATE ───────────────────────────────────────────────────────────────
-/** The value below which `q` of the total weight lies. Deterministic: ties are broken by value, then by page. */
+/**
+ * The value below which `q` of the total weight lies. When the weight splits
+ * exactly at a boundary the answer is the midpoint of the two neighbours, never
+ * whichever happened to be lower. Deterministic: ties are ordered by value, then page.
+ */
 export function weightedQuantile(points, q) {
   const sorted = [...points].sort((a, b) => a.value - b.value || String(a.evidence?.url).localeCompare(String(b.evidence?.url)));
   const total = sorted.reduce((s, p) => s + p.weight, 0);
+  if (!sorted.length || !(total > 0)) return null;
+  const target = total * q;
   let acc = 0;
-  for (const p of sorted) { acc += p.weight; if (acc >= total * q) return p.value; }
-  return sorted.at(-1)?.value ?? null;
+  for (let i = 0; i < sorted.length; i += 1) {
+    acc += sorted[i].weight;
+    if (Math.abs(acc - target) < total * 1e-9 && i + 1 < sorted.length) return (sorted[i].value + sorted[i + 1].value) / 2;
+    if (acc > target) return sorted[i].value;
+  }
+  return sorted.at(-1).value;
+}
+
+/** How far apart the weight of the evidence lies: P90 over P10. 1 when it agrees or there is one reference. */
+export function dispersionOf(kept) {
+  if (kept.length < 2) return 1;
+  const lo = weightedQuantile(kept, 0.1);
+  const hi = weightedQuantile(kept, 0.9);
+  return lo > 0 ? hi / lo : 1;
 }
 
 /** The centre and the expected selling range in "good" condition, from the references that stand. */
 export function aggregate(kept) {
   if (kept.length === 0) return null;
   const centre = weightedQuantile(kept, 0.5);
-  let below; let above;
-  if (kept.length >= MAD_MIN_SAMPLE) {
-    below = clamp(1 - weightedQuantile(kept, 0.25) / centre, RANGE.min[0], RANGE.max[0]);
-    above = clamp(weightedQuantile(kept, 0.75) / centre - 1, RANGE.min[1], RANGE.max[1]);
-  } else {
-    [below, above] = kept.length === 1 ? RANGE.one : RANGE.few;
-  }
+  if (kept.length === 1) return { centre, low: centre * (1 - RANGE.one[0]), high: centre * (1 + RANGE.one[1]) };
+  const least = kept.length >= MAD_MIN_SAMPLE ? RANGE.many : RANGE.few;
+  // The range is where the weight of the evidence lies: evidence that disagrees gives a wide range.
+  const below = clamp(1 - weightedQuantile(kept, 0.25) / centre, least[0], RANGE.max[0]);
+  const above = clamp(weightedQuantile(kept, 0.75) / centre - 1, least[1], RANGE.max[1]);
   return { centre, low: centre * (1 - below), high: centre * (1 + above) };
 }
 
-// ── PRICE ───────────────────────────────────────────────────────────────────
-/** How well the price is evidenced. Decided by the evidence alone. */
-export function priceConfidence({ kept, scale, approximate, familyLevel = false }) {
-  if (approximate) return 'low';
-  const il = kept.filter((p) => p.evidence.market === 'IL');
-  const ilExact = il.filter((p) => p.evidence.match === 'exact').length;
-  const intlExact = kept.filter((p) => p.evidence.market === 'INTL' && p.evidence.match === 'exact').length;
-  const spread = il.length ? Math.max(...il.map((p) => p.value)) / Math.min(...il.map((p) => p.value)) : Infinity;
-  // A price for a family, not for a known model, is never "high".
-  if (il.length >= 3 && ilExact >= 2 && spread <= 1.6 && !familyLevel) return 'high';
-  if (il.length >= 2 || (il.length >= 1 && kept.length >= 3) || (intlExact >= 3 && scale)) return 'medium';
+// ── CONFIDENCE ──────────────────────────────────────────────────────────────
+/**
+ * How well the price is evidenced. Decided by the evidence alone:
+ *
+ *   high    strong local weight (about three good current Israeli listings for
+ *           this exact item) from at least three references that agree
+ *   medium  at least two references, with one good local reference's worth of
+ *           weight among them, or several exact sales abroad brought to Israeli
+ *           price level, without real disagreement
+ *   low     everything else: one reference (one seller's opinion, wherever it
+ *           is), foreign and unscaled, old, read off list pages, a family
+ *           rather than a model, or evidence that disagrees
+ */
+export function priceConfidence({ kept, scale, approximate = false, basis = BASIS.ITEM }) {
+  if (approximate || basis === BASIS.SIMILAR || kept.length < 2) return 'low';
+  const dispersion = dispersionOf(kept);
+  if (dispersion > DISPERSION.dispersed) return 'low';
+  const local = localWeight(kept);
+  const scaledExact = kept.filter((p) => p.evidence.market !== 'IL' && p.evidence.match === 'exact').length;
+  if (local >= LOCAL_STRENGTH.high && kept.length >= 3 && dispersion <= DISPERSION.agrees && basis === BASIS.ITEM) return 'high';
+  if (local >= LOCAL_STRENGTH.medium || (scale && scaledExact >= 3 && dispersion <= DISPERSION.agrees)) return 'medium';
   return 'low';
 }
 
+// ── PRICE ───────────────────────────────────────────────────────────────────
 /**
- * Every condition's band from the "good" one.
+ * Every condition's band from the "good" one, by the ladder.
  *
  * `basis` says where a condition's price comes from: 'listings' when at least
  * one reference that stands STATED that condition itself, 'adjusted' when it is
- * the ladder applied to the others. A condition that was assumed vouches for
- * nothing. A new-sealed unit is never priced above the
+ * the ladder applied to the others. A new-sealed unit is never priced above the
  * shop's price for a new one.
  */
 export function conditionPrices(good, kept, anchorIl) {
@@ -275,44 +271,70 @@ export function conditionPrices(good, kept, anchorIl) {
 /**
  * The valuation the app will show, from an evidence pool.
  *
- * Total and deterministic: any input yields { status, ... }, never throws, and
- * the same evidence always yields the same answer. `approximate` is true when
- * the item's exact model or generation is still an open question that moves the
- * price; `familyLevel` when only the family is established at all. Either way
- * the price is for the family, and it says so.
+ * Total and deterministic. `familyLevel` is true when only the item's family is
+ * established; `approximate` when the exact model is an open question that
+ * moves the price. When an item's exact model IS known but nothing was found
+ * for it or a close comparable, the family's other models are used as a last
+ * resort and the valuation says so: approximate, low confidence, "similar models".
  */
-export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, searched = null } = {}) {
+export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, searched = null, today = null } = {}) {
   const evidence = (Array.isArray(pool) ? pool : []).filter((e) => e && typeof e === 'object');
-  const { points, anchorIl, scale } = normalizeReferences(evidence, { familyLevel });
+  const day = today ?? new Date().toISOString().slice(0, 10);
+  let basis = familyLevel ? BASIS.FAMILY : BASIS.ITEM;
+  let norm = normalizeReferences(evidence, { basis, today: day });
+  if (basis === BASIS.ITEM && !norm.points.some((p) => !p.dropped)) {
+    const similar = normalizeReferences(evidence, { basis: BASIS.SIMILAR, today: day });
+    if (similar.points.some((p) => !p.dropped)) { basis = BASIS.SIMILAR; norm = similar; }
+  }
+  const { points, anchorIl, scale, localDrives } = norm;
   const kept = points.filter((p) => !p.dropped);
-  const used = new Set(kept.map((p) => p.evidence));
-  const dropped = new Map(points.filter((p) => p.dropped).map((p) => [p.evidence, p.dropped]));
+  const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
+  const byEvidence = new Map(points.map((p) => [p.evidence, p]));
   const count = (pred) => kept.filter((p) => pred(p.evidence)).length;
-  const abroad = kept.some((p) => p.evidence.market === 'INTL');
+  const abroad = kept.some((p) => p.evidence.market !== 'IL');
+  const rough = approximate || basis === BASIS.SIMILAR;
+  const dispersion = dispersionOf(kept);
+  const prices = kept.map((p) => p.evidence.price_ils);
+
   const base = {
-    evidence: sortEvidence(evidence.map((e) => ({
-      ...e,
-      used: used.has(e),
-      set_aside: dropped.get(e) ?? (used.has(e) || isNewPrice(e, 'IL') || isNewPrice(e, 'INTL') ? null : 'not_comparable'),
-    }))),
+    evidence: sortEvidence(evidence.map((e) => {
+      const p = byEvidence.get(e);
+      const anchor = isNewPrice(e, 'IL') || isNewPrice(e, 'INTL');
+      return {
+        ...e,
+        freshness: freshnessOf(e.listed, day, e.archived),
+        used: !!p && !p.dropped,
+        weight: p && !p.dropped ? round2(p.weight) : 0,
+        set_aside: p?.dropped ?? (p || anchor ? null : 'not_comparable'),
+      };
+    })),
     counts: {
       resale: kept.length,
       il_used_exact: count((e) => e.market === 'IL' && e.match === 'exact'),
       il_used_close: count((e) => e.market === 'IL' && e.match !== 'exact'),
-      intl_used_exact: count((e) => e.market === 'INTL' && e.match === 'exact'),
-      intl_used_close: count((e) => e.market === 'INTL' && e.match !== 'exact'),
+      intl_used_exact: count((e) => e.market !== 'IL' && e.match === 'exact'),
+      intl_used_close: count((e) => e.market !== 'IL' && e.match !== 'exact'),
       sold: count((e) => SOLD_KINDS.has(e.kind)),
       retail_il: evidence.filter((e) => isNewPrice(e, 'IL')).length,
-      not_comparable: evidence.filter((e) => !usableMatch(e.match, familyLevel)).length,
-      set_aside: dropped.size,
+      not_comparable: evidence.filter((e) => e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match)).length,
+      // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.
+      abroad_unused: unused,
+      set_aside: points.length - kept.length - unused,
       unverified,
     },
+    basis,
     retail_new_ils: anchorIl ? roundNice(anchorIl) : null,
+    // The references priced from, as they were found: the spread a person would see looking at the same pages.
+    reference_range: prices.length ? { low: Math.min(...prices), high: Math.max(...prices) } : null,
+    local_strength: round2(localWeight(kept)),
+    local_drives: localDrives,
+    dispersion: round2(dispersion),
+    dispersed: dispersion > DISPERSION.dispersed,
     // Foreign prices in the valuation: whether they were brought to Israeli price level, and by how much.
     intl_adjusted: abroad ? !!scale : null,
-    intl_scale: abroad && scale ? Math.round(scale * 100) / 100 : null,
-    approximate: !!approximate,
-    family_level: !!familyLevel,
+    intl_scale: abroad && scale ? round2(scale) : null,
+    approximate: rough,
+    family_level: basis !== BASIS.ITEM,
     searched,
   };
   const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason });
@@ -325,14 +347,19 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     ...base,
     status: 'priced',
     prices: conditionPrices(good, kept, anchorIl),
-    price_confidence: priceConfidence({ kept, scale, approximate, familyLevel }),
+    price_confidence: priceConfidence({ kept, scale, approximate: rough, basis }),
     withdrawn: null,
   };
 }
 
-const RANK = (e) => (e.used ? 0 : e.kind === 'new_retail' && USABLE_MATCHES.has(e.match) ? 1 : 2) * 10 + (e.market === 'IL' ? 0 : 1) * 2 + (e.match === 'exact' ? 0 : 1);
-/** What the price rests on first, the new-price anchors next, what was set aside last. Stable. */
-function sortEvidence(evidence) { return evidence.map((e, i) => [e, i]).sort((a, b) => RANK(a[0]) - RANK(b[0]) || a[1] - b[1]).map(([e]) => e); }
+const RANK = (e) => (e.used ? 0 : e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) ? 1 : 2) * 100 + (e.market === 'IL' ? 0 : 1) * 10 + (e.match === 'exact' ? 0 : 1);
+/** What the price rests on first (Israel before abroad), the new-price anchors next, what was set aside last. Stable. */
+function sortEvidence(evidence) { return evidence.map((e, i) => [e, i]).sort((a, b) => RANK(a[0]) - RANK(b[0]) || b[0].weight - a[0].weight || a[1] - b[1]).map(([e]) => e); }
+
+/** How strong the Israeli second-hand evidence in a pool is: what decides whether to look further afield. */
+export function localStrength(evidence, { familyLevel = false, today = null } = {}) {
+  return normalizeReferences(Array.isArray(evidence) ? evidence : [], { basis: familyLevel ? BASIS.FAMILY : BASIS.ITEM, today: today ?? new Date().toISOString().slice(0, 10) }).local;
+}
 
 // ── THE MARKET IDENTITY ─────────────────────────────────────────────────────
 const STOP = new Set(['the', 'a', 'an', 'and', 'with', 'series', 'model', 'edition']);

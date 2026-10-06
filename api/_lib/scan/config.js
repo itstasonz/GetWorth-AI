@@ -70,11 +70,15 @@ export const resolveMarketModel = (env = process.env) => modelOf(env, SCAN_MARKE
 // and every ceiling below stays under it.
 export const SCAN_FUNCTION_MAX_DURATION_S = 60;
 export const IDENTIFY_TIMEOUT_MS = 20_000;
-export const MARKET_TIMEOUT_MS = 50_000;
+/**
+ * The market search has at most two stages, one search action each: Israel, and
+ * then further afield only when the Israeli evidence is too thin to price the
+ * item on its own (valuation.js LOCAL_STRENGTH.drives).
+ */
+export const MARKET_STAGE_TIMEOUT_MS = 22_000;
+export const MARKET_MAX_STAGES = 2;
 export const IDENTIFY_MAX_OUTPUT_TOKENS = 1_200;
 export const MARKET_MAX_OUTPUT_TOKENS = 3_000;
-/** Searches, page opens and in-page finds all count. Bounds latency and cost. */
-export const MARKET_MAX_TOOL_CALLS = 2;
 export const MARKET_SEARCH_CONTEXT_SIZE = 'low';
 
 // ── LIMITS ──────────────────────────────────────────────────────────────────

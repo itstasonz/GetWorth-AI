@@ -81,9 +81,10 @@ export function buildValuationRow({ id, userId, scanUuid, identity, valuation, l
       identity,
       valuation: valuation ? {
         status: valuation.status, prices: valuation.prices, price_confidence: valuation.price_confidence,
-        approximate: valuation.approximate, withdrawn: valuation.withdrawn, counts: valuation.counts,
+        approximate: valuation.approximate, basis: valuation.basis, withdrawn: valuation.withdrawn, counts: valuation.counts,
+        local_strength: valuation.local_strength, dispersion: valuation.dispersion, reference_range: valuation.reference_range,
         retail_new_ils: valuation.retail_new_ils, intl_scale: valuation.intl_scale, searched: valuation.searched,
-        sources: (valuation.evidence ?? []).slice(0, 16).map((e) => ({ url: e.url, price: e.price, currency: e.currency, kind: e.kind, match: e.match, market: e.market, condition: e.condition, used: e.used })),
+        sources: (valuation.evidence ?? []).slice(0, 16).map((e) => ({ url: e.url, price: e.price, currency: e.currency, kind: e.kind, match: e.match, market: e.market, condition: e.condition, page: e.page, listed: e.listed, archived: e.archived === true, freshness: e.freshness, weight: e.weight, used: e.used })),
       } : null,
     },
     ocr_text: (identity?.visible_text ?? []).join(' ').slice(0, 500) || null,

@@ -7,6 +7,12 @@
 // Two steps rather than one call, for the person holding the phone: the item's
 // name is on the screen while the market is still being looked up.
 //
+// THE PRICE STEP SEARCHES ISRAEL FIRST. One search action looks for Israeli
+// second-hand listings and the Israeli new price. The server then weighs the
+// verified Israeli evidence in hand, and only when it is thin does a second
+// search action look abroad and try the Israeli market again in other words.
+// Enough good local evidence stops the search; the model does not decide.
+//
 // THE PRICE STEP IS STABLE BY CONSTRUCTION:
 //   · market research belongs to the ITEM, not to the photograph. It is kept
 //     under a key built from what the item is (valuation.js `marketKey`), so two
@@ -26,7 +32,7 @@
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem } from './identify.js';
 import { researchMarket, marketDate } from './market.js';
-import { buildValuation, verifyEvidence, mergeEvidence, marketKey } from './valuation.js';
+import { buildValuation, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import {
@@ -99,7 +105,9 @@ function remember(key, record) {
 export function resetMarketCache() { memory.clear(); }
 
 const defaultStore = Object.freeze({ load: loadMarketResearch, save: saveMarketResearch });
-const usable = (record, now) => (record && Array.isArray(record.evidence) && typeof record.at === 'number' && now - record.at <= MARKET_POOL_MS ? record : null);
+// Kept research is read by today's rules (evidence.js `requalify`), whichever version of them gathered it.
+const usable = (record, now) => (record && Array.isArray(record.evidence) && typeof record.at === 'number' && now - record.at <= MARKET_POOL_MS
+  ? { ...record, evidence: record.evidence.map(requalify) } : null);
 
 /** The most recent research for a market identity, from memory or the shared store, or null. */
 async function recall(key, store, now) {
@@ -137,6 +145,8 @@ export async function runPrice({
     const valuation = buildValuation({
       evidence: record.evidence, searchPerformed: record.search_performed !== false, unverified: record.unverified ?? 0,
       approximate, familyLevel, searched: { ...record.searched, at: new Date(record.at).toISOString() },
+      // A listing's age is measured to TODAY, not to the day it was retrieved: pooled and reused evidence ages.
+      today: marketDate(t0),
     });
     return {
       status: valuation.status === 'priced' ? SCAN_STATUS.PRICED : SCAN_STATUS.INSUFFICIENT,
@@ -150,34 +160,69 @@ export async function runPrice({
   if (earlier && t0 - earlier.at <= MARKET_FRESH_MS) return priced(earlier, { reused: true, call: { ...noCall, ms: now() - t0 } });
 
   const fx = await getFxTable({ fetchImpl });
-  try {
-    const { raw, provenance, meta } = await researchMarket({ identity, answer, model, apiKey, safetyIdentifier, fetchImpl, now: t0 });
-    const today = marketDate(t0);
-    const found = verifyEvidence(raw?.evidence, provenance, fx, today);
-    const record = {
-      at: t0,
-      // What an earlier search found for this same item still counts: the pool grows, the price settles.
-      evidence: mergeEvidence(found.evidence, earlier?.evidence),
-      unverified: found.unverified,
-      search_performed: provenance.search_performed,
-      searched: { date: today, queries: provenance.queries?.length ?? 0, pages: provenance.sources?.length ?? 0 },
-      fx_date: fx?.rate_date ?? null,
-    };
-    // Only research that really searched is worth keeping.
-    if (provenance.search_performed) {
-      remember(key, record);
-      try { await store.save(key, record, scanUuid); } catch { /* the answer does not depend on the write */ }
-    }
-    return priced(record, {
-      reused: false,
-      call: { stage: 'market', model: meta.model, ms: now() - t0, usage: meta.usage, tool_calls: meta.tool_calls, first_search_ms: meta.timings?.first_search_ms ?? null },
-    });
-  } catch (err) {
+  const today = marketDate(t0);
+  const stages = [];
+  const usage = { input_tokens: 0, output_tokens: 0, reasoning_tokens: 0 };
+  let found = [];
+  let unverified = 0;
+  let queries = 0;
+  let pages = 0;
+  let searched = false;
+  let firstSearchMs = null;
+  let usedModel = model;
+  /** One search stage: its verified evidence joins what is in hand. Throws what the provider threw. */
+  const search = async (stage) => {
+    const { raw, provenance, meta } = await researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0 });
+    const verified = verifyEvidence(raw?.evidence, provenance, fx, today);
+    found = mergeEvidence(found, verified.evidence);
+    unverified += verified.unverified;
+    queries += provenance.queries?.length ?? 0;
+    pages += provenance.sources?.length ?? 0;
+    searched = searched || provenance.search_performed;
+    firstSearchMs ??= meta.timings?.first_search_ms ?? null;
+    usedModel = meta.model ?? usedModel;
+    for (const k of Object.keys(usage)) usage[k] += meta.usage?.[k] ?? 0;
+    stages.push(stage);
+  };
+  const call = () => ({
+    stage: 'market', model: usedModel, ms: now() - t0, usage: stages.length ? usage : null,
+    tool_calls: stages.length, first_search_ms: firstSearchMs, stages: [...stages],
+  });
+
+  // ISRAEL FIRST.
+  try { await search('local'); } catch (err) {
     const failure = classifyOpenAIFailure(err?.message);
-    console.warn(`[Scan] market failed code=${failure}`);
-    const call = { stage: 'market', model, ms: now() - t0, usage: null, tool_calls: 0, first_search_ms: null };
+    console.warn(`[Scan] market failed stage=local code=${failure}`);
     // The search failed, but evidence gathered for this item in the last days is still evidence.
-    if (earlier) return priced(earlier, { reused: true, stale: true, call });
-    return { status: SCAN_STATUS.FAILED, failure, valuation: null, reused: false, call };
+    if (earlier) return priced(earlier, { reused: true, stale: true, call: call() });
+    return { status: SCAN_STATUS.FAILED, failure, valuation: null, reused: false, call: call() };
   }
+  // LOOK FURTHER ONLY WHEN ISRAEL DID NOT ANSWER. Decided here, from the verified
+  // evidence in hand (this search and the pool), not left to the model: enough
+  // good local evidence stops the search, thin local evidence widens it once.
+  // The line is the one the valuation itself draws: from LOCAL_STRENGTH.drives the Israeli evidence prices
+  // the item alone, so a search abroad would buy nothing.
+  const local = localStrength(mergeEvidence(found, earlier?.evidence), { familyLevel, today });
+  if (local < LOCAL_STRENGTH.drives) {
+    try { await search('expand'); } catch (err) {
+      // The wider search failing leaves the local search's evidence standing.
+      console.warn(`[Scan] market failed stage=expand code=${classifyOpenAIFailure(err?.message)}`);
+    }
+  }
+
+  const record = {
+    at: t0,
+    // What an earlier search found for this same item still counts: the pool grows, the price settles.
+    evidence: mergeEvidence(found, earlier?.evidence),
+    unverified,
+    search_performed: searched,
+    searched: { date: today, queries, pages, stages: [...stages] },
+    fx_date: fx?.rate_date ?? null,
+  };
+  // Only research that really searched is worth keeping.
+  if (searched) {
+    remember(key, record);
+    try { await store.save(key, record, scanUuid); } catch { /* the answer does not depend on the write */ }
+  }
+  return priced(record, { reused: false, call: call() });
 }

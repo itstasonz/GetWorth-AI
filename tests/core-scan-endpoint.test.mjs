@@ -23,7 +23,7 @@ import { resetFxCache } from '../api/_lib/scan/fx.js';
 import { buildValuationRow, PRICE_METHOD, loadMarketResearch, saveMarketResearch, marketKeyHash, MARKET_EVENT } from '../api/_lib/scan/persist.js';
 import { marketKey, buildValuation } from '../api/_lib/scan/valuation.js';
 import * as CFG from '../api/_lib/scan/config.js';
-import { IMG, RAW_IDENTITY, RAW_MARKET, GOOD_BAND, SOURCES, fakeProvider } from './helpers/core-scan-fakes.mjs';
+import { IMG, RAW_IDENTITY, RAW_MARKET, RAW_EXPAND, GOOD_BAND, SOURCES, NOW, fakeProvider } from './helpers/core-scan-fakes.mjs';
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
 const KEY = 'sk-test-not-a-real-key';
@@ -96,8 +96,10 @@ const band = (b) => ({ list: b.list, low: b.low, high: b.high });
 
 describe('CE-2 step 2: the model finds evidence, the server prices it', () => {
   const identity = normalizeIdentity(RAW_IDENTITY);
-  const price = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm-market', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID, ...extra });
-  test('CE-2a ONE call: the hosted web_search tool, located in Israel, required, asked for its own record; no photograph, and no field for a price', async () => {
+  const price = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm-market', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW, ...extra });
+  /** An Israeli search that found one undated listing and the new price: thin, so the search goes on (core-scan-local-market LM-4). */
+  const THIN = { evidence: RAW_MARKET.evidence.slice(1) };
+  test('CE-2a ONE call when Israel answers: the hosted web_search tool, located in Israel, required, asked for its own record; no photograph, and no field for a price', async () => {
     const fetchImpl = fakeProvider();
     const r = await price(fetchImpl);
     assert.equal(r.status, SCAN_STATUS.PRICED);
@@ -108,7 +110,7 @@ describe('CE-2 step 2: the model finds evidence, the server prices it', () => {
     assert.equal(body.tools[0].user_location.country, 'IL');
     assert.equal(body.tool_choice, 'required');
     assert.ok(body.include.includes('web_search_call.action.sources'));
-    assert.equal(body.max_tool_calls, CFG.MARKET_MAX_TOOL_CALLS);
+    assert.equal(body.max_tool_calls, 1, 'one search action per call');
     assert.equal(body.store, false);
     assert.equal(body.text.format.strict, true);
     assert.deepEqual(Object.keys(body.text.format.schema.properties), ['evidence'], 'the model cannot return a valuation');
@@ -123,29 +125,29 @@ describe('CE-2 step 2: the model finds evidence, the server prices it', () => {
   });
   test('CE-2c pages the model names but the search never reached do not make a price', async () => {
     const r = await price(fakeProvider({ reached: [SOURCES.IL_RETAIL] }));
-    assert.deepEqual([r.status, r.valuation.withdrawn, r.valuation.retail_new_ils, r.valuation.counts.unverified], [SCAN_STATUS.INSUFFICIENT, 'no_verified_second_hand_reference', 550, 3]);
+    assert.deepEqual([r.status, r.valuation.withdrawn, r.valuation.retail_new_ils, r.valuation.counts.unverified], [SCAN_STATUS.INSUFFICIENT, 'no_verified_second_hand_reference', 550, 2]);
   });
   test('CE-2d a provider failure with nothing known about the item is a status, never a number', async () => {
     const r = await price(fakeProvider({ status: 429 }));
     assert.deepEqual([r.status, r.failure, r.valuation], [SCAN_STATUS.FAILED, 'rate_limited', null]);
   });
   test('CE-2e the bank\'s rates are fetched once per run and applied by the server; without them the scan still answers', async () => {
-    const fetchImpl = fakeProvider();
+    const fetchImpl = fakeProvider({ markets: [THIN], expand: [RAW_EXPAND] });
     const r = await price(fetchImpl);
-    assert.equal(fetchImpl.of('fx').length, 1);
+    assert.equal(fetchImpl.of('fx').length, 1, 'once, for both searches');
     assert.equal(r.valuation.evidence.find((e) => e.currency === 'USD').price_ils, 245);
     assert.doesNotMatch(fetchImpl.of('market')[0].body.input[0].content[0].text, /3\.5/, 'the model is not asked to convert');
     resetMarketCache(); resetFxCache();
-    const down = await price(fakeProvider({ fx: null }));
+    const down = await price(fakeProvider({ markets: [THIN], expand: [RAW_EXPAND], fx: null }));
     assert.equal(down.status, SCAN_STATUS.PRICED);
     assert.equal(down.valuation.evidence.find((e) => e.currency === 'USD').price_ils, null);
-    assert.equal(down.valuation.counts.resale, 2, 'a price with no rate takes no part in the arithmetic');
+    assert.equal(down.valuation.counts.resale, 1, 'a price with no rate takes no part in the arithmetic');
   });
 });
 
 describe('CE-2R market research belongs to the item: reused, shared and pooled', () => {
   const identity = normalizeIdentity(RAW_IDENTITY);
-  const T0 = Date.UTC(2026, 9, 6, 9, 0, 0);
+  const T0 = NOW;
   const at = (ms) => () => ms;
   const run = (fetchImpl, store, extra = {}) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl, store, scanUuid: UUID, now: at(T0), ...extra });
   test('CE-2Ra a second scan of the same item within the hour makes no search and gets the same price', async () => {
@@ -192,21 +194,21 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
     const NEW_URL = 'https://market.example.co.il/ads/999';
     await run(fakeProvider(), store);
     resetMarketCache();
-    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 'Superlight יד שנייה', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good' }] }], reached: [NEW_URL] });
+    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 'Superlight יד שנייה', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null }] }], reached: [NEW_URL] });
     const second = await run(later, store, { now: at(T0 + 3 * 3_600_000) });
     assert.equal(later.of('market').length, 1);
     assert.equal(second.reused, false);
-    assert.equal(second.valuation.counts.resale, 4, 'three earlier references and one new');
-    assert.equal(second.valuation.price_confidence, 'high', 'three Israeli references, exact, that agree');
-    assert.equal(second.valuation.evidence[0].url, NEW_URL);
-    assert.equal(store.rows.get(second.market_key).evidence.length, 5, 'the pooled evidence is what is kept');
+    assert.equal(second.valuation.counts.resale, 3, 'two earlier references and one new');
+    assert.equal(second.valuation.local_strength, 2.2, 'one dated listing and two undated: more than either search had alone');
+    assert.ok(second.valuation.evidence.some((e) => e.url === NEW_URL && e.used));
+    assert.equal(store.rows.get(second.market_key).evidence.length, 4, 'the pooled evidence is what is kept');
   });
   test('CE-2Rf evidence older than the pooling window is not used', async () => {
     const store = fakeStore();
     await run(fakeProvider(), store);
     resetMarketCache();
     const NEW_URL = 'https://market.example.co.il/ads/999';
-    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 't', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good' }] }], reached: [NEW_URL] });
+    const later = fakeProvider({ markets: [{ evidence: [{ url: NEW_URL, title: 't', price: 270, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null }] }], reached: [NEW_URL] });
     const r = await run(later, store, { now: at(T0 + CFG.MARKET_POOL_MS + 60_000) });
     assert.equal(r.valuation.counts.resale, 1);
   });
@@ -239,18 +241,18 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
 });
 
 describe('CE-2F an item known only by its family is priced from the family', () => {
-  const SIBLINGS = { evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match: 'sibling_model', market: 'IL', condition: 'new_sealed' })) };
+  const SIBLINGS = { evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match: 'sibling_model', market: 'IL', condition: 'new_sealed', page: 'listing', listed: null })) };
   const family = normalizeIdentity({ ...RAW_IDENTITY, canonical_name: 'apple airpods pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], followup: { kind: 'photo', affects: 'identity', question: 'Take a close-up photo of the text inside the lid', options: [] } });
   const run = (identity) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [SIBLINGS] }), store: fakeStore(), scanUuid: UUID });
   test('CE-2Fa listings the model called "sibling" price an item whose generation is unknown, as an approximate range', async () => {
     const r = await run(family);
     assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.price_confidence, r.valuation.counts.resale], [SCAN_STATUS.PRICED, true, true, 'low', 3]);
-    assert.deepEqual(band(r.valuation.prices.good), { list: 320, low: 230, high: 310 });
+    assert.deepEqual(band(r.valuation.prices.good), { list: 400, low: 190, high: 400 });
   });
-  test('CE-2Fb the same listings price nothing for an item whose exact model is known', async () => {
+  test('CE-2Fb for an item whose exact model is known, the same listings are "similar models": an approximate range, never its own price', async () => {
     resetMarketCache();
     const r = await run(normalizeIdentity(RAW_IDENTITY));
-    assert.deepEqual([r.status, r.valuation.counts.resale], [SCAN_STATUS.INSUFFICIENT, 0]);
+    assert.deepEqual([r.status, r.valuation.basis, r.valuation.approximate, r.valuation.price_confidence], [SCAN_STATUS.PRICED, 'similar_models', true, 'low']);
   });
   test('CE-2Fc the market prompt tells the model which models a family-level item may be', async () => {
     const fetchImpl = fakeProvider({ markets: [SIBLINGS] });
@@ -538,7 +540,7 @@ describe('CE-6 structure', () => {
   test('CE-6a the function\'s time limit is a literal 60 and every ceiling fits inside it', () => {
     assert.deepEqual(config, { maxDuration: 60 });
     assert.match(read(join(ROOT, 'api/scan.js')), /export const config = \{ maxDuration: 60 \};/);
-    assert.ok(CFG.MARKET_TIMEOUT_MS + 8000 <= CFG.SCAN_FUNCTION_MAX_DURATION_S * 1000);
+    assert.ok(CFG.MARKET_MAX_STAGES * CFG.MARKET_STAGE_TIMEOUT_MS + 8000 <= CFG.SCAN_FUNCTION_MAX_DURATION_S * 1000);
     assert.ok(CFG.IDENTIFY_TIMEOUT_MS + 8000 <= CFG.SCAN_FUNCTION_MAX_DURATION_S * 1000);
     assert.ok(CFG.MAX_BODY_BYTES < 4.5 * 1024 * 1024, 'under the platform\'s request-body limit');
   });
@@ -547,7 +549,7 @@ describe('CE-6 structure', () => {
     assert.equal(CFG.resolveMarketModel({}), 'gpt-6-luna');
     assert.equal(CFG.resolveMarketModel({ CORE_SCAN_MARKET_MODEL: ' gpt-6.1-sol ' }), 'gpt-6.1-sol');
     assert.deepEqual([CFG.resolveIdentityEffort({}), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'medium' }), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'max!' })], ['low', 'medium', 'low']);
-    assert.equal(CFG.MARKET_MAX_TOOL_CALLS, 2, 'each search action costs the owner several seconds');
+    assert.equal(CFG.MARKET_MAX_STAGES, 2, 'each search costs the owner several seconds');
     assert.equal(CFG.MARKET_FRESH_MS, 60 * 60 * 1000, 'the same item is not researched twice in an hour');
     assert.ok(CFG.MARKET_POOL_MS > CFG.MARKET_FRESH_MS);
   });
