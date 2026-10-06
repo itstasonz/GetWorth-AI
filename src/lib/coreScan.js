@@ -40,9 +40,10 @@ const MIN_IMAGE_BYTES = 512;
 export const MAX_SCAN_IMAGES = 3;
 export const MAX_CORRECTION_CHARS = 160;
 
-// Learned from the server, once: this deployment has the core scan switched off.
-// It outlives a reset, so the app stops asking and uses the older path for the
-// rest of the session.
+// Learned from the server, once: the core scan is not available to this account
+// (switched off, or the account is not on the rollout list). It outlives a
+// reset, so the app stops asking and uses the older path — until the account
+// changes, when it is forgotten: the answer belongs to an account, not a device.
 let unavailable = false;
 
 const initial = () => ({
@@ -76,8 +77,8 @@ export const scanStore = {
   subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
   getSnapshot() { return state; },
   reset() { controller?.abort(); controller = null; deps = null; state = initial(); emit(); },
-  /** For the suites: forget that the server said the scan was off. */
-  forgetAvailability() { unavailable = false; state = initial(); emit(); },
+  /** A different account may get a different answer: drop the scan and forget what the last account was told. */
+  forgetAvailability() { unavailable = false; scanStore.reset(); },
 };
 
 /** Is a scan on screen that a new photograph should be added to rather than replace? */

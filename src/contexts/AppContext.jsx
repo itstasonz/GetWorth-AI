@@ -839,7 +839,7 @@ export function AppProvider({ children }) {
     ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
     currentScanUuidRef.current = null; capturedImageRef.current = null;
     lastAttemptRef.current = null; // SCAN-2: never replay a signed-out user's images
-    scanStore.reset();             // nor leave their scan, photograph or signed token behind
+    scanStore.forgetAvailability(); // nor leave their scan, photograph or signed token behind, nor what the server told THEM
     // MKT-3: a REAL logout/expiry/switch must drop the buy intent so it can
     // never resume in another account's session. Guarded by outgoingUserId:
     // this function also runs on the anonymous boot — which is exactly the

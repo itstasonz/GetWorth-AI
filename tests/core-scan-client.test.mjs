@@ -112,8 +112,12 @@ describe('CC-1 photograph in, answer out', () => {
     // It is remembered: the next scan goes straight to the older path without asking again.
     assert.equal(await startScan(deps()), 'unavailable');
     assert.equal(requests.length, 1);
+    // A different account may get a different answer: on an account change it is asked again.
     scanStore.forgetAvailability();
     assert.equal(snap().unavailable, false);
+    server({ identify: [identified()], price: [pricedAnswer()] });
+    assert.equal(await startScan(deps()), 'ok');
+    assert.equal(snap().stage, STAGE.PRICED);
   });
   test('CC-1e identified but unpriced is its own state, with no number anywhere', async () => {
     server({ identify: [identified()], price: [pricedAnswer({ status: 'insufficient_evidence', prices: null, retail_new_ils: 550, withdrawn: 'no_verified_second_hand_reference' })] });

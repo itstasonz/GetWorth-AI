@@ -452,6 +452,61 @@ describe('CE-4 the two actions', () => {
   });
 });
 
+describe('CE-7 the rollout list: the core scan is for the accounts on the existing list', () => {
+  /** Run `fn` with the list and the deployment kind set, then put the environment back. */
+  async function withRollout({ list, production = true }, fn) {
+    const before = { ids: process.env.SCAN_ENGINE_V2_USER_IDS, env: process.env.VERCEL_ENV };
+    if (list === undefined) delete process.env.SCAN_ENGINE_V2_USER_IDS; else process.env.SCAN_ENGINE_V2_USER_IDS = list;
+    if (production) process.env.VERCEL_ENV = 'production'; else delete process.env.VERCEL_ENV;
+    try { return await fn(); } finally {
+      if (before.ids === undefined) delete process.env.SCAN_ENGINE_V2_USER_IDS; else process.env.SCAN_ENGINE_V2_USER_IDS = before.ids;
+      if (before.env === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = before.env;
+    }
+  }
+  test('CE-7a an account on the list gets the core scan', async () => {
+    await withRollout({ list: 'someone-else, user-1' }, async () => {
+      const { call, log } = harness();
+      const r = await call(identifyBody());
+      assert.deepEqual([r.status, r.payload.status], [200, 'identified']);
+      assert.deepEqual([log.charge, log.identify], [1, 1]);
+    });
+  });
+  test('CE-7b an account that is not on it is answered "unavailable", with no reason, nothing charged and nothing called', async () => {
+    await withRollout({ list: 'user-1' }, async () => {
+      const { call, log } = harness();
+      const { token } = (await call(identifyBody())).payload;
+      for (const body of [identifyBody(), { action: 'price', scan_uuid: UUID, token }]) {
+        const r = await call(body, { auth: 'Bearer other' });
+        assert.equal(r.status, 503, 'the status the app already turns into the scan this account had before');
+        assert.deepEqual(r.payload, { scan_uuid: UUID, status: 'unavailable', error: 'scan_unavailable' }, 'exactly the answer of a deployment with the scan switched off');
+      }
+      assert.deepEqual([log.charge, log.identify, log.price], [1, 1, 0], 'only the listed account\'s own scan ran');
+    });
+  });
+  test('CE-7c in Production an empty or missing list admits nobody, the founder included', async () => {
+    for (const list of [undefined, '', ' , ']) {
+      await withRollout({ list }, async () => {
+        const { call, log } = harness();
+        const r = await call(identifyBody());
+        assert.deepEqual([r.status, r.payload.status], [503, 'unavailable'], JSON.stringify(list));
+        assert.deepEqual([log.charge, log.identify], [0, 0]);
+      });
+    }
+  });
+  test('CE-7d the gate reads the existing list and nothing a request sends', async () => {
+    await withRollout({ list: 'user-1' }, async () => {
+      const { call, log } = harness();
+      const r = await call(identifyBody({ user_id: 'user-1', allow: true, SCAN_ENGINE_V2_USER_IDS: 'user-2' }), { auth: 'Bearer other' });
+      assert.equal(r.status, 503);
+      assert.equal(log.identify, 0);
+    });
+    const src = readFileSync(join(ROOT, 'api/scan.js'), 'utf8');
+    assert.match(src, /import \{ isV2Permitted \} from '\.\/_lib\/v2\/config\.js';/, 'the existing allowlist check, not a new one');
+    assert.match(src, /if \(!isV2Permitted\(user\.id, process\.env\)\)/);
+    assert.doesNotMatch(src, /CORE_SCAN_USER_IDS/, 'no second list');
+  });
+});
+
 describe('CE-5 what a scan leaves behind', () => {
   const identity = normalizeIdentity(RAW_IDENTITY);
   const pricedValuation = buildValuation({ evidence: [

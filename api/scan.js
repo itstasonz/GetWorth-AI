@@ -15,13 +15,21 @@
 //       offered, or 'unsure' — never free text.
 //
 // Every request passes the same gate, in the order that makes a refused request
-// cost nothing:  method → session → body (bounded) → configuration → quota.
+// cost nothing:  method → session → body (bounded) → configuration → rollout
+// list → quota.
+//
+// THE ROLLOUT LIST. The core scan is open only to the accounts on the existing
+// SCAN_ENGINE_V2_USER_IDS list, and in Production an empty or missing list
+// admits nobody. An account that is not on it is answered exactly as a
+// deployment with the scan switched off is — 503 `unavailable`, no reason — and
+// the app already turns that answer into the scan it had before.
 //
 // The OpenAI key never leaves the server, and nothing a browser sends reaches a
 // prompt except through the fenced, length-bounded fields the steps name.
 // ══════════════════════════════════════════════════════════════════════════════
 import { verifyJWT } from './analyze.js';
 import { cors, json, readImage, nodeHandler, UUID_RE } from './_lib/v2/http.js';
+import { isV2Permitted } from './_lib/v2/config.js';
 import {
   resolveScanMode, resolveIdentityModel, resolveMarketModel, SCAN_MODE, SCAN_KEY_ENV,
   MAX_BODY_BYTES, MAX_IMAGES, MAX_IMAGE_BYTES, MAX_USER_TEXT, MAX_REVISIONS,
@@ -86,6 +94,10 @@ export function createScanHandler({
     const mode = resolveScanMode(process.env);
     if (mode !== SCAN_MODE.ENABLED) {
       console.warn(`[Scan] unavailable mode=${mode}`);
+      return json({ scan_uuid: scanUuid, status: 'unavailable', error: 'scan_unavailable' }, 503, headers);
+    }
+    // Not on the rollout list: the same answer, so the app falls back to the scan this account already has.
+    if (!isV2Permitted(user.id, process.env)) {
       return json({ scan_uuid: scanUuid, status: 'unavailable', error: 'scan_unavailable' }, 503, headers);
     }
 
