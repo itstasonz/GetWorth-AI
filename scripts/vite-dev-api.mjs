@@ -67,6 +67,8 @@ const REQUIRED = {
   // Scan Engine V2: the flag, the key, and the secret that signs scan state.
   '/api/v2/identify': ['SCAN_ENGINE_V2_ENABLED', 'OPENAI_API_KEY', 'SCAN_ENGINE_V2_STATE_SECRET'],
   '/api/v2/price': ['SCAN_ENGINE_V2_ENABLED', 'OPENAI_API_KEY', 'SCAN_ENGINE_V2_STATE_SECRET'],
+  // The core scan: the key, the database for the quota, and any one secret to sign scan tokens.
+  '/api/scan': ['OPENAI_API_KEY', 'SUPABASE_URL', 'SUPABASE_JWT_SECRET'],
 };
 const OPTIONAL = ['GOOGLE_VISION_API_KEY', 'SUPABASE_SERVICE_KEY', 'SUPABASE_ANON_KEY',
   'SUPABASE_JWT_SECRET', 'VOYAGE_API_KEY', 'OPENAI_ENRICHMENT_MODEL',
@@ -79,9 +81,7 @@ const ROUTES = [
   ['/api/submit-candidate', '../api/submit-candidate.js'],
   ['/api/v2/identify', '../api/v2/identify.js'],
   ['/api/v2/price', '../api/v2/price.js'],
-  // Scan Lab (private benchmark capture). Off unless SCAN_LAB_ENABLED is 'true'
-  // and the account is in SCAN_LAB_USER_IDS; it calls no provider.
-  ['/api/scan-lab', '../api/scan-lab.js'],
+  ['/api/scan', '../api/scan.js'],
 ];
 
 export default function devApi({ envFile = '.env.local' } = {}) {

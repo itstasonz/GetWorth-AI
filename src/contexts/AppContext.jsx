@@ -8,9 +8,7 @@ import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
-import {
-  SCAN_V2_ENABLED, scanV2Store, isScanV2Available, awaitingFollowup, startScanV2, followupScanV2,
-} from '../lib/scanV2';
+import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft } from '../lib/coreScan';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -255,10 +253,7 @@ function useRealtimeChannel(userId, channelKey, buildChannel, onRecover) {
 // Perf: skips decode+resize if raw image is already under 150KB
 // Modern browsers auto-handle EXIF orientation on canvas draw
 // ═══════════════════════════════════════════════════════
-// EXPORTED for Scan Lab, which stores the derivative THIS function makes beside
-// the original so the benchmark is fed what a scan is fed. Adding the export
-// changes nothing on the scan path.
-export function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
+function compressImage(dataUrl, maxDim = 800, quality = 0.65) {
   const t0 = performance.now();
   // Perf: skip compression entirely if image is already small enough
   const rawKB = Math.round(dataUrl.length * 0.75 / 1024);
@@ -435,9 +430,7 @@ function assessCanvasPixels(canvas) {
  * Resolves to null when the image cannot be inspected; only an explicit
  * `ok: false` is a rejection.
  */
-// EXPORTED for Scan Lab, which applies this same check to the derivative it
-// stores. Adding the export changes nothing on the scan path.
-export function assessImageDataUrl(dataUrl, { timeoutMs = 4000 } = {}) {
+function assessImageDataUrl(dataUrl, { timeoutMs = 4000 } = {}) {
   return new Promise((resolve) => {
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
       resolve({ ok: false, reason: 'not_an_image_data_url' }); return;
@@ -846,7 +839,7 @@ export function AppProvider({ children }) {
     ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
     currentScanUuidRef.current = null; capturedImageRef.current = null;
     lastAttemptRef.current = null; // SCAN-2: never replay a signed-out user's images
-    scanV2Store.reset();           // nor leave their V2 scan, photograph or signed state behind
+    scanStore.reset();             // nor leave their scan, photograph or signed token behind
     // MKT-3: a REAL logout/expiry/switch must drop the buy intent so it can
     // never resume in another account's session. Guarded by outgoingUserId:
     // this function also runs on the anonymous boot — which is exactly the
@@ -2726,45 +2719,45 @@ export function AppProvider({ children }) {
       return;
     }
 
-    // ── SCAN ENGINE V2 — A SEPARATE PATH, TAKEN ONLY WHEN THE SERVER SAYS SO ──
+    // ── THE CORE SCAN — THE ONE SCAN PATH ────────────────────────────────────
     //
-    // Off unless this build was made with VITE_SCAN_ENGINE_V2_ENABLED AND the
-    // server enrols this account (asked once per session, with no photograph).
-    // For everyone else nothing below this block changes: the V1 pipeline runs
-    // exactly as it did, and no V2 request is ever made on its behalf.
+    // The photograph goes to POST /api/scan: a vision model says what the item
+    // is, the live web is searched for what it sells for second-hand in Israel,
+    // and the result screen takes it from there. Its state lives in
+    // src/lib/coreScan.js, and nothing below this block runs for such a scan.
     //
-    // A V2 scan calls neither /api/analyze nor /api/enrich, and returns before
-    // any V1 state is touched. Its own state lives in src/lib/scanV2.js.
-    if (SCAN_V2_ENABLED) {
-      const v2Followup = appendMode && awaitingFollowup();
-      const v2ScanUuid = v2Followup ? currentScanUuidRef.current : newScanUuid();
-      const v2 = v2Followup || await isScanV2Available({
-        userId: currentUserIdRef.current, getToken: getFreshToken, scanUuid: v2ScanUuid,
-      });
-      if (v2) {
-        if (pipelineActiveRef.current) return;
-        pipelineActiveRef.current = true;
-        try {
-          const deps = {
-            dataUrl: rawDataUrl, lang, getToken: getFreshToken,
+    // The older pipeline below is kept for ONE case: a deployment that has the
+    // core scan switched off answers 503, and that scan falls through to it.
+    {
+      if (pipelineActiveRef.current) return;
+      pipelineActiveRef.current = true;
+      let outcome = null;
+      try {
+        const adding = appendMode && scanActive();
+        setAddPhotoMode(false);
+        setPipelineState('idle');
+        setPipelineError(null);
+        setView('analyzing');
+        // The result screen opens the moment the item is identified; the price
+        // arrives on it while the market search is still running.
+        const onIdentified = () => { setImages(scanStore.getSnapshot().images); setView('results'); };
+        if (adding) {
+          await addScanPhoto({ dataUrl: rawDataUrl, lang, onIdentified });
+        } else {
+          const scanUuid = newScanUuid();
+          currentScanUuidRef.current = scanUuid;
+          outcome = await startScan({
+            dataUrl: rawDataUrl, scanUuid, lang, getToken: getFreshToken, onIdentified,
             compress: (d) => compressImage(d, 1280, 0.82), assess: assessImageDataUrl,
-          };
-          setAddPhotoMode(false);
-          setView('analyzing');
-          if (v2Followup) {
-            await followupScanV2(deps);
-          } else {
-            currentScanUuidRef.current = v2ScanUuid;
-            await startScanV2({ ...deps, scanUuid: v2ScanUuid });
-          }
-          // Still this scan, and the user has not left it.
-          if (scanV2Store.getSnapshot().active) setView('results');
-        } finally {
-          pipelineActiveRef.current = false;
+          });
         }
-        return;
+        // A scan that stopped before an identity (a bad photograph, a refusal)
+        // shows its reason on the same screen.
+        if (scanStore.getSnapshot().active) setView('results');
+      } finally {
+        pipelineActiveRef.current = false;
       }
-      if (scanV2Store.getSnapshot().active) scanV2Store.reset();
+      if (outcome !== 'unavailable') return;
     }
 
     pipelineActiveRef.current = true;
@@ -3029,7 +3022,7 @@ export function AppProvider({ children }) {
   // ── Cancel and go home ──
   const cancelPipeline = useCallback(() => {
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
-    scanV2Store.reset(); // a V2 scan in flight is abandoned with the flow (no-op otherwise)
+    scanStore.reset(); // a scan in flight is abandoned with the flow
     lastAttemptRef.current = null; // SCAN-2: leaving the flow drops the retry snapshot
     setPipelineState('idle');
     setPipelineError(null);
@@ -4366,6 +4359,7 @@ export function AppProvider({ children }) {
     // Cancel any in-flight pipeline
     if (pipelineAbortRef.current) pipelineAbortRef.current.abort();
     lastAttemptRef.current = null; // SCAN-2: new scan session — drop the retry snapshot
+    scanStore.reset();
     setNavDirection('pop');
     setPipelineState('idle');
     setPipelineError(null);
@@ -4483,6 +4477,24 @@ export function AppProvider({ children }) {
     const opening = hasRealPrice(mv) ? Number(mv.mid) : '';
     setListingData({ title: result?.name || '', desc: '', price: opening, phone: '', location: '' });
     setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
+  };
+
+  // ── SELL, STRAIGHT FROM A SCAN ──
+  // The scan already knows what the item is, its condition and its price, so
+  // the listing opens on its review step with the title, the description, the
+  // price and the photographs filled in. Everything stays editable there.
+  const sellFromScan = () => {
+    if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
+    const scan = scanStore.getSnapshot();
+    if (!scan.active || !scan.identity) return;
+    const draft = buildListingDraft(scan);
+    setResult(draft.result);
+    setImages(scan.images);
+    // The seller's phone and area rarely change: start from their latest listing.
+    const last = myListings?.[0];
+    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, phone: last?.contact_phone || '', location: last?.location || '' });
+    setCondition(draft.condition); setAnswers({}); setSerialData(null);
+    setListingStep(2); setNavDirection('push'); setView('listing');
   };
 
   const selectCondition = (c) => {
@@ -4623,7 +4635,7 @@ export function AppProvider({ children }) {
     images, setImages, addListingImages, result, setResult,
     listingStep, setListingStep, condition, setCondition,
     answers, setAnswers, listingData, setListingData,
-    publishing, publishListing, startListing, selectCondition,
+    publishing, publishListing, startListing, selectCondition, sellFromScan,
     reportListing,
     // Serial/IMEI verification
     serialData, serialLoading, submitSerialPhoto, clearSerialData, submitSerialText,
@@ -4641,7 +4653,7 @@ export function AppProvider({ children }) {
     // Pipeline (replaces analyzeImage)
     handleFile, startCamera, capture, stopCamera, releaseCamera,
     pipelineState, pipelineError, retryPipeline, cancelPipeline, scanCooldownUntil,
-    getFreshToken, // Scan Engine V2 retries its price step with the user's own session
+    getFreshToken, // the scan screen's own steps carry the user's session
     // Multi-photo + Help modal
     addPhoto, addPhotoMode, setAddPhotoMode,
     captureAdditionalPhoto, handleAdditionalFile, submitBrandHint,

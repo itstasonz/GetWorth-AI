@@ -74,11 +74,15 @@ const PROBE = new URL('./fixtures/provider-probe/', import.meta.url);
 //               risk; conflating the two is how an allowlist entry becomes an
 //               egress target by accident.
 //   DEV       — local development only.
+//   PUBLIC    — a free, unauthenticated, read-only public feed. No key is sent
+//               to it and nothing is billed by it, so it has no ledger entry.
 const HOST_REGISTRY = {
   'api.anthropic.com':       'PROVIDER',
   'api.openai.com':          'PROVIDER',
   'vision.googleapis.com':   'PROVIDER',
   'api.voyageai.com':        'PROVIDER',
+  // The Bank of Israel's representative exchange rates (api/_lib/scan/fx.js).
+  'www.boi.org.il':          'PUBLIC',
   'get-worth-ai.vercel.app': 'INBOUND',
   localhost:                 'DEV',
 };

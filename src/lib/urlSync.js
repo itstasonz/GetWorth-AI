@@ -21,7 +21,6 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { SCAN_LAB_ENABLED } from './scanLab';
 
 // ── Navigation direction — module-level ref ───────────────────────────────────
 // Written synchronously by AppContext navigation functions BEFORE calling setView,
@@ -44,7 +43,7 @@ const VIEW_DEPTH = {
   // depth 1 the profile→orders transition REPLACED the history entry, so
   // back skipped the screen the user actually came from.
   detail:        2, sellerProfile: 2, chat:  2, orders: 2, orderDetail: 2,
-  admin:         2, notifications: 2, analytics: 2, scanLab: 2,
+  admin:         2, notifications: 2, analytics: 2,
   // Ephemeral scan flow
   camera: -1, analyzing: -1, results: -1, listing: -1,
 };
@@ -70,7 +69,6 @@ export function buildUrlFromState({ view, selected, activeChat, activeOrder }) {
     case 'notifications': return '/orders';
     case 'analytics':     return '/profile';
     case 'admin':         return '/admin';
-    case 'scanLab':       return '/scan-lab';
     default:              return null; // ephemeral views
   }
 }
@@ -89,9 +87,6 @@ export function parseUrlToState(pathname) {
   if (p === '/profile') return { view: 'profile',    tab: 'profile' };
   if (p === '/admin')   return { view: 'admin',      tab: 'profile' };
   if (p === '/saved')   return { view: 'saved',      tab: 'profile' };
-  // Only a build made with the Scan Lab flag has the screen; without it the
-  // path is unknown and falls through to home like any other.
-  if (p === '/scan-lab' && SCAN_LAB_ENABLED) return { view: 'scanLab', tab: 'profile' };
 
   // Deep links — fall back to parent (Phase 3B adds cold fetch here)
   if (p.startsWith('/listing/')) return { view: 'browse', tab: 'browse',   _fallback: true };

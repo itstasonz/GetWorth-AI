@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef, Suspense, useSyncExternalStore } from 'react';
 import { DollarSign, Globe, Home, Search, ShoppingBag, MessageCircle, User, X, AlertCircle, Shield, Star, Phone, Volume2, VolumeX, ChevronRight, ChevronLeft, Bell, ArrowLeft, PlusCircle, RefreshCw, Upload } from 'lucide-react';
 import { AppProvider, useApp } from './contexts/AppContext';
-import { scanV2Store } from './lib/scanV2';
+import { scanStore } from './lib/coreScan';
 import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
 import NotificationsPanel from './components/NotificationsPanel';
@@ -25,16 +25,8 @@ import { AuthView, ProfileView } from './views/AuthProfileView';
 const LazyCameraView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.CameraView })));
 const LazyAnalyzingView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.AnalyzingView })));
 const LazyResultsView = React.lazy(() => import('./views/CameraResultsView').then(m => ({ default: m.ResultsView })));
-// Scan Engine V2's own screen. Loaded only when a V2 scan is active, which needs
-// the build flag AND the server's per-account enrolment (src/lib/scanV2.js).
-const LazyScanV2View = React.lazy(() => import('./views/ScanV2View'));
-// Scan Lab: private benchmark capture for one allowlisted account. Written as a
-// direct `import.meta.env` read so a build made WITHOUT the flag drops the
-// screen from the bundle altogether. With the flag, the screen is public code
-// holding no data: every read and write is authorized by /api/scan-lab.
-const LazyScanLabView = import.meta.env.VITE_SCAN_LAB_ENABLED === 'true'
-  ? React.lazy(() => import('./views/ScanLabView'))
-  : null;
+// The scan screen: identity, price, condition and Sell on one screen (src/lib/coreScan.js).
+const LazyScanView = React.lazy(() => import('./views/ScanView'));
 const LazyInboxView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.InboxView })));
 const LazyChatView = React.lazy(() => import('./views/ChatViews').then(m => ({ default: m.ChatView })));
 const LazyMyListingsView = React.lazy(() => import('./views/SellViews').then(m => ({ default: m.MyListingsView })));
@@ -283,11 +275,15 @@ function AppShell() {
     myListings, unreadCount, notifUnreadCount, fileRef, orders,
     cameraBlocked, setCameraBlocked,
     showNotifications, setShowNotifications,
+    pipelineState,
   } = useApp();
 
-  // False for every scan that is not a V2 scan, which is every scan unless the
-  // build flag and the server's allowlist both say otherwise.
-  const scanV2Active = useSyncExternalStore(scanV2Store.subscribe, () => scanV2Store.getSnapshot().active);
+  // A scan is on screen (src/lib/coreScan.js).
+  const scanActive = useSyncExternalStore(scanStore.subscribe, () => scanStore.getSnapshot().active);
+  // True only on a deployment with the core scan switched off; the older screens then take over.
+  const scanUnavailable = useSyncExternalStore(scanStore.subscribe, () => scanStore.getSnapshot().unavailable);
+  // A photograph refused before any scan began (an unreadable file, a cooldown) is shown by the older error screen.
+  const blockedBeforeScan = !scanActive && (pipelineState === 'compress_error' || pipelineState === 'analysis_error');
 
   const { hasUpdate, updating, applyUpdate, dismissUpdate } = usePWAUpdate();
   // Active-work gating: the banner never auto-activates anything, but it is
@@ -329,7 +325,7 @@ function AppShell() {
   // handles popping to the correct parent view with proper state restoration.
   // reset() is intentionally NOT used here — it clears activeChat/pipeline state
   // which is wrong for a simple "go back one level" action.
-  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orders', 'orderDetail', 'admin', 'notifications', 'analytics', 'scanLab']);
+  const BACK_VIEWS = new Set(['detail', 'sellerProfile', 'orders', 'orderDetail', 'admin', 'notifications', 'analytics']);
   const isBackView = BACK_VIEWS.has(view);
   const BACK_LABELS = {
     detail:        lang === 'he' ? 'עיון'    : 'Browse',
@@ -339,7 +335,6 @@ function AppShell() {
     admin:         lang === 'he' ? 'ניהול'  : 'Admin',
     notifications: lang === 'he' ? 'הזמנות' : 'Orders',
     analytics:     lang === 'he' ? 'פרופיל' : 'Profile',
-    scanLab:       lang === 'he' ? 'פרופיל' : 'Profile',
   };
   const headerLabel = isBackView
     ? (BACK_LABELS[view] ?? (lang === 'he' ? 'חזרה' : 'Back'))
@@ -634,8 +629,8 @@ function AppShell() {
         {/* paint over the composer. Moving ChatView here puts it at root stacking level.                  */}
         <Suspense fallback={<LoadingScreen fullscreen />}>
           {view === 'camera' && <LazyCameraView />}
-          {view === 'analyzing' && (scanV2Active ? <LazyScanV2View /> : <LazyAnalyzingView />)}
-          {view === 'results' && (scanV2Active ? <LazyScanV2View /> : <LazyResultsView />)}
+          {view === 'analyzing' && (scanUnavailable || blockedBeforeScan ? <LazyAnalyzingView /> : <LazyScanView />)}
+          {view === 'results' && (scanActive ? <LazyScanView /> : <LazyResultsView />)}
           {view === 'chat' && <LazyChatView />}
         </Suspense>
 
@@ -657,7 +652,6 @@ function AppShell() {
               {view === 'listing' && <LazyListingFlowView />}
               {view === 'analytics' && <LazyAnalyticsView />}
               {view === 'admin' && <LazyAdminPanel />}
-              {view === 'scanLab' && LazyScanLabView && <LazyScanLabView />}
               {view === 'orders' && <LazyOrdersView />}
               {view === 'orderDetail' && <LazyOrderDetailView />}
               {view === 'notifications' && <LazyNotificationsView />}

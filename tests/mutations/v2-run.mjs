@@ -43,7 +43,6 @@ const SUITES = [
   'tests/scan-v2-anchor.test.mjs',
   'tests/scan-v2-endpoints.test.mjs',
   // The client half: the photograph's path from the shutter to the request.
-  'tests/scan-v2-client.test.mjs',
 ];
 
 const argv = process.argv.slice(2);

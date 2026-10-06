@@ -1751,7 +1751,8 @@ export function ListingFlowView() {
       {/* Step 2: Review listing */}
       {listingStep === 2 && (
         <>
-          <BackButton onClick={() => setListingStep((condition === 'used' || condition === 'poor') ? 1 : 0)} rtl={rtl} label={t?.back || 'Back'} />
+          {/* A listing opened from a scan arrives here already filled in; Back returns to the scan. */}
+          <BackButton onClick={() => (result?.coreScan ? setView('results') : setListingStep((condition === 'used' || condition === 'poor') ? 1 : 0))} rtl={rtl} label={t?.back || 'Back'} />
           <FadeIn className="text-center"><h2 className="text-2xl font-bold">{t.review}</h2></FadeIn>
 
           {/* Image management strip */}
