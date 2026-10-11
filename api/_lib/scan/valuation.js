@@ -308,7 +308,8 @@ export function aggregate(kept) {
 export function priceConfidence({ kept, scale, approximate = false, basis = BASIS.ITEM }) {
   // Confidence is earned by PRIVATE references: a shop's refurbished offers support a price and vouch for none.
   const privately = kept.filter((p) => PRIVATE_RESALE.has(p.evidence.kind)).length;
-  if (approximate || privately < 2) return 'low';
+  // A price for a FAMILY rests on the models the item may be, not on the item: never more than low.
+  if (approximate || basis === BASIS.FAMILY || privately < 2) return 'low';
   const dispersion = dispersionOf(kept);
   if (dispersion > DISPERSION.dispersed) return 'low';
   const local = localWeight(kept);
@@ -376,7 +377,9 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
   const count = (pred) => kept.filter((p) => pred(p.evidence)).length;
   const abroad = kept.some((p) => p.evidence.market !== 'IL');
-  const rough = approximate;
+  // A family-level valuation is approximate by construction, question or no question: the listings are for the models
+  // the item may be, not for the item. (Found 2026-10-11: with no open question it showed as an exact listing price.)
+  const rough = approximate || basis === BASIS.FAMILY;
   const dispersion = dispersionOf(kept);
   const prices = kept.map((p) => p.evidence.price_ils);
 

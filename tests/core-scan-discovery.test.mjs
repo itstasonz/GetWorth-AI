@@ -252,6 +252,45 @@ describe('CD-3 the three scans of 2026-10-11, replayed', () => {
   });
 });
 
+describe('CD-5 an uncertain identity stays uncertain: listings for the models it may be give a range, never an exact-model price', () => {
+  beforeEach(() => { resetMarketCache(); resetFxCache(); });
+  // AirPods Pro, generation not established, the two generations as alternatives. The model found three current Israeli
+  // listings for those generations and reported them as the prompt asks: close_comparable.
+  const alternatives = [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }];
+  const base = { canonical_name: 'apple airpods pro', brand: 'Apple', product_family: 'AirPods Pro', model: null, exact_model_established: false, alternatives, search: { hebrew_name: 'איירפודס פרו', aliases: [], model_numbers: [] } };
+  const quiet = identity({ ...base, followup: { kind: 'none', affects: 'none', question: null, options: [] } });
+  const asked = identity({ ...base, followup: { kind: 'choice', affects: 'price', question: 'Which generation?', options: ['1st generation', '2nd generation'] } });
+  const listings = (match) => ({ evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: `AirPods Pro 2 ${match}`, price, currency: 'ILS', kind: 'used_listing', match, market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', stock: 'unknown', shipping: null })) });
+  const pages = Object.fromEntries([SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL].map((u, k) => [u, `AirPods Pro 2 יד שנייה ₪${[300, 450, 650][k]} · פורסם 01/10/2026`]));
+  const run = (who, market, answer = null) => runPrice({ identity: who, answer, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
+
+  test('CD-5a no open question (the photograph could not tell the generations apart, and they sell alike): approximate, low, family-level — never an exact listing price', async () => {
+    const r = await run(quiet, listings('close_comparable'));
+    assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.basis, r.valuation.price_confidence, r.valuation.counts.resale], [SCAN_STATUS.PRICED, true, true, 'product_family', 'low', 3]);
+    assert.equal(isApproximate(quiet, null), false, 'the question state alone would have called it exact: the basis is what makes it approximate');
+  });
+  test('CD-5b an open question: the same, and the answer makes the price exact under its own key', async () => {
+    const r = await run(asked, listings('close_comparable'));
+    assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.price_confidence], [SCAN_STATUS.PRICED, true, true, 'low']);
+    resetMarketCache();
+    const answered = await run(asked, listings('exact'), { question: 'Which generation?', text: '2nd generation' });
+    assert.deepEqual([answered.status, answered.valuation.approximate, answered.valuation.family_level], [SCAN_STATUS.PRICED, false, false]);
+  });
+  test('CD-5c the gate is the same gate: listings for OTHER models open nothing and price nothing, with or without a question', async () => {
+    for (const who of [quiet, asked]) {
+      resetMarketCache();
+      const r = await run(who, listings('sibling_model'));
+      assert.deepEqual([r.status, r.valuation.prices, r.valuation.counts.il_qualifying, r.valuation.counts.resale], [SCAN_STATUS.INSUFFICIENT, null, 0, 0]);
+      assert.ok(r.valuation.evidence.every((e) => e.set_aside === SET_ASIDE.DIFFERENT_MODEL));
+    }
+    // And the comparables open it only as current Israeli USED listings: sealed ones alone do not.
+    resetMarketCache();
+    const sealed = { evidence: listings('close_comparable').evidence.map((e) => ({ ...e, condition: 'new_sealed' })) };
+    const r = await run(quiet, sealed);
+    assert.deepEqual([r.status, r.valuation.withdrawn], [SCAN_STATUS.INSUFFICIENT, WITHDRAWN.NO_LOCAL_EVIDENCE]);
+  });
+});
+
 describe('CD-4 the market step is told the queries ran, and the pool records it', () => {
   beforeEach(() => { resetMarketCache(); resetFxCache(); });
   test('CD-4a the record says how many queries the server built and how many the tool ran', async () => {

@@ -387,7 +387,7 @@ describe('CV-5 a price never claims more than its evidence', () => {
     const approx = { ...VALUATION, approximate: true, price_confidence: 'low' };
     await settle(await open({ identify: [identified({ followup: GENERATION, display_name: 'Apple AirPods Pro', uncertainty_note: 'Generation not established', identity_confidence: 'medium' })], price: [pricedAnswer(approx), pricedAnswer()] }));
     assert.match(text(), /Approximate selling range\u2066₪240–270\u2069/);
-    assert.match(text(), /The exact model is not confirmed, so this is a range for the product family\./);
+    assert.match(text(), /The exact model is not confirmed\. This range is based on comparable models of the same family, not on the exact product\./);
     assert.doesNotMatch(text(), /Recommended listing price/);
     assert.ok(button('Sell for about ₪290'));
     assert.equal(button('Sell for ₪290'), undefined);
@@ -395,6 +395,24 @@ describe('CV-5 a price never claims more than its evidence', () => {
     assert.equal(requests[2].answer, 1);
     assert.match(text(), /Recommended listing price₪290/, 'answered, the price is exact');
     assert.doesNotMatch(text(), /Approximate selling range/);
+  });
+  test('CV-5g an unconfirmed model with NO open question is still a range from comparable models, never an exact-looking listing price — in both languages', async () => {
+    const family = { ...VALUATION, approximate: true, family_level: true, basis: 'product_family', price_confidence: 'low' };
+    const quiet = { display_name: 'Apple AirPods Pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], identity_confidence: 'medium' };
+    await settle(await open({ identify: [identified(quiet)], price: [pricedAnswer(family)] }));
+    assert.match(text(), /Approximate selling range⁦₪240–270⁩/);
+    assert.match(text(), /based on comparable models of the same family, not on the exact product/);
+    assert.match(text(), /Price confidence: Low/);
+    assert.doesNotMatch(text(), /Recommended listing price|Expected selling range/);
+    assert.ok(button('Sell for about ₪290') && !button('Sell for ₪290'));
+    await click(button('Why this price?'));
+    assert.match(container.querySelector('[role="dialog"]').textContent, /listings are for comparable models of the same family, not for the exact product/);
+    await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
+    await act(async () => { scan.scanStore.reset(); });
+    await settle(await open({ identify: [identified(quiet)], price: [pricedAnswer(family)] }, { lang: 'he' }));
+    assert.match(text(), /טווח מכירה משוער/);
+    assert.match(text(), /הטווח מבוסס על דגמים דומים מאותה משפחה, ולא על המוצר המדויק\./);
+    assert.doesNotMatch(text(), /מחיר מומלץ לפרסום/);
   });
   test('CV-5d "Not sure" keeps the approximate range honest: it stays approximate', async () => {
     const approx = { ...VALUATION, approximate: true, price_confidence: 'low' };

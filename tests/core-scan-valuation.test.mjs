@@ -146,10 +146,13 @@ describe('CS-2F when only the family is known, the models it may be are its comp
     const v = value(junk, { familyLevel: true });
     assert.deepEqual([v.status, v.counts.resale, v.counts.not_comparable], ['insufficient_evidence', 0, 5]);
   });
-  test('CS-2Fd a price for a family is never "high", however many Israeli listings agree', () => {
+  test('CS-2Fd a price for a family is approximate and never more than "low", however many Israeli listings agree and whether or not a question is open', () => {
     const three = () => [item({ price: 300, listed: CURRENT }), item({ price: 310, listed: CURRENT }), item({ price: 320, listed: CURRENT })];
-    assert.equal(value(three()).price_confidence, 'high');
-    assert.equal(value(three(), { familyLevel: true }).price_confidence, 'medium');
+    assert.deepEqual([value(three()).price_confidence, value(three()).approximate], ['high', false]);
+    const family = value(three(), { familyLevel: true });
+    assert.deepEqual([family.status, family.price_confidence, family.approximate, family.family_level], ['priced', 'low', true, true], 'with no open question: still approximate, still low');
+    const asked = value(three(), { familyLevel: true, approximate: true });
+    assert.deepEqual([asked.price_confidence, asked.approximate], ['low', true]);
   });
   test('CS-2Fe a sibling\'s NEW price is not this item\'s new-price anchor, even at family level', () => {
     const v = value([item({ price: 300 }), item({ price: 699, kind: 'new_retail', match: 'sibling_model' })], { familyLevel: true });
