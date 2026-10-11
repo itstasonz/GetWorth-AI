@@ -16,6 +16,7 @@
 //   CB-3  the exact item, and not something near it
 //   CB-4  new-price anchors are held to the same rule
 //   CB-5  what the valuation does with what is and is not bound
+//   CB-7  the provider's text as the live search really returned it (2026-10-11)
 //
 // Pure functions and fakes. No network, no credit.
 //
@@ -26,6 +27,7 @@ import assert from 'node:assert/strict';
 
 import { bindPrice, namesOf, isBound, BOUND, BIND_REASON } from '../api/_lib/scan/binding.js';
 import { buildValuation, verifyEvidence, SET_ASIDE, WEIGHT } from '../api/_lib/scan/valuation.js';
+import { pageTypeOf } from '../api/_lib/scan/evidence.js';
 import { runPrice, resetMarketCache, SCAN_STATUS } from '../api/_lib/scan/service.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
 import { buildMarketPrompt, MARKET_SCHEMA } from '../api/_lib/scan/market.js';
@@ -63,9 +65,13 @@ describe('CB-1 one listing, one product, one price', () => {
     assert.equal(level({ price: 250 }, listing('Logitech G Pro Wireless', 'משומש במצב טוב ... ₪250')), BOUND.STRONG, '[6] a result that IS the listing, with its one price');
     assert.equal(isBound({ binding: bind({ price: 430 }, page).level }), true);
   });
-  test('CB-1b a listing page is not taken on its title when the page shows other prices too', () => {
-    const page = listing('Logitech G Pro Wireless - לוח מודעות', 'מחיר: 400 ₪\nמודעות דומות: Logitech G703 ב-300 ₪');
-    assert.deepEqual([level({ price: 400 }, page), level({ price: 300 }, page)], [BOUND.WEAK, BOUND.WEAK]);
+  test('CB-1b a listing page that shows other prices too is not taken on its title; the price on the line under its title is its own', () => {
+    // The price right under the listing's own title is the listing's; the similar ad's price below is not, and is not this item's.
+    const under = listing('Logitech G Pro Wireless - לוח מודעות', 'מחיר: 400 ₪\nמודעות דומות: Logitech G703 ב-300 ₪');
+    assert.deepEqual([level({ price: 400 }, under), level({ price: 300 }, under)], [BOUND.STRONG, BOUND.WEAK]);
+    // With another line between the title and the price, and other prices on the page, the title alone does not vouch for it.
+    const apart = listing('Logitech G Pro Wireless - לוח מודעות', 'פורסם אתמול · חולון\nמחיר: 400 ₪\nמודעות דומות: Logitech G703 ב-300 ₪');
+    assert.deepEqual([level({ price: 400 }, apart), level({ price: 300 }, apart)], [BOUND.WEAK, BOUND.WEAK]);
   });
   test('CB-1c with no page text, or a price the text does not show with its currency, nothing is bound', () => {
     assert.deepEqual(bind({}, listing('', '')), { level: BOUND.WEAK, reason: BIND_REASON.NO_TEXT, match: 'exact' });
@@ -274,5 +280,48 @@ describe('CB-6 through the whole price step', () => {
     const fetchImpl = fakeProvider({ markets: [local], reached: Object.values(URLS), pageText: { [URLS.category]: CATEGORY, [URLS.shop]: 'Logitech G502 X ₪399' }, rows: false });
     const r = await run(fetchImpl);
     assert.deepEqual([r.status, r.valuation.prices, r.valuation.retail_new_ils, r.valuation.counts.unbound, r.valuation.counts.unverified], [SCAN_STATUS.INSUFFICIENT, null, null, 2, 0]);
+  });
+});
+
+// ── THE PROVIDER'S TEXT, AS IT REALLY CAME ──────────────────────────────────
+// One live market search for a Logitech G Pro Wireless (2026-10-11, one billed
+// call) returned 28 results. The excerpts below are the provider's own text for
+// the pages behind the model's four price claims, shortened, unchanged in shape.
+describe('CB-7 the provider\'s own text, as the live search returned it', () => {
+  const shop = (title, text) => ({ type: 'shop_product', title, text: `${title}\n${text}` });
+  // ivory.co.il/catalog.php?id=121262: the product's heading, an empty heading, the price on a line of its own;
+  // the Eilat price, the instalment totals and the heading again further down.
+  const IVORY = 'מק"ט אייבורי: 910-005276 ... PRO Wireless מגיע עם התאמה אישית\n\n# עכבר גיימינג Logitech G PRO Wireless Gaming כולל תאורת לד\n\n## עכבר Logitech G PRO Wireless Gaming כולל תאורת לד\n\n### \n\n389 ₪\n\nהמחיר באילת: 329 ₪\n\nמחיר כולל שידרוגים ותוספות: 389 ₪\n\nהמחיר עד 12 תשלומים: ₪389 (12 X 32.42) המחיר ל 24 תשלומים: ₪413 (24 X 17.23) המחיר ל 36 תשלומים: ₪425 (36 X 11.82)';
+  test('CB-7a a product page that shows its price on the line under the product\'s own heading binds it, as STRONG', () => {
+    const page = shop('עכבר גיימינג Logitech G PRO Wireless Gaming כולל תאורת לד', IVORY);
+    assert.deepEqual(bind({ price: 389 }, page), { level: BOUND.STRONG, reason: BIND_REASON.ONE_LISTING, match: 'exact' });
+    assert.equal(isBound({ binding: bind({ price: 413 }, page).level }), false, 'an instalment total is not the price');
+    assert.equal(bind({ price: 329 }, page).reason, BIND_REASON.NO_VAT_PRICE);
+  });
+  // zap.co.il/model.aspx?modelid=1005972: the offer's name, a blank line, the price with its shipping; a right-to-left mark inside "659\u200F₪".
+  const ZAP = 'השוואת הצעות (1)\n\n659\u200F₪   בחנות אחת\n\nLogitech G Pro Wireless Gaming Mouse\n\n659 ₪ כולל משלוח (60 ₪) Image: bullet עד 5 ימי עסקים\n\n### שמות נוספים לדגם';
+  test('CB-7b a price-comparison page for one model is a product page, and its offer binds with its shipping beside it', () => {
+    assert.equal(pageTypeOf('https://www.zap.co.il/model.aspx?modelid=1005972', 'search_or_category'), 'shop_product');
+    assert.equal(pageTypeOf('https://www.zap.co.il/models.aspx?db135285=135294&pageinfo=2&sog=c-mouse', 'shop_product'), 'search_or_category');
+    assert.equal(pageTypeOf('https://shop.zap.co.il/product-model?offerid=23017964', 'other'), 'shop_product');
+    const page = shop('\u200Fעכבר גיימינג \u200Fאלחוטי LogiTech G-Pro Wireless לוגיטק - זאפ השוואת מחירים', ZAP);
+    assert.deepEqual(bind({ price: 659, shipping: 60 }, page), { level: BOUND.STRONG, reason: BIND_REASON.ONE_LISTING, match: 'exact' });
+    assert.equal(isBound({ binding: bind({ price: 659 }, page).level }), false, 'with the shipping unreported the row shows two prices');
+  });
+  test('CB-7c on a page that lists many things a price on its own line stays unbound: the line above may be any listing\'s', () => {
+    // il.ebay.com browse page, as rendered: a card is its title, its condition and its price, each on a line.
+    const card = 'Logitech G Pro Wireless Mouse - No Dongle No Charger\n\nPre-Owned · Logitech\n\nILS 52.17\n\nor Best Offer\n\nILS 18.38 shipping';
+    const r = bind({ price: 52.17, title: 'Logitech G Pro Wireless Mouse - No Dongle No Charger' }, list(card, 'Logitech Wireless Gaming Mice | eBay'));
+    assert.deepEqual([r.level, r.reason], [BOUND.WEAK, BIND_REASON.PRODUCT_ABSENT]);
+  });
+  test('CB-7d the line above binds only when it is the product\'s own and nothing stands between', () => {
+    const own = 'Logitech G Pro Wireless';
+    assert.equal(level({ price: 399 }, shop(own, 'Logitech G Pro Wireless\n\n₪399\n\nמוצרים דומים\n\nLogitech G Pro X Superlight\n\n₪549')), BOUND.STRONG);
+    assert.equal(level({ price: 549 }, shop(own, 'Logitech G Pro Wireless\n\n₪399\n\nמוצרים דומים\n\nLogitech G Pro X Superlight\n\n₪549')), BOUND.WEAK, 'another product\'s line above');
+    assert.equal(level({ price: 60 }, shop(own, 'Logitech G Pro Wireless\n\n₪399\n\nאביזרים: רגליות טפלון\n\n₪60')), BOUND.WEAK, 'a line between names something else');
+    assert.equal(isBound({ binding: level({ price: 450 }, shop(own, 'Logitech G Pro Wireless\n₪300\n₪450')) }), false, 'a price between');
+    // The page's title names this mouse; its one price sits under a sibling's name. The page's one price is the sibling's.
+    const sibling = bind({ price: 300 }, shop(own, 'Logitech G703 Lightspeed\n\n₪300'));
+    assert.deepEqual([sibling.level, sibling.reason], [BOUND.UNBOUND, BIND_REASON.OTHER_MODEL]);
   });
 });

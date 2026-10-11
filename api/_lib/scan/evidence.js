@@ -75,6 +75,11 @@ const PAGE_SHAPES = [
   [/(^|\.)ad\.co\.il$/i, /^\/(archive\/)?c\//i, 'search_or_category'],
   [/(^|\.)facebook\.com$/i, /^\/marketplace\/item\//i, 'listing'],
   [/(^|\.)facebook\.com$/i, /^\/marketplace(\/|$)/i, 'search_or_category'],
+  // Zap (seen live 2026-10-11): model.aspx is ONE model's offers from every shop, a product page whose
+  // lowest offer is the new price; models.aspx lists many models; a shop's offer page is one product.
+  [/^zap\.co\.il$/i, /^\/model\.aspx$/i, 'shop_product'],
+  [/^zap\.co\.il$/i, /^\/models\.aspx$/i, 'search_or_category'],
+  [/^shop\.zap\.co\.il$/i, /^\/product-model$/i, 'shop_product'],
 ];
 
 /** What kind of page a price was read from. A known address shape wins over the model's word. */
@@ -94,7 +99,8 @@ const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', '
 const DAY_MS = 86_400_000;
 // "3 days ago", "לפני שבועיים", "posted today": each as the age in days it states.
 const UNIT_DAYS = { minute: 0, hour: 0, day: 1, week: 7, month: 30, year: 365, דקה: 0, דקות: 0, שעה: 0, שעות: 0, שעתיים: 0, יום: 1, ימים: 1, יומיים: 2, שבוע: 7, שבועות: 7, שבועיים: 14, חודש: 30, חודשים: 30, חודשיים: 60, שנה: 365, שנים: 365, שנתיים: 730 };
-const AGO_EN = /(\d+|an?|one)\s+(minute|hour|day|week|month|year)s?\s+ago/gi;
+// "1.5 years ago" is a year and a half, not five years: the whole number is read.
+const AGO_EN = /(\d+(?:\.\d+)?|an?|one)\s+(minute|hour|day|week|month|year)s?\s+ago/gi;
 const AGO_HE = /לפני\s+(?:(\d+)\s+)?(דקות|דקה|שעתיים|שעות|שעה|יומיים|ימים|יום|שבועיים|שבועות|שבוע|חודשיים|חודשים|חודש|שנתיים|שנים|שנה)/g;
 const POSTED_TODAY = /((posted|listed|updated|added)\s+today|(פורסם|פורסמה|עודכן|עודכנה|הועלה|נוסף)\s+היום)/i;
 const YESTERDAY = /(\byesterday\b|אתמול)/i;
@@ -102,7 +108,7 @@ const YESTERDAY = /(\byesterday\b|אתמול)/i;
 /** Every age, in days, that a page's text states in relative words. */
 function statedAges(pageText) {
   const ages = [];
-  for (const m of pageText.matchAll(AGO_EN)) ages.push((/^\d+$/.test(m[1]) ? Number(m[1]) : 1) * UNIT_DAYS[m[2].toLowerCase()]);
+  for (const m of pageText.matchAll(AGO_EN)) ages.push((/^\d/.test(m[1]) ? Number(m[1]) : 1) * UNIT_DAYS[m[2].toLowerCase()]);
   for (const m of pageText.matchAll(AGO_HE)) ages.push((m[1] ? Number(m[1]) : 1) * UNIT_DAYS[m[2]]);
   if (POSTED_TODAY.test(pageText)) ages.push(0);
   if (YESTERDAY.test(pageText)) ages.push(1);
@@ -139,9 +145,54 @@ export function listedDate(raw, pageText, today) {
   return statedAges(pageText).some((stated) => Math.abs(age - stated) <= Math.max(2, stated * 0.25)) ? iso : null;
 }
 
-// An ad the site itself keeps as history: an archive address, or the archive notice on the page.
+// ── WHAT THE PROVIDER SAYS ABOUT A RESULT ───────────────────────────────────
+// Every result's text opens with the provider's own note (seen on all 28
+// results of the live search of 2026-10-11): a citation marker in private-use
+// characters, the word limit, and when the PAGE was published and crawled —
+//   "\uE200cite\uE202turn0search7\uE201 [wordlim: 200] Published: 1.5 years ago; Crawled: 2 months ago; …"
+// The note is not the page. Left in the text, "Crawled: 2 months ago" would
+// let a claimed date two months back be "verified" by the day the provider
+// looked — the one thing a listing date must never be. So the note is taken
+// off before the text is read, and the one fact in it that is about the page,
+// its publication age, is kept as the provider's statement.
+const PROVIDER_NOTE = /^\s*(?:[\uE000-\uF8FF]cite[\uE000-\uF8FF][^\uE000-\uF8FF\s]*[\uE000-\uF8FF]\s*)?(?:\[wordlim:\s*\d+\]\s*)?((?:(?:published|crawled):\s*[^;\n]*;\s*)*)/iu;
+const AGE_WORDS = { today: 0, yesterday: 1, 'last week': 7, 'last month': 30, 'last year': 365 };
+
+/** An age stated in words ("1.5 years ago", "last month", "today"), in days, or null. */
+function ageInDays(phrase) {
+  const s = String(phrase ?? '').trim().toLowerCase();
+  if (s in AGE_WORDS) return AGE_WORDS[s];
+  const m = /^(\d+(?:\.\d+)?|an?|one)\s+(minute|hour|day|week|month|year)s?\s+ago$/.exec(s);
+  return m ? (/^\d/.test(m[1]) ? Number(m[1]) : 1) * UNIT_DAYS[m[2]] : null;
+}
+
+/**
+ * A result's text without the provider's note, and the page's publication age
+ * in days when the note states one. The crawl age is dropped: it dates the
+ * visit, not the page. Total: text without a note comes back as it is.
+ */
+export function providerNote(raw) {
+  const text = typeof raw === 'string' ? raw : '';
+  const m = PROVIDER_NOTE.exec(text);
+  if (!m || !m[0]) return { text, published_days: null };
+  let published = null;
+  for (const f of m[1].matchAll(/(published|crawled):\s*([^;\n]*);/giu)) {
+    if (f[1].toLowerCase() === 'published') published ??= ageInDays(f[2]);
+  }
+  return { text: text.slice(m[0].length), published_days: published };
+}
+
+/** The date an age in days comes to, counted back from `today`, as YYYY-MM-DD; null when either is not a number. */
+export function dateDaysAgo(days, today) {
+  const now = Date.parse(`${String(today ?? '').slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(now) || typeof days !== 'number' || !Number.isFinite(days) || days < 0) return null;
+  return new Date(now - Math.round(days) * DAY_MS).toISOString().slice(0, 10);
+}
+
+// An ad the site itself keeps as history: an archive address, or the archive notice on the page
+// (ad.co.il's archive notice; Homeless's "this deal appears to have closed", seen live 2026-10-11).
 const ARCHIVE_ADDRESS = /\/archive\//i;
-const ARCHIVE_NOTICE = /(מודעת ארכיון|archived (ad|listing)|this (ad|listing) (has|is) (expired|ended|no longer))/i;
+const ARCHIVE_NOTICE = /(מודעת ארכיון|עסקה זו כבר נסגרה|archived (ad|listing)|this (ad|listing) (has|is) (expired|ended|no longer))/i;
 /** Does the site itself say this ad is no longer live? */
 export function isArchived(url, pageText) {
   return ARCHIVE_ADDRESS.test(String(url ?? '')) || ARCHIVE_NOTICE.test(String(pageText ?? ''));
@@ -183,12 +234,16 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
   }
   const pageText = new Map();
   const pageTitle = new Map();
+  const pagePublished = new Map();
   for (const r of Array.isArray(provenance?.results) ? provenance.results : []) {
     const key = pageKey(r?.url);
+    // The provider's note comes off the text first; what it says about the page's age is kept apart.
+    const note = providerNote(r?.text);
     // The title and the snippet each on a line of their own: two lines are two rows.
-    const body = [r?.title, r?.text].filter((v) => typeof v === 'string').join('\n');
+    const body = [r?.title, typeof r?.text === 'string' ? note.text : null].filter((v) => typeof v === 'string').join('\n');
     if (key && body) pageText.set(key, `${pageText.get(key) ?? ''}\n${body}`);
     if (key && typeof r?.title === 'string' && r.title.trim() && !pageTitle.has(key)) pageTitle.set(key, r.title);
+    if (key && note.published_days != null && !pagePublished.has(key)) pagePublished.set(key, note.published_days);
   }
 
   const evidence = [];
@@ -230,7 +285,10 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
       stock: EVIDENCE_STOCK.includes(e?.stock) ? e.stock : 'unknown',
       shipping,
       shipping_ils: shipping ? Math.round(toIls(shipping, currency, fx) ?? 0) || null : null,
-      listed: listedDate(e?.listed, pageText.get(key), seen),
+      // The listing's date: the one the page's own text bears out; failing that, the age the provider states
+      // for the page — when the page IS the listing. A page that lists many things is published once and
+      // changes daily, so its age says nothing about any one ad on it.
+      listed: listedDate(e?.listed, pageText.get(key), seen) ?? (page === 'search_or_category' ? null : dateDaysAgo(pagePublished.get(key), seen)),
       archived: isArchived(url, pageText.get(key)),
       seen,
     });

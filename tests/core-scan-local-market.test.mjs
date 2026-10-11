@@ -24,7 +24,7 @@ import {
   buildValuation, normalizeReferences, aggregate, weightedQuantile, localStrength, verifyEvidence, requalify,
   WEIGHT, LOCAL_STRENGTH, DISPERSION, SET_ASIDE, BASIS, NEGOTIATION,
 } from '../api/_lib/scan/valuation.js';
-import { localityOf, pageTypeOf, listedDate, freshnessOf, isArchived, FRESHNESS_DAYS } from '../api/_lib/scan/evidence.js';
+import { localityOf, pageTypeOf, listedDate, freshnessOf, isArchived, providerNote, dateDaysAgo, FRESHNESS_DAYS } from '../api/_lib/scan/evidence.js';
 import { buildMarketPrompt, MARKET_STAGES } from '../api/_lib/scan/market.js';
 import { runPrice, resetMarketCache, SCAN_STATUS } from '../api/_lib/scan/service.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
@@ -132,6 +132,34 @@ describe('LM-1 where a price is from, what page it was on, and how old the listi
     assert.deepEqual([e.archived, e.listed, e.seen], [true, null, TODAY]);
     const v = value([e]);
     assert.deepEqual([v.evidence[0].freshness, v.evidence[0].weight, v.local_strength], ['archived', WEIGHT.freshness.archived, 0]);
+  });
+  test('LM-1h the provider\'s note on a result: its crawl date never dates a listing; its publication age is the provider\'s word, kept as such', () => {
+    // Every result of the live search of 2026-10-11 opened with this note. The one below is the Homeless ad for the mouse.
+    const NOTE = '\uE200cite\uE202turn0search7\uE201 [wordlim: 200] Published: 1.5 years ago; Crawled: 2 months ago; ';
+    assert.deepEqual(providerNote(`${NOTE}Logitech g pro wireless חדש באריזה.`), { text: 'Logitech g pro wireless חדש באריזה.', published_days: 547.5 });
+    assert.deepEqual(providerNote('\uE200cite\uE202turn0search0\uE201 [wordlim: 200] Crawled: last month; מק"ט אייבורי'), { text: 'מק"ט אייבורי', published_days: null });
+    assert.deepEqual(providerNote('\uE200cite\uE202turn0reddit14\uE201 [wordlim: 200] Published: today; text'), { text: 'text', published_days: 0 });
+    assert.deepEqual(providerNote('a page that says Published: 3 days ago; in its own text'), { text: 'a page that says Published: 3 days ago; in its own text', published_days: null }, 'only the note at the head of a result is the provider\'s');
+    assert.deepEqual([dateDaysAgo(547.5, TODAY), dateDaysAgo(0, TODAY), dateDaysAgo(null, TODAY), dateDaysAgo(3, 'never')], ['2025-04-06', TODAY, null, null]);
+    const url = 'https://m.homeless.co.il/yad2/viewad%2C994310.aspx';
+    const fx = parseBoiRates(BOI_JSON);
+    const reached = extractSearchProvenance(searchItems([url], { text: { [url]: `${NOTE}Logitech g pro wireless חדש באריזה.` } }));
+    const raw = { ...RAW_MARKET.evidence[1], url, title: 'g pro wireless עכבר גיימינג למכירה 430 שח', price: 430, listed: null };
+    // The model gave no date; the provider says the page was published a year and a half ago: the listing is OLDER, not of unknown age.
+    const [e] = verifyEvidence([raw], reached, fx, TODAY, ITEM).evidence;
+    assert.deepEqual([e.listed, freshnessOf(e.listed, TODAY)], ['2025-04-06', 'older']);
+    // The model reports the crawl date as the listing date: the note is not page text, so nothing bears it out, and the provider's publication age stands.
+    const crawl = { ...raw, listed: '2026-08-06' };
+    assert.equal(verifyEvidence([crawl], reached, fx, TODAY, ITEM).evidence[0].listed, '2025-04-06');
+    // With only a crawl date in the note, a claimed date two months back is not verified, and there is no date.
+    const crawledOnly = extractSearchProvenance(searchItems([url], { text: { [url]: '\uE200cite\uE202turn0search7\uE201 [wordlim: 200] Crawled: 2 months ago; Logitech g pro wireless' } }));
+    assert.equal(verifyEvidence([crawl], crawledOnly, fx, TODAY, ITEM).evidence[0].listed, null);
+    // A page that lists many things is published once and changes daily: its age says nothing about any one ad on it.
+    const listUrl = 'https://www.yad2.co.il/market/collections/computer-accessories';
+    const listPage = extractSearchProvenance(searchItems([listUrl], { text: { [listUrl]: `${NOTE}g pro wireless ₪430` } }));
+    assert.equal(verifyEvidence([{ ...raw, url: listUrl, page: 'search_or_category' }], listPage, fx, TODAY, ITEM).evidence[0].listed, null);
+    assert.equal(isArchived(url, 'נראה שעסקה זו כבר נסגרה. לפניכם חיפושים נוספים ועוד מודעות רלוונטיות.'), true, 'Homeless says the deal has closed');
+    assert.equal(listedDate('2025-04-06', 'posted 1.5 years ago', TODAY), '2025-04-06', 'an age with a fraction is read whole, not as its last digit');
   });
   test('LM-1f evidence kept from an earlier search is read by today\'s rules', () => {
     const kept = requalify({ url: 'https://il.ebay.com/b/Logitech/bn_21829535', domain: 'il.ebay.com', price: 56, price_ils: 56, kind: 'used_listing', match: 'exact', market: 'IL' });

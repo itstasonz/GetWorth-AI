@@ -15,7 +15,9 @@
 // one listing:
 //
 //   STRONG        a page for one listing or one product, whose own title or
-//                 text names the product beside the price
+//                 text names the product beside the price — or, as such pages
+//                 are rendered, on the line just above a price that stands on
+//                 a line of its own (ivory.co.il, zap.co.il, live 2026-10-11)
 //   VERIFIED_ROW  a page that lists many things, where the product and the
 //                 price sit in the same row, card or snippet, and that row
 //                 shows no other price. One row, one price: "A ₪300 B ₪450"
@@ -83,7 +85,8 @@ const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר
 // A shop's second price: without VAT (Eilat). It labels the price that follows it, or else the one just before.
 const NO_VAT = /(אילת|eilat|ללא מע"?מ|לפני מע"?מ|without vat|ex\.? ?vat)/gi;
 
-const norm = (v) => String(v ?? '').normalize('NFKC').replace(/''|׳׳/g, '"').toLowerCase();
+// Bidi control characters are dropped: Zap writes "659\u200F₪" with a right-to-left mark between the number and its sign (seen live 2026-10-11).
+const norm = (v) => String(v ?? '').normalize('NFKC').replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').replace(/''|׳׳/g, '"').toLowerCase();
 const words = (text) => [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ t: m[0], at: m.index, end: m.index + m[0].length }));
 const tokens = (v) => words(norm(v)).map((w) => w.t);
 const unit = (u) => (u === 'אינץ' || u === '"' || u === '״' ? 'inch' : u);
@@ -219,6 +222,14 @@ export function bindPrice(claim, page, identity, answer = null) {
     if (m) cuts.push([p.end + m[0].length - 1, p.end + m[0].length]);
   }
   cuts.sort((a, b) => a[0] - b[0]);
+  // THE ROWS: the stretches of text between the cuts.
+  const rows = [];
+  let start = 0;
+  for (const [a, b] of cuts) { if (a > start) rows.push([start, a]); start = Math.max(start, b); }
+  if (start < text.length) rows.push([start, text.length]);
+  const wordsIn = ([a, b], near = null) => all.filter((w) => w.at >= a && w.end <= b && (near == null || Math.abs(w.at - near) <= MAX_DISTANCE));
+  /** The nearest row above row `k` that has words in it, or null. */
+  const rowAbove = (k) => { let j = k - 1; while (j >= 0 && wordsIn(rows[j]).length === 0) j -= 1; return j >= 0 ? rows[j] : null; };
   // Words that may stand before a price without being another listing: the product's own, and a price label.
   const explained = new Set([...own, ...brand, ...tokens(claim.title), ...PRICE_LABELS]);
 
@@ -226,10 +237,20 @@ export function bindPrice(claim, page, identity, answer = null) {
   for (const price of shown) {
     if (noVat.has(price.start)) { reason = BIND_REASON.NO_VAT_PRICE; continue; }
     // THE ROW: the stretch of text this price sits in.
-    let from = 0; let to = text.length;
-    for (const [a, b] of cuts) { if (b <= price.at) from = b; else if (a >= price.at) { to = a; break; } }
-    const row = all.filter((w) => w.at >= from && w.end <= to && Math.abs(w.at - price.at) <= MAX_DISTANCE);
-    const who = whoIn(row, price.at);
+    const k = rows.findIndex(([a, b]) => price.at >= a && price.at < b);
+    if (k < 0) continue;
+    let [from, to] = rows[k];
+    let row = wordsIn([from, to], price.at);
+    let who = whoIn(row, price.at);
+    // A PAGE FOR ONE THING SHOWS ITS PRICE ON A LINE OF ITS OWN, under the line that names the thing: that is how
+    // the provider rendered ivory.co.il and zap.co.il product pages (live, 2026-10-11). The line just above counts
+    // as the price's when it names the product and no price stands between; a line naming anything else breaks
+    // the join. On a page that lists many things a line is a listing, and the line above is somebody else's.
+    if (!who && single) {
+      const above = rowAbove(k);
+      const named = above && !priced.some((p) => p.at >= above[0] && p.end <= from) ? whoIn(wordsIn(above), price.at) : null;
+      if (named && price.at - named.at <= MAX_DISTANCE) { who = named; row = [...wordsIn(above), ...row]; [from] = above; }
+    }
     if (!who) continue;
     // ONE ROW, ONE PRICE. A second price in the row is a second listing, or something the row does not explain:
     // "A ₪300 B ₪450" and "A B ₪300 ₪450" do not say which price is A's.
@@ -248,11 +269,16 @@ export function bindPrice(claim, page, identity, answer = null) {
   }
 
   // A PAGE FOR ONE LISTING: its own title names the product, and this is the only price the page shows.
-  // The title and the price may then sit in different lines and still be one listing.
+  // The title and the price may then sit in different lines and still be one listing — unless the price's
+  // own line, or the line above it, names another model: then the page's one price is that model's.
   if (single && rivals.length === 0 && shown.some((p) => !noVat.has(p.start))) {
     const head = words(norm(page?.title));
     const who = whoIn(head, 0);
-    const v = who ? verdict(head, who, text) : null;
+    const beside = shown.filter((p) => !noVat.has(p.start)).flatMap((p) => {
+      const k = rows.findIndex(([a, b]) => p.at >= a && p.at < b);
+      return k < 0 ? [] : [...(rowAbove(k) ? wordsIn(rowAbove(k)) : []), ...wordsIn(rows[k])];
+    });
+    const v = who ? verdict([...head, ...beside], who, text) : null;
     if (v && !v.refused) return v;
     if (v) reason = v.refused;
   }
