@@ -71,6 +71,8 @@ const SEPARATOR = /\.{3,}|…|[\r\n]+|#{2,}|\s\|\s|•|\s[–—]\s/gu;
 const VARIANT_WORDS = new Set([
   'pro', 'max', 'plus', 'mini', 'ultra', 'lite', 'air', 'se', 'fe', 'xl', 'xs', 'xr', 'neo', 'slim', 'oled', 'ti', 'super', 'superlight',
   'x', 'digital', 'ii', 'iii', 'iv', 'gen', 'generation', 'mk', 'פרו', 'מקס', 'פלוס', 'מיני', 'אולטרה', 'דור',
+  // A fragrance's concentrations and flankers: "Rouge Smoking Extrait" is not "Rouge Smoking".
+  'intense', 'extrait', 'elixir', 'absolu', 'absolue', 'edt', 'edp', 'אינטנס',
 ]);
 // A price that ends its clause: "…₪300, …", "…300 ש"ח. …". What follows is another listing.
 const PRICE_CLOSES = /^\s{0,2}(?:₪|ש"ח|ש״ח|שח|ils|nis|\$|usd|€|eur|£|gbp)?\s{0,2}[,;.](?=\s|$)/;
@@ -82,8 +84,8 @@ const SIGN_BEFORE = new RegExp(`${MARKER}\\s{0,2}$`);
 const SIGN_AFTER = new RegExp(`^\\s{0,2}${MARKER}`);
 const UNIT_WORD = /^(gb|tb|mb|ml|mm|cm|kg|mah|inch|pack|pcs|יח)$/;
 const CODE = /^([a-z]+)(\d+)([a-z]*)$/;                    // g703, tb301, a7iii
-const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר|גיגה|ג'יגה|ג׳יגה|ג"יגה|טרה|"|״)(?![\p{L}\p{N}])/giu;
-const HEBREW_UNITS = { אינץ: 'inch', '"': 'inch', '״': 'inch', גיגה: 'gb', "ג'יגה": 'gb', 'ג׳יגה': 'gb', 'ג"יגה': 'gb', טרה: 'tb' };
+const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר|גיגה|ג'יגה|ג׳יגה|ג"יגה|טרה|מ"ל|מ״ל|מל|"|״)(?![\p{L}\p{N}])/giu;
+const HEBREW_UNITS = { אינץ: 'inch', '"': 'inch', '״': 'inch', גיגה: 'gb', "ג'יגה": 'gb', 'ג׳יגה': 'gb', 'ג"יגה': 'gb', טרה: 'tb', 'מ"ל': 'ml', 'מ״ל': 'ml', מל: 'ml' };
 // A shop's second price: without VAT (Eilat). It labels the price that follows it, or else the one just before.
 const NO_VAT = /(אילת|eilat|ללא מע"?מ|לפני מע"?מ|without vat|ex\.? ?vat)/gi;
 

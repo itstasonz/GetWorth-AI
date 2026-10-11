@@ -30,9 +30,9 @@
 // a made-up answer. Every provider call is made here and nowhere else.
 // ══════════════════════════════════════════════════════════════════════════════
 import { classifyOpenAIFailure } from '../openai-recognition.js';
-import { identifyItem } from './identify.js';
+import { identifyItem, completeIdentity } from './identify.js';
 import { researchMarket, marketDate } from './market.js';
-import { buildValuation, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
+import { buildValuation, incompleteValuation, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import {
@@ -64,11 +64,13 @@ export async function runIdentify({ images, lang, correction = null, prior = nul
   const followupsUsed = prior?.followups ?? 0;
   const t0 = Date.now();
   try {
-    const { identity, meta } = await identifyItem({
+    const { identity: seen, meta } = await identifyItem({
       images, lang, correction, prior: prior?.identity ?? null,
       followupsLeft: MAX_FOLLOWUPS - followupsUsed,
       model, apiKey, safetyIdentifier, fetchImpl,
     });
+    // Does the identity name ONE product the market can be searched for? When not, the server's own question goes on it.
+    const identity = completeIdentity(seen, { lang, followupsLeft: MAX_FOLLOWUPS - followupsUsed });
     // What the owner said the item is travels with the identity, so it is kept with the scan.
     if (correction) identity.owner_correction = String(correction).slice(0, MAX_USER_TEXT);
     return {
@@ -125,7 +127,7 @@ async function recall(key, store, now) {
  * move the price? Step 1 asks a question only then, so an unanswered question
  * means the price is for the family and must say so.
  */
-export const isApproximate = (identity, answer) => !answer && !!identity?.followup?.kind && identity.followup.kind !== 'none';
+export const isApproximate = (identity, answer) => (!answer || answer.unsure === true) && !!identity?.followup?.kind && identity.followup.kind !== 'none';
 /** Is only the item's family established, not its exact model? Then the family's members are its comparables. */
 export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_model_established !== true;
 
@@ -154,6 +156,10 @@ export async function runPrice({
     };
   };
   const noCall = { stage: 'market', model, ms: 0, usage: null, tool_calls: 0, first_search_ms: null };
+  // AN IDENTITY THAT NAMES NO ONE PRODUCT IS NOT SEARCHED FOR. A house of perfume or a brand of blender is a catalogue;
+  // a search for it buys other products' prices (2026-10-11). No call is made and no number is given: the scan asked
+  // for the photograph that would settle it.
+  if (identity?.incomplete) return { status: SCAN_STATUS.INSUFFICIENT, valuation: incompleteValuation(identity.incomplete), market_key: null, fx_date: null, reused: false, call: noCall };
 
   const earlier = await recall(key, store, t0);
   // Fresh research for this item: reuse it. No search, the same evidence, the same price.
@@ -166,6 +172,7 @@ export async function runPrice({
   let found = [];
   let unverified = 0;
   let queries = 0;
+  let planned = 0;
   let pages = 0;
   let searched = false;
   let firstSearchMs = null;
@@ -177,6 +184,7 @@ export async function runPrice({
     found = mergeEvidence(found, verified.evidence);
     unverified += verified.unverified;
     queries += provenance.queries?.length ?? 0;
+    planned += meta.queries_planned ?? 0;
     pages += provenance.sources?.length ?? 0;
     searched = searched || provenance.search_performed;
     firstSearchMs ??= meta.timings?.first_search_ms ?? null;
@@ -216,7 +224,8 @@ export async function runPrice({
     evidence: mergeEvidence(found, earlier?.evidence),
     unverified,
     search_performed: searched,
-    searched: { date: today, queries, pages, stages: [...stages] },
+    // `planned` is how many queries the server built; `queries` how many the tool's own record says it ran.
+    searched: { date: today, queries, planned, pages, stages: [...stages] },
     fx_date: fx?.rate_date ?? null,
   };
   // Only research that really searched is worth keeping.

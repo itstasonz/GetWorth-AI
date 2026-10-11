@@ -74,7 +74,9 @@ export function WrongItemSheet({ open, onClose, onSubmit, identity, copy, rtl })
 /**
  * One source: what it is and where it is from on the first side, its price on
  * the other, in one row, so a price can never be read against the wrong source.
- * The whole row is the link.
+ * The whole row is the link. A title may be Hebrew with a model name in it, or
+ * long: it wraps to two lines and is never clipped mid-word; the price column
+ * keeps its width. When the source was not used, one short line says why.
  */
 function Source({ e, copy }) {
   const original = e.currency === 'ILS' ? formatPrice(e.price) : `${e.price.toLocaleString()} ${e.currency}`;
@@ -87,21 +89,23 @@ function Source({ e, copy }) {
     copy.places[e.market] ?? null,
     copy.freshness[e.freshness] ?? null,
   ].filter(Boolean).join(' · ');
+  const why = !e.used && e.set_aside ? copy.why[e.set_aside] ?? null : null;
   return (
     <li>
       <a
         href={e.url} target="_blank" rel="noopener noreferrer"
         className="flex items-start justify-between gap-3 py-3 state-layer rounded-control"
       >
-        <span className="min-w-0 space-y-0.5">
-          <span className="block text-body-sm text-text-primary truncate"><Bidi>{e.title || e.domain}</Bidi></span>
+        <span className="min-w-0 flex-1 space-y-0.5">
+          <span className="block text-body-sm text-text-primary line-clamp-2 break-words"><Bidi>{e.title || e.domain}</Bidi></span>
           <span className="block text-meta text-text-muted">{facts}</span>
+          {why && <span className="block text-meta text-text-secondary">{why}</span>}
           <span className="flex items-center gap-1 text-meta text-text-muted">
             <bdi dir="ltr">{e.domain}</bdi>
             <ExternalLink className="w-3 h-3" aria-hidden="true" />
           </span>
         </span>
-        <span className="shrink-0 text-end">
+        <span className="shrink-0 text-end whitespace-nowrap">
           <bdi dir="ltr" className="block text-label text-text-primary">{original}</bdi>
           {converted && <bdi dir="ltr" className="block text-meta text-text-muted">{converted}</bdi>}
           {shipping && <span className="block text-meta text-text-muted"><Bidi>{shipping}</Bidi></span>}
@@ -111,13 +115,56 @@ function Source({ e, copy }) {
   );
 }
 
+// WHICH GROUP A FOUND PRICE BELONGS TO. Three, and a price is in exactly one:
+//   used       it took part in the price
+//   context    it was verified and is shown for what it is, but a price is not read from it: the new price, a
+//              listing abroad or an old or sealed Israeli one when no current Israeli listing stands, a shop's
+//              refurbished unit with no private listing beside it, a price from abroad Israel made unnecessary
+//   rejected   not this product (another model, an accessory, a part), above the new price, far out of line, or
+//              a price the page did not tie to the product
+const CONTEXT = new Set(['abroad_without_israeli_reference', 'israeli_listing_old_or_sealed', 'retail_refurbished_without_private_resale', 'local_evidence_sufficient']);
+const isAnchor = (e) => e.kind === 'new_retail' && !e.set_aside && (e.match === 'exact' || e.match === 'close_comparable');
+export function groupEvidence(evidence) {
+  const groups = { used: [], context: [], rejected: [] };
+  for (const e of Array.isArray(evidence) ? evidence : []) {
+    if (!e || typeof e !== 'object') continue;
+    if (e.used) groups.used.push(e);
+    else if (isAnchor(e) || CONTEXT.has(e.set_aside)) groups.context.push(e);
+    else if (e.set_aside) groups.rejected.push(e);
+  }
+  return groups;
+}
+
+function Group({ title, items, copy, open = true }) {
+  if (items.length === 0) return null;
+  const list = <ul className="divide-y divide-subtle">{items.map((e) => <Source key={`${e.url}|${e.price}`} e={e} copy={copy} />)}</ul>;
+  if (open) {
+    return (
+      <div className="space-y-1">
+        <p className="text-label text-text-muted">{title} · {items.length}</p>
+        {list}
+      </div>
+    );
+  }
+  // Rejected results are counted and kept behind one tap: what was NOT this product is detail, not the answer.
+  return (
+    <details className="space-y-1">
+      <summary className="text-label text-text-muted cursor-pointer state-layer rounded-control py-1">{title} · {items.length}</summary>
+      {list}
+    </details>
+  );
+}
+
+/**
+ * "Why this price?" / "What I found". The answer first, in two or three lines;
+ * then the sources in three groups — used, context, rejected — each labelled
+ * for what it is; how the price was worked out last, behind one tap.
+ */
 export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
   const v = valuation ?? {};
   const counts = v.counts ?? {};
   const evidence = Array.isArray(v.evidence) ? v.evidence : [];
-  // Priced: what the price rests on, then the new prices it was measured against; what was set aside is counted, not listed.
-  // Unpriced: every verified price that was found, each labelled for what it is, so the context can be seen and checked.
-  const shown = evidence.filter((e) => e.used || (e.kind === 'new_retail' && !e.set_aside) || (!priced && e.set_aside && e.set_aside !== 'price_not_tied_to_product'));
+  const groups = groupEvidence(evidence);
   // A shop's refurbished offers that were used are support, not second-hand listings: counted apart from them.
   const refurbishedUsed = counts.refurbished_used ?? evidence.filter((e) => e.used && e.kind === 'refurbished').length;
   const privateUsed = Math.max(0, (counts.resale ?? 0) - refurbishedUsed);
@@ -132,52 +179,56 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
   const unexplained = Object.entries(reasons).filter(([reason]) => !copy.aside?.[reason]).reduce((sum, [, n]) => sum + n, 0);
   const older = evidence.filter((e) => e.used && (e.freshness === 'older' || e.freshness === 'archived')).length;
   const range = v.reference_range;
+  const nothing = groups.used.length + groups.context.length + groups.rejected.length === 0;
   return (
     <Sheet open={open} onClose={onClose} title={priced ? copy.whyTitle : copy.whatFound}>
       <div className="space-y-4 overflow-y-auto" style={{ maxHeight: '62vh' }}>
+        {/* THE ANSWER, SHORT. */}
         <div className="space-y-1 text-body text-text-primary">
-          <p className="font-semibold">{copy.found(privateUsed)}</p>
-          {privateUsed > 0 && (
+          <p className="font-semibold">{copy.found(priced ? privateUsed : 0)}</p>
+          {priced && privateUsed > 0 && (
             <p className="text-body-sm text-text-secondary">{copy.fromIsrael(Math.max(0, il))} · {copy.fromAbroad(Math.max(0, intl))}</p>
           )}
-          {refurbishedUsed > 0 && <p className="text-body-sm text-text-secondary">{copy.refurbishedSupport(refurbishedUsed)}</p>}
-          {range && <p>{copy.relevantRange}: {copy.range(range)}</p>}
+          {priced && refurbishedUsed > 0 && <p className="text-body-sm text-text-secondary">{copy.refurbishedSupport(refurbishedUsed)}</p>}
+          {priced && range && <p>{copy.relevantRange}: {copy.range(range)}</p>}
+          {priced && <p>{copy.confidenceLine}: {copy.levels[v.price_confidence] ?? copy.levels.low}</p>}
+          {!priced && v.no_price_reason && copy.noPriceWhy?.[v.no_price_reason] && <p className="text-body-sm text-text-secondary">{copy.noPriceWhy[v.no_price_reason]}</p>}
           {v.retail_new_ils && (
             <p>{copy.newInIsrael}: <bdi dir="ltr">{formatPrice(v.retail_new_ils)}</bdi>{v.retail_new_in_stock === false ? ` ${copy.outOfStock}` : ''}</p>
           )}
           {v.retail_new_range?.dispersed && <p className="text-body-sm text-text-secondary">{copy.retailDisagree(formatPrice(v.retail_new_range.low), formatPrice(v.retail_new_range.high))}</p>}
-          {priced && <p>{copy.confidenceLine}: {copy.levels[v.price_confidence] ?? copy.levels.low}</p>}
-          {!priced && v.no_price_reason && copy.noPriceWhy?.[v.no_price_reason] && <p className="text-body-sm text-text-secondary">{copy.noPriceWhy[v.no_price_reason]}</p>}
         </div>
 
-        {priced && (
-          <div className="space-y-1 text-body-sm text-text-secondary">
-            {v.basis === 'similar_models' && <p>{copy.similarWhy}</p>}
-            {v.basis !== 'similar_models' && v.approximate && <p>{copy.approximateWhy}</p>}
-            {v.dispersed && <p>{copy.dispersedWhy}</p>}
-            {v.intl_adjusted === true && <p>{copy.intlAdjusted(v.intl_scale)}</p>}
-            {v.intl_adjusted === false && <p>{copy.intlUnadjusted}</p>}
-            {intl > 0 && <p>{copy.abroadNoShipping}</p>}
-            <p>{copy.how}</p>
-            <p>{copy.conditionsHow}</p>
+        {/* THE SOURCES, IN THREE GROUPS. */}
+        {nothing
+          ? <p className="text-body-sm text-text-secondary">{copy.noSources}</p>
+          : (
+            <div className="space-y-4">
+              <Group title={copy.groupUsed} items={groups.used} copy={copy} />
+              <Group title={copy.groupContext} items={groups.context} copy={copy} />
+              <Group title={copy.groupRejected} items={groups.rejected} copy={copy} open={false} />
+            </div>
+          )}
+
+        {/* HOW, BEHIND ONE TAP. */}
+        <details>
+          <summary className="text-label text-text-muted cursor-pointer state-layer rounded-control py-1">{copy.details}</summary>
+          <div className="space-y-1 pt-2 text-body-sm text-text-secondary">
+            {priced && v.approximate && <p>{copy.approximateWhy}</p>}
+            {priced && v.dispersed && <p>{copy.dispersedWhy}</p>}
+            {priced && v.intl_adjusted === true && <p>{copy.intlAdjusted(v.intl_scale)}</p>}
+            {priced && v.intl_adjusted === false && <p>{copy.intlUnadjusted}</p>}
+            {priced && intl > 0 && <p>{copy.abroadNoShipping}</p>}
+            {(counts.unbound ?? 0) > 0 && <p>{copy.unbound(counts.unbound)}</p>}
+            {(counts.abroad_unused ?? 0) > 0 && <p>{copy.abroadUnused(counts.abroad_unused)}</p>}
+            {explained.map(([reason, n]) => <p key={reason}>{copy.aside[reason](n)}</p>)}
+            {unexplained > 0 && <p>{copy.setAside(unexplained)}</p>}
+            {older > 0 && <p>{copy.olderUsed(older)}</p>}
+            {priced && <p>{copy.how}</p>}
+            {priced && <p>{copy.conditionsHow}</p>}
+            {v.searched?.date && <p>{copy.searchedOn(v.searched.date)}</p>}
           </div>
-        )}
-
-        <div className="space-y-1 text-body-sm text-text-secondary">
-          {(counts.unbound ?? 0) > 0 && <p>{copy.unbound(counts.unbound)}</p>}
-          {(counts.abroad_unused ?? 0) > 0 && <p>{copy.abroadUnused(counts.abroad_unused)}</p>}
-          {explained.map(([reason, n]) => <p key={reason}>{copy.aside[reason](n)}</p>)}
-          {unexplained > 0 && <p>{copy.setAside(unexplained)}</p>}
-          {older > 0 && <p>{copy.olderUsed(older)}</p>}
-          {v.searched?.date && <p>{copy.searchedOn(v.searched.date)}</p>}
-        </div>
-
-        <div className="space-y-1">
-          <p className="text-label text-text-muted">{copy.sources}</p>
-          {shown.length > 0
-            ? <ul className="divide-y divide-subtle">{shown.map((e) => <Source key={`${e.url}|${e.price}`} e={e} copy={copy} />)}</ul>
-            : <p className="text-body-sm text-text-secondary">{copy.noSources}</p>}
-        </div>
+        </details>
       </div>
     </Sheet>
   );

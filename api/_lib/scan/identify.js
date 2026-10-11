@@ -217,6 +217,85 @@ export function normalizeIdentity(raw, { ownerStated = false, followupsLeft = 1 
   return identity;
 }
 
+// ── WHAT A SEARCH NEEDS TO KNOW FIRST ───────────────────────────────────────
+// Three real scans (2026-10-11) showed what a market search cannot do: price a
+// perfume known only by its house (it came back with another house's perfume),
+// or a blender known only by its brand (it came back with other blenders). A
+// market search is paid for, and one that cannot name the product buys
+// nothing. So before the search, the server — not the model — checks that the
+// identity names ONE product, and when it does not, asks for the one photograph
+// that would settle it. The rules are few and stated:
+//
+//   a brand alone            no model, no family, no model number: a catalogue,
+//                            not a product. Ask for the model name or label.
+//   a fragrance              needs its NAME and its SIZE before any price: the
+//                            same house sells many at very different prices,
+//                            and 30 ml is not 100 ml. Then, before the price,
+//                            how much is left — the one fact the owner knows.
+//   electronics, appliances  when the exact model is not established, no model
+//                            number was read and the photograph suggests no
+//                            alternatives, ask for the model label: the family
+//                            alone cannot be priced for this product.
+//
+// The owner's own word ("Wrong item?") settles any of these: an owner-stated
+// identity is taken as it is given.
+export const INCOMPLETE = Object.freeze({ BRAND_ONLY: 'brand_only', FRAGRANCE_NAME_OR_SIZE: 'fragrance_name_or_size', MODEL_UNREAD: 'model_not_established' });
+const FRAGRANCE = /(perfume|fragrance|parfum|cologne|eau de (?:toilette|parfum)|\bed[pt]\b|בושם|פרפיום)/iu;
+const APPLIANCE = /(blender|mixer|processor|vacuum|kettle|toaster|microwave|fryer|coffee|espresso|iron\b|heater|washer|dryer|dishwasher|oven|printer|speaker|headphone|earbud|camera|console|router|monitor|television|\btv\b|laptop|tablet|phone|watch|drone|projector|soundbar|scooter|בלנדר|מיקסר|שואב|קומקום|מצנם|מיקרוגל|מצלמה|אוזניות|רמקול|מדפסת|קונסולה)/iu;
+const VOLUME = /\d+(?:\.\d+)?\s?(ml|מ"ל|מ״ל|מל|oz|fl\.? ?oz)(?![\p{L}\p{N}])/iu;
+const ASK = {
+  [INCOMPLETE.BRAND_ONLY]: { en: 'Take a clear photo of the model name or the label, so the exact product can be identified.', he: 'צלמו בבירור את שם הדגם או את התווית, כדי שאפשר יהיה לזהות את המוצר המדויק.' },
+  [INCOMPLETE.FRAGRANCE_NAME_OR_SIZE]: { en: 'Take a clear photo of the label or the sticker on the bottom of the bottle, so the fragrance name and size can be read.', he: 'צלמו בבירור את התווית או את המדבקה בתחתית הבקבוק, כדי שאפשר יהיה לקרוא את שם הבושם ואת הנפח.' },
+  [INCOMPLETE.MODEL_UNREAD]: { en: 'Take a clear photo of the model label (usually on the underside or the back), so the exact model can be identified.', he: 'צלמו בבירור את תווית הדגם (בדרך כלל בתחתית או מאחור), כדי שאפשר יהיה לזהות את הדגם המדויק.' },
+};
+const REMAINING = {
+  en: { question: 'How much perfume is left in the bottle?', options: ['Full or sealed', 'About 75%', 'About half', 'Under 25%'] },
+  he: { question: 'כמה בושם נשאר בבקבוק?', options: ['מלא או סגור', 'בערך 75%', 'בערך חצי', 'פחות מ־25%'] },
+};
+const REMAINING_ANSWERED = /(%|full|sealed|half|quarter|מלא|סגור|חצי|רבע)/iu;
+
+/** Is this item a fragrance? Read from what the photograph established, never from the brand alone. */
+export const isFragrance = (i) => FRAGRANCE.test([i?.item_type, i?.product_family, i?.canonical_name, i?.display_name].filter(Boolean).join(' '));
+
+/** Why the identity cannot yet be searched for as ONE product, or null when it can. */
+export function identityGap(identity) {
+  const i = identity ?? {};
+  if (!i.is_sellable_item || i.owner_stated) return null;
+  if (isFragrance(i)) return (i.model || i.product_family) && VOLUME.test(String(i.size_or_capacity ?? '')) ? null : INCOMPLETE.FRAGRANCE_NAME_OR_SIZE;
+  if (!i.model && !i.product_family && !i.model_number) return i.brand ? INCOMPLETE.BRAND_ONLY : null;
+  const technical = i.category === 'Electronics' || APPLIANCE.test(String(i.item_type ?? ''));
+  if (technical && !i.exact_model_established && !i.model_number && (i.alternatives?.length ?? 0) === 0) return INCOMPLETE.MODEL_UNREAD;
+  return null;
+}
+
+/**
+ * The identity with the server's own question on it, when the search needs one.
+ *
+ * `incomplete` names what is missing; while it is set the market step does not
+ * run. The question is asked while the scan's allowance lasts; the owner can
+ * always say what the item is instead. A fragrance that IS named asks, before
+ * its price, how much is left: a required choice, answered (or "not sure")
+ * before the search.
+ */
+export function completeIdentity(identity, { lang = 'he', followupsLeft = 1 } = {}) {
+  const out = { ...identity, followup: { ...identity.followup } };
+  const l = lang === 'en' ? 'en' : 'he';
+  const gap = identityGap(out);
+  if (gap) {
+    out.incomplete = gap;
+    out.followup = followupsLeft > 0
+      ? { kind: 'photo', affects: 'identity', question: ASK[gap][l], options: [], required: true }
+      : { kind: 'none', affects: 'none', question: null, options: [] };
+    return out;
+  }
+  if (isFragrance(out) && followupsLeft > 0 && !(out.followup.kind === 'choice' && REMAINING_ANSWERED.test(out.followup.options.join(' ')))) {
+    out.followup = { kind: 'choice', affects: 'price', question: REMAINING[l].question, options: [...REMAINING[l].options], required: true };
+  } else if (out.followup.kind === 'choice' && isFragrance(out)) {
+    out.followup = { ...out.followup, required: true };
+  }
+  return out;
+}
+
 /**
  * The identity call. ONE request, no retry and no second model.
  * Resolves to { identity, meta } or throws an Error `classifyOpenAIFailure` understands.

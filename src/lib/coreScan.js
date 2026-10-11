@@ -26,6 +26,7 @@ export const STAGE = Object.freeze({
   PRICING: 'pricing',           // step 2 is in flight; the identity is already shown
   PRICED: 'priced',
   INSUFFICIENT: 'insufficient', // identified, but no price it will stand behind
+  NEEDS_DETAIL: 'needs_detail', // identified, but one detail the price needs is missing: the server asked for it before searching
   NO_ITEM: 'no_item',
   ERROR: 'error',
 });
@@ -186,6 +187,9 @@ async function identify({ correction = null } = {}) {
     timings: { ...state.timings, identity_shown_ms: state.timings.identity_shown_ms ?? elapsed() },
   });
   if (p.status === 'no_item') { set({ stage: STAGE.NO_ITEM }); deps.onIdentified?.(); return 'no_item'; }
+  // The server found the identity too thin to search for — a house of perfume, a brand of blender — or needs one answer
+  // before the search (how much perfume is left). Its question comes first; no market request is made until it is met.
+  if (p.identity?.incomplete || p.identity?.followup?.required === true) { set({ stage: STAGE.NEEDS_DETAIL }); deps.onIdentified?.(); return 'ok'; }
   // The identity goes on screen now; the price joins it when the search returns.
   set({ stage: STAGE.PRICING });
   deps.onIdentified?.();
@@ -252,18 +256,29 @@ export function addScanPhoto({ dataUrl, lang, onIdentified = null }) {
 
 /** Has the scan a question the owner has not answered or put aside? */
 export const openQuestion = (s = state) => (s.identity?.followup?.kind && s.identity.followup.kind !== 'none' && s.answered === null ? s.identity.followup : null);
-const settled = () => state.stage === STAGE.PRICED || state.stage === STAGE.INSUFFICIENT;
+const settled = () => state.stage === STAGE.PRICED || state.stage === STAGE.INSUFFICIENT || state.stage === STAGE.NEEDS_DETAIL;
 
-/** Answer the question with one of its options (by index): the price is redone for that answer. */
+/** Answer the question with one of its options (by index): the price is done, or redone, for that answer. */
 export function answerQuestion(index, lang) {
   if (!state.active || !settled() || !openQuestion() || !Number.isInteger(index) || !deps) return Promise.resolve();
   deps.lang = lang;
   return guarded('price', () => price({ answer: index }));
 }
 
-/** "Not sure": the price already shown stands, and the question goes away. No request. */
+/**
+ * "Not sure": beside a price already shown it stands and the question goes away, with no request. Before the price,
+ * when the question was required, "not sure" is the answer the search is run with, and the price stays approximate.
+ * A required photograph has no "not sure": the owner can say what the item is, or sell at their own price.
+ */
 export function dismissQuestion() {
-  if (state.active && openQuestion()) set({ answered: 'dismissed' });
+  const q = openQuestion();
+  if (!state.active || !q) return Promise.resolve();
+  if (state.stage === STAGE.NEEDS_DETAIL) {
+    if (q.kind !== 'choice' || !deps) return Promise.resolve();
+    return guarded('price', () => price({ answer: 'unsure' }));
+  }
+  set({ answered: 'dismissed' });
+  return Promise.resolve();
 }
 
 /** "Wrong item?" — the owner says what it really is; the scan looks again with that. */

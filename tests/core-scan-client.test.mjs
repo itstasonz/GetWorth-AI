@@ -42,7 +42,7 @@ function server(script) {
     return new Response(JSON.stringify(next.payload), { status: next.status ?? 200 });
   };
 }
-const identified = (over = {}, n = 1) => ({ payload: { status: 'identified', identity: identityOf(over), default_condition: 'good', token: `tok-${n}`, timings: { total_ms: 3000 } } });
+const identified = (over = {}, n = 1, server = {}) => ({ payload: { status: 'identified', identity: { ...identityOf(over), ...server }, default_condition: 'good', token: `tok-${n}`, timings: { total_ms: 3000 } } });
 const pricedAnswer = (valuation = VALUATION) => ({ payload: { status: valuation.status === 'priced' ? 'priced' : 'insufficient_evidence', valuation, valuation_id: 'val-1', timings: { total_ms: 6000 } } });
 const deps = (over = {}) => ({
   dataUrl: IMG, scanUuid: UUID, lang: 'he', getToken: async () => 'session', compress: async (d) => d, assess: async () => ({ ok: true }), ...over,
@@ -171,6 +171,38 @@ describe('CC-2 the one question never stands in front of the answer', () => {
     assert.equal(snap().stage, STAGE.PRICED);
     assert.equal(openQuestion(), null);
     assert.equal(shown, 1);
+  });
+  // The one exception, and the server's: when the identity names no ONE product (a house of perfume, a brand of
+  // blender), or a fragrance must say how much is left, the question comes BEFORE the search, so no paid search is
+  // spent on a catalogue (the perfume and blender scans of 2026-10-11).
+  const LABEL = { kind: 'photo', affects: 'identity', question: 'Take a clear photo of the label', options: [], required: true };
+  const LEFT = { kind: 'choice', affects: 'price', question: 'How much perfume is left in the bottle?', options: ['Full or sealed', 'About 75%', 'About half', 'Under 25%'], required: true };
+  test('CC-2d a required photograph stops the scan before the price: one request, its own state, no number; the photograph then goes round and the price follows', async () => {
+    server({ identify: [identified({}, 1, { followup: LABEL, incomplete: 'fragrance_name_or_size' }), identified({ model: 'Rouge Smoking', size_or_capacity: '100 ml' }, 2)], price: [pricedAnswer()] });
+    assert.equal(await startScan(deps()), 'ok');
+    assert.equal(snap().stage, STAGE.NEEDS_DETAIL);
+    assert.deepEqual(requests.map((r) => r.body.action), ['identify'], 'no price request: the market is not searched for a house of perfume');
+    assert.equal(openQuestion().kind, 'photo');
+    assert.equal(bandFor(snap().valuation, 'good'), null);
+    assert.equal(buildListingDraft().price, '', 'the owner can still sell, at their own price');
+    await dismissQuestion();
+    assert.deepEqual([snap().stage, requests.length], [STAGE.NEEDS_DETAIL, 1], 'a required photograph has no "not sure"');
+    await addScanPhoto({ dataUrl: IMG, lang: 'he' });
+    assert.deepEqual(requests.map((r) => r.body.action), ['identify', 'identify', 'price']);
+    assert.equal(snap().stage, STAGE.PRICED);
+  });
+  test('CC-2e a required choice stops the scan before the price; an answer, or "not sure", is what the search then runs with', async () => {
+    server({ identify: [identified({}, 1, { followup: LEFT })], price: [pricedAnswer()] });
+    await startScan(deps());
+    assert.deepEqual([snap().stage, requests.length], [STAGE.NEEDS_DETAIL, 1]);
+    await answerQuestion(2, 'he');
+    assert.deepEqual([requests[1].body.action, requests[1].body.answer, snap().stage], ['price', 2, STAGE.PRICED]);
+    scanStore.reset();
+    server({ identify: [identified({}, 1, { followup: LEFT })], price: [pricedAnswer({ ...VALUATION, approximate: true, price_confidence: 'low' })] });
+    await startScan(deps());
+    await dismissQuestion();
+    assert.deepEqual([requests[1].body.action, requests[1].body.answer, snap().stage, snap().valuation.approximate], ['price', 'unsure', STAGE.PRICED, true]);
+    assert.equal(openQuestion(), null);
   });
 });
 

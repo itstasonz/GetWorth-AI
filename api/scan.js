@@ -130,7 +130,8 @@ export function createScanHandler({
         const options = identity.followup?.kind === 'choice' ? identity.followup.options : [];
         const text = body.answer === 'unsure' ? UNSURE[lang] : (Number.isInteger(body.answer) ? options[body.answer] : null);
         if (!text) return done({ error: 'bad_request', detail: 'answer is not one of the options offered' }, 400);
-        answer = { question: identity.followup?.question ?? null, text };
+        // "unsure" is an answer the search may carry, and a price that stays approximate.
+        answer = { question: identity.followup?.question ?? null, text, ...(body.answer === 'unsure' ? { unsure: true } : {}) };
       }
       const result = await price({ identity, answer, scanUuid, model: resolveMarketModel(process.env), apiKey, safetyIdentifier });
       if (result.status === SCAN_STATUS.FAILED) return done({ status: result.status, failure: result.failure, retryable: true }, 200, result.call);

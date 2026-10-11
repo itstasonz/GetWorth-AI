@@ -291,12 +291,13 @@ describe('LM-2 the weighing: general rules, on items of no category', () => {
     });
     assert.equal(JSON.stringify(value([...e].reverse()).prices), JSON.stringify(p));
   });
-  test('LM-2m [13] when the exact model is known and nothing was found for it, similar models give an approximate range and say so', () => {
+  test('LM-2m [13] when the exact model is known and only OTHER models were found, there is no price: another model is another product (the Ninja scan, 2026-10-11)', () => {
     const siblings = [il(650, { match: 'sibling_model', condition: 'like_new' }), il(600, { match: 'sibling_model', page: 'search_or_category' }), il(790, { match: 'sibling_model', condition: 'new_sealed', page: 'search_or_category' })];
     const v = value(siblings);
-    assert.deepEqual([v.status, v.basis, v.approximate, v.family_level, v.price_confidence, v.counts.resale], ['priced', BASIS.SIMILAR, true, true, 'low', 3]);
+    assert.deepEqual([v.status, v.basis, v.prices, v.approximate, v.counts.resale], ['insufficient_evidence', BASIS.ITEM, null, false, 0]);
+    assert.ok(v.evidence.every((e) => e.set_aside === 'different_model'), 'each is shown for what it is: a different model');
     const withExact = value([...siblings, il(400, { listed: CURRENT })]);
-    assert.deepEqual([withExact.basis, withExact.approximate, withExact.counts.resale], [BASIS.ITEM, false, 1], 'one listing for the item itself and the similar models are not used');
+    assert.deepEqual([withExact.status, withExact.basis, withExact.approximate, withExact.counts.resale], ['priced', BASIS.ITEM, false, 1], 'one listing for the item itself prices it, and the other models stay out');
   });
 });
 

@@ -240,29 +240,40 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
   });
 });
 
-describe('CE-2F an item known only by its family is priced from the family', () => {
+describe('CE-2F an item known only by its family is priced from the models it may be — never from other models', () => {
   // Read as used listings: sealed listings alone open no gate (core-scan-valuation CS-2Fe), and this suite is about the family.
-  const SIBLINGS = { evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match: 'sibling_model', market: 'IL', condition: 'unknown', page: 'listing', listed: null })) };
+  const listings = (match) => ({ evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match, market: 'IL', condition: 'unknown', page: 'listing', listed: null })) });
+  // The models under could_also_be, as the prompt has the model report them; and the same three called another model.
+  const COMPARABLES = listings('close_comparable');
+  const SIBLINGS = listings('sibling_model');
   const family = normalizeIdentity({ ...RAW_IDENTITY, canonical_name: 'apple airpods pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], followup: { kind: 'photo', affects: 'identity', question: 'Take a close-up photo of the text inside the lid', options: [] } });
-  const run = (identity) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [SIBLINGS], pageText: {} }), store: fakeStore(), scanUuid: UUID });
-  test('CE-2Fa listings the model called "sibling" price an item whose generation is unknown, as an approximate range', async () => {
+  const run = (identity, market = COMPARABLES) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [market], pageText: {} }), store: fakeStore(), scanUuid: UUID });
+  test('CE-2Fa listings for the models the item may be price an item whose generation is unknown, as an approximate range', async () => {
     const r = await run(family);
     assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.price_confidence, r.valuation.counts.resale], [SCAN_STATUS.PRICED, true, true, 'low', 3]);
     assert.deepEqual(band(r.valuation.prices.good), { list: 570, low: 270, high: 570 });
   });
-  test('CE-2Fb for an item whose exact model is known, the same listings are "similar models": an approximate range, never its own price', async () => {
+  test('CE-2Fb listings the model called another model price nothing — not for the family, and not for an item whose exact model is known', async () => {
     resetMarketCache();
-    const r = await run(normalizeIdentity(RAW_IDENTITY));
-    assert.deepEqual([r.status, r.valuation.basis, r.valuation.approximate, r.valuation.price_confidence], [SCAN_STATUS.PRICED, 'similar_models', true, 'low']);
+    const other = await run(family, SIBLINGS);
+    assert.deepEqual([other.status, other.valuation.prices, other.valuation.counts.resale], [SCAN_STATUS.INSUFFICIENT, null, 0]);
+    resetMarketCache();
+    const r = await run(normalizeIdentity(RAW_IDENTITY), SIBLINGS);
+    assert.deepEqual([r.status, r.valuation.basis, r.valuation.prices, r.valuation.approximate], [SCAN_STATUS.INSUFFICIENT, 'this_item', null, false]);
+    assert.ok(r.valuation.evidence.every((e) => e.set_aside === 'different_model'));
   });
   test('CE-2Fc the market prompt tells the model which models a family-level item may be', async () => {
-    const fetchImpl = fakeProvider({ markets: [SIBLINGS], pageText: {} });
+    const fetchImpl = fakeProvider({ markets: [COMPARABLES], pageText: {} });
     resetMarketCache();
     await runPrice({ identity: family, model: 'm', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID });
     const prompt = fetchImpl.of('market')[0].body.input[0].content[0].text;
     assert.match(prompt, /exact_model_established: no/);
     assert.match(prompt, /could_also_be: Apple AirPods Pro \(1st generation\), Apple AirPods Pro \(2nd generation\)/);
     assert.match(prompt, /is close_comparable, not sibling_model/);
+    assert.match(prompt, /any other model of the family is sibling_model/);
+    // And the queries the server built name each of those models, so the search looks for what the item may be.
+    assert.match(prompt, /Apple AirPods Pro \(1st generation\) יד שנייה למכירה/);
+    assert.match(prompt, /Apple AirPods Pro \(2nd generation\) יד שנייה למכירה/);
   });
 });
 
@@ -421,7 +432,7 @@ describe('CE-4 the two actions', () => {
     await call({ action: 'price', scan_uuid: UUID, token, answer: 1 });
     assert.deepEqual(log.priceArgs.answer, { question: 'What storage size is it?', text: '256 GB' });
     await call({ action: 'price', scan_uuid: UUID, token, answer: 'unsure', lang: 'en' });
-    assert.equal(log.priceArgs.answer.text, 'The owner is not sure');
+    assert.deepEqual([log.priceArgs.answer.text, log.priceArgs.answer.unsure], ['The owner is not sure', true], 'and the price step is told it was "unsure", so the price stays approximate');
   });
   test('CE-4e going round again: a correction or another photograph is a charged identification, a bounded number of times', async () => {
     const { call, log } = harness();

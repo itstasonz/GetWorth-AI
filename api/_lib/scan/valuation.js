@@ -48,12 +48,14 @@ export { pageKey, verifyEvidence, mergeEvidence, requalify } from './evidence.js
 
 export const WITHDRAWN = Object.freeze({
   NO_SEARCH: 'no_search_recorded',
+  /** The identity names a brand or a house, not one product: no search was made for it (identify.js identityGap). */
+  IDENTITY_INCOMPLETE: 'identity_incomplete',
   NO_RESALE_EVIDENCE: 'no_verified_second_hand_reference',
   /** References were found, none of them an Israeli second-hand listing that is current and for a used unit. */
   NO_LOCAL_EVIDENCE: 'no_verified_israeli_second_hand_reference',
 });
-/** What the valuation rests on. */
-export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR: 'similar_models' });
+/** What the valuation rests on: this item, or — when only its family is established — the models it may be. */
+export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family' });
 
 // ── THE STATED ASSUMPTIONS ──────────────────────────────────────────────────
 /**
@@ -103,6 +105,8 @@ export const SET_ASIDE = Object.freeze({
   REFURBISHED_ALONE: 'retail_refurbished_without_private_resale',
   /** Context when the gate is closed: a listing abroad with no Israeli listing to compare it with; an Israeli listing that is old or for a sealed unit. */
   ABROAD_ONLY: 'abroad_without_israeli_reference', NOT_CURRENT: 'israeli_listing_old_or_sealed',
+  /** Another model of the same brand or family: a different product, shown so, never priced from. */
+  DIFFERENT_MODEL: 'different_model',
 });
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
@@ -116,10 +120,17 @@ const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guid
  */
 const PRIVATE_RESALE = new Set(['used_listing', 'sold', 'price_guide']);
 const SOLD_KINDS = new Set(['sold', 'price_guide']);
+/**
+ * ANOTHER MODEL IS ANOTHER PRODUCT. A listing the model called sibling_model
+ * never prices this item, at item level or at family level: the second real
+ * scan (2026-10-11) brought other Ninja machines for a Ninja blender, and
+ * their prices say nothing about this one. When only the family is
+ * established, the models the photograph may show (could_also_be, reported as
+ * close_comparable) are its comparables; any other model of the family is not.
+ */
 const MATCHES = Object.freeze({
   [BASIS.ITEM]: new Set(['exact', 'close_comparable']),
-  [BASIS.FAMILY]: new Set(['exact', 'close_comparable', 'sibling_model']),
-  [BASIS.SIMILAR]: new Set(['exact', 'close_comparable', 'sibling_model']),
+  [BASIS.FAMILY]: new Set(['exact', 'close_comparable']),
 });
 const ANCHOR_MATCHES = MATCHES[BASIS.ITEM];
 
@@ -297,7 +308,7 @@ export function aggregate(kept) {
 export function priceConfidence({ kept, scale, approximate = false, basis = BASIS.ITEM }) {
   // Confidence is earned by PRIVATE references: a shop's refurbished offers support a price and vouch for none.
   const privately = kept.filter((p) => PRIVATE_RESALE.has(p.evidence.kind)).length;
-  if (approximate || basis === BASIS.SIMILAR || privately < 2) return 'low';
+  if (approximate || privately < 2) return 'low';
   const dispersion = dispersionOf(kept);
   if (dispersion > DISPERSION.dispersed) return 'low';
   const local = localWeight(kept);
@@ -336,27 +347,22 @@ export function conditionPrices(good, kept, anchorIl) {
  *
  * Total and deterministic. `familyLevel` is true when only the item's family is
  * established; `approximate` when the exact model is an open question that
- * moves the price. When an item's exact model IS known but nothing was found
- * for it or a close comparable, the family's other models are used as a last
- * resort and the valuation says so: approximate, low confidence, "similar models".
+ * moves the price. Another model of the family is never this item's price:
+ * with nothing found for the item or a close comparable there is no price.
  */
 export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, searched = null, today = null } = {}) {
   const evidence = (Array.isArray(pool) ? pool : []).filter((e) => e && typeof e === 'object');
   const day = today ?? new Date().toISOString().slice(0, 10);
-  let basis = familyLevel ? BASIS.FAMILY : BASIS.ITEM;
-  let norm = normalizeReferences(evidence, { basis, today: day });
-  if (basis === BASIS.ITEM && !norm.points.some((p) => !p.dropped)) {
-    const similar = normalizeReferences(evidence, { basis: BASIS.SIMILAR, today: day });
-    if (similar.points.some((p) => !p.dropped)) { basis = BASIS.SIMILAR; norm = similar; }
-  }
+  const basis = familyLevel ? BASIS.FAMILY : BASIS.ITEM;
+  const norm = normalizeReferences(evidence, { basis, today: day });
   const { points, anchorIl, anchorInStock, anchorRange, scale, localDrives } = norm;
   // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
   const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || anchorLike(e, 'IL') || anchorLike(e, 'INTL'))));
   // THE GATE. An Israeli second-hand price rests on at least one Israeli PRIVATE reference that is current (not known
   // to be old) and for a USED unit, tied to this product. Listings abroad, a shop's refurbished units, new prices and
-  // old or sealed Israeli ads are context: with no such reference standing they price nothing, and each is marked
-  // with why. Once one stands, every reference that qualified takes part as before. (The first real scan, 2026-10-11:
-  // one sealed ad from April 2025, one refurbished unit, one listing in the United States — and ₪430 on the screen.)
+  // old or sealed Israeli ads are context: with none standing they price nothing, each marked with why; once one
+  // stands, every reference that qualified takes part as before. (The first real scan, 2026-10-11: one sealed ad from
+  // April 2025, one refurbished unit, one listing in the United States — and ₪430 on the screen.)
   const qualifies = (p) => p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind) && p.freshness !== 'older' && p.freshness !== 'archived' && p.condition !== 'new_sealed';
   const localEvidence = points.some((p) => !p.dropped && qualifies(p));
   if (!localEvidence) {
@@ -370,7 +376,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
   const count = (pred) => kept.filter((p) => pred(p.evidence)).length;
   const abroad = kept.some((p) => p.evidence.market !== 'IL');
-  const rough = approximate || basis === BASIS.SIMILAR;
+  const rough = approximate;
   const dispersion = dispersionOf(kept);
   const prices = kept.map((p) => p.evidence.price_ils);
 
@@ -383,7 +389,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
         freshness: freshnessOf(e.listed, day, e.archived),
         used: !!p && !p.dropped,
         weight: p && !p.dropped ? round2(p.weight) : 0,
-        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (p || anchor ? null : 'not_comparable')),
+        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (p || anchor ? null : (e.match === 'sibling_model' ? SET_ASIDE.DIFFERENT_MODEL : 'not_comparable'))),
       };
     })),
     counts: {
@@ -444,6 +450,12 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     withdrawn: null,
     no_price_reason: null,
   };
+}
+
+/** The answer when the identity names no one product and no search was made: the empty no-price state, and what was missing (identify.js INCOMPLETE). */
+export function incompleteValuation(missing) {
+  const empty = buildValuation({ evidence: [], searchPerformed: true });
+  return { ...empty, withdrawn: WITHDRAWN.IDENTITY_INCOMPLETE, no_price_reason: WITHDRAWN.IDENTITY_INCOMPLETE, missing: typeof missing === 'string' ? missing.slice(0, 40) : null };
 }
 
 const RANK = (e) => (e.used ? 0 : e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) ? 1 : 2) * 100 + (e.market === 'IL' ? 0 : 1) * 10 + (e.match === 'exact' ? 0 : 1);

@@ -98,7 +98,8 @@ function server(script) {
     return new Response(JSON.stringify(next?.payload ?? { error: 'unscripted' }), { status: next?.status ?? (next ? 200 : 500) });
   };
 }
-const identified = (over = {}) => ({ payload: { status: 'identified', identity: normalizeIdentity({ ...RAW_IDENTITY, ...over }), default_condition: 'good', token: 'tok' } });
+// `server` is what the server adds after normalising: a required question, what the identity still lacks.
+const identified = (over = {}, server = {}) => ({ payload: { status: 'identified', identity: { ...normalizeIdentity({ ...RAW_IDENTITY, ...over }), ...server }, default_condition: 'good', token: 'tok' } });
 const pricedAnswer = (valuation = VALUATION) => ({ payload: { status: valuation.status === 'priced' ? 'priced' : 'insufficient_evidence', valuation, valuation_id: 'val-1' } });
 
 async function open(script, { lang = 'en' } = {}) {
@@ -263,6 +264,37 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     await click(button('Take the photo'));
     assert.deepEqual(app.calls.at(-1), ['addPhoto', 'camera']);
   });
+  test('CV-2d the one exception: a photograph the SERVER requires comes before the price, with no "not sure", no price, no "What I found" — and the owner can still sell or correct', async () => {
+    const LABEL = { kind: 'photo', affects: 'identity', question: 'Take a clear photo of the label or the sticker on the bottom of the bottle, so the fragrance name and size can be read.', options: [], required: true };
+    await settle(await open({ identify: [identified({ display_name: 'BDK Parfums perfume', brand: 'BDK Parfums', model: null, product_family: null, item_type: 'perfume', category: 'Beauty', identity_confidence: 'medium' }, { followup: LABEL, incomplete: 'fragrance_name_or_size' })] }));
+    assert.deepEqual(requests.map((r) => r.action), ['identify']);
+    assert.match(text(), /I can see this is BDK Parfums perfume, but not the exact product\. A market price needs that first, so the market was not searched yet\./);
+    assert.match(text(), /One thing before the price/);
+    assert.match(text(), /label or the sticker on the bottom of the bottle/);
+    assert.doesNotMatch(text(), /₪|Recommended|Checking today's market prices|For a more exact price|Not sure/);
+    assert.ok(button('Take the photo') && button('Upload a photo') && button('Sell at your own price') && button('Wrong item?') && button('Scan another item'));
+    assert.equal(button('What I found'), undefined);
+  });
+  test('CV-2e a choice the server requires (how much perfume is left) is asked before the price; "Not sure" sends the search off with that', async () => {
+    const LEFT = { kind: 'choice', affects: 'price', question: 'How much perfume is left in the bottle?', options: ['Full or sealed', 'About 75%', 'About half', 'Under 25%'], required: true };
+    await settle(await open({ identify: [identified({}, { followup: LEFT })], price: [pricedAnswer({ ...VALUATION, approximate: true, price_confidence: 'low' })] }));
+    assert.match(text(), /One thing before the price/);
+    assert.match(text(), /How much perfume is left in the bottle\?/);
+    assert.doesNotMatch(text(), /₪/);
+    assert.ok(button('About half') && button('Not sure'));
+    await click(button('Not sure'));
+    assert.deepEqual(requests.map((r) => [r.action, r.answer]), [['identify', undefined], ['price', 'unsure']]);
+    assert.match(text(), /Approximate selling range/);
+  });
+  test('CV-2f the same, in Hebrew', async () => {
+    const LABEL = { kind: 'photo', affects: 'identity', question: 'צלמו בבירור את התווית או את המדבקה בתחתית הבקבוק, כדי שאפשר יהיה לקרוא את שם הבושם ואת הנפח.', options: [], required: true };
+    await settle(await open({ identify: [identified({ display_name: 'בושם BDK Parfums' }, { followup: LABEL, incomplete: 'fragrance_name_or_size' })] }, { lang: 'he' }));
+    assert.match(text(), /זיהיתי שזה בושם BDK Parfums, אבל לא את המוצר המדויק\./);
+    assert.match(text(), /דבר אחד לפני המחיר/);
+    assert.match(text(), /שם הבושם ואת הנפח/);
+    assert.ok(button('לצלם') && button('למכור במחיר שלי') && button('פריט שגוי?'));
+    assert.equal(button('לא בטוח/ה'), undefined);
+  });
 });
 
 describe('CV-3 honest when it cannot price', () => {
@@ -301,14 +333,27 @@ describe('CV-3 honest when it cannot price', () => {
     assert.match(said, /1 refurbished offer from a shop was found\. Without a private second-hand listing to support it, it was not used as a used price\./);
     assert.match(said, /1 listing from abroad was found\. Without an Israeli second-hand listing to compare it with, it is context only/);
     assert.doesNotMatch(said, /Confidence|set aside/);
-    // Every verified price is shown as context, each labelled for what it is, each a link.
-    const links = [...container.querySelectorAll('[role="dialog"] a')];
-    assert.deepEqual(links.map((a) => a.getAttribute('href')), live.evidence.map((e) => e.url));
-    assert.match(links[0].textContent, /Used · exact · Israel · older/);
-    assert.match(links[1].textContent, /Refurbished · exact · Israel/);
-    assert.match(links[2].textContent, /Used · exact · abroad/);
-    assert.match(links[2].textContent, /62 USD/);
-    assert.match(links[3].textContent, /New · exact · Israel/);
+    // Every verified price is shown, each labelled for what it is, each a link — in its group: context first (the
+    // refurbished unit, the listing abroad, the two new prices), then, behind one tap, what was not usable (the ad
+    // above the new price). Nothing is "used".
+    const dialog = container.querySelector('[role="dialog"]');
+    assert.doesNotMatch(said, /Used for the price/);
+    assert.match(said, /Context only, not used for the price · 4/);
+    assert.match(said, /Not this product, or not usable · 1/);
+    const links = [...dialog.querySelectorAll('a')];
+    assert.deepEqual(links.map((a) => a.getAttribute('href')), [live.evidence[1], live.evidence[2], live.evidence[3], live.evidence[4], live.evidence[0]].map((e) => e.url));
+    assert.match(links[0].textContent, /Refurbished · exact · Israel/);
+    assert.match(links[0].textContent, /a shop's refurbished unit, no private listing beside it/, 'each unused source says in one line why');
+    assert.match(links[1].textContent, /Used · exact · abroad/);
+    assert.match(links[1].textContent, /62 USD/);
+    assert.match(links[1].textContent, /abroad, no Israeli listing to compare with/);
+    assert.match(links[2].textContent, /New · exact · Israel/);
+    assert.match(links[4].textContent, /Used · exact · Israel · older/);
+    assert.match(links[4].textContent, /above the new price/);
+    assert.ok(links[4].closest('details'), 'the rejected result sits behind one tap');
+    assert.equal(links[0].closest('details'), null, 'the context does not');
+    // Titles wrap instead of being clipped, and the price column keeps its width.
+    assert.ok(links.every((a) => a.querySelector('.line-clamp-2') && !a.querySelector('.truncate')));
   });
   test('CV-3b a failure keeps the item on screen and offers the step again', async () => {
     await settle(await open({ identify: [identified()], price: [{ payload: { status: 'failed', failure: 'timeout' } }, pricedAnswer()] }));
@@ -360,13 +405,6 @@ describe('CV-5 a price never claims more than its evidence', () => {
     assert.match(text(), /Price confidence: Low/);
     assert.equal(requests.length, 2);
   });
-  test('CV-5e a known model priced from similar models is a range, and says which kind', async () => {
-    const similar = { ...VALUATION, approximate: true, basis: 'similar_models', price_confidence: 'low' };
-    await settle(await open({ identify: [identified()], price: [pricedAnswer(similar)] }));
-    assert.match(text(), /Approximate selling range/);
-    assert.match(text(), /No listing was found for this exact model, so this is a range from similar models\./);
-    assert.doesNotMatch(text(), /product family|Recommended listing price/);
-  });
   test('CV-5f prices that are far apart are shown as a range, not as one confident number', async () => {
     const dispersed = { ...VALUATION, dispersed: true, price_confidence: 'low' };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(dispersed)] }));
@@ -394,7 +432,7 @@ describe('CV-4 the two sheets', () => {
     assert.equal(container.querySelector('[role="dialog"]'), null);
     assert.match(text(), /Logitech G Pro Wireless/);
   });
-  test('CV-4b "Why this price?" says how the price was calculated and shows what it rests on, as links; what was set aside is counted, not listed', async () => {
+  test('CV-4b "Why this price?" says how the price was calculated and shows what it rests on, as links; what was set aside is counted and kept behind one tap', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
     await click(button('Why this price?'));
     const dialog = container.querySelector('[role="dialog"]');
@@ -414,8 +452,17 @@ describe('CV-4 the two sheets', () => {
     assert.match(said, /1 result was a different product or variant, an accessory or a part, so it was not used\./);
     assert.doesNotMatch(said, /set aside/);
     assert.match(said, /Market searched on 2026-10-06/);
+    // Three groups: what the price rests on, the new price as context, and — behind one tap — what was not usable.
+    assert.match(said, /Used for the price · 2/);
+    assert.match(said, /Context only, not used for the price · 1/);
+    assert.match(said, /Not this product, or not usable · 2/);
     const links = [...dialog.querySelectorAll('a')];
-    assert.deepEqual(links.map((a) => a.getAttribute('href')), [SOURCES.IL_USED_1, SOURCES.INTL_USED, SOURCES.IL_RETAIL]);
+    assert.deepEqual(links.map((a) => a.getAttribute('href')), [SOURCES.IL_USED_1, SOURCES.INTL_USED, SOURCES.IL_RETAIL, 'https://shop.example.co.il/p/pricey', 'https://shop.example.co.il/p/skates']);
+    assert.ok(links.slice(0, 3).every((a) => !a.closest('details')) && links.slice(3).every((a) => a.closest('details')));
+    assert.match(links[3].textContent, /above the new price/);
+    assert.match(links[4].textContent, /a different product, accessory or part/);
+    // How it was worked out is there, behind one tap.
+    assert.ok([...dialog.querySelectorAll('details summary')].some((s) => /How this was worked out/.test(s.textContent)));
     assert.ok(links.every((a) => a.getAttribute('target') === '_blank' && a.getAttribute('rel') === 'noopener noreferrer'));
     assert.match(links[0].textContent, /Used · exact · Israel · current/, 'what it is, how exact, where from, how fresh');
     assert.match(links[1].textContent, /Sold · exact · abroad$|Sold · exact · abroad[^·]/);
@@ -423,7 +470,6 @@ describe('CV-4 the two sheets', () => {
     assert.match(links[2].textContent, /New · exact · Israel/);
     assert.match(links[1].textContent, /70 USD/);
     assert.match(links[1].textContent, /≈ ₪245/);
-    assert.doesNotMatch(said, /Mouse skates|overpriced/);
   });
   test('CV-4g a shop\'s refurbished offer that was used is counted as support, not as a second-hand listing', async () => {
     const v = {

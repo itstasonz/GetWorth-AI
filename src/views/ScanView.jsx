@@ -59,11 +59,16 @@ function Identity({ identity, copy, done, lang }) {
   );
 }
 
-/** The one question: offered beside a price already given, never in front of it. */
-function Question({ question: f, copy, lang, onPhoto, onUpload }) {
+/**
+ * The one question. Usually offered beside a price already given, never in
+ * front of it. When the server REQUIRED it — the photograph that names the
+ * product, or how much perfume is left — it comes before the search, and a
+ * required photograph has no "not sure".
+ */
+function Question({ question: f, copy, lang, onPhoto, onUpload, required = false }) {
   return (
     <div className="rounded-container border border-subtle bg-surface p-4 space-y-3">
-      <p className="text-label text-text-muted">{copy.refine}</p>
+      <p className="text-label text-text-muted">{required ? copy.needed : copy.refine}</p>
       <p className="text-title-sm text-text-primary"><Bidi>{f.question}</Bidi></p>
       {f.kind === 'choice' ? (
         <div className="flex flex-wrap gap-2">
@@ -76,7 +81,7 @@ function Question({ question: f, copy, lang, onPhoto, onUpload }) {
         <>
           <Btn fullWidth onClick={onPhoto}><Camera className="w-4 h-4" aria-hidden="true" /> {copy.takePhoto}</Btn>
           <Btn fullWidth onClick={onUpload}><Upload className="w-4 h-4" aria-hidden="true" /> {copy.uploadPhoto}</Btn>
-          <Btn variant="ghost" fullWidth onClick={dismissQuestion}>{copy.notSure}</Btn>
+          {!required && <Btn variant="ghost" fullWidth onClick={dismissQuestion}>{copy.notSure}</Btn>}
         </>
       )}
     </div>
@@ -128,6 +133,7 @@ export default function ScanView() {
   const looking = s.stage === STAGE.IDLE || s.stage === STAGE.PREPARING || s.stage === STAGE.IDENTIFYING;
   const band = bandFor(s.valuation, s.condition);
   const settled = s.stage === STAGE.PRICED || s.stage === STAGE.INSUFFICIENT;
+  const needsDetail = s.stage === STAGE.NEEDS_DETAIL;
   const question = openQuestion(s);
   // A range, not one number, whenever one number would claim too much: the exact model is still an open
   // question that moves the price, or the prices found disagree with each other.
@@ -165,7 +171,7 @@ export default function ScanView() {
                 <>
                   <p className="text-label text-text-muted">{copy.approxLabel}</p>
                   <p className="text-display text-text-primary">{copy.range(band)}</p>
-                  {approximate && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_models' ? copy.similarNote : copy.approxNote}</p>}
+                  {approximate && <p className="text-body-sm text-text-secondary">{copy.approxNote}</p>}
                 </>
               ) : (
                 <>
@@ -203,17 +209,27 @@ export default function ScanView() {
           </div>
         )}
 
-        {settled && question && (
+        {/* The product is not named well enough to search for, or one answer is needed first: no market request yet. */}
+        {needsDetail && (
+          <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
+            <p className="text-body text-text-primary"><Bidi>{copy.needsDetail(identity.display_name)}</Bidi></p>
+            {!question && <p className="text-body-sm text-text-secondary">{copy.needsDetailHint}</p>}
+          </div>
+        )}
+
+        {(settled || needsDetail) && question && (
           <Question
-            question={question} copy={copy} lang={lang}
+            question={question} copy={copy} lang={lang} required={needsDetail || question.required === true}
             onPhoto={() => addPhoto('camera')} onUpload={() => fileRef.current?.click()}
           />
         )}
 
-        {settled && (
+        {needsDetail && <Btn fullWidth size="lg" onClick={sellFromScan}>{copy.sellOwnPrice}</Btn>}
+
+        {(settled || needsDetail) && (
           <div className="flex items-center justify-between">
             <Btn variant="ghost" onClick={() => setSheet('wrong')}>{copy.wrongItem}</Btn>
-            <Btn variant="ghost" onClick={() => setSheet('why')}>{s.stage === STAGE.PRICED ? copy.whyPrice : copy.whatFound}</Btn>
+            {settled && <Btn variant="ghost" onClick={() => setSheet('why')}>{s.stage === STAGE.PRICED ? copy.whyPrice : copy.whatFound}</Btn>}
           </div>
         )}
 
@@ -233,7 +249,7 @@ export default function ScanView() {
           </div>
         )}
 
-        {(settled || s.stage === STAGE.NO_ITEM || s.stage === STAGE.ERROR) && (
+        {(settled || needsDetail || s.stage === STAGE.NO_ITEM || s.stage === STAGE.ERROR) && (
           <Btn fullWidth onClick={close}>{copy.scanAgain}</Btn>
         )}
 

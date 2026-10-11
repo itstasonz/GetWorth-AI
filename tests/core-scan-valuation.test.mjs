@@ -19,7 +19,7 @@ import assert from 'node:assert/strict';
 
 import {
   roundNice, pageKey, verifyEvidence, mergeEvidence, normalizeReferences, weightedQuantile, aggregate, priceConfidence,
-  buildValuation, marketKey, WITHDRAWN, BASIS, CONDITION_FACTOR, NEGOTIATION,
+  buildValuation, marketKey, WITHDRAWN, BASIS, SET_ASIDE, CONDITION_FACTOR, NEGOTIATION,
 } from '../api/_lib/scan/valuation.js';
 import { normalizeIdentity, buildIdentityPrompt, IDENTITY_SCHEMA, occursInText } from '../api/_lib/scan/identify.js';
 import { buildMarketPrompt, MARKET_SCHEMA } from '../api/_lib/scan/market.js';
@@ -88,13 +88,14 @@ describe('CS-2 irrelevant results never reach the price', () => {
     item({ price: 300, kind: 'used_listing', match: 'sibling_model' }),
     item({ price: 70, kind: 'new_retail', match: 'accessory' }),
   ];
-  test('CS-2a only the exact used unit is priced from; the new unit is the anchor; the rest is set aside', () => {
+  test('CS-2a only the exact used unit is priced from; the new unit is the anchor; the rest is set aside, the other model named as one', () => {
     const v = value(NINJA());
     assert.equal(v.status, 'priced');
     assert.deepEqual([v.counts.resale, v.counts.il_used_exact, v.counts.retail_il, v.counts.not_comparable], [1, 1, 1, 3]);
     assert.equal(v.retail_new_ils, 600);
     assert.deepEqual(v.evidence.filter((e) => e.used).map((e) => e.price), [450]);
-    assert.deepEqual(v.evidence.filter((e) => e.set_aside === 'not_comparable').map((e) => e.price).sort((a, b) => a - b), [70, 180, 300]);
+    assert.deepEqual(v.evidence.filter((e) => e.set_aside === 'not_comparable').map((e) => e.price).sort((a, b) => a - b), [70, 180]);
+    assert.deepEqual(v.evidence.filter((e) => e.set_aside === SET_ASIDE.DIFFERENT_MODEL).map((e) => e.price), [300], 'the CB103 is another Ninja: a different product, said so');
   });
   test('CS-2b the part, the sibling and the accessory change nothing: with or without them the price is the same', () => {
     const all = NINJA();
@@ -106,24 +107,29 @@ describe('CS-2 irrelevant results never reach the price', () => {
   });
 });
 
-describe('CS-2F when only the family is known, the family\'s models are its comparables', () => {
-  // The real evidence of a live scan (2026-10-06): AirPods Pro, generation not established. The model
-  // found three Israeli listings for AirPods Pro 2 and called each a sibling model.
-  // (Those three listings were for SEALED units; sealed listings alone open no gate — CS-2Fe — so here they are read as used ones.)
-  const AIRPODS = (condition = 'unknown') => [300, 450, 650].map((price) => item({ price, kind: 'used_listing', match: 'sibling_model', condition }));
-  test('CS-2Fa for an item whose exact model IS known, a sibling model is used only when nothing else was found, and never as this item\'s own price', () => {
-    const v = value(AIRPODS());
-    assert.deepEqual([v.status, v.basis, v.approximate, v.price_confidence, v.counts.resale], ['priced', BASIS.SIMILAR, true, 'low', 3]);
-    const withExact = value([...AIRPODS(), item({ price: 500 })]);
+describe('CS-2F when only the family is known, the models it may be are its comparables — and another model never is', () => {
+  // The real evidence of a live scan (2026-10-06): AirPods Pro, generation not established. The model found three
+  // Israeli listings for AirPods Pro 2 — one of the models the photograph may show, which the prompt has it report
+  // as close_comparable. (Those three listings were for SEALED units; sealed listings alone open no gate — CS-2Fe —
+  // so here they are read as used ones.) The same three called sibling_model are ANOTHER model: they price nothing.
+  const AIRPODS = (condition = 'unknown', match = 'close_comparable') => [300, 450, 650].map((price) => item({ price, kind: 'used_listing', match, condition }));
+  const OTHERS = (condition = 'unknown') => AIRPODS(condition, 'sibling_model');
+  test('CS-2Fa another model of the brand never prices this item, whether or not anything else was found: it is shown as a different model', () => {
+    const v = value(OTHERS());
+    assert.deepEqual([v.status, v.withdrawn, v.prices, v.counts.resale], ['insufficient_evidence', WITHDRAWN.NO_RESALE_EVIDENCE, null, 0]);
+    assert.ok(v.evidence.every((e) => e.set_aside === SET_ASIDE.DIFFERENT_MODEL && !e.used));
+    const withExact = value([...OTHERS(), item({ price: 500 })]);
     assert.deepEqual([withExact.basis, withExact.approximate, withExact.counts.resale, withExact.counts.not_comparable], [BASIS.ITEM, false, 1, 3]);
+    assert.equal(value(OTHERS(), { familyLevel: true, approximate: true }).status, 'insufficient_evidence', 'nor at family level: the family\'s OTHER models are other products');
   });
-  test('CS-2Fb at family level the same listings price the family: approximate, low confidence, worked by hand', () => {
+  test('CS-2Fb at family level the models the item may be price the family: approximate, low confidence, worked by hand', () => {
     // Each asking price x0.9, condition not stated so taken as "good": 270, 405, 585. Equal weights: the centre
     // is 405. The range is where the weight lies: down to 270, up by the most a range may reach (+40%): 567.
     // Asking price max(405 / 0.9, 567) = 567 → ₪570.
     const v = value(AIRPODS(), { familyLevel: true, approximate: true });
     assert.deepEqual([v.status, v.basis, v.approximate, v.family_level, v.price_confidence], ['priced', BASIS.FAMILY, true, true, 'low']);
     assert.deepEqual([v.counts.resale, v.counts.il_used_close, v.counts.il_used_exact, v.counts.not_comparable], [3, 3, 0, 0]);
+    assert.equal(JSON.stringify(v.prices), JSON.stringify(value(AIRPODS(), { familyLevel: true, approximate: true }).prices), 'deterministic');
     assert.deepEqual({ list: v.prices.good.list, low: v.prices.good.low, high: v.prices.good.high }, { list: 570, low: 270, high: 570 });
     assert.equal(v.prices.new_sealed.basis, 'adjusted');
     assert.equal(v.prices.good.basis, 'adjusted', 'a condition that was not stated vouches for nothing');
@@ -132,7 +138,7 @@ describe('CS-2F when only the family is known, the family\'s models are its comp
     const v = value(AIRPODS('new_sealed'), { familyLevel: true, approximate: true });
     assert.deepEqual([v.status, v.withdrawn, v.prices, v.counts.resale, v.counts.il_qualifying], ['insufficient_evidence', WITHDRAWN.NO_LOCAL_EVIDENCE, null, 0, 0]);
     assert.ok(v.evidence.every((e) => e.set_aside === 'israeli_listing_old_or_sealed'));
-    const withUsed = value([...AIRPODS('new_sealed'), item({ price: 400, match: 'sibling_model', condition: 'good' })], { familyLevel: true, approximate: true });
+    const withUsed = value([...AIRPODS('new_sealed'), item({ price: 400, match: 'close_comparable', condition: 'good' })], { familyLevel: true, approximate: true });
     assert.deepEqual([withUsed.status, withUsed.counts.resale, withUsed.prices.new_sealed.basis], ['priced', 4, 'listings'], 'one used listing opens it, and the sealed ones then take part as sealed');
   });
   test('CS-2Fc at family level an accessory, a part, a box and a bundle still never count', () => {
