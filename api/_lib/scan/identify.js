@@ -79,7 +79,8 @@ export const IDENTITY_SCHEMA = strict({
   identity_precision: { type: 'string', enum: [...PRECISIONS] },
   attributes: {
     type: 'array', maxItems: MAX_ATTRIBUTES,
-    items: strict({ name: { type: 'string' }, value: nullable, basis: { type: 'string', enum: ['observed', 'inferred', 'unknown'] }, matters: { type: 'string', enum: [...IMPACTS] } }),
+    // "confirmed" is what the OWNER said in an earlier round; the model may carry it, and the server checks it against its own record (applyConfirmed).
+    items: strict({ name: { type: 'string' }, value: nullable, basis: { type: 'string', enum: ['observed', 'inferred', 'unknown', 'confirmed'] }, matters: { type: 'string', enum: [...IMPACTS] } }),
   },
   // What the model would ask, if anything. The SERVER chooses which one, when, and whether at all.
   clarifications: {
@@ -180,7 +181,10 @@ export function normalizeIdentity(raw, { ownerStated = false, followupsLeft = 1 
   identity.market_class = oneOf(r.market_class, MARKET_CLASSES, marketClassOf(identity));
   identity.identity_precision = oneOf(r.identity_precision, PRECISIONS, precisionOf(identity.market_class));
   identity.attributes = (Array.isArray(r.attributes) ? r.attributes : [])
-    .map((a) => ({ name: attributeName(a?.name), value: text(a?.value, 60), basis: oneOf(a?.basis, ['observed', 'inferred', 'unknown'], 'unknown'), matters: oneOf(a?.matters, IMPACTS, 'low') }))
+    // The model's "confirmed" is only its word for what the owner said: it is read as inferred here, and becomes confirmed
+    // only where the server's own record of the owner's answers says so (applyConfirmed). A seller's statement is never
+    // promoted to something the photograph showed, and the model cannot promote one either.
+    .map((a) => ({ name: attributeName(a?.name), value: text(a?.value, 60), basis: oneOf(a?.basis === 'confirmed' ? 'inferred' : a?.basis, ['observed', 'inferred', 'unknown'], 'unknown'), matters: oneOf(a?.matters, IMPACTS, 'low') }))
     .filter((a) => a.name).slice(0, MAX_ATTRIBUTES);
   // A value the photograph did not show is not a value: an inferred attribute keeps its word but never passes for a fact.
   for (const a of identity.attributes) if (!a.value) a.basis = 'unknown';
@@ -360,17 +364,60 @@ export function selectQuestion(identity, { lang = 'he', followupsLeft = 1 } = {}
 
 // Core fields a confirmed attribute may settle, by the names the model is asked to use.
 const CORE_FIELDS = { model: 'model', model_number: 'model_number', variant: 'variant', storage: 'size_or_capacity', capacity: 'size_or_capacity', size: 'size_or_capacity', 'bottle size': 'size_or_capacity', volume: 'size_or_capacity', color: 'color', colour: 'color' };
-/** The owner's confirmed facts, written over the model's guesses: a confirmed attribute is never silently replaced. */
+// The model names an attribute in its own words on every look: "remaining" one round, "remaining volume" the next. The
+// owner's answer settles both. Only these qualifiers are read as the same attribute: "model" is never "model number".
+const QUALIFIERS = /^(volume|capacity|amount|level|left|remaining|size)$/;
+const sameAttribute = (a, b) => {
+  const x = tokens(a); const y = tokens(b);
+  if (!x.length || !y.length) return false;
+  if (x.join(' ') === y.join(' ')) return true;
+  const [short, long] = x.length < y.length ? [x, y] : [y, x];
+  return long.length === short.length + 1 && short.every((t, k) => t === long[k]) && QUALIFIERS.test(long.at(-1));
+};
+// What a note about the unknown says, once the owner has said it: "remaining amount unknown" beside "remaining: about half".
+const REMAINING_WORDS = /(remaining|left|fill|quantity|נשאר|נותר|כמות|מלא)/iu;
+const settledBy = (note, c) => {
+  const n = String(note).toLowerCase();
+  return tokens(c.attribute).some((t) => t.length >= 3 && n.includes(t)) || (c.attribute === 'remaining' && REMAINING_WORDS.test(n));
+};
+/**
+ * The owner's confirmed facts, written over the model's guesses: a confirmed attribute is never silently replaced, is
+ * marked as the OWNER's word (basis "confirmed", never "observed"), and a note the model wrote about not knowing it is
+ * taken down: what the owner has answered is no longer uncertain.
+ */
 function applyConfirmed(identity) {
   for (const c of identity.confirmed ?? []) {
     // "Not sure" is recorded so the question is not asked again; it settles nothing and names nothing.
     if (c.unsure) continue;
-    const have = (identity.attributes ?? []).find((a) => a.name === c.attribute);
+    const have = (identity.attributes ?? []).find((a) => sameAttribute(a.name, c.attribute));
     if (have) { have.value = c.value; have.basis = 'confirmed'; have.matters = have.matters === 'low' ? 'medium' : have.matters; }
     else if ((identity.attributes?.length ?? 0) < MAX_ATTRIBUTES && !ASKED_ATTRIBUTE.test(c.attribute)) identity.attributes.push({ name: c.attribute, value: c.value, basis: 'confirmed', matters: 'high' });
     const field = CORE_FIELDS[c.attribute];
     if (field && c.value) identity[field] = c.value;
+    if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c)) identity.uncertainty_note = null;
   }
+}
+
+/**
+ * ONE MORE PHOTOGRAPH, AFTER THE SEARCH. The founder's Ninja blender (2026-10-11,
+ * real scan): the identity named one product by its marketing name, so the
+ * search ran — and came back with other Ninja machines, because the Israeli
+ * market lists appliances and electronics by their model CODE, which the
+ * photograph did not show. When the search for an exact-model technical item
+ * ends with no second-hand reference and no model code was ever read, the model
+ * label is the one photograph that can change the NEXT search. It is offered
+ * beside the result, never required — the search is done, the owner may sell
+ * at their own price — and once per scan: a label that still shows no code is
+ * not asked for again.
+ */
+export function questionAfterResearch(identity, valuation, { lang = 'he', followupsLeft = 1 } = {}) {
+  const i = identity ?? {};
+  if (followupsLeft <= 0 || !valuation || valuation.status === 'priced') return null;
+  if (i.owner_stated || i.incomplete || i.asked_label || (i.followup?.kind && i.followup.kind !== 'none')) return null;
+  if (strategyFor(i) !== STRATEGY.EXACT || (valuation.counts?.resale ?? 0) > 0) return null;
+  const technical = i.market_class === 'consumer_electronics' || i.category === 'Electronics' || APPLIANCE.test(String(i.item_type ?? ''));
+  if (!technical || i.model_number || (i.search?.model_numbers?.length ?? 0) > 0) return null;
+  return { kind: 'photo', affects: 'identity', question: ASK[INCOMPLETE.MODEL_UNREAD][lang === 'en' ? 'en' : 'he'], options: [], unit: null, attribute: 'model label' };
 }
 
 /**

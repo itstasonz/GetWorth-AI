@@ -64,6 +64,7 @@ export const SCAN_COPY = {
     needsDetailHint: 'Tell me what it is under "Wrong item?", or sell at your own price.',
     answer: 'Continue',
     confirmedFacts: (facts) => `You confirmed: ${facts}.`,
+    supportingPhotos: (n) => (n === 1 ? '+ 1 supporting photo, used to identify the item' : `+ ${n} supporting photos, used to identify the item`),
     similarItemsNote: 'This kind of item has no exact model. The range is based on listings for similar items, not the same one.',
     similarItemsWhy: 'This kind of item is compared by type, size, material and condition, so the listings are for similar items, not the same one.',
     // Why there is no price on the result, by reason, when the general sentence would mislead.
@@ -208,6 +209,7 @@ export const SCAN_COPY = {
     needsDetailHint: 'אפשר לכתוב מה זה תחת "פריט שגוי?", או למכור במחיר שלכם.',
     answer: 'המשך',
     confirmedFacts: (facts) => `אישרתם: ${facts}.`,
+    supportingPhotos: (n) => (n === 1 ? '+ תמונה תומכת אחת, לזיהוי הפריט בלבד' : `+ ${n} תמונות תומכות, לזיהוי הפריט בלבד`),
     similarItemsNote: 'לפריט מהסוג הזה אין דגם מדויק. הטווח מבוסס על מודעות לפריטים דומים, לא לאותו פריט.',
     similarItemsWhy: 'פריט מהסוג הזה מושווה לפי סוג, גודל, חומר ומצב, ולכן המודעות הן לפריטים דומים, לא לאותו פריט.',
     insufficientBy: {

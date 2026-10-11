@@ -37,7 +37,7 @@ import {
   MAX_BODY_BYTES, MAX_IMAGES, MAX_IMAGE_BYTES, MAX_USER_TEXT, MAX_REVISIONS, MAX_FOLLOWUPS,
 } from './_lib/scan/config.js';
 import { runIdentify, runPrice, startingCondition, SCAN_STATUS } from './_lib/scan/service.js';
-import { recordAnswer } from './_lib/scan/identify.js';
+import { recordAnswer, questionAfterResearch } from './_lib/scan/identify.js';
 import { signScanToken, verifyScanToken } from './_lib/scan/token.js';
 import { chargeScan, refundScan } from './_lib/scan/quota.js';
 import { recordValuation, logScanEvent } from './_lib/scan/persist.js';
@@ -62,6 +62,24 @@ function readImages(value) {
     out.push(img.b64);
   }
   return { images: out };
+}
+
+/**
+ * What the research found and why each price was or was not used, as counts: the queries planned and run, the pages
+ * reached, every reason a price was set aside, the hosts the prices came from. Enough to tell "nothing was found" from
+ * "found and rejected" from "found and unverified" (scripts/scan-trace.mjs reads it); nothing a person could be read from.
+ */
+export function diagnosticsOf(valuation) {
+  const evidence = Array.isArray(valuation?.evidence) ? valuation.evidence : [];
+  const reasons = {};
+  const hosts = {};
+  for (const e of evidence) {
+    const why = e.used ? 'used' : (e.set_aside ?? 'other');
+    reasons[why] = (reasons[why] ?? 0) + 1;
+    const h = String(e.domain ?? 'unknown').slice(0, 60);
+    hosts[h] = (hosts[h] ?? 0) + 1;
+  }
+  return { searched: valuation?.searched ?? null, evidence: evidence.length, reasons, hosts, unverified: valuation?.counts?.unverified ?? null, unbound: valuation?.counts?.unbound ?? null };
 }
 
 /** The handler over injectable dependencies, so the suites drive the real gate without a network. */
@@ -149,11 +167,23 @@ export function createScanHandler({
       }
       const result = await price({ identity, answer, scanUuid, model: resolveMarketModel(process.env), apiKey, safetyIdentifier });
       if (result.status === SCAN_STATUS.FAILED) return done({ status: result.status, failure: result.failure, retryable: true }, 200, result.call);
+      // ONE MORE PHOTOGRAPH MAY CHANGE THE NEXT SEARCH (identify.js questionAfterResearch): when a technical item with no
+      // model code found no second-hand reference, the model label is offered beside the result, in a re-signed token.
+      const more = questionAfterResearch(identity, result.valuation, { lang, followupsLeft: MAX_FOLLOWUPS - (prior.followups ?? 0) });
+      if (more) {
+        identity = { ...identity, followup: more, asked_label: true };
+        base.token = await signScanToken({
+          userId: user.id, scanUuid, identity, started: prior.iat ?? null,
+          counters: { revisions: prior.revisions ?? 0, followups: (prior.followups ?? 0) + 1, identify_ms: prior.identify_ms ?? null },
+        });
+      }
       // What the scan leaves behind: the row a listing links to, and its own timings.
       const clientMs = Number.isFinite(body?.client_elapsed_ms) ? Math.max(0, Math.min(600_000, Math.round(body.client_elapsed_ms))) : null;
       const [valuationId] = await Promise.all([
         record({ userId: user.id, scanUuid, identity, valuation: result.valuation, lang }),
         logEvent(scanUuid, 'core_scan_priced', {
+          // Why the research priced or did not: hosts and reasons only — no page text, no photograph, no person.
+          diagnostics: diagnosticsOf(result.valuation), asked_after: more ? more.attribute : null,
           status: result.status, withdrawn: result.valuation?.withdrawn ?? null, price_confidence: result.valuation?.price_confidence ?? null,
           identity_confidence: identity.identity_confidence, category: identity.category, counts: result.valuation?.counts ?? null,
           identify_ms: prior.identify_ms ?? null, market_ms: result.call?.ms ?? null, first_search_ms: result.call?.first_search_ms ?? null,

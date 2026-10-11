@@ -327,9 +327,14 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const day = today ?? new Date().toISOString().slice(0, 10);
   const basis = strategy === STRATEGY.COMPARABLE ? BASIS.SIMILAR_ITEMS : (familyLevel ? BASIS.FAMILY : BASIS.ITEM);
   const norm = normalizeReferences(evidence, { basis, today: day });
-  const { points, anchorIl, anchorInStock, anchorRange, scale, localDrives } = norm;
+  const { points, scale, localDrives } = norm;
+  let { anchorIl, anchorInStock, anchorRange } = norm;
   // A SPECIALISED MARKET: every reference is verified and shown, and none is priced from — the engine has no method for it.
-  if (strategy === STRATEGY.SPECIALISED) for (const p of points) if (!p.dropped) p.dropped = SET_ASIDE.SPECIALISED_CONTEXT;
+  // That includes the NEW price: a new Toyota's price beside a photographed used Toyota reads as its value (the founder's
+  // Yaris Cross, 2026-10-11), and a new price is a ceiling only where a used price is made under it. Context, not a figure.
+  const specialised = strategy === STRATEGY.SPECIALISED;
+  if (specialised) { for (const p of points) if (!p.dropped) p.dropped = SET_ASIDE.SPECIALISED_CONTEXT; anchorIl = null; anchorInStock = null; anchorRange = null; }
+  const specialisedRetail = (e) => specialised && e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && !!e.price_ils;
   const similar = basis === BASIS.SIMILAR_ITEMS;
   // A shop's price for a SIMILAR item: shown as context, never an anchor, never counted as this item's new price.
   const similarRetail = (e) => similar && e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && !!e.price_ils;
@@ -372,13 +377,13 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const base = {
     evidence: sortEvidence(evidence.map((e) => {
       const p = byEvidence.get(e);
-      const anchor = !similar && (isNewPrice(e, 'IL') || isNewPrice(e, 'INTL'));
+      const anchor = !similar && !specialised && (isNewPrice(e, 'IL') || isNewPrice(e, 'INTL'));
       return {
         ...e,
         freshness: freshnessOf(e.listed, day, e.archived),
         used: !!p && !p.dropped,
         weight: p && !p.dropped ? round2(p.weight) : 0,
-        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (similarRetail(e) ? SET_ASIDE.SIMILAR_RETAIL : (p || anchor ? null : (e.match === 'sibling_model' ? SET_ASIDE.DIFFERENT_MODEL : 'not_comparable')))),
+        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (similarRetail(e) ? SET_ASIDE.SIMILAR_RETAIL : (specialisedRetail(e) ? SET_ASIDE.SPECIALISED_CONTEXT : (p || anchor ? null : (e.match === 'sibling_model' ? SET_ASIDE.DIFFERENT_MODEL : 'not_comparable'))))),
       };
     })),
     counts: {
@@ -388,14 +393,14 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       intl_used_exact: count((e) => e.market !== 'IL' && e.match === 'exact'),
       intl_used_close: count((e) => e.market !== 'IL' && e.match !== 'exact'),
       sold: count((e) => SOLD_KINDS.has(e.kind)),
-      retail_il: similar ? 0 : evidence.filter((e) => isNewPrice(e, 'IL')).length,
+      retail_il: similar || specialised ? 0 : evidence.filter((e) => isNewPrice(e, 'IL')).length,
       // A shop's refurbished offers that qualified: supporting evidence at most, never the used market by themselves.
       retail_refurbished: points.filter((p) => p.evidence.kind === 'refurbished').length,
       // Of the references priced from, how many are a shop's refurbished offers: the screen counts second-hand listings without them.
       refurbished_used: kept.filter((p) => p.evidence.kind === 'refurbished').length,
       // Israeli private references, current and for a used unit: what opens the gate.
       il_qualifying: kept.filter(qualifies).length,
-      not_comparable: evidence.filter((e) => !loose.has(e) && !similarRetail(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
+      not_comparable: evidence.filter((e) => !loose.has(e) && !similarRetail(e) && !specialisedRetail(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
       unbound: loose.size,
       // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.
       abroad_unused: unused,

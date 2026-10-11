@@ -172,6 +172,18 @@ describe('CC-2 the one question never stands in front of the answer', () => {
     await answerQuestion('mostly', 'he');
     assert.equal(requests.length, 2, 'yes or no, or not sure');
   });
+  test('CC-2g the first photograph is the item: a label photographed for the scan joins the identification and never takes its place; when the allowance is full the oldest supporting photograph makes way', async () => {
+    const more = (k) => `${IMG}${'A'.repeat(4 * k)}`;
+    server({ identify: [identified({ followup: PHOTO }, 1), identified({ followup: PHOTO }, 2), identified({ followup: PHOTO }, 3), identified({}, 4)], price: [pricedAnswer(), pricedAnswer(), pricedAnswer(), pricedAnswer()] });
+    await startScan(deps());
+    await addScanPhoto({ dataUrl: more(1), lang: 'he' });
+    assert.deepEqual(snap().images, [IMG, more(1)], 'the item first, the label after it');
+    await addScanPhoto({ dataUrl: more(2), lang: 'he' });
+    assert.deepEqual(snap().images, [IMG, more(1), more(2)]);
+    await addScanPhoto({ dataUrl: more(3), lang: 'he' });
+    assert.deepEqual(snap().images, [IMG, more(2), more(3)], 'the item is never the one that makes way');
+    assert.deepEqual(requests.at(-2).body.images, [IMG, more(2), more(3)], 'every permitted photograph goes to the identification, the item first');
+  });
   test('CC-2c a photograph the scan asked for is added to the same scan, looked at again and re-priced', async () => {
     server({ identify: [identified({ followup: PHOTO }, 1), identified({}, 2)], price: [pricedAnswer(), pricedAnswer()] });
     await startScan(deps());

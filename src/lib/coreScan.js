@@ -260,7 +260,11 @@ export function addScanPhoto({ dataUrl, lang, onIdentified = null }) {
     const image = await prepare(dataUrl);
     if (!image) return;
     if (before === STAGE.ERROR && state.images.length === 0) set({ images: [image] });
-    else set({ images: [...state.images, image].slice(-MAX_SCAN_IMAGES) });
+    // THE FIRST PHOTOGRAPH IS THE ITEM. A label or a sticker photographed for the scan is supporting evidence: it joins
+    // the identification and never takes the item's place as the photograph the screen and the listing lead with.
+    // (The founder's perfume, 2026-10-11: the bottom label had replaced the bottle.) When the allowance is full, the
+    // OLDEST supporting photograph makes way, never the first.
+    else { const [first, ...rest] = state.images; set({ images: [first, ...[...rest, image].slice(-(MAX_SCAN_IMAGES - 1))] }); }
     await identify();
   });
 }

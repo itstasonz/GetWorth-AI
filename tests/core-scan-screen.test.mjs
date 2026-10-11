@@ -233,6 +233,52 @@ describe('CV-6 a Hebrew screen with an English name in it', () => {
   });
 });
 
+describe('CV-9 the founder\'s scans: the item stays the photograph, a fact says what it is, a label is offered after the search', () => {
+  const LABEL = { kind: 'photo', affects: 'identity', question: 'Take a clear photo of the model label (usually on the underside or the back), so the exact model can be identified.', options: [], attribute: 'model label' };
+  test('CV-9a the item\'s photograph leads after a supporting label photograph, which is counted and named for what it is', async () => {
+    await settle(await open({ identify: [identified({}, { followup: { ...LABEL, required: true }, incomplete: 'model_not_established' }), identified({}, {})], price: [pricedAnswer()] }));
+    assert.equal(container.querySelector('img').getAttribute('src'), IMG);
+    assert.doesNotMatch(text(), /supporting photo/);
+    await act(async () => { await scan.addScanPhoto({ dataUrl: `${IMG}AAAA`, lang: 'en' }); });
+    assert.equal(container.querySelector('img').getAttribute('src'), IMG, 'still the item, not the label');
+    assert.match(text(), /\+ 1 supporting photo, used to identify the item/);
+    assert.deepEqual(requests.map((r) => [r.action, r.images?.length]), [['identify', 1], ['identify', 2], ['price', undefined]]);
+  });
+  test('CV-9b a confirmed measurement says what it measures, as the owner\'s word', async () => {
+    const sofa = { display_name: 'Grey corner sofa', brand: null, model: null, category: 'Furniture', item_type: 'corner sofa', identity_confidence: 'medium' };
+    const server = { confirmed: [{ attribute: 'width', value: '200 cm', question: 'Approximately how wide is it?' }], market_class: 'furniture', identity_precision: 'descriptive' };
+    await settle(await open({ identify: [identified(sofa, server)], price: [pricedAnswer({ ...UNPRICED, no_price_reason: 'too_few_comparable_items', withdrawn: 'too_few_comparable_items', retail_new_ils: null })] }));
+    assert.match(text(), /You confirmed: width: 200 cm\./);
+    assert.match(text(), /Only one similar item was verified in Israel/);
+    assert.doesNotMatch(text(), /New, it/);
+  });
+  test('CV-9c a car: no new-car price on the result, and the words say what was found is context', async () => {
+    const car = { display_name: 'Toyota Yaris Cross', brand: 'Toyota', model: 'Yaris Cross', category: 'Vehicles', item_type: 'car', identity_confidence: 'medium' };
+    const v = { ...UNPRICED, no_price_reason: 'no_calibrated_valuation_method_for_this_market', withdrawn: 'no_calibrated_valuation_method_for_this_market', retail_new_ils: null, retail_new_in_stock: null, strategy: 'specialised_market', evidence: [{ ...UNPRICED.evidence[0], price: 161000, price_ils: 161000, set_aside: 'specialised_market_context' }] };
+    await settle(await open({ identify: [identified(car, { market_class: 'vehicle' })], price: [pricedAnswer(v)] }));
+    assert.doesNotMatch(text(), /New, it currently sells|₪161,000/);
+    assert.match(text(), /which I cannot price reliably yet/);
+    assert.ok(button('Sell at your own price') && button('What I found'));
+    await click(button('What I found'));
+    assert.match(text(), /Context only, not used for the price · 1/);
+    assert.doesNotMatch(text(), /New in Israel/);
+  });
+  test('CV-9d after a search that found no second-hand reference, the label photograph is offered beside the result with its own buttons, and "not sure" puts it away', async () => {
+    const blender = { display_name: 'Ninja Power Blender Duo Pro', brand: 'Ninja', model: 'Power Blender Duo Pro', category: 'Home', item_type: 'blender', identity_confidence: 'medium' };
+    const answer = { ...pricedAnswer({ ...UNPRICED, retail_new_ils: null }) };
+    answer.payload = { ...answer.payload, identity: { ...identified(blender).payload.identity, followup: LABEL, asked_label: true }, token: 'tok-2' };
+    await settle(await open({ identify: [identified(blender)], price: [answer] }));
+    assert.match(text(), /For a more exact price/);
+    assert.match(text(), /Take a clear photo of the model label/);
+    assert.ok(button('Take the photo') && button('Upload a photo') && button('Not sure') && button('Sell at your own price'));
+    await click(button('Take the photo'));
+    assert.deepEqual(app.calls.at(-1), ['addPhoto', 'camera']);
+    await click(button('Not sure'));
+    assert.doesNotMatch(text(), /Take a clear photo of the model label/);
+    assert.equal(requests.length, 2, 'put away: nothing sent');
+  });
+});
+
 describe('CV-2 the one question sits beside the price, never in front of it', () => {
   const CHOICE = { kind: 'choice', affects: 'price', question: 'What storage size is it?', options: ['128 GB', '256 GB'] };
   test('CV-2a the price is already there; the options are one tap each and an answer re-prices', async () => {
@@ -306,7 +352,7 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     const car = { display_name: 'Toyota Corolla', brand: 'Toyota', model: 'Corolla', category: 'Vehicles', item_type: 'car', identity_confidence: 'medium' };
     const server = { followup: KM, confirmed: [{ attribute: 'year', value: '2019', question: 'What year is the car?' }], eligibility_notes: ['Ownership, registration and accident history cannot be verified from a photograph.'], market_class: 'vehicle' };
     await settle(await open({ identify: [identified(car, server)], price: [pricedAnswer({ ...UNPRICED, no_price_reason: 'no_calibrated_valuation_method_for_this_market', withdrawn: 'no_calibrated_valuation_method_for_this_market', retail_new_ils: null })] }));
-    assert.match(text(), /You confirmed: 2019\./);
+    assert.match(text(), /You confirmed: year: 2019\./, 'the fact with what it is');
     assert.match(text(), /Ownership, registration and accident history cannot be verified from a photograph\./);
     assert.match(text(), /How many kilometres has it travelled\?/);
     const box = container.querySelector('input[type="number"]');

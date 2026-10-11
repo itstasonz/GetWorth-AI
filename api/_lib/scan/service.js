@@ -74,6 +74,8 @@ export async function runIdentify({ images, lang, correction = null, prior = nul
     const identity = completeIdentity(seen, { lang, followupsLeft: MAX_FOLLOWUPS - followupsUsed, confirmed: prior?.identity?.confirmed ?? null });
     // What the owner said the item is travels with the identity, so it is kept with the scan.
     if (correction) identity.owner_correction = String(correction).slice(0, MAX_USER_TEXT);
+    // The label photograph was asked for once already (identify.js questionAfterResearch): that is not asked again.
+    if (prior?.identity?.asked_label) identity.asked_label = true;
     return {
       status: identity.is_sellable_item ? SCAN_STATUS.IDENTIFIED : SCAN_STATUS.NO_ITEM,
       identity,

@@ -56,8 +56,9 @@ function Identity({ identity, copy, done, lang }) {
         {copy.identityConfidence}: <span className="font-semibold text-text-primary">{copy.levels[identity.identity_confidence] ?? copy.levels.low}</span>
       </p>
       {/* What the owner has confirmed, and what a photograph cannot establish (authenticity, a vehicle's papers): said plainly. */}
+      {/* Each fact with WHAT it is: "200 cm" alone does not say width. Said as the owner's word, never as something seen. */}
       {(identity.confirmed ?? []).filter((c) => !c.unsure).length > 0 && (
-        <p className="text-body-sm text-text-secondary"><Bidi>{copy.confirmedFacts((identity.confirmed ?? []).filter((c) => !c.unsure).map((c) => c.value).join(' · '))}</Bidi></p>
+        <p className="text-body-sm text-text-secondary"><Bidi>{copy.confirmedFacts((identity.confirmed ?? []).filter((c) => !c.unsure).map((c) => (/^(followup|detail)$/.test(c.attribute) ? c.value : `${c.attribute}: ${c.value}`)).join(' · '))}</Bidi></p>
       )}
       {(identity.eligibility_notes ?? []).slice(0, 2).map((note) => <p key={note} className="text-body-sm text-text-muted"><Bidi>{note}</Bidi></p>)}
     </div>
@@ -174,7 +175,9 @@ export default function ScanView() {
   const rough = approximate || s.valuation?.dispersed === true;
   const counts = s.valuation?.counts ?? {};
   const israeli = (counts.il_used_exact ?? 0) + (counts.il_used_close ?? 0);
-  const photo = s.images[s.images.length - 1] ?? (s.active ? null : images?.[0]);
+  // The item's own photograph leads; a label photographed for the scan is supporting evidence and is said to be.
+  const photo = s.images[0] ?? (s.active ? null : images?.[0]);
+  const supporting = Math.max(0, s.images.length - 1);
 
   return (
     <div className="fixed inset-0 z-sheet overflow-y-auto bg-canvas" dir={rtl ? 'rtl' : 'ltr'}>
@@ -188,6 +191,7 @@ export default function ScanView() {
         {photo && (
           <div className="rounded-container overflow-hidden bg-surface">
             <img src={photo} alt="" className="w-full max-h-56 object-cover" />
+            {supporting > 0 && <p className="px-3 py-1.5 text-meta text-text-muted">{copy.supportingPhotos(supporting)}</p>}
           </div>
         )}
 
