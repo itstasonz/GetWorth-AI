@@ -203,11 +203,20 @@ async function price({ answer = null } = {}) {
   const r = await post({ action: 'price', token: state.token, ...(answer === null ? {} : { answer }), client_elapsed_ms: elapsed() }, PRICE_TIMEOUT_MS);
   if (refused('price', r)) return;
   const p = r.payload ?? {};
+  // The answer was recorded and another question stands before the search: the identity comes back with it, and the
+  // market is not asked yet. One question at a time, each answer kept.
+  if (p.status === 'identified' && p.identity) {
+    set({ identity: p.identity, token: p.token ?? state.token, answered: null, stage: STAGE.NEEDS_DETAIL });
+    return;
+  }
   if (p.status === 'failed' || !p.valuation) { fail('price', 'other', { code: p.failure ?? 'failed' }); return; }
   set({
     stage: p.status === 'priced' ? STAGE.PRICED : STAGE.INSUFFICIENT,
     valuation: p.valuation,
     valuationId: p.valuation_id ?? null,
+    // With an answer the server re-signed the token and the identity now carries the confirmed fact.
+    ...(p.token ? { token: p.token } : {}),
+    ...(p.identity ? { identity: p.identity } : {}),
     timings: { ...state.timings, price_shown_ms: elapsed() },
   });
   console.log(`[Scan] photo → identity ${state.timings.identity_shown_ms}ms · photo → price ${state.timings.price_shown_ms}ms (server ${p.timings?.total_ms ?? '?'}ms${p.reused ? ', market research reused' : ''})`);
@@ -258,11 +267,17 @@ export function addScanPhoto({ dataUrl, lang, onIdentified = null }) {
 export const openQuestion = (s = state) => (s.identity?.followup?.kind && s.identity.followup.kind !== 'none' && s.answered === null ? s.identity.followup : null);
 const settled = () => state.stage === STAGE.PRICED || state.stage === STAGE.INSUFFICIENT || state.stage === STAGE.NEEDS_DETAIL;
 
-/** Answer the question with one of its options (by index): the price is done, or redone, for that answer. */
-export function answerQuestion(index, lang) {
-  if (!state.active || !settled() || !openQuestion() || !Number.isInteger(index) || !deps) return Promise.resolve();
+/**
+ * Answer the question: one of its options (by index) for a choice or yes/no, a number in its unit for a number
+ * question. The price is done, or redone, for that answer.
+ */
+export function answerQuestion(value, lang) {
+  const q = openQuestion();
+  if (!state.active || !settled() || !q || !deps) return Promise.resolve();
+  const numeric = q.kind === 'number';
+  if (numeric ? !(typeof value === 'number' && Number.isFinite(value) && value >= 0) : !Number.isInteger(value)) return Promise.resolve();
   deps.lang = lang;
-  return guarded('price', () => price({ answer: index }));
+  return guarded('price', () => price({ answer: value }));
 }
 
 /**

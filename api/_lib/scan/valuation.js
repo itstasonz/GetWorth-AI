@@ -43,6 +43,7 @@ import { CONDITION_LADDER } from '../valuation-guard.js';
 import { CONDITIONS } from './config.js';
 import { freshnessOf } from './evidence.js';
 import { isBound } from './binding.js';
+import { STRATEGY } from './strategy.js';
 
 export { pageKey, verifyEvidence, mergeEvidence, requalify } from './evidence.js';
 
@@ -53,9 +54,13 @@ export const WITHDRAWN = Object.freeze({
   NO_RESALE_EVIDENCE: 'no_verified_second_hand_reference',
   /** References were found, none of them an Israeli second-hand listing that is current and for a used unit. */
   NO_LOCAL_EVIDENCE: 'no_verified_israeli_second_hand_reference',
+  /** This KIND of item (a car, a luxury watch, a collectible) is valued by methods this engine has no calibration for: no number. */
+  NO_CALIBRATED_METHOD: 'no_calibrated_valuation_method_for_this_market',
 });
-/** What the valuation rests on: this item, or — when only its family is established — the models it may be. */
-export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family' });
+/** What the valuation rests on: this item; the models it may be, when only its family is established; or similar items, for a thing identified by description. */
+export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR_ITEMS: 'similar_items' });
+// How a kind of item is valued, and what makes two scans "the same thing": strategy.js, re-exported for the callers that read them here.
+export { STRATEGY, strategyFor, marketKey } from './strategy.js';
 
 // ── THE STATED ASSUMPTIONS ──────────────────────────────────────────────────
 /**
@@ -107,6 +112,8 @@ export const SET_ASIDE = Object.freeze({
   ABROAD_ONLY: 'abroad_without_israeli_reference', NOT_CURRENT: 'israeli_listing_old_or_sealed',
   /** Another model of the same brand or family: a different product, shown so, never priced from. */
   DIFFERENT_MODEL: 'different_model',
+  /** Verified, shown, and not priced from: this kind of item is valued by methods this engine does not have. */
+  SPECIALISED_CONTEXT: 'specialised_market_context',
 });
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
@@ -131,6 +138,8 @@ const SOLD_KINDS = new Set(['sold', 'price_guide']);
 const MATCHES = Object.freeze({
   [BASIS.ITEM]: new Set(['exact', 'close_comparable']),
   [BASIS.FAMILY]: new Set(['exact', 'close_comparable']),
+  // A thing identified by description has no "exact": a similar item of the same kind, size and material is its comparable.
+  [BASIS.SIMILAR_ITEMS]: new Set(['exact', 'close_comparable']),
 });
 const ANCHOR_MATCHES = MATCHES[BASIS.ITEM];
 
@@ -308,8 +317,8 @@ export function aggregate(kept) {
 export function priceConfidence({ kept, scale, approximate = false, basis = BASIS.ITEM }) {
   // Confidence is earned by PRIVATE references: a shop's refurbished offers support a price and vouch for none.
   const privately = kept.filter((p) => PRIVATE_RESALE.has(p.evidence.kind)).length;
-  // A price for a FAMILY rests on the models the item may be, not on the item: never more than low.
-  if (approximate || basis === BASIS.FAMILY || privately < 2) return 'low';
+  // A price for a FAMILY, or from SIMILAR items, rests on things that are not this item: never more than low.
+  if (approximate || basis !== BASIS.ITEM || privately < 2) return 'low';
   const dispersion = dispersionOf(kept);
   if (dispersion > DISPERSION.dispersed) return 'low';
   const local = localWeight(kept);
@@ -351,12 +360,14 @@ export function conditionPrices(good, kept, anchorIl) {
  * moves the price. Another model of the family is never this item's price:
  * with nothing found for the item or a close comparable there is no price.
  */
-export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, searched = null, today = null } = {}) {
+export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, strategy = STRATEGY.EXACT, searched = null, today = null } = {}) {
   const evidence = (Array.isArray(pool) ? pool : []).filter((e) => e && typeof e === 'object');
   const day = today ?? new Date().toISOString().slice(0, 10);
-  const basis = familyLevel ? BASIS.FAMILY : BASIS.ITEM;
+  const basis = strategy === STRATEGY.COMPARABLE ? BASIS.SIMILAR_ITEMS : (familyLevel ? BASIS.FAMILY : BASIS.ITEM);
   const norm = normalizeReferences(evidence, { basis, today: day });
   const { points, anchorIl, anchorInStock, anchorRange, scale, localDrives } = norm;
+  // A SPECIALISED MARKET: every reference is verified and shown, and none is priced from — the engine has no method for it.
+  if (strategy === STRATEGY.SPECIALISED) for (const p of points) if (!p.dropped) p.dropped = SET_ASIDE.SPECIALISED_CONTEXT;
   // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
   const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || anchorLike(e, 'IL') || anchorLike(e, 'INTL'))));
   // THE GATE. An Israeli second-hand price rests on at least one Israeli PRIVATE reference that is current (not known
@@ -377,9 +388,9 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
   const count = (pred) => kept.filter((p) => pred(p.evidence)).length;
   const abroad = kept.some((p) => p.evidence.market !== 'IL');
-  // A family-level valuation is approximate by construction, question or no question: the listings are for the models
-  // the item may be, not for the item. (Found 2026-10-11: with no open question it showed as an exact listing price.)
-  const rough = approximate || basis === BASIS.FAMILY;
+  // A family-level valuation, or one from similar items, is approximate by construction, question or no question: the
+  // listings are not for this item. (Found 2026-10-11: with no open question a family price showed as an exact one.)
+  const rough = approximate || basis !== BASIS.ITEM;
   const dispersion = dispersionOf(kept);
   const prices = kept.map((p) => p.evidence.price_ils);
 
@@ -434,13 +445,15 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     intl_adjusted: abroad ? !!scale : null,
     intl_scale: abroad && scale ? round2(scale) : null,
     approximate: rough,
-    family_level: basis !== BASIS.ITEM,
+    family_level: basis === BASIS.FAMILY,
+    strategy,
     searched,
   };
   // `no_price_reason` is the same code under the name the screen reads it by.
   const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason, no_price_reason: reason });
 
   if (!searchPerformed && evidence.length === 0) return withdraw(WITHDRAWN.NO_SEARCH);
+  if (strategy === STRATEGY.SPECIALISED) return withdraw(WITHDRAWN.NO_CALIBRATED_METHOD);
   const good = aggregate(kept);
   // References were found and none of them is an Israeli second-hand listing that stands: say that, not "nothing found".
   if (!good) return withdraw(points.length > 0 && !localEvidence ? WITHDRAWN.NO_LOCAL_EVIDENCE : WITHDRAWN.NO_RESALE_EVIDENCE);
@@ -468,30 +481,4 @@ function sortEvidence(evidence) { return evidence.map((e, i) => [e, i]).sort((a,
 /** How strong the Israeli second-hand evidence in a pool is: what decides whether to look further afield. */
 export function localStrength(evidence, { familyLevel = false, today = null } = {}) {
   return normalizeReferences(Array.isArray(evidence) ? evidence : [], { basis: familyLevel ? BASIS.FAMILY : BASIS.ITEM, today: today ?? new Date().toISOString().slice(0, 10) }).local;
-}
-
-// ── THE MARKET IDENTITY ─────────────────────────────────────────────────────
-const STOP = new Set(['the', 'a', 'an', 'and', 'with', 'series', 'model', 'edition']);
-const tokens = (v) => String(v ?? '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t && !STOP.has(t));
-/** Whether the thing being sold is the whole product or a lesser part of it: what the configuration means for the price. */
-const SCOPE = { complete_item: 'complete', bundle: 'complete', unknown: 'complete' };
-
-/**
- * A key for "the same thing on the market".
- *
- * Built from what the item IS — its catalogue name, its capacity, whether it is
- * the whole product, and the owner's answer when one was given — and from
- * nothing about the photograph: not the image, not the colour, not the
- * language, not the wording of a display name. Two photographs of the same
- * product share one key, and so share one market research.
- */
-export function marketKey(identity, answer = null) {
-  const i = identity ?? {};
-  const name = tokens(i.canonical_name || [i.brand, i.model ?? i.product_family ?? i.item_type, i.variant].filter(Boolean).join(' '));
-  return [
-    [...new Set(name)].sort().join(' '),
-    tokens(i.size_or_capacity).join(''),
-    SCOPE[i.configuration] ?? i.configuration ?? 'complete',
-    tokens(answer?.text).join(' '),
-  ].join('|');
 }

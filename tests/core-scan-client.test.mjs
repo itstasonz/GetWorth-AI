@@ -191,6 +191,21 @@ describe('CC-2 the one question never stands in front of the answer', () => {
     assert.deepEqual(requests.map((r) => r.body.action), ['identify', 'identify', 'price']);
     assert.equal(snap().stage, STAGE.PRICED);
   });
+  test('CC-2f a number question takes a figure; when the server answers with the NEXT question the scan stays before the price, and the newest token is carried', async () => {
+    const YEAR = { kind: 'number', affects: 'identity', question: 'What year is the car?', options: [], unit: null, attribute: 'year', required: true };
+    const KM = { kind: 'number', affects: 'price', question: 'How many kilometres has it travelled?', options: [], unit: 'km', attribute: 'mileage', required: true };
+    const next = { payload: { status: 'identified', identity: { ...identityOf({}), followup: KM, confirmed: [{ attribute: 'year', value: '2019', question: YEAR.question }] }, default_condition: 'good', token: 'tok-2' } };
+    server({ identify: [identified({}, 1, { followup: YEAR })], price: [next, { ...pricedAnswer(), payload: { ...pricedAnswer().payload, token: 'tok-3' } }] });
+    await startScan(deps());
+    assert.deepEqual([snap().stage, openQuestion().kind, requests.length], [STAGE.NEEDS_DETAIL, 'number', 1]);
+    await answerQuestion('2019', 'he');
+    assert.equal(requests.length, 1, 'a string is not a number');
+    await answerQuestion(2019, 'he');
+    assert.deepEqual([requests[1].body.action, requests[1].body.answer, requests[1].body.token], ['price', 2019, 'tok-1']);
+    assert.deepEqual([snap().stage, openQuestion().question, snap().token, snap().identity.confirmed[0].value], [STAGE.NEEDS_DETAIL, KM.question, 'tok-2', '2019'], 'the next required question, before any price');
+    await answerQuestion(85000, 'he');
+    assert.deepEqual([requests[2].body.answer, requests[2].body.token, snap().stage, snap().token], [85000, 'tok-2', STAGE.PRICED, 'tok-3']);
+  });
   test('CC-2e a required choice stops the scan before the price; an answer, or "not sure", is what the search then runs with', async () => {
     server({ identify: [identified({}, 1, { followup: LEFT })], price: [pricedAnswer()] });
     await startScan(deps());

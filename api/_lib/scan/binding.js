@@ -106,11 +106,19 @@ export function namesOf(identity) {
   const i = identity ?? {};
   const brand = new Set(tokens(i.brand));
   const strip = (v) => tokens(v).filter((t) => !brand.has(t));
-  const telling = (run) => run.length > 0 && (run.join('').length >= 4 || run.some((t) => /\d/.test(t)));
+  const descriptive = i.identity_precision === 'descriptive';
+  const telling = (run) => run.length > 0 && (run.join('').length >= 4 || run.some((t) => /\d/.test(t)) || (descriptive && run.length === 1 && /^[א-ת]{3}$/.test(run[0])));
   const model = strip(i.model ?? i.product_family ?? i.canonical_name);
   const variant = strip(i.variant).filter((t) => !model.includes(t));
   const runs = [[...model, ...variant], ...(i.search?.aliases ?? []).map(strip)];
   for (const n of [i.model_number, ...(i.search?.model_numbers ?? [])]) runs.push(tokens(n));
+  // A THING IDENTIFIED BY DESCRIPTION (a sofa, a handmade bowl) has no model name a row must carry: the row must name
+  // what KIND of thing it is — in English (its type) or in Hebrew (what a seller here calls it) — beside its price.
+  // Each telling word of those names is a run of its own: four letters in Latin ("sofa", "lamp"), three in Hebrew, where
+  // words are shorter ("ספה", "שטיח"). Shorter words ("rug", "עץ") name too many things.
+  if (i.identity_precision === 'descriptive') {
+    for (const t of [...tokens(i.item_type), ...tokens(i.search?.hebrew_name), ...strip(i.canonical_name)]) if (t.length >= (/[א-ת]/.test(t) ? 3 : 4) || /\d/.test(t)) runs.push([t]);
+  }
   const seen = new Set();
   return runs.filter((r) => telling(r) && !seen.has(r.join(' ')) && seen.add(r.join(' ')));
 }
@@ -194,6 +202,8 @@ export function bindPrice(claim, page, identity, answer = null) {
   const brand = new Set(tokens(identity?.brand));
   const title = [...new Set(tokens(claim.title).filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !brand.has(t)))].slice(0, 12);
   const exact = claim.match === 'exact';
+  // A thing identified by description has no model a comparable could be "of": its comparables must name the KIND of thing.
+  const descriptive = identity?.identity_precision === 'descriptive';
   const single = SINGLE_ITEM_PAGES.has(page?.type);
   const level = single ? BOUND.STRONG : BOUND.VERIFIED_ROW;
   const mine = sizesIn(norm(`${identity?.size_or_capacity ?? ''} ${answer?.text ?? ''}`));
@@ -202,7 +212,7 @@ export function bindPrice(claim, page, identity, answer = null) {
   const whoIn = (row, at) => {
     const named = nearest(names.flatMap((run) => runsIn(row, run)), at);
     if (named) return named;
-    const titled = !exact && title.length >= 2 && title.every((t) => row.some((w) => w.t === t));
+    const titled = !exact && !descriptive && title.length >= 2 && title.every((t) => row.some((w) => w.t === t));
     return titled ? { at: nearest(row.filter((w) => title.includes(w.t)), at).at, next: null, then: null } : null;
   };
   /**

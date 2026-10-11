@@ -394,7 +394,7 @@ describe('CS-7 identity: unknown is allowed, and a claim to have read something 
     assert.match(p, /Unknown is allowed/);
     assert.match(p, /canonical_name/);
     assert.match(p, /a quarter or more/);
-    assert.match(buildIdentityPrompt({ followupsLeft: 0 }), /A question was already asked/);
+    assert.match(buildIdentityPrompt({ followupsLeft: 0 }), /has already been asked what can be asked for this item\. clarifications must be empty/);
     const m = buildMarketPrompt({ identity: normalizeIdentity(RAW_IDENTITY), today: '2026-10-06', answer: { question: 'Storage?', text: '256 GB' } });
     assert.match(m, /SECOND-HAND IN ISRAEL RIGHT NOW/);
     assert.match(m, /Today is 2026-10-06/);

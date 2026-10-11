@@ -154,7 +154,9 @@ describe('CD-2 before the search, the identity must name ONE product', () => {
     assert.equal(isApproximate(asked, { question: asked.followup.question, text: 'The owner is not sure', unsure: true }), true, 'not knowing does not make the price exact');
   });
   test('CD-2c a brand alone, and a technical item whose model is not read and could be anything, are asked for the model label; a family with alternatives, an owner\'s word, or a model number are enough', () => {
-    const brandOnly = identity({ ...NINJA, product_family: null, model: null, display_name: 'Ninja blender', canonical_name: 'ninja blender', exact_model_established: false });
+    // A branded appliance known by its brand alone. (Its category, Home, would read as household goods, sold by description;
+    // the model's own market_class says what kind of thing it is, and an appliance is sold by model.)
+    const brandOnly = identity({ ...NINJA, market_class: 'consumer_electronics', product_family: null, model: null, display_name: 'Ninja blender', canonical_name: 'ninja blender', exact_model_established: false });
     assert.equal(identityGap(brandOnly), INCOMPLETE.BRAND_ONLY);
     assert.match(completeIdentity(brandOnly, { lang: 'en' }).followup.question, /model name or the label/);
     const familyOnly = identity({ ...NINJA, model: null, exact_model_established: false, alternatives: [] });

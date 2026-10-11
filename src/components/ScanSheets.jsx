@@ -214,7 +214,7 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
         <details>
           <summary className="text-label text-text-muted cursor-pointer state-layer rounded-control py-1">{copy.details}</summary>
           <div className="space-y-1 pt-2 text-body-sm text-text-secondary">
-            {priced && v.approximate && <p>{copy.approximateWhy}</p>}
+            {priced && v.approximate && <p>{v.basis === 'similar_items' ? copy.similarItemsWhy : copy.approximateWhy}</p>}
             {priced && v.dispersed && <p>{copy.dispersedWhy}</p>}
             {priced && v.intl_adjusted === true && <p>{copy.intlAdjusted(v.intl_scale)}</p>}
             {priced && v.intl_adjusted === false && <p>{copy.intlUnadjusted}</p>}

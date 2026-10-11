@@ -25,6 +25,7 @@
 import { extractOpenAIJson } from '../openai-recognition.js';
 import { FENCE_RULE, fence, promptSafe, promptSafeList } from '../prompt-trust.js';
 import { extractSearchProvenance } from '../phaseb/search-provenance.js';
+import { transliterates } from '../script-normalization.js';
 import { streamResponse } from '../v2/openai-stream.js';
 import {
   CONDITIONS, MARKET, MARKET_STAGE_TIMEOUT_MS, MARKET_MAX_OUTPUT_TOKENS, MARKET_SEARCH_CONTEXT_SIZE, MAX_USER_TEXT, resolveMarketEffort,
@@ -89,10 +90,21 @@ function itemBlock(identity, answer) {
     row('hebrew_name', i.search?.hebrew_name),
     i.search?.aliases?.length ? `also_sold_as: ${promptSafeList(i.search.aliases, { items: 3 })}` : null,
     i.search?.model_numbers?.length ? `other_model_numbers: ${promptSafeList(i.search.model_numbers, { items: 3 })}` : null,
+    // What kind of thing, how precisely it is sold, and what is known about it — observed or confirmed, never inferred.
+    row('market_class', i.market_class),
+    row('identity_precision', i.identity_precision),
+    ...(i.attributes ?? []).filter((a) => a.value && (a.basis === 'observed' || a.basis === 'confirmed')).slice(0, 6).map((a) => `${promptSafe(a.name, 40)}: ${promptSafe(a.value, 60)}${a.basis === 'confirmed' ? ' (owner confirmed)' : ''}`),
     answer?.question ? `owner_was_asked: ${promptSafe(answer.question, 200)}` : null,
     answer?.text ? `owner_answered: ${promptSafe(answer.text, MAX_USER_TEXT)}` : null,
   ].filter(Boolean).join('\n'));
 }
+
+// How the matching rule reads for each precision: the one place the prompt adapts to the kind of item.
+const MATCHING = {
+  exact_model: 'match: exact (this product, this configuration), close_comparable (the same product in another colour or capacity, or the directly comparable model), sibling_model (a different model of the family)',
+  family: 'match: exact (this product, this configuration), close_comparable (the same product in another colour or capacity, or one of the models under could_also_be), sibling_model (any other model of the family)',
+  descriptive: 'match: this kind of item has no exact model. exact (the same kind of thing, same size class and material, from the same maker when one is named), close_comparable (the same kind of thing, a similar size or material), sibling_model (a different kind of thing from the same maker)',
+};
 
 // ── THE QUERIES ─────────────────────────────────────────────────────────────
 // The queries are built HERE, from the identity, the same way every time, and
@@ -111,6 +123,8 @@ export const MAX_QUERIES = Object.freeze({ local: 8, expand: 6 });
 const CLASSIFIEDS_SITES = 'site:homeless.co.il OR site:ad.co.il OR site:yad2.co.il';
 const SHOP_SITES = 'zap.co.il OR ksp.co.il OR ivory.co.il OR bug.co.il';
 const clean = (v, max = 80) => promptSafe(v, max);
+// The confirmed attributes that name what an item IS, and so belong in a search for it.
+const SEARCHABLE = /^(year|model year|storage|capacity|generation|trim|edition|model|model number|variant|size|bottle size|volume|engine|reference|followup|detail)$/i;
 
 /**
  * What the item is called, for a search: its exact name (brand, model or
@@ -128,12 +142,20 @@ export function searchNames(identity, answer = null) {
   // The configuration that moves the price belongs in the exact name: the capacity read off the item, and the owner's
   // answer when it names one ("256 GB", "2nd generation") — not when it describes the unit ("About half", "not sure").
   const size = clean(i.size_or_capacity, 30);
-  const detail = answer?.text && answer.unsure !== true && /\d/.test(answer.text) && !/%/.test(answer.text) ? clean(answer.text, 40) : null;
-  const name = [product, size, detail].filter(Boolean).join(' ');
-  // The Hebrew name names THIS product only when it carries the model: "בושם BDK" alone is the house, so the model joins it.
+  const configuration = (v) => v && /\d/.test(v) && !/%/.test(v);
+  const detail = answer?.text && answer.unsure !== true && configuration(answer.text) ? clean(answer.text, 40) : null;
+  // What the owner confirmed joins the exact name when it names WHAT the item is (a car's year, a phone's storage, a
+  // trim) — not when it describes the unit (mileage, width, how much is left): listings are not written by those.
+  const confirmed = (i.confirmed ?? []).filter((c) => !c.unsure && SEARCHABLE.test(c.attribute) && configuration(c.value) && c.value !== answer?.text && c.value !== size).map((c) => clean(c.value, 40)).slice(0, 2);
+  const name = [...new Set([product, size, detail, ...confirmed].filter(Boolean))].join(' ');
+  // The Hebrew name names THIS product only when it carries the model — written in either alphabet ("קורולה" is
+  // "Corolla"): "בושם BDK" alone is the house, so the model joins it.
   const hebrew = clean(i.search?.hebrew_name);
   const model = clean(i.model ?? i.product_family, 60);
-  const carries = (h) => !model || model.toLowerCase().split(/\s+/).every((t) => h.toLowerCase().includes(t));
+  const carries = (h) => {
+    const words = h.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+    return !model || model.toLowerCase().split(/\s+/).every((t) => h.toLowerCase().includes(t) || words.some((w) => transliterates(w, t, { minLength: 3 })));
+  };
   const hebrewName = hebrew && hebrew.toLowerCase() !== name.toLowerCase() ? (carries(hebrew) ? hebrew : `${hebrew} ${model}`) : null;
   return { name, codes, aliases, hebrew: hebrewName, alternatives };
 }
@@ -143,32 +165,50 @@ export function searchNames(identity, answer = null) {
  * before its family, Israel before abroad, Hebrew beside English. Bounded, and
  * the same for the same item.
  */
+// THE MARKET DECIDES THE WORDS. A car is looked for with the words of the car market, a sofa with the Hebrew words a
+// seller here uses, and neither has a "new price in a shop" to anchor on. Nothing here is a product rule: it is the
+// handful of markets the engine knows how to phrase a search for.
+const MARKET_TERMS = {
+  vehicle: { local: ['רכב יד שנייה למכירה', 'מחירון רכב'], expand: ['used car price'], shops: false, hebrewFirst: true },
+  furniture: { local: ['ריהוט יד שנייה'], expand: [], shops: false, hebrewFirst: true },
+  household: { local: [], expand: [], shops: true, hebrewFirst: true },
+  handmade_vintage: { local: ['וינטג\'', 'עבודת יד'], expand: ['vintage', 'handmade'], shops: false, hebrewFirst: true },
+  collectible: { local: ['אספנות'], expand: ['sold listings', 'collectible value'], shops: false, hebrewFirst: false },
+  luxury_watch_jewelry: { local: [], expand: ['sold', 'chrono24'], shops: true, hebrewFirst: false },
+};
+const termsFor = (identity) => MARKET_TERMS[identity?.market_class] ?? { local: [], expand: [], shops: true, hebrewFirst: false };
+
 export function buildSearchQueries({ identity, answer = null, stage = 'local' } = {}) {
   const { name, codes, aliases, hebrew, alternatives } = searchNames(identity, answer);
   if (!name) return [];
+  const terms = termsFor(identity);
   const out = [];
   if (stage === 'expand') {
     out.push(`${name} used sold price`);
     if (codes[0]) out.push(`${codes[0]} used`);
-    out.push(`${name} new price`);
+    if (terms.shops) out.push(`${name} new price`);
+    for (const t of terms.expand) out.push(`${name} ${t}`);
     out.push(`${hebrew ?? aliases[0] ?? name} משומש למכירה`);
     for (const alt of alternatives) out.push(`${alt} יד שנייה למכירה`);
   } else {
-    // THE EXACT PRODUCT FIRST: a model number names one product and nothing else.
+    // THE EXACT PRODUCT FIRST: a model number names one product and nothing else. For a thing sold by description the
+    // Hebrew words come first: that is how its listings are written.
     for (const code of codes) out.push(`${code} יד שנייה OR למכירה OR משומש`);
+    if (terms.hebrewFirst && hebrew) out.push(`${hebrew} יד שנייה`);
     out.push(`${name} יד שנייה למכירה`);
+    for (const t of terms.local) out.push(`${hebrew ?? name} ${t}`);
     out.push(`${name} למכירה ${CLASSIFIEDS_SITES}`);
-    if (hebrew) out.push(`${hebrew} יד שנייה`);
+    if (!terms.hebrewFirst && hebrew) out.push(`${hebrew} יד שנייה`);
     out.push(`${name} used second hand Israel`);
     for (const alt of alternatives) out.push(`${alt} יד שנייה למכירה`);
     for (const alias of aliases) out.push(`${alias} יד שנייה`);
-    out.push(`${codes[0] ?? name} מחיר ${SHOP_SITES}`);
+    if (terms.shops) out.push(`${codes[0] ?? name} מחיר ${SHOP_SITES}`);
   }
   const seen = new Set();
   const unique = out.filter((q) => { const k = q.toLowerCase(); return !seen.has(k) && seen.add(k); });
   const max = MAX_QUERIES[stage] ?? MAX_QUERIES.local;
-  // The new-price query is the last one and must survive the cut on the local stage.
-  if (stage !== 'expand' && unique.length > max) return [...unique.slice(0, max - 1), unique.at(-1)];
+  // The new-price query, when there is one, is the last one and must survive the cut on the local stage.
+  if (stage !== 'expand' && terms.shops && unique.length > max) return [...unique.slice(0, max - 1), unique.at(-1)];
   return unique.slice(0, max);
 }
 
@@ -206,7 +246,7 @@ EVIDENCE — every usable price you found, up to ${MAX_EVIDENCE}: second-hand pr
 - url: the page's exact URL as the search returned it. title: the listing's OWN title, copied exactly as the page shows it, in its own language (its first ten words): do not translate it, tidy it or describe it. price and currency: exactly as shown on the page; do not convert and do not round.
 - kind: used_listing (a PRIVATE SELLER's or second-hand dealer's asking price — on a classifieds board, a forum or a marketplace — for a unit it sells on; a sealed, unused unit offered this way is still used_listing, with condition new_sealed), sold (a completed sale), refurbished (a SHOP's renewed, ex-display or returned unit: "מחודש", "מציאון", "renewed" — never new_retail and never used_listing), new_retail (a SHOP's price for a new unit), price_guide (a published average of sold prices), other.
 - A new price in Israel is the price WITH VAT. Many Israeli shops show a second, lower "Eilat" price without VAT: never report that one. Where a comparison page shows a range of shops, report the lowest price.
-- match: exact (this product, this configuration), close_comparable (the same product in another colour or capacity, or the directly comparable model), sibling_model (a different model of the family), accessory, part, box_only, bundle (sold together with other things), irrelevant. When exact_model_established is "no", a listing for one of the models named under could_also_be is close_comparable, not sibling_model: it is one of the things this item may be.
+- ${MATCHING[identity?.identity_precision] ?? MATCHING.exact_model}, accessory, part, box_only, bundle (sold together with other things), irrelevant. When exact_model_established is "no", a listing for one of the models named under could_also_be is close_comparable, not sibling_model: it is one of the things this item may be.
 - market: IL when the SELLER or shop is in Israel, otherwise INTL. A global marketplace showing shekels (il.ebay.com) is INTL.
 - condition: the condition the listing itself states — new_sealed (new, sealed or unused), like_new (barely used, no visible wear), good (normal use, light wear, working), fair (clear wear or small defects, working), poor (heavy wear, damage or partly working) — or unknown when it does not say. A shop's new unit is new_sealed.
 - page: listing (one seller's own listing page), search_or_category (a search, category or browse page that lists many items: the price is one line of a list), shop_product (a shop's page for the product), price_guide, other.

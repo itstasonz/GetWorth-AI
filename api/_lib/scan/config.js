@@ -77,7 +77,8 @@ export const IDENTIFY_TIMEOUT_MS = 20_000;
  */
 export const MARKET_STAGE_TIMEOUT_MS = 22_000;
 export const MARKET_MAX_STAGES = 2;
-export const IDENTIFY_MAX_OUTPUT_TOKENS = 1_200;
+/** The identity now carries attributes and candidate questions: more room, still one short answer. */
+export const IDENTIFY_MAX_OUTPUT_TOKENS = 2_000;
 export const MARKET_MAX_OUTPUT_TOKENS = 3_000;
 export const MARKET_SEARCH_CONTEXT_SIZE = 'low';
 
@@ -91,8 +92,8 @@ export const MAX_USER_TEXT = 160;
 export const TOKEN_TTL_MS = 30 * 60 * 1000;
 /** Re-identifications (a correction, a follow-up photograph) one scan may make. */
 export const MAX_REVISIONS = 3;
-/** The scan asks at most this many follow-up questions. */
-export const MAX_FOLLOWUPS = 2;
+/** The scan asks at most this many questions, one at a time (a car may need its year, its mileage and its trim). */
+export const MAX_FOLLOWUPS = 3;
 /** Market research for the same item is reused, with no new search, for this long. */
 export const MARKET_FRESH_MS = 60 * 60 * 1000;
 /** Evidence older than fresh but younger than this still joins a new search's evidence. Prices do not move in days. */

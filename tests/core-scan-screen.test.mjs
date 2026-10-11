@@ -286,6 +286,30 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     assert.deepEqual(requests.map((r) => [r.action, r.answer]), [['identify', undefined], ['price', 'unsure']]);
     assert.match(text(), /Approximate selling range/);
   });
+  test('CV-2g a number question is a number box with its unit and a Continue button, never a chat; what the owner confirmed and what a photograph cannot establish are said plainly', async () => {
+    const KM = { kind: 'number', affects: 'price', question: 'How many kilometres has it travelled?', options: [], unit: 'km', attribute: 'mileage', required: true };
+    const car = { display_name: 'Toyota Corolla', brand: 'Toyota', model: 'Corolla', category: 'Vehicles', item_type: 'car', identity_confidence: 'medium' };
+    const server = { followup: KM, confirmed: [{ attribute: 'year', value: '2019', question: 'What year is the car?' }], eligibility_notes: ['Ownership, registration and accident history cannot be verified from a photograph.'], market_class: 'vehicle' };
+    await settle(await open({ identify: [identified(car, server)], price: [pricedAnswer({ ...UNPRICED, no_price_reason: 'no_calibrated_valuation_method_for_this_market', withdrawn: 'no_calibrated_valuation_method_for_this_market', retail_new_ils: null })] }));
+    assert.match(text(), /You confirmed: 2019\./);
+    assert.match(text(), /Ownership, registration and accident history cannot be verified from a photograph\./);
+    assert.match(text(), /How many kilometres has it travelled\?/);
+    const box = container.querySelector('input[type="number"]');
+    assert.ok(box && /km/.test(box.closest('form').textContent), 'the unit sits beside the box');
+    assert.equal(container.querySelector('textarea'), null, 'no free text');
+    const go = button('Continue');
+    assert.ok(go.disabled, 'nothing typed, nothing sent');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(box, '85000');
+      box.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    await act(async () => { container.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); await new Promise((r) => setTimeout(r, 30)); });
+    assert.deepEqual(requests.map((r) => [r.action, r.answer]), [['identify', undefined], ['price', 85000]]);
+    // A car is verified and shown, never priced by this engine: the result says so in words, with no number.
+    assert.match(text(), /Items like this are valued by year, mileage, reference, authentication or grading, which I cannot price reliably yet/);
+    assert.doesNotMatch(text(), /₪|Recommended/);
+    assert.ok(button('Sell at your own price'));
+  });
   test('CV-2f the same, in Hebrew', async () => {
     const LABEL = { kind: 'photo', affects: 'identity', question: 'צלמו בבירור את התווית או את המדבקה בתחתית הבקבוק, כדי שאפשר יהיה לקרוא את שם הבושם ואת הנפח.', options: [], required: true };
     await settle(await open({ identify: [identified({ display_name: 'בושם BDK Parfums' }, { followup: LABEL, incomplete: 'fragrance_name_or_size' })] }, { lang: 'he' }));

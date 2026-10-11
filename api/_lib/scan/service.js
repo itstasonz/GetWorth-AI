@@ -32,7 +32,7 @@
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity } from './identify.js';
 import { researchMarket, marketDate } from './market.js';
-import { buildValuation, incompleteValuation, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
+import { buildValuation, incompleteValuation, strategyFor, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import {
@@ -69,8 +69,9 @@ export async function runIdentify({ images, lang, correction = null, prior = nul
       followupsLeft: MAX_FOLLOWUPS - followupsUsed,
       model, apiKey, safetyIdentifier, fetchImpl,
     });
-    // Does the identity name ONE product the market can be searched for? When not, the server's own question goes on it.
-    const identity = completeIdentity(seen, { lang, followupsLeft: MAX_FOLLOWUPS - followupsUsed });
+    // Does the identity name ONE product the market can be searched for, and which question, if any, comes next? What the
+    // owner confirmed in earlier rounds is kept and written over the model's guesses: a confirmed fact is never lost.
+    const identity = completeIdentity(seen, { lang, followupsLeft: MAX_FOLLOWUPS - followupsUsed, confirmed: prior?.identity?.confirmed ?? null });
     // What the owner said the item is travels with the identity, so it is kept with the scan.
     if (correction) identity.owner_correction = String(correction).slice(0, MAX_USER_TEXT);
     return {
@@ -127,9 +128,9 @@ async function recall(key, store, now) {
  * move the price? Step 1 asks a question only then, so an unanswered question
  * means the price is for the family and must say so.
  */
-export const isApproximate = (identity, answer) => (!answer || answer.unsure === true) && !!identity?.followup?.kind && identity.followup.kind !== 'none';
+export const isApproximate = (identity, answer) => ((!answer || answer.unsure === true) && !!identity?.followup?.kind && identity.followup.kind !== 'none') || (identity?.confirmed ?? []).some((c) => c.unsure === true);
 /** Is only the item's family established, not its exact model? Then the family's members are its comparables. */
-export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_model_established !== true;
+export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_model_established !== true && identity?.identity_precision !== 'descriptive';
 
 /**
  * Step 2. `answer` is { question, text } when the owner answered the question
@@ -143,10 +144,12 @@ export async function runPrice({
   const key = marketKey(identity, answer);
   const approximate = isApproximate(identity, answer);
   const familyLevel = isFamilyLevel(identity, answer);
+  // How this KIND of item is valued, chosen from what it is (valuation.js strategyFor), never from the evidence found.
+  const strategy = strategyFor(identity);
   const priced = (record, extra) => {
     const valuation = buildValuation({
       evidence: record.evidence, searchPerformed: record.search_performed !== false, unverified: record.unverified ?? 0,
-      approximate, familyLevel, searched: { ...record.searched, at: new Date(record.at).toISOString() },
+      approximate, familyLevel, strategy, searched: { ...record.searched, at: new Date(record.at).toISOString() },
       // A listing's age is measured to TODAY, not to the day it was retrieved: pooled and reused evidence ages.
       today: marketDate(t0),
     });

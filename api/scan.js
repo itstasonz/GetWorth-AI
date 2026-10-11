@@ -32,9 +32,10 @@ import { cors, json, readImage, nodeHandler, UUID_RE } from './_lib/v2/http.js';
 import { isV2Permitted } from './_lib/v2/config.js';
 import {
   resolveScanMode, resolveIdentityModel, resolveMarketModel, SCAN_MODE, SCAN_KEY_ENV,
-  MAX_BODY_BYTES, MAX_IMAGES, MAX_IMAGE_BYTES, MAX_USER_TEXT, MAX_REVISIONS,
+  MAX_BODY_BYTES, MAX_IMAGES, MAX_IMAGE_BYTES, MAX_USER_TEXT, MAX_REVISIONS, MAX_FOLLOWUPS,
 } from './_lib/scan/config.js';
-import { runIdentify, runPrice, SCAN_STATUS } from './_lib/scan/service.js';
+import { runIdentify, runPrice, startingCondition, SCAN_STATUS } from './_lib/scan/service.js';
+import { recordAnswer } from './_lib/scan/identify.js';
 import { signScanToken, verifyScanToken } from './_lib/scan/token.js';
 import { chargeScan, refundScan } from './_lib/scan/quota.js';
 import { recordValuation, logScanEvent } from './_lib/scan/persist.js';
@@ -43,7 +44,6 @@ import { recordValuation, logScanEvent } from './_lib/scan/persist.js';
 export const config = { maxDuration: 60 };
 
 const LANGS = ['he', 'en'];
-const UNSURE = { he: 'הבעלים לא בטוחים', en: 'The owner is not sure' };
 
 const clientIp = (req) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
 
@@ -123,15 +123,26 @@ export function createScanHandler({
     // ── PRICE ────────────────────────────────────────────────────────────────
     if (action === 'price') {
       if (!prior) return done({ error: 'invalid_token', detail: 'token_missing' }, 400);
-      const identity = prior.identity;
-      if (!identity?.is_sellable_item) return done({ error: 'bad_request', detail: 'nothing to price' }, 400);
+      if (!prior.identity?.is_sellable_item) return done({ error: 'bad_request', detail: 'nothing to price' }, 400);
       let answer = null;
+      let identity = prior.identity;
       if (body?.answer !== undefined && body?.answer !== null) {
-        const options = identity.followup?.kind === 'choice' ? identity.followup.options : [];
-        const text = body.answer === 'unsure' ? UNSURE[lang] : (Number.isInteger(body.answer) ? options[body.answer] : null);
-        if (!text) return done({ error: 'bad_request', detail: 'answer is not one of the options offered' }, 400);
-        // "unsure" is an answer the search may carry, and a price that stays approximate.
-        answer = { question: identity.followup?.question ?? null, text, ...(body.answer === 'unsure' ? { unsure: true } : {}) };
+        // The answer is an option the scan offered (by index), "unsure", or a number in the question's own unit — never free
+        // text. It becomes a confirmed fact on the identity, and the server then chooses the next question, if any.
+        const recorded = recordAnswer(identity, body.answer, { lang, followupsLeft: MAX_FOLLOWUPS - (prior.followups ?? 0) });
+        if (recorded.error) return done({ error: 'bad_request', detail: recorded.error }, 400);
+        ({ identity, answer } = recorded);
+        const token = await signScanToken({
+          userId: user.id, scanUuid, identity, started: prior.iat ?? null,
+          counters: { revisions: prior.revisions ?? 0, followups: (prior.followups ?? 0) + (identity.followup.kind === 'none' ? 0 : 1), identify_ms: prior.identify_ms ?? null },
+        });
+        // Another REQUIRED question stands before the search: the identity goes back, with that question on it, and no
+        // market request is made yet.
+        if (identity.followup?.required === true) {
+          return done({ status: SCAN_STATUS.IDENTIFIED, identity, default_condition: startingCondition(identity), token }, 200);
+        }
+        prior = { ...prior, identity };
+        base.token = token;
       }
       const result = await price({ identity, answer, scanUuid, model: resolveMarketModel(process.env), apiKey, safetyIdentifier });
       if (result.status === SCAN_STATUS.FAILED) return done({ status: result.status, failure: result.failure, retryable: true }, 200, result.call);
@@ -144,12 +155,14 @@ export function createScanHandler({
           identity_confidence: identity.identity_confidence, category: identity.category, counts: result.valuation?.counts ?? null,
           identify_ms: prior.identify_ms ?? null, market_ms: result.call?.ms ?? null, first_search_ms: result.call?.first_search_ms ?? null,
           tool_calls: result.call?.tool_calls ?? null, stages: result.call?.stages ?? null, usage: result.call?.usage ?? null, model: result.call?.model ?? null,
-          basis: result.valuation?.basis ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null, unbound: result.valuation?.counts?.unbound ?? null,
+          basis: result.valuation?.basis ?? null, strategy: result.valuation?.strategy ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null, unbound: result.valuation?.counts?.unbound ?? null,
           reused: result.reused === true, stale: result.stale === true, approximate: result.valuation?.approximate === true,
+          market_class: identity.market_class ?? null, identity_precision: identity.identity_precision ?? null, confirmed: identity.confirmed?.length ?? 0,
           revisions: prior.revisions ?? 0, answered: !!answer, client_elapsed_before_price_ms: clientMs,
         }),
       ]);
-      return done({ status: result.status, valuation: result.valuation, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true }, 200, result.call);
+      // With an answer recorded the token was re-signed: the client carries the newest one.
+      return done({ status: result.status, valuation: result.valuation, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call);
     }
 
     // ── IDENTIFY ─────────────────────────────────────────────────────────────

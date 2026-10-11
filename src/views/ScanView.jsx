@@ -22,7 +22,7 @@
 import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { X, Camera, Upload, AlertTriangle, RefreshCw, Check } from 'lucide-react';
 import { useApp } from '../contexts/AppContext';
-import { Btn, Chip } from '../components/ui';
+import { Btn, Chip, InputField } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 import {
   scanStore, STAGE, CONDITIONS, bandFor, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
@@ -55,6 +55,11 @@ function Identity({ identity, copy, done, lang }) {
       <p className="text-body-sm text-text-secondary">
         {copy.identityConfidence}: <span className="font-semibold text-text-primary">{copy.levels[identity.identity_confidence] ?? copy.levels.low}</span>
       </p>
+      {/* What the owner has confirmed, and what a photograph cannot establish (authenticity, a vehicle's papers): said plainly. */}
+      {(identity.confirmed ?? []).filter((c) => !c.unsure).length > 0 && (
+        <p className="text-body-sm text-text-secondary"><Bidi>{copy.confirmedFacts((identity.confirmed ?? []).filter((c) => !c.unsure).map((c) => c.value).join(' · '))}</Bidi></p>
+      )}
+      {(identity.eligibility_notes ?? []).slice(0, 2).map((note) => <p key={note} className="text-body-sm text-text-muted"><Bidi>{note}</Bidi></p>)}
     </div>
   );
 }
@@ -66,17 +71,32 @@ function Identity({ identity, copy, done, lang }) {
  * required photograph has no "not sure".
  */
 function Question({ question: f, copy, lang, onPhoto, onUpload, required = false }) {
+  const [figure, setFigure] = useState('');
+  const number = Number(figure);
+  const canSubmit = figure.trim() !== '' && Number.isFinite(number) && number >= 0;
   return (
     <div className="rounded-container border border-subtle bg-surface p-4 space-y-3">
       <p className="text-label text-text-muted">{required ? copy.needed : copy.refine}</p>
       <p className="text-title-sm text-text-primary"><Bidi>{f.question}</Bidi></p>
-      {f.kind === 'choice' ? (
+      {f.kind === 'choice' || f.kind === 'yes_no' ? (
         <div className="flex flex-wrap gap-2">
           {f.options.map((option, index) => (
             <Chip key={option} onClick={() => answerQuestion(index, lang)}><Bidi>{option}</Bidi></Chip>
           ))}
           <Chip onClick={dismissQuestion}>{copy.notSure}</Chip>
         </div>
+      ) : f.kind === 'number' ? (
+        // A figure the owner knows (mileage, width, year), in the question's own unit: a number box, never a chat.
+        <form className="space-y-2" onSubmit={(e) => { e.preventDefault(); if (canSubmit) { answerQuestion(number, lang); setFigure(''); } }}>
+          <div className="flex items-center gap-2">
+            <InputField type="number" inputMode="decimal" min="0" step="any" value={figure} onChange={(e) => setFigure(e.target.value)} aria-label={f.question} className="flex-1" />
+            {f.unit && <span className="text-body text-text-secondary shrink-0"><bdi dir="ltr">{f.unit}</bdi></span>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Btn primary type="submit" disabled={!canSubmit}>{copy.answer}</Btn>
+            <Btn variant="ghost" type="button" onClick={dismissQuestion}>{copy.notSure}</Btn>
+          </div>
+        </form>
       ) : (
         <>
           <Btn fullWidth onClick={onPhoto}><Camera className="w-4 h-4" aria-hidden="true" /> {copy.takePhoto}</Btn>
@@ -171,7 +191,7 @@ export default function ScanView() {
                 <>
                   <p className="text-label text-text-muted">{copy.approxLabel}</p>
                   <p className="text-display text-text-primary">{copy.range(band)}</p>
-                  {approximate && <p className="text-body-sm text-text-secondary">{copy.approxNote}</p>}
+                  {approximate && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_items' ? copy.similarItemsNote : copy.approxNote}</p>}
                 </>
               ) : (
                 <>
@@ -199,7 +219,7 @@ export default function ScanView() {
         {s.stage === STAGE.INSUFFICIENT && (
           <div className="space-y-4">
             <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
-              <p className="text-body text-text-primary"><Bidi>{copy.insufficient(identity.display_name)}</Bidi></p>
+              <p className="text-body text-text-primary"><Bidi>{(s.valuation?.no_price_reason && copy.insufficientBy?.[s.valuation.no_price_reason]) ? copy.insufficientBy[s.valuation.no_price_reason](identity.display_name) : copy.insufficient(identity.display_name)}</Bidi></p>
               {s.valuation?.retail_new_ils && (
                 <p className="text-body-sm text-text-secondary">{(s.valuation.retail_new_in_stock === false ? copy.retailContextUnavailable : copy.retailContext)(formatPrice(s.valuation.retail_new_ils))}</p>
               )}
