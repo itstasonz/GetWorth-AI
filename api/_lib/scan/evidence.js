@@ -94,6 +94,21 @@ export function pageTypeOf(url, claimed) {
   return EVIDENCE_PAGES.includes(claimed) ? claimed : 'other';
 }
 
+// ── WHAT KIND OF PRICE ──────────────────────────────────────────────────────
+// Classified boards: whoever lists here sells second-hand, sealed or not. A
+// private seller's unused unit on Homeless is a RESALE asking price whose
+// condition is new_sealed — not a shop's new price, and not "other" (the live
+// search of 2026-10-11 had the model call exactly such an ad `other`, which
+// would have kept it out of the valuation for the wrong reason).
+const CLASSIFIEDS = /(^|\.)(yad2\.co\.il|homeless\.co\.il|ad\.co\.il|facebook\.com)$/i;
+
+/** The kind of price, with one listing on a classifieds board read as private resale whatever the model called it. */
+export function kindOf(url, page, claimed) {
+  const kind = EVIDENCE_KINDS.includes(claimed) ? claimed : 'other';
+  if (page === 'listing' && CLASSIFIEDS.test(hostOf(url) ?? '') && (kind === 'other' || kind === 'new_retail')) return 'used_listing';
+  return kind;
+}
+
 // ── WHEN ────────────────────────────────────────────────────────────────────
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const DAY_MS = 86_400_000;
@@ -263,6 +278,8 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
     const ils = toIls(price, currency, fx);
     const page = pageTypeOf(url, e?.page);
     const claimed = EVIDENCE_MATCHES.includes(e?.match) ? e.match : 'irrelevant';
+    const claimedKind = EVIDENCE_KINDS.includes(e?.kind) ? e.kind : 'other';
+    const kind = kindOf(url, page, claimedKind);
     const shipping = finite(e?.shipping);
     const bound = bindPrice({ price, currency, title: e?.title, match: claimed, shipping }, { type: page, title: pageTitle.get(key), text: pageText.get(key) }, item?.identity, item?.answer);
     evidence.push({
@@ -272,7 +289,9 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
       price,
       currency,
       price_ils: ils ? Math.round(ils) : null,
-      kind: EVIDENCE_KINDS.includes(e?.kind) ? e.kind : 'other',
+      // What the site is wins over what was claimed: one ad on a classifieds board is private resale.
+      kind,
+      ...(kind !== claimedKind ? { kind_claimed: claimedKind } : {}),
       // What the row itself shows wins over what was claimed for it: "exact" beside another size is a comparable.
       match: bound.match ?? claimed,
       ...(bound.match && bound.match !== claimed ? { match_claimed: claimed } : {}),
@@ -309,8 +328,11 @@ export function requalify(e) {
   const domain = e.domain ?? hostOf(e.url);
   // Research kept from before a price had to be tied to its product holds no proof that it was: it does not count.
   const proven = Object.values(BOUND).includes(e.binding);
+  const page = pageTypeOf(e.url, e.page);
+  const kind = kindOf(e.url, page, e.kind);
   return {
-    ...e, market: localityOf(domain, e.market), page: pageTypeOf(e.url, e.page), listed: e.listed ?? null, archived: e.archived === true || isArchived(e.url, null),
+    ...e, market: localityOf(domain, e.market), page, listed: e.listed ?? null, archived: e.archived === true || isArchived(e.url, null),
+    kind, ...(kind !== e.kind ? { kind_claimed: e.kind } : {}),
     binding: proven ? e.binding : BOUND.WEAK, binding_reason: proven ? e.binding_reason ?? null : BIND_REASON.LEGACY,
   };
 }

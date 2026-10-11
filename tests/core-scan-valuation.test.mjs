@@ -284,8 +284,8 @@ describe('CS-5 condition prices are an explicit ladder, and say when they are an
     assert.equal(withLikeNew.like_new.basis, 'listings');
     const setAside = value([item({ price: 200 }), item({ price: 900, condition: 'like_new' }), item({ price: 599, kind: 'new_retail' })]).prices;
     assert.equal(setAside.like_new.basis, 'adjusted', 'a reference that was set aside vouches for nothing');
-    // The real evidence of a live scan: one refurbished unit that did not state its condition.
-    const assumed = value([item({ price: 149, kind: 'refurbished', condition: 'unknown' })]).prices;
+    // The real evidence of a live scan: a shop's refurbished unit that did not state its condition, beside a private listing that did not either.
+    const assumed = value([item({ price: 149, kind: 'refurbished', condition: 'unknown', page: 'shop_product', stock: 'in_stock' }), item({ price: 140, condition: 'unknown' })]).prices;
     assert.equal(assumed.like_new.basis, 'adjusted', 'a condition that was assumed vouches for nothing');
     assert.equal(assumed.good.basis, 'adjusted');
     const unknownUsed = value([item({ price: 149, condition: 'unknown' })]).prices;

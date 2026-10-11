@@ -41,6 +41,7 @@
 // Pure functions over text. Nothing is fetched.
 // ══════════════════════════════════════════════════════════════════════════════
 import { pricedNumbers, MAX_DISTANCE } from '../phaseb/content-binding.js';
+import { transliterates } from '../script-normalization.js';
 
 export const BOUND = Object.freeze({ STRONG: 'strong', VERIFIED_ROW: 'verified_row', WEAK: 'weak', UNBOUND: 'unbound' });
 export const BIND_REASON = Object.freeze({
@@ -81,7 +82,8 @@ const SIGN_BEFORE = new RegExp(`${MARKER}\\s{0,2}$`);
 const SIGN_AFTER = new RegExp(`^\\s{0,2}${MARKER}`);
 const UNIT_WORD = /^(gb|tb|mb|ml|mm|cm|kg|mah|inch|pack|pcs|יח)$/;
 const CODE = /^([a-z]+)(\d+)([a-z]*)$/;                    // g703, tb301, a7iii
-const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר|"|״)(?![\p{L}\p{N}])/giu;
+const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר|גיגה|ג'יגה|ג׳יגה|ג"יגה|טרה|"|״)(?![\p{L}\p{N}])/giu;
+const HEBREW_UNITS = { אינץ: 'inch', '"': 'inch', '״': 'inch', גיגה: 'gb', "ג'יגה": 'gb', 'ג׳יגה': 'gb', 'ג"יגה': 'gb', טרה: 'tb' };
 // A shop's second price: without VAT (Eilat). It labels the price that follows it, or else the one just before.
 const NO_VAT = /(אילת|eilat|ללא מע"?מ|לפני מע"?מ|without vat|ex\.? ?vat)/gi;
 
@@ -89,7 +91,7 @@ const NO_VAT = /(אילת|eilat|ללא מע"?מ|לפני מע"?מ|without vat|ex
 const norm = (v) => String(v ?? '').normalize('NFKC').replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').replace(/''|׳׳/g, '"').toLowerCase();
 const words = (text) => [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((m) => ({ t: m[0], at: m.index, end: m.index + m[0].length }));
 const tokens = (v) => words(norm(v)).map((w) => w.t);
-const unit = (u) => (u === 'אינץ' || u === '"' || u === '״' ? 'inch' : u);
+const unit = (u) => HEBREW_UNITS[u] ?? u;
 const sizesIn = (text) => [...text.matchAll(SIZE)].map((m) => `${Number(m[1])}${unit(m[2].toLowerCase())}`);
 const nearest = (list, at) => [...list].sort((a, b) => Math.abs(a.at - at) - Math.abs(b.at - at))[0] ?? null;
 
@@ -111,11 +113,24 @@ export function namesOf(identity) {
   return runs.filter((r) => telling(r) && !seen.has(r.join(' ')) && seen.add(r.join(' ')));
 }
 
+/**
+ * One word of a listing is one word of the name: the same word, or the same
+ * name written in the other alphabet ("אייפון" is "iphone", "גלקסי" is
+ * "galaxy": api/_lib/script-normalization.js, no dictionary). A word with a
+ * digit in it is never read across alphabets: "13" is "13" or nothing. A SHORT
+ * word ("pro", "max": two consonants) collides with too many words to stand
+ * alone, so it is read across alphabets only beside a word of the run that
+ * matched on its own. Nothing here knows meanings: "wireless" is never "אלחוטי".
+ */
+const sameWord = (w, t, weak = false) => w === t || transliterates(w, t, { minLength: weak ? 2 : 3 });
+
 /** Every place a run of words occurs in order: where, and the two words that follow it. */
 function runsIn(row, run) {
   const out = [];
   for (let k = 0; k + run.length <= row.length; k += 1) {
-    if (run.every((t, j) => row[k + j].t === t)) out.push({ at: row[k].at, index: k, next: row[k + run.length] ?? null, then: row[k + run.length + 1] ?? null });
+    const strong = run.map((t, j) => sameWord(row[k + j].t, t));
+    const whole = strong.every(Boolean) || (strong.some(Boolean) && run.every((t, j) => strong[j] || sameWord(row[k + j].t, t, true)));
+    if (whole) out.push({ at: row[k].at, index: k, next: row[k + run.length] ?? null, then: row[k + run.length + 1] ?? null });
   }
   return out;
 }
@@ -206,7 +221,9 @@ export function bindPrice(claim, page, identity, answer = null) {
     let before = who.index == null ? null : who.index - 1;
     while (before != null && before >= 0 && brand.has(row[before].t)) before -= 1;
     if (before != null && before >= 0 && FOR_WORDS.has(row[before].t)) return { refused: BIND_REASON.FOR_THE_PRODUCT };
-    const generation = who.next && /^[2-9]$/.test(who.next.t) && !(who.then && UNIT_WORD.test(who.then.t));
+    // A digit right after the name is a generation ("AirPods Pro 2") — unless it is the price's own first digit ("Galaxy S24 ₪3,000").
+    const isPrice = (w) => priced.some((p) => w.at >= p.start && w.at < p.end);
+    const generation = who.next && /^[2-9]$/.test(who.next.t) && !isPrice(who.next) && !(who.then && UNIT_WORD.test(who.then.t));
     if (who.next && (VARIANT_WORDS.has(who.next.t) || generation)) return { level, reason: BIND_REASON.VARIANT, match: 'close_comparable' };
     const theirs = sizesIn(stretch);
     const unitOf = (s) => s.replace(/^[\d.]+/, '');

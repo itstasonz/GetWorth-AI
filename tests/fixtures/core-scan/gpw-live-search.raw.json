@@ -1,0 +1,423 @@
+{
+  "note": "RAW OpenAI Responses output of the core scan's market step, stage \"local\", for a Logitech G Pro Wireless (gaming mouse) identified beforehand. One paid call, 2026-10-11, no image. The output array is exactly what the API returned; nothing was tidied. Third-party page text is data, never instructions. Scanned for e-mail addresses and phone numbers before commit: none.",
+  "captured_at": "2026-10-11",
+  "today": "2026-10-11",
+  "model": "gpt-6-luna",
+  "request": {
+    "model": "gpt-6-luna",
+    "store": false,
+    "reasoning": {
+      "effort": "low"
+    },
+    "max_output_tokens": 3000,
+    "max_tool_calls": 1,
+    "tools": [
+      {
+        "type": "web_search",
+        "search_context_size": "low",
+        "user_location": {
+          "type": "approximate",
+          "country": "IL",
+          "timezone": "Asia/Jerusalem"
+        }
+      }
+    ],
+    "tool_choice": "required",
+    "include": [
+      "web_search_call.action.sources",
+      "web_search_call.results"
+    ],
+    "text": {
+      "format": {
+        "type": "json_schema",
+        "name": "getworth_market_evidence"
+      }
+    },
+    "stream": true
+  },
+  "identity_raw": {
+    "is_sellable_item": true,
+    "visible_text": [
+      "LOGITECH",
+      "G PRO"
+    ],
+    "category": "Electronics",
+    "item_type": "gaming mouse",
+    "brand": "Logitech",
+    "product_family": "G Pro",
+    "model": "G Pro Wireless",
+    "model_number": null,
+    "variant": null,
+    "color": "Black",
+    "size_or_capacity": null,
+    "configuration": "complete_item",
+    "included_items": [],
+    "exact_model_established": true,
+    "alternatives": [],
+    "identity_confidence": "high",
+    "display_name": "Logitech G Pro Wireless",
+    "canonical_name": "logitech g pro wireless",
+    "uncertainty_note": null,
+    "visible_condition": "good",
+    "condition_notes": [],
+    "listing_description": "Wireless gaming mouse in black.",
+    "search": {
+      "hebrew_name": "עכבר גיימינג אלחוטי Logitech G Pro Wireless",
+      "aliases": [
+        "Logitech G Pro Wireless Gaming Mouse"
+      ],
+      "model_numbers": [
+        "910-005272"
+      ]
+    },
+    "followup": {
+      "kind": "none",
+      "affects": "none",
+      "question": null,
+      "options": []
+    }
+  },
+  "timings_ms": {
+    "headers_ms": 2273,
+    "first_event_ms": 2275,
+    "first_output_ms": 7466,
+    "total_ms": 8438,
+    "first_search_ms": 6818
+  },
+  "usage": {
+    "input_tokens": 14558,
+    "input_tokens_details": {
+      "cache_write_tokens": 5998,
+      "cached_tokens": 0
+    },
+    "output_tokens": 760,
+    "output_tokens_details": {
+      "reasoning_tokens": 395
+    },
+    "total_tokens": 15318
+  },
+  "status": "completed",
+  "output": [
+    {
+      "id": "ws_0eed446830ed8023016acb48f48c1887d18831bb883a511d0f",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "queries": [
+          "Logitech G Pro Wireless עכבר יד שנייה יד 2 משומש למכירה ישראל",
+          "Logitech G Pro Wireless למכירה שח site:homeless.co.il OR site:ad.co.il OR site:yad2.co.il",
+          "Logitech G Pro Wireless used second hand Israel ₪",
+          "Logitech G Pro Wireless 910-005272 מחיר חדש ישראל zap.co.il OR ksp.co.il OR ivory.co.il OR bug.co.il"
+        ],
+        "query": "Logitech G Pro Wireless עכבר יד שנייה יד 2 משומש למכירה ישראל",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://www.ivory.co.il/catalog.php?id=121262"
+          },
+          {
+            "type": "url",
+            "url": "https://www.zap.co.il/model.aspx?modelid=1005972"
+          },
+          {
+            "type": "url",
+            "url": "https://il.ebay.com/b/Logitech-Wireless-Ergonomic-Optical-Computer-Gaming-Mice/23160/bn_71362921"
+          },
+          {
+            "type": "url",
+            "url": "https://www.homeless.co.il/yad2/viewad%2C994315.aspx"
+          },
+          {
+            "type": "url",
+            "url": "https://www.bug.co.il/brand/logitech/gprowireless/"
+          },
+          {
+            "type": "url",
+            "url": "https://cryptech.co.il/products/logitech-g-pro-wireless-gaming-mouse-black"
+          },
+          {
+            "type": "url",
+            "url": "https://www.zap.co.il/models.aspx?db135285=135294&pageinfo=2&sog=c-mouse"
+          },
+          {
+            "type": "url",
+            "url": "https://m.homeless.co.il/yad2/viewad%2C994310.aspx"
+          },
+          {
+            "type": "url",
+            "url": "https://powercon.co.il/products/logitech-g-pro-wireless-gaming-mouse"
+          },
+          {
+            "type": "url",
+            "url": "https://www.yad2.co.il/market/collections/electronics_for-laptops-and-computers_computer-accessories?pageNumber=2"
+          },
+          {
+            "type": "url",
+            "url": "https://1pc.co.il/en/logitech-g-pro-wireless-gaming-mouse"
+          },
+          {
+            "type": "url",
+            "url": "https://www.ad.co.il/archive/c/23?pageindex=14&sp169=4614&sp58=3588&view=list&withprice=1"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/hardwareswap/comments/11yydy7"
+          },
+          {
+            "type": "url",
+            "url": "https://infoservice.co.il/BGU/Periferials/Mice/LogitechMouse241023.pdf"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/ag_israel/comments/1s8hoi3/%D7%9E%D7%97%D7%A4%D7%A9%D7%AA_%D7%93%D7%99%D7%A1%D7%A7%D7%99%D7%9D_%D7%99%D7%93_%D7%A9%D7%A0%D7%99%D7%94_%D7%9C%D7%A1%D7%95%D7%A0%D7%99_5_%D7%95%D7%A6%D7%A8%D7%99%D7%9B%D7%94_%D7%A2%D7%96%D7%A8%D7%94_%D7%9C%D7%90_%D7%9C%D7%99%D7%A4%D7%95%D7%9C/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/hardwareswap/comments/uffsf8"
+          },
+          {
+            "type": "url",
+            "url": "https://www.logitech.com/assets/66332/2/logitech-g-pro-x-superlight-2-lightspeed-gaming-mouse.pdf"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/PakGamers/comments/xtiv49"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/israel_bm/comments/1sk64mc/%D7%A2%D7%91%D7%A8%D7%95_5_%D7%93%D7%A7%D7%95%D7%AA_%D7%96%D7%94_%D7%91%D7%95%D7%98%D7%99%D7%9D/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/mkindia/comments/11cbfkg"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/LebaneseMarketplace/comments/1u21udi/logitech_g_pro_x_superlight_1_wireless_mouse_60/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.logitech.com/assets/65542/2/pro-wireless.pdf"
+          },
+          {
+            "type": "url",
+            "url": "https://www.logitech.com/assets/70209/2/pro_2_lightspeed_qsg_amr.pdf"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/marketplacekenya/comments/1ssov1n/logitech_gaming_mouse/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/MouseReview/comments/1hy53ao"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/MouseReview/comments/1p9upg6/buying_2nd_hand/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/dubaiclassifieds/comments/1tdns35/wts_logitech_g_pro_x_2_superlight/"
+          },
+          {
+            "type": "url",
+            "url": "https://www.reddit.com/r/hardwareswap/comments/q6nzr1"
+          }
+        ]
+      },
+      "results": [
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search0 [wordlim: 200] Crawled: 2 weeks ago; מק\"ט אייבורי: 910-005276 ... טכנולוגיה אלחוטית חדשנית, מקצה לקצה, מתגברת על מגבלות השהיה, קישוריות וכוח כדי לספק חיבור עקבי וללא פיגור, קצב דיווח של 1 ms - ללא חוט. ... PRO Wireless מגיע עם התאמה אישית של ~16.8M צבע5תכונות מתקדמות דורשות Logitech G HUB, זמין להורדה בכתובת logitechG.com/downloadsזה מושלם לייצוג צבעי הצוות שלך, התאמה אישית של ההגדרה שלך או סנכרון עם מוצרי G אחרים.LIGHTSYNC כולל גם אפקטי תאורה מונעי משחק המגיבים לפעולה במשחק, הדמיית אודיו, דגימת צבע מסך ועוד. ... מבוסס על למעלה מ-35 שנות מומחיות של Logitech בהנדסה, בנייה, בדיקת עכברים, PRO Wireless נועד לעמוד בפני שחקני esports מקצוענים במהלך אימונים וטורנירים.\n\n# עכבר גיימינג Logitech G PRO Wireless Gaming כולל תאורת לד\n\nלמגוון מוצרי Logitech G\n\nמק\"ט אייבורי: 910-005276\n\n## עכבר Logitech G PRO Wireless Gaming כולל תאורת לד\n\n### \n\n389 ₪\n\nהמחיר באילת: 329 ₪\n\nהמחירים בתוקף עד: 24/09/2026\n\nאפשרויות איסוף ומשלוח:משלוח לבית הלקוח -עד 7 ימי עבודה: חינם\n\n[Input]\n\nהצג זמינות מלאי בסניפים\n\n[Button: סגור]\n\nמחיר כולל שידרוגים ותוספות: 389 ₪\n\nהגדרת מוצר מציאון: החזרה ו/או מוחדש - המוצר היה בשימוש לקוח ו/או בעל פגיעות פיזיות קלות ו/או היה בתצוגת סניף ו/או חזר מתיקון ו/או הוחלף חלק ו/או אריזה פגומה ו/או פיקסל במסך.\nיתכן ולא כל האביזרים הנלווים קיימים באריזה, כמו באריזה המקורית\n\n+ [Input] -\n\nמוצר זה לא זמין למעבר לקטגוריית עכברים לחץ/י כאן\n\nעד 12 תשלומים ללא ריבית בכרטיס אשראי\n\nהמחיר עד 12 תשלומים: ₪389 (12 X 32.42) המחיר ל 24 תשלומים: ₪413 (24 X 17.23) המחיר ל 36 תשלומים: ₪425 (36 X 11.82)\nעד 6 שיקים ללא ריבית (בכפוף לתנאי ERN) חדש - עד 6 תשלומים ללא ריבית בהוראת קבע דיגיטלית (כפוף לתנאי ERN)\n\nפרטי המוצר\n\n \n\n#### \nעוצב עם מקצוענים, תוכנן לנצח\n\nPRO Wireless תוכנן להיות עכבר המשחקים האולטימטיבי עבור מקצועני esports. במשך תקופה של שנתיים, Logitech G שיתפה פעולה עם יותר מ-50 שחקנים מקצועיים כדי למצוא את הצורה, המשקל והתחושה המושלמים בשילוב עם טכנולוגיות החיישנים האלחוטיים LIGHTSPEED ו- HERO 25k שלנו. התוצאה היא עכבר גיימינג עם ביצועים ודיוק ללא תחרות, שנותן לך את הכלים והביטחון הדרושים כדי לנצח.\nתכנת הכל עם G HUB.\n\nImage\n\nImage\n\n#### זיכרון מובנה\n\nעם זיכרון מובנה, אתה יכול להשתמש ב-G HUB כדי לשמור את ההעדפות שלך ישירות לעכבר לשימוש מהיר וקל במערכות טורנירים. הגדרות העכבר שלך נשארות עקביות מבית לשלב. דלג על התקנת תוכנה מותאמת אישית או הגדרה מחדש של ההגדרות שלך. ישר למשחק.\n\n#### מערכת מתיחת כפתורים מכנית\n\nPRO Wireless מצויד בהנדסת הכפתורים הראשית העדכנית ביותר. באמצעות קפיץ מתכת כדי למתוח את לוחות המקשים השמאלי והימני המופרדים, מרחק הנסיעה וכוח ההפעלה (הכוח הנדרש ללחיצה) הצטמצמו ושוכללו. התוצאה היא תחושה מדויקת, עקבית ומהודקת להפליא לכל קליק.\n\nImage\n\nImage\n\n#### הופעה מתמשכת\n\nמבוסס על למעלה מ-35 שנות מומחיות של Logitech בהנדסה, בנייה, בדיקת עכברים, PRO Wireless נועד לעמוד בפני שחקני esports מקצוענים במהלך אימונים וטורנירים. פני השטח של PRO מצופים לעמידות ואחיזה בעוד שכפות הרגליים נבדקו לביצועים של למעלה מ-250 ק\"מ של שימוש.\n\nקישור לאתר הספק/היצרן »\n\nImage: Generic placeholder image\n\nעכבר גיימינג Logitech G PRO Wireless Gaming כולל תאורת לד\n389 ₪ מחיר כולל שידרוגים ותוספות:",
+          "title": "עכבר גיימינג Logitech G PRO Wireless Gaming כולל תאורת לד",
+          "url": "https://www.ivory.co.il/catalog.php?id=121262"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search1 [wordlim: 200] Crawled: last month; Image: עכבר גיימינג אלחוטי LogiTech G-Pro Wireless לוגיטק תמונה 1 ... עכברים חוטיים או אלחוטיים, עכברי Bluetooth, עכברים אופטיים, עכבר לייזר, עכבר Trackball, עכברים של מותגים כגון Logitech ,Microsoft ,Teac ,Salient Tech ,Genius ואחרים.{\"SaleOpen\":true,\"Currency\":\"ILS\",\"Catalog\":\"zap\",\"Id\":1005972,\"Title\":\"‏עכבר גיימינג ‏אלחוטי logitech g-pro wireless\",\"MinPrice\":659.0000,\"MaxPrice\":659.0000,\"MainCategory\":\"computers\",\"SubCategory\":\"c-mouse\",\"SubCategoryHebName\":\"עכברים\",\"ImageUrl\":\"https://img.zap.co.il/pics/7/7/5/6/91376577c.gif\",\"Description\":\"‏עכבר גיימינג ‏אלחוטי logitech g-pro wireless\",\"Brand\":\"Logitech\",\"Url\":\"https://www.zap.co.il/model.aspx?\n\nחוות דעת (4)\n\nקנייה בחנות מקומית\n\n\nImage: עכבר גיימינג אלחוטי LogiTech G-Pro Wireless לוגיטק תמונה 1\n\nImage: עכבר גיימינג אלחוטי LogiTech G-Pro Wireless לוגיטק תמונה 2\n\n  * Image: עכבר גיימינג אלחוטי LogiTech G-Pro Wireless לוגיטק תמונה 1\n  * Image: עכבר גיימינג אלחוטי LogiTech G-Pro Wireless לוגיטק תמונה 2\n\n# ‏עכבר גיימינג ‏אלחוטי LogiTech G-Pro Wireless לוגיטק\n\n4.5 (4) הוספת חוות דעת\n\nמאפייני מפתח\n\nסוג:\n\n \n\nעכבר גיימינג\n\nחיבור:\n\n \n\nאלחוטי\n\nלחצנים:\n\n \n\n8 לחצנים\n\nתאריך כניסה לזאפ:\n\n \n\n12/2018\n\n\nהשוואת הצעות (1)\n\nחוות דעת (4)\n\nמפרט טכני\n\nקנייה בחנות מקומית\n\nמוצרים דומים\n\n659‏₪   בחנות אחת\n\nImage: קרוב אליי קרוב אליי\n\nכתוב חוות דעת\n\nLogitech G Pro Wireless Gaming Mouse\n\n659 ₪ כולל משלוח (60 ₪) Image: bullet עד 5 ימי עסקים\n\nלפרטים נוספים\n\n### שמות נוספים לדגם\n\n‏עכבר גיימינג ‏אלחוטי LogiTech G - Pro Wireless לוגיטק, G-Pro Wireless לוגיטק , לוגיטק G-Pro Wireless\n\n### קטגוריות משלימות\n\nלחוות דעת ופרטי החנויות\n\nמוצרים נוספים של Logitech בזאפ\n\nבחרו את העכבר המתאים ביותר עבורכם מתוך מגוון עכברים בקטגוריה. עכברים חוטיים או אלחוטיים, עכברי Bluetooth, עכברים אופטיים, עכבר לייזר, עכבר Trackball, עכברים של מותגים כגון Logitech ,Microsoft ,Teac ,Salient Tech ,Genius ואחרים.\n\n{\"SaleOpen\":true,\"Currency\":\"ILS\",\"Catalog\":\"zap\",\"Id\":1005972,\"Title\":\"‏עכבר גיימינג ‏אלחוטי logitech g-pro wireless\",\"MinPrice\":659.0000,\"MaxPrice\":659.0000,\"MainCategory\":\"computers\",\"SubCategory\":\"c-mouse\",\"SubCategoryHebName\":\"עכברים\",\"ImageUrl\":\"https://img.zap.co.il/pics/7/7/5/6/91376577c.gif\",\"Description\":\"‏עכבר גיימינג ‏אלחוטי logitech g-pro wireless\",\"Brand\":\"Logitech\",\"Url\":\"https://www.zap.co.il/model.aspx?modelid=1005972\",\"Rate\":425.0,\"NormalizeRate\":4.5,\"ReviewsAmount\":4,\"PriceRange\":\"659-659\",\"IsSpecialDay\":false,\"PageName\":\"model\",\"Filters\":null,\"Reff\":null,\"GUID\":\"13a800fe873e48038fc520d8b62653c2\",\"ZapFpGuid\":\"\"}",
+          "title": "‏עכבר גיימינג ‏אלחוטי LogiTech G-Pro Wireless לוגיטק - זאפ השוואת מחירים",
+          "url": "https://www.zap.co.il/model.aspx?modelid=1005972"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search2 [wordlim: 200] Crawled: last week;   *     *     *     * Logitech G PRO Wireless GHOST Gaming Mouse - LIMITED EDITION, VERY RARE, SEALED ...   * Logitech G PRO LIGHTSPEED Wireless Gaming Mouse - Black (Non-Orig Acc) ... eBay Refurbished\n  * All Filters\n\n620 results\n\nSort: Best Match\n\n  * Best Match\n  * Time: ending soonest\n  * Time: newly listed\n  * Price + Shipping: lowest first\n  * Price + Shipping: highest first\n  * Distance: nearest first\n\n  * List View\n  * Gallery View\n\n  *     *     *     * Logitech G PRO Wireless GHOST Gaming Mouse - LIMITED EDITION, VERY RARE, SEALED\n\nBrand New · Logitech\n\nILS 767.20\n\nor Best Offer\n\nILS 46.03 shipping\n\n9⁣T⁣ ⁣3⁣K⁣ ⁣⁣⁣⁣⁣⁣1⁣Y⁣ ⁣⁣⁣T⁣⁣⁣⁣⁣⁣⁣⁣⁣F⁣⁣ ⁣\n\n  *     *     *     * New ListingLogi MX Master 2S M-R0066 Black Wireless USB 7-Button Gaming Mouse UGC\n\nPre-Owned · Logitech\n\nILS 92.06\n\nor Best Offer\n\nILS 18.72 shipping\n\nY⁣⁣⁣⁣⁣⁣X⁣ ⁣5⁣9⁣ ⁣W⁣⁣⁣⁣⁣⁣⁣⁣K⁣ ⁣1⁣⁣J⁣⁣⁣⁣ ⁣\n\n  *     *     *     *     * Logitech MX Master 2S Wireless Mouse WITH UNIFYING DONGLE Or Bluetooth Tested\n\nPre-Owned · Logitech\n\nILS 91.14\n\nWas: ILS 101.27 was - ILS 101.27\n\nFree international shipping\n\n⁣⁣⁣N⁣Y⁣⁣⁣⁣ ⁣N⁣E⁣⁣⁣ ⁣S⁣⁣⁣K⁣ ⁣⁣⁣⁣⁣X⁣⁣X⁣ ⁣V⁣\n\n  *     *     *     *     * New ListingLogitech G305 LIGHTSPEED Wireless Gaming Mouse, Black, HERO 12000 DPI - Open Box\n\nOpen Box · Logitech\n\nILS 76.69\n\nILS 21.45 shipping\n\n4⁣⁣F⁣ ⁣⁣B⁣C⁣ ⁣G⁣8⁣⁣ ⁣2⁣6⁣⁣ ⁣⁣⁣0⁣⁣⁣⁣8⁣⁣⁣ ⁣⁣⁣\n\n  * Logitech G Pro Wireless Mouse - No Dongle No Charger\n\nPre-Owned · Logitech\n\nILS 52.17\n\nor Best Offer\n\nILS 18.38 shipping\n\n⁣⁣D⁣⁣8⁣ ⁣3⁣⁣C⁣ ⁣⁣⁣J⁣⁣⁣6⁣ ⁣⁣⁣⁣Y⁣⁣⁣V⁣⁣⁣ ⁣Z⁣\n\n  * Logitech Lightspeed Wireless Gaming Mouse G305 [ BLACK ] NEW\n\nBrand New · Logitech\n\nILS 171.48\n\nWas: ILS 214.45 was - ILS 214.45\n\nFree international shipping\n\nK⁣⁣N⁣ ⁣M⁣⁣⁣⁣⁣⁣⁣9⁣⁣⁣ ⁣⁣⁣⁣W⁣D⁣⁣⁣⁣⁣⁣⁣⁣ ⁣\n\n  * Logitech G Pro Wireless Gaming Mouse\n\nPre-Owned · Logitech\n\n(164)\n\nILS 89.00\n\nILS 19.95 shipping\n\n3⁣⁣⁣⁣E⁣ ⁣I⁣⁣⁣L⁣ ⁣⁣I⁣⁣2⁣⁣⁣⁣⁣⁣ ⁣⁣Z⁣⁣J⁣ ⁣2⁣M⁣\n\n  * Logitech G PRO X Superlight 2 MR0097 Wireless Gaming Mouse\n\nPre-Owned · Logitech\n\nILS 227.06\n\nFree international shipping\n\nM⁣I⁣⁣ ⁣⁣⁣B⁣⁣A⁣ ⁣⁣H⁣5⁣⁣⁣ ⁣9⁣⁣⁣2⁣⁣⁣⁣⁣⁣ ⁣D⁣⁣\n\n  * New Logitech G305 Lightspeed Wireless Gaming Mouse G305\n\nBrand New · Logitech\n\n(98)\n\nILS 78.22\n\nWas: ILS 92.03 was - ILS 92.03\n\nor Best Offer\n\nILS 21.91 shipping\n\n⁣⁣⁣Y⁣K⁣⁣⁣⁣ ⁣⁣⁣⁣⁣⁣⁣⁣R⁣P⁣⁣⁣ ⁣⁣⁣⁣A⁣F⁣ ⁣⁣\n\n  * Logitech G309 LIGHTSPEED Wireless Gaming Mouse, LIGHTFORCE Hybrid Switches, HERO\n\nBrand New · Logitech\n\nILS 117.35\n\nWas: ILS 138.07 was - ILS 138.07\n\n## Best selling\n\nSee All\n\n  * Logitech G305 (910-005280) Wireless Gaming Mouse\n\n(98)\n\nILS 84.24 New\n\nILS 61.35 Used\n\n  * Logitech G Pro Wireless Gaming Mouse With eSPORTS Grade Performance\n\n(164)\n\nILS 245.47 New\n\nILS 92.03 Used\n\n  * Logitech G603 Wireless Gaming Mouse - Black\n\n(26)\n\nILS 460.29 New\n\nILS 156.48 Used\n\n  * Logitech G305 Wireless Gaming Mouse with G240 Mousepad\n\n(17)\n\nILS 107.38 New\n\nILS 38.36 Used\n\n  * Logitech G502 Lightspeed Wireless Gaming Mouse with HERO 16K Sensor - Black (910-005565)\n\n(14)\n\nILS 230.16 New\n\nILS 76.69 Used\n\n  * Logitech G900 Chaos Spectrum Professional Grade Wired/Wireless Gaming Mouse\n\n(119)\n\nILS 260.82 New\n\nILS 119.68 Used\n\n  * Logitech G903 Wireless Optical Gaming Mouse with RGB Lighting - Black\n\n(89)\n\nILS 398.91 New\n\nILS 141.13 Used\n\n## Top rated\n\nSee All\n\n  * Logitech G Pro Wireless Gaming Mouse With eSPORTS Grade Performance\n\n(164)\n\n96% agree - Well designed\n\nILS 245.47 New\n\nILS 92.03 Used\n\n  * Logitech G305 (910-005280) Wireless Gaming Mouse\n\n(98)\n\n97% agree - Well designed\n\nILS 84.24 New\n\nILS 61.35 Used\n\n  * Logitech G305 Wireless Gaming Mouse with G240 Mousepad\n\n(17)\n\n100% agree - Well designed\n\nILS 107.38 New\n\nILS 38.36 Used\n\n  * Logitech G900 Chaos Spectrum Professional Grade Wired/Wireless Gaming Mouse\n\n(119)\n\n95% agree - Well designed\n\nILS 260.82 New\n\nILS 119.68 Used\n\n  * Logitech G903 Wireless Optical Gaming Mouse with RGB Lighting - Black\n\n(89)\n\n88% agree - Well designed\n\nILS 398.91 New\n\nILS 141.13 Used\n\n  * Logitech G603 Wireless Gaming Mouse - Black\n\n(26)\n\n95% agree - Well designed\n\nILS 460.29 New\n\nILS 156.48 Used\n\n  * Logitech G502 Lightspeed Wireless Gaming Mouse with HERO 16K Sensor - Black (910-005565)\n\n(14)\n\n75% agree - Well designed\n\nILS 230.16 New\n\nILS 76.69 Used",
+          "title": "Logitech Wireless Ergonomic Optical Computer Gaming Mice | eBay",
+          "url": "https://il.ebay.com/b/Logitech-Wireless-Ergonomic-Optical-Computer-Gaming-Mice/23160/bn_71362921"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search3 [wordlim: 200] Crawled: 2 months ago; Image: תמונה 1, Logitech G Pro אוזניות למכירה בפרדס חנה-כרכור | סטריאו אביזרים ... Logitech G Pro X Wireless חדש באריזה.\n\nנראה שעסקה זו כבר נסגרה. לפניכם חיפושים נוספים ועוד מודעות רלוונטיות.\n\n# Logitech G Pro אוזניות למכירה בפרדס חנה-כרכור | סטריאו אביזרים\n\n700 ₪\n\nImage: תמונה 1, Logitech G Pro אוזניות למכירה בפרדס חנה-כרכור | סטריאו אביזרים\n\n[Input] Image: Like Ad\n\nImage: share Ad\n\nX\n\nImage: עבור לתמונה הבאהImageImage: עבור לתמונה הבאה\n\nImage\n\nLogitech G Pro X Wireless חדש באריזה.\n\n## פריט\n\nLogitech G Pro אוזניות\n\n## פרטים נוספים\n\n### קטגוריה: \n\n- אביזרים\n\n### עיר: \n\nפרדס חנה-כרכור\n\n### מחיר: \n\n700\n",
+          "title": "Logitech G Pro אוזניות למכירה בפרדס חנה-כרכור 700 שח | סטריאו - אביזרים | לוח יד שניה הומלס",
+          "url": "https://www.homeless.co.il/yad2/viewad%2C994315.aspx"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search4 [wordlim: 200] Crawled: last month; דף הבית > מקלדות ועכברים > עכבר גיימינג אלחוטי G PRO WIRELESS לוג'יטק - Logitech ... 399 ₪מחיר באילת: 338.14 ₪ ... הגוף קל המשקל וחיישן המשחקים האופטי של עכבר המשחקים המקצועי של Logitech שפותח ביחד עם מקצועני ספורט אלקטרוני, תוכנן לספק מהירות, דיוק וכושר תגובה ללא מתחרים. ... מערכת מתיחת קפיצי המתכת של הלחצנים משפרת את העקביות של לחצני שמאלה/ימינה של העכבר ומסייעת להפחתת הכוח הנחוץ לצורך לחיצה ומספקת ביצועי לחיצה אמינים ללא תקלות שניתן לסמוך עליהן. ... העכבר ניתן להתאמה עם עד 16.8 מיליון צבעים להתאמה מושלמת לבעי הנבחרת שלכם להגדרה אישית או לסנכרון עם מוצרי משחקים אחרים.\n",
+          "title": "עכבר גיימינג אלחוטי G PRO WIRELESS לוג'יטק - Logitech - באג",
+          "url": "https://www.bug.co.il/brand/logitech/gprowireless/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search5 [wordlim: 200] Crawled: today; # Logitech G PRO Wireless Gaming Mouse Black ...   * משלוח אקספרס עד הבית: 1-4 ימי עסקים ₪49\n",
+          "title": "Logitech G PRO Wireless Gaming Mouse Black – Cryptech",
+          "url": "https://cryptech.co.il/products/logitech-g-pro-wireless-gaming-mouse-black"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search6 [wordlim: 200] Crawled: 4 days ago;   * מחיר מהיקר לזול ...   * מס' מדרגים ... zap choice zap choice תו \"Zap Choice\" ניתן על ידי zap להצעות שמומלצות במיוחד על בסיס חוות דעת הגולשים ואיכות ההצעה. ...   * מחיר הנמצא בטווח של עד 10% מהמחיר הזול ביותר למוצר ... מוצר חדש, אריזה סגורה עם ערכה מלאה ומקורית! ... ‏עכבר ‏אלחוטי LogiTech M240 910-007119 ... ‏עכבר ‏אלחוטי LogiTech G-Pro Wireless\n",
+          "title": "עכברים ‏LogiTech - זאפ השוואת מחירים - עמוד 2",
+          "url": "https://www.zap.co.il/models.aspx?db135285=135294&pageinfo=2&sog=c-mouse"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search7 [wordlim: 200] Published: 1.5 years ago; Crawled: 2 months ago; Logitech g pro wireless חדש באריזה. ... ##### תמונות של g pro wireless עכבר גיימינג למכירה בפרדס חנה-כרכור מחשבים וציוד נלווה אביזרים\n",
+          "title": "g pro wireless עכבר גיימינג למכירה בפרדס חנה-כרכור 430 שח | מחשבים וציוד נלווה - אביזרים | לוח יד שניה הומלס",
+          "url": "https://m.homeless.co.il/yad2/viewad%2C994310.aspx"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search8 [wordlim: 200] Crawled: 3 months ago; עכבר הגיימינג Logitech G Pro Wireless מספק חיבור אלחוטי אמין וחיישן HERO 16K לדיוק מרבי. ... ש: האם עכבר Logitech G Pro Wireless (SKU: 910-005272) תומך בתדר סקר של 1000 הרץ? ... ספק: Grand ברקוד: 910-005272 לא זמין זמינות: במלאי במלאי לא במלאי קטגוריות: גיימינג, ציוד היקפי\n",
+          "title": "Logitech G Pro Wireless Gaming Mouse – Powercon",
+          "url": "https://powercon.co.il/products/logitech-g-pro-wireless-gaming-mouse"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search9 [wordlim: 200] Crawled: 3 weeks ago; ביד2 מאז2020 ... למכירה חדש באריזה!!Logitech Wireless Mouse M330 Silent Plus.דרישות מערכת: Windows 10, 11 וגרסאות מתקדמות יותר macOS 11 וגרסאות מתקדמות יותר ת Chrome OS Linux חיבור USB פנוי מפרט טכני: 3 לחצנים גלגל לגלילה עקיבה אופטית מתקדמת של Logitech רזולוציית חיישן: 1000 dpi טווח אלחוטי: עד כ 10 מטר חיבוריות אלחוטית מתקדמת 4. ... מקלדת Magic Keyboard (עם כניסת לייטנינג) ועכבר Magic Mouse של אפל, מקוריים במלואם. ... מקלדת מכנית Logitech G512 Carbon עם מתגי GX Blue (קליקי) ותאורת RGB. ... עכבר אחותי האביזרים חוטיים ככה שאפשר להשתמש בזה בלי בעיות כפתורים טובים לעכבר כמעט חדש.\n",
+          "title": "אביזרי מחשבים – לפטופים ומחשבים יד שנייה למכירה | יד2",
+          "url": "https://www.yad2.co.il/market/collections/electronics_for-laptops-and-computers_computer-accessories?pageNumber=2"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search10 [wordlim: 200] Crawled: 4 months ago; SKU: 910-005272 ... ### Logitech G Pro Wireless Gaming Mouse\n",
+          "title": "Logitech G Pro Wireless Gaming Mouse - 1PC.co.il",
+          "url": "https://1pc.co.il/en/logitech-g-pro-wireless-gaming-mouse"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search11 [wordlim: 200] Crawled: 4 months ago; Logitech g703 עכבר גיימינג של לוגיטק תומך powerplay חדש לגמרי סגור עם פלומבות. ... Logitech G Pro שומש פחות מחודש וגם אז הש... ... עכבר גיימינג Logitech G402 מעולה עכבר גיימינג של חברת Logitech דגם G402 עם חמישה מקשים בצד העכבר על מנת לעזור במשחקים.\n",
+          "title": "ארכיון מודעות מחשבים וציוד נלווה עכבר אביזרים - עמוד 14 - ad",
+          "url": "https://www.ad.co.il/archive/c/23?pageindex=14&sp169=4614&sp58=3588&view=list&withprice=1"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit12 [wordlim: 200] Published: 3.6 years ago; Crawled: 3.6 years ago; ~~Logitech G Pro Wireless is used, but in good shape.\n",
+          "title": "[USA-IL] [H] Logitech G Pro Wireless [W] PayPal",
+          "url": "https://www.reddit.com/r/hardwareswap/comments/11yydy7"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search13 [wordlim: 200] Published: 3.0 years ago; InfoService / logitech ... <td><strong>165₪</strong></td> ... <td><strong>G PRO</strong><br><span style=\"color:red\">Lightspeed Wireless</span><br><span style=\"color:purple\">Lag-Free Wireless, 2.4GHz 1ms</span><br>Ergonomically design for comfort<br>Ultra-Lightweight.\n",
+          "title": "Microsoft Word - LogitechMouse241023",
+          "url": "https://infoservice.co.il/BGU/Periferials/Mice/LogitechMouse241023.pdf"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit14 [wordlim: 200] Published: 6 months ago;     למאו תרגמתי ישירות כי רדיט מאוד לא אוהב מילים באנגלית בתוך פסקה בעברית ... הייתי מציע לך להתקשר למוכרים ולבקש לבוא לראות את המשחק בקופסה. ... כל אחד מהמשחקים האלה אם לא בחינם מקבל הנחה כל חודש שמוריד אותו לאיזה מחיר של 40 שקל על מה 100 שקל ... אין שום בעיה בלקנות משחקים יד 2 ואין שום בעיה עם המשחקים, אם כבר להפך משחקים בישראל ידועים כאוברפרייסד. ...   הבנתי, אני לא מחפשת דיסקים מזויפים תאמת בעיקר תהיתי אם אני סתם אלך לקנות ממישהו יד שניה יש סיכוי שינסו לעבוד עלי עם כל מיני שטיקים שאני לא יודעת אליהם ... שוק היד-שנייה בקונסולות וגיימינג הוא לא רע בכלל למען האמת, כמעט סטנדרט עבור אנשים מסויימים. ...     אף פעם אל תקני משחק בחנות ישראלית את יוצאת פראיירית כי את משלמת 200 שקל יותר ואת על הדרך גם נותנת לגנבים לגיטימציה להמשיך לגנוב תקני דיגיטלי שיש סייל מהחנות של סוני, עדיף 50 אחוז הנחה אם יש לך סבלנות אין משחק שרציתי לשחק על הסוני לא שיחקתי במחיר נורמלי\n",
+          "title": "מחפשת דיסקים יד שניה לסוני 5 וצריכה עזרה לא ליפול למזימות",
+          "url": "https://www.reddit.com/r/ag_israel/comments/1s8hoi3/%D7%9E%D7%97%D7%A4%D7%A9%D7%AA_%D7%93%D7%99%D7%A1%D7%A7%D7%99%D7%9D_%D7%99%D7%93_%D7%A9%D7%A0%D7%99%D7%94_%D7%9C%D7%A1%D7%95%D7%A0%D7%99_5_%D7%95%D7%A6%D7%A8%D7%99%D7%9B%D7%94_%D7%A2%D7%96%D7%A8%D7%94_%D7%9C%D7%90_%D7%9C%D7%99%D7%A4%D7%95%D7%9C/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit15 [wordlim: 200] Published: 4.4 years ago; Crawled: 4.4 years ago; I have a Logitech G Pro Wireless mouse that I have been using since January 2022.\n",
+          "title": "[USA-IL] [H] Logitech G Pro Wireless Mouse [W] Paypal",
+          "url": "https://www.reddit.com/r/hardwareswap/comments/uffsf8"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search16 [wordlim: 200] Published: 3.4 years ago; איור עכבר מלמעלה עם קווי סימון כחולים ומספרים 1, 2, 3, 4, 5, 6 המצביעים על לחצן שמאלי, לחצן ימני, לחצן אמצעי/גלילה, דפדפן קדימה, דפדפן אחורה ו-Power LED.מופיע לוגו G במרכז החלק התחתון של העכבר. ... מסומן חיבור טעינה/נתונים USB בחלק העליון, מתג הפעלה/כיבוי עם ON/OFF בהגדלה עגולה, ודלת צמצם POWERPLAY בחלק התחתון עם לוגו G.מופיע גם הכיתוב PRO SUPERLIGHT ליד אזור המתג.\n",
+          "title": "תכונות העכבר",
+          "url": "https://www.logitech.com/assets/66332/2/logitech-g-pro-x-superlight-2-lightspeed-gaming-mouse.pdf"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit17 [wordlim: 200] Published: 4.0 years ago; Crawled: 4.0 years ago; I bought logitech g pro tkl (cherry mx blue) (black) ... Logitech g pro wireless (black)\n",
+          "title": "how much would these sell for?",
+          "url": "https://www.reddit.com/r/PakGamers/comments/xtiv49"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit18 [wordlim: 200] Published: 6 months ago; סקרן לדעת מה היה המחיר הפעם שהמלאי אזל כל כך מהר, כבר שנה אני עוקב ורוב הזמן הוא היה למכירה אבל ב2700 ... לא שינוי רציני, פעם שלישית שאני נכנסת בתוך שעה ונגמר המלאי, חייב להיות בוטים, אני שוקלת לקנות יד שנייה כבר ...     תבדקי בזאפ, קצת יותר יקר אבל לי זה הגיע סבבה ...     קניתי OLED יד שנייה ב1600₪ שבועיים לפני תחילת המלחמה כי הרחתי את זה באוויר, הבחור מכר כי השתדרג לlegion go רוצה להפתר מהר, ככה שאפשר למצוא מציאות פשוט צריך להיות עם האצבע על ההדק. ... יכול להיות גם שהם עדיין לא עדכנו את מלאי באתר, גם כן בכוונה, כדי שכל הבוטים ינסו לקנות ויכשלו, ויותר מאוחר - אנשים יכלו לרכוש. ... שווב ליצור קשר עם השירות לקוחות, יש כאלו שייתנו לך לשריין בתמורה לתשלום. ...   קניתי אותו בהשקה ומכרתי בשניה שקניתי סוויצ 2 . ... אומיגאד רגע זה מריץ טוב את המשחקים כמו על המחשב גם  קצת יותר כבדים?\n",
+          "title": "עברו 5 דקות! זה בוטים??",
+          "url": "https://www.reddit.com/r/israel_bm/comments/1sk64mc/%D7%A2%D7%91%D7%A8%D7%95_5_%D7%93%D7%A7%D7%95%D7%AA_%D7%96%D7%94_%D7%91%D7%95%D7%98%D7%99%D7%9D/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit19 [wordlim: 200] Published: 3.6 years ago; Crawled: 3.6 years ago; Ideally second hand, but if anyone has any websites where we can buy it at non-inflated rates ( ~~it's 10 g on Amazon lol~~), please let me know ...   Link: https://compify.in/product/logitech-g-pro-wireless/\n",
+          "title": "[WTB] Logitech G Pro wireless",
+          "url": "https://www.reddit.com/r/mkindia/comments/11cbfkg"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit20 [wordlim: 200] Published: 4 months ago; Logitech G Pro X Superlight 1 Wireless Mouse\n",
+          "title": "Logitech G Pro X Superlight 1 Wireless Mouse - 60 USD Final",
+          "url": "https://www.reddit.com/r/LebaneseMarketplace/comments/1u21udi/logitech_g_pro_x_superlight_1_wireless_mouse_60/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search21 [wordlim: 200] Published: 7.7 years ago; ה-PRO WIRELESS מותאם למערכת טעינה אלחוטית Logitech G POWERPLAY, הנמכרת בנפרד.\n",
+          "title": "טעינה/נתונים על כבל",
+          "url": "https://www.logitech.com/assets/65542/2/pro-wireless.pdf"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0search22 [wordlim: 200] Published: 2.3 years ago; The mouse body is shown with a central Logitech “G” logo and a second lower view labeled “PRO LIGHTSPEED”.\n",
+          "title": "8 לחצנים הניתנים לתכנות מלא",
+          "url": "https://www.logitech.com/assets/70209/2/pro_2_lightspeed_qsg_amr.pdf"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit23 [wordlim: 200] Published: 5 months ago; Logitech G Pro Wireless Gaming Mouse @ 15,000 KES\n",
+          "title": "Logitech Gaming Mouse",
+          "url": "https://www.reddit.com/r/marketplacekenya/comments/1ssov1n/logitech_gaming_mouse/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit24 [wordlim: 200] Published: 1.7 years ago; Crawled: 1.5 years ago; I have logitech g pro wireless for 3 or 4 years And still good as new, no double clicking or anything ... I had a Logitech g pro wireless that I warrantied twice for double clicking before switching the Lamzu Atlantis.\n",
+          "title": "Never Buying Logitech Ever Again",
+          "url": "https://www.reddit.com/r/MouseReview/comments/1hy53ao"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit25 [wordlim: 200] Published: 10 months ago; So im looking into replacing my g402 from logitech and im looking into getting something that will feel as great but be wireless and cheap im planing to go with the second hand route as its much cheaper than new.I know that there are Chinese mise but im unsure how they will feel and for that price a bit more i can get the original 2nd hand.\n",
+          "title": "Buying 2nd hand",
+          "url": "https://www.reddit.com/r/MouseReview/comments/1p9upg6/buying_2nd_hand/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit26 [wordlim: 200] Published: 4 months ago; Crawled: 4 months ago; Logitech G Pro X 2 Superstrike    ((((SOLD))))\n",
+          "title": "[WTS] Logitech G Pro X 2 Superlight",
+          "url": "https://www.reddit.com/r/dubaiclassifieds/comments/1tdns35/wts_logitech_g_pro_x_2_superlight/"
+        },
+        {
+          "type": "text_result",
+          "snippet": "citeturn0reddit27 [wordlim: 200] Published: 5.0 years ago; Crawled: 5.0 years ago; [Tuesday October 12 2021] [+2 votes] ... **Logitech G Pro Wireless (Not superlight) $70** – Switched over to the 502 so no longer need this!\n",
+          "title": "[USA-IL][H] Logitech G Pro Wireless (non-superlight) Mouse, Jabra Elite 65ts, Apple Pencil Gen 1 (as is) [W] Paypal",
+          "url": "https://www.reddit.com/r/hardwareswap/comments/q6nzr1"
+        }
+      ]
+    },
+    {
+      "id": "rs_0eed446830ed8023016acb48f8863887d1b3c821f3ec3b3a91",
+      "type": "reasoning",
+      "content": [],
+      "encrypted_content": "gAAAAABqy0j6ZsjOyrcs1hzEloNfopn54TfVQIOYAQQBU2nW1DGqGaLSY3NI97g5HHJhueU6CyFi0woLReta52NStFgDQSb6fTJJ-4vMQMvYsv_qvmN_iqiXKvUwbxfykMmuRI_2rxk00MFqwkwnT9HEEbB6BM9Vm68PYTw3R2FoJoK-HiQh3xYI9o5ODLDfs4bO5NIuLQG-6thaxiVpSTUbQdMjSLP6bdLUtrMAlgoh-UZOBrt3_XCjPOMcQbI9Uinp7tcI3ShRdjp3gMLzQ7aNFdkzjRhwVSHQztiP5pGJK000ogRDCZT5eK0CQhp3cE6rBZYiQAA16rBmQUndCaCeWz3lnIt-aK-uKeT5fJm5Y7jE5Ifew5_v3cCuWf45-iM_wDhsOodSkzLqmhyYWbIQY-JQRRnEYEyHt4EznYh98v51cNrzW97UFqZzfoiJyDj7IR5NYZMAFCN1vB_jr1Jf_EcM4ItW3I0cc7F68f95DP6X5S4os6CFP6zIsQxAr-Cqwet879d2KxnYNu9BTIkIsLEg0mse-T23lBlmSfAAl7tXyMLEERxCu_5QiQ1I80WgJhPcb1vvYI7Au90yBtgbhSvQE2qOm3YSC5rlKJXeLaZnIUOZLEjtl6PBX8ZQHjXt67nNUeaIPbsoMGAqfpzBxBKhvLi8oMCU9VCUy-W45jZzFIzqmxoNA2Y-QBH39DffArnRsYcCdmqbbtDLdvum6LotTaWeq_66jV4ma57FAc89TXDKsbNoyHKvk_vcZpZCohMe9o6C2B1plqgyPo5vcWm9Z81fU2FmmYo-SDimSNuD4lPJejGP9l8gkuqyPfZ0xFdoPNlSewo3UUdc0S0eNQF89Ved0e1MSvdff6lX8ccFEifRBjb2CSMgfsb3mG_lVELjFx2FXPSbYBaL3RAq8DTv6GY4Pl1CNEF3l3aeSYI6y7JJ-AkLOAy2ggNEvgRPU48vkXWitTf3aJXuVIgnpKki3UJQ-VSSwCDlZeAciTrVxHsCmB0RmUudACrN6bTElQq41BajfGpxuF25YVOt7gCwHxxzsqkpdDnjgX77jjPsvMDDm_LrxHcxeHTy2xwDaPROt_68WcyOjcrcub0tEwxcYGdDJwTkgInKYYDg6TlC20mUNO5Xdyj2QIh7rMKZjkNc-QEUQ5hHd17qxz9yBoy4N5kHYQPGwOLevM8zrlp3yLWzKhbADbF3rsq9JLuUplUcE7GkeEdNYkweRREP4GvKOb40DLt7ZttWa5UQRzpaLt9oPNvEHgn9CCRCwSVwf9jc68TqsNH4cL9PF7pciYP7YuysaP2Z-3p8WRV4U4BLHJQKOko2NDlOv9X7IlNnNHAJjFVZU2h5GrZyeOUzJwzO6FYJCFWpfUtDKSI9uGVCFjyQDqnFZnOl8bRCQaJnc7W0Fk1pEUcxNv7pPZIKzNgxgp35inOHdRTrWsBkvXmb-RhHiLHws1AxsUM0cvRIAzOlLRSKyafZYrdCkf-kIkyJBrRxDHBORRjgSGl_xrWkoT8hq3hR-884sS0Kt1-BVJw2gQ7ImMAt700863VNhZZPJCOt60TW6KWsPkEFJz1sBbjWC7sxSGUf6VJDGT7XKr1MLp9jwjYwTygmyqYPim-kfrhuEadLKs9jJ76e9u0vOS9eUK7qOwV1L_IBFhZilBJLjsScQA2NLRrt9AgHzwT3Z6XgerALJshKJ2Dn0z36MMgMJEM0LvIFlzyO1qirOpab9XXA9EHUO0Y9Ka0j8jOtV0LoLhsHuJntC3jIY1d7xy-T2iQ5qQ8iRJ3DPB-TIQwFGk5iOrj4vJZeaSQfqFnYlx2yvT4M5ctRuDVK89_t99c7DOkVrjMgNMNMrEmCosfHTWq8Uq6-5sEuXqvbrEwZFX_2hgdnmg47WB52LTjpdcrFvOxa2ivcIFpu_eJUp_vAWKdfUhMRiJOhjTrFk3DGBqN5PJ_abHaEAeKVAy1jKCgPoVOT_cASK5ZhnrPTZySYr3iM5i9F7x671MSK7BL3pNyWzwN7kcCwLeoj9l5DyTQswuA1bVEu8L2LklEdHGkjHPLdWx0sG4OB4aYDrSbinfLhQsZxBsMHE164M81avw7Q7vqILM-3CMkoIP2fd-70856KaFBivJu8FDNRiqI40d2S3Zj28SBsgqvaog-O0mySS1mr8DDF1KMrCV8u8ILWRkO7fwFPLBgVp1NLVPMMa5f37qvijLygQjpu6zc_MdmwBWC6Zf0LLou6B_YpN9SsS6-R7yy7zOnW9nKOb8O4PZ0NbbtOHi2cbBjR3yscn_jxs0KG33Q-sBc4Woejq2LOnyYeF18HQNk42eZ-yGlaI9FufYI-O8fe-OE04Q6FRL_TR7rZWdy6EUULHMO5vd_QRiEQu1Iqj_7F4OcsfG0XuxHd0T-wAvZzntRqKWdt-84C8QOwAKuY8V9G2M6H9Ligo5qx230FYFaIhflnvhcPyCbeaWzqmXtFS-C58TIA4vIsunjktH3MecmpiGQF9JqQEHSmFTOeyrVSClCLTthK9X8UtnHtgvcOtXzwThnORGS7oCpl_8sCNiItfeFJa4iu4UtTzvvRter3JWnt7lLkWSmODUIrN68C-Gh3t3wocfNYaQqubZqGiv2QK-UnJhGoxBRBmmBzCy9I-JBkhDW6kA0RVXOM7dv3my8CIjHNc6W2zd3EuVkSP1pn6hZKjLQSmhz-1dUiurJMUQy2sPCE6IHwCv_Q6vhGAOxm3RzAgOxB32ilAg17hl9DvQYSyXitA8Bnqxku5FYyVM6Yjyqv3LhIRjmBL1Xz4mc0ga6PNR1j4XxZW8JnfueLUN84cJiMKcEBECdUfG6En86aMhMwFiS9OdCsplflFkaR6flyYBLGUgVhIInScNRJ8D6seIEX2rx0vnrCkop689AowRTy-oq-5nFKhsuvjBipTYLZxeqaVI9hdvJzF2Gf2WFuRqyIlJpsp3sQUMRZUMR2DALsop9EUHSHLUEcZh91xCgPGUZvfryGBCgY5DbquYA3BXHcVWWri7qCfJI-a8qfxvaC-5XdXy2TvM4ZAyx8F6jIFiLGVFRydo30eUtnPAr4-HFCtnXqH6ETMUqp_wYfrUccqqZreoKcmXN6tjaYR-xq5i4HLrh2FYyCQvL_aCUCS7wN1FYA97aCHNBXSdV00UUTHQxF1wleTS9ICxHsErsuZzMryeRgV6F4C5Q7d98MezpzmcFaCe6KGrM6Tb7ngJy_hVAyG4VuyXJ7NB1p3b0Zjuyfxmo8l3eSnl0haMWQv9XJ1p_UrCd4i2q3tDqN62U5-caazk6fNqWaVTIFiRjCOriprEfh08kxrlQd88W1T7BGyZNY050eaXL_NuH-VkaesP4HnytXGoqJsW6yNLNskx28WKwrCS7fcPZVC1hjflZVRmYqnAbmdnOC4UtGTLE4oxZsOe5h7IpJ6jf7tTQAmYIaNfpxl-_GDGUZuA6D9RYLUqk8ceD_R1qI7yRT2DUO5ygTLxVIeM2lxLTYdAUvgR4RUZqrgG0kY7Ygp0YkCDWD6ENUw7OtOEdOKNG8Gc-6F5Ios4okIXsiP2FMSli5efcz77syrexpWU0rJKGPI-nFj1S7oB_VZumMojF54BZxz8QFP6W1zh4ceEDE71DQIsadkEdn6e7LzYqmDN10VLLzqYaR6KXIz2ZhGryRHXTnyjXX5H2S0q0HMF63UKVCI4aj1ghZHzYTK2fePj_nkMcVeIS1q_sYqSWrs116dzkTSKQVCN7M0vEstLxCuC4WlSM1n2Skl3EHd115mZe0TPuBi6GBvS8x2N29HB-8WB_gmX6-Jo34PBkAtInqZ3x_cL-kViIjEwPEsadV_lC0gh2R1slL3QjmLRb1el7Hu17Wy02Ub6e_1mghbqUFZdpN0H8w0zXoBrIKu4DEGx5xT0ZRBMBHXmvXfngHnqHFyW3R6EtJlgk62DA12pOTCfQ5SoqzxmWPwjuxQu8HOBIIWZoXus_49uh5bhl8d6Cqb2Sa8gJQW842ejF1Ie2Clly-ZFuIS1wVR_hhFYTkjvIyvWF25Pk7CkvkK9HipfrHzvHD4LZNQL-yf3q87SgxHqG08tqeZQ-Nqu_Q5GJH_Pllb1Ht2an9Ds-aAMhHgmuf7ggTXvuvLJixPR4Q2ymdqfWdU1QuBlZuwQLv0e5RqyyGv6gPLNH3s9YccYjV5uCKdX2aisSzYv439mUAaIlnvPb7mdeLra7Hlz-XcYa62rK2PILNlXP1Xsd4QXKLakAeaJu3rTzXGyPvbHkVTBh3T7t4Ue4KA2rT2ppPhhCEN4XRkbotcfasO4icFqIixWrH_nsq36DkII7CXBDQxxNXUGnNah04CEzhzIwYv-VQiflqu_YALnq1K8I2_G7hcADd-dcRFKOFsqT8E3pd4xWTUm2tuAiSixASFweQdReTa_Bo9ybl1zNWcF1exHRxmQD0pOiP3WxpZATuGp96ycwFyKwOFyvtsg0zwyU7L-7pjp_Jd2OzX3iQC0Gy57XweSsFJ0WRS3Z49yMrbq7XE5yAM9nP3xddYH4FpSuQRTXZ3Klg8vfSpGNHzZT1uwkv94xkeHdMZAox0PaUghOMhv5ud73vP7QA4iR23XVeDPyu2SKZH-f4H-19yYlS_JrfbkcIsVP31_odPB7kKcxiRr6JibbhrA177xSxE3s10zk7HUHVAhaWWKBY1VCWjuUQ77Br7_M6qEYslpIZqx2wGai4VXCaqYfag5P04QzuPqFYSrkf7ZfOQXuPHARJTnkatEJNKK0R2bVoJ5T4AlxmeSZOVKEGgBtSOHb3MAlv9bINEdfYX1xvHqf0lYoTxlrRGa-26a_4-5eaHxevi92ZUoSEuLFVEIzpueTEhhR0Tlutiw5vM1ycV9DIcatn99Afu7oaBpxSGv-wYlGimJSUl-I1RDZBZRe2-zU-s8EPAOej4sRtM6xfeJ35hail6k5n4CnGvjwZz1NBlXxgf7kPJ0RO1_N0aPA3HlfrhxWbKUoyDkZXaRnj57k5",
+      "summary": []
+    },
+    {
+      "id": "msg_0eed446830ed8023016acb48f9670c87d199f4108820dd619a",
+      "type": "message",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "annotations": [],
+          "logprobs": [],
+          "text": "{\"evidence\":[{\"url\":\"https://m.homeless.co.il/yad2/viewad%2C994310.aspx\",\"title\":\"g pro wireless עכבר גיימינג למכירה בפרדס חנה-כרכור\",\"price\":430,\"currency\":\"ILS\",\"kind\":\"other\",\"match\":\"exact\",\"market\":\"IL\",\"condition\":\"new_sealed\",\"page\":\"listing\",\"listed\":null,\"stock\":\"unknown\",\"shipping\":null},{\"url\":\"https://www.ivory.co.il/catalog.php?id=121262\",\"title\":\"עכבר גיימינג Logitech G PRO Wireless Gaming כולל תאורת לד\",\"price\":389,\"currency\":\"ILS\",\"kind\":\"refurbished\",\"match\":\"exact\",\"market\":\"IL\",\"condition\":\"unknown\",\"page\":\"shop_product\",\"listed\":null,\"stock\":\"out_of_stock\",\"shipping\":0},{\"url\":\"https://www.zap.co.il/model.aspx?modelid=1005972\",\"title\":\"‏עכבר גיימינג ‏אלחוטי LogiTech G-Pro Wireless לוגיטק\",\"price\":659,\"currency\":\"ILS\",\"kind\":\"new_retail\",\"match\":\"exact\",\"market\":\"IL\",\"condition\":\"new_sealed\",\"page\":\"search_or_category\",\"listed\":null,\"stock\":\"in_stock\",\"shipping\":60},{\"url\":\"https://www.bug.co.il/brand/logitech/gprowireless/\",\"title\":\"עכבר גיימינג אלחוטי G PRO WIRELESS לוג'יטק - Logitech\",\"price\":399,\"currency\":\"ILS\",\"kind\":\"new_retail\",\"match\":\"exact\",\"market\":\"IL\",\"condition\":\"new_sealed\",\"page\":\"shop_product\",\"listed\":null,\"stock\":\"unknown\",\"shipping\":null}]}"
+        }
+      ],
+      "phase": "final_answer",
+      "role": "assistant"
+    }
+  ]
+}

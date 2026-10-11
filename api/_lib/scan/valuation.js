@@ -74,6 +74,8 @@ export const WEIGHT = Object.freeze({
   freshness: Object.freeze({ current: 1, recent: 0.85, unknown: 0.6, older: 0.4, archived: 0.15 }),
   kind: Object.freeze({ sold: 1.2, price_guide: 1, used_listing: 1, refurbished: 0.8 }),
   page: Object.freeze({ listing: 1, price_guide: 1, shop_product: 0.9, search_or_category: 0.7, other: 0.6 }),
+  /** A shop's refurbished offer that the shop no longer has is a past offer: it counts for less. Private listings carry no stock. */
+  stock: Object.freeze({ out_of_stock: 0.5 }),
 });
 /** A used unit asking more than the shop's price for a new one is not a second-hand reference. */
 const ABOVE_NEW = 1.05;
@@ -94,9 +96,18 @@ export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
  */
 export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 });
 /** Why a reference that qualifies took no part in the price. */
-export const SET_ASIDE = Object.freeze({ ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product' });
+export const SET_ASIDE = Object.freeze({ ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product', REFURBISHED_ALONE: 'retail_refurbished_without_private_resale' });
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
+/**
+ * THE SECOND-HAND MARKET IS PRIVATE RESALE: what people ask and get for their
+ * own units, sealed ones included. A shop's refurbished offer is a different
+ * market — a warranty, a return policy, a margin — so it may SUPPORT a price
+ * that private listings already give, and never stand in for one: with no
+ * private reference standing, a refurbished offer is set aside, shown, and
+ * prices nothing. No percentage turns one market into the other.
+ */
+const PRIVATE_RESALE = new Set(['used_listing', 'sold', 'price_guide']);
 const SOLD_KINDS = new Set(['sold', 'price_guide']);
 const MATCHES = Object.freeze({
   [BASIS.ITEM]: new Set(['exact', 'close_comparable']),
@@ -106,8 +117,8 @@ const MATCHES = Object.freeze({
 const ANCHOR_MATCHES = MATCHES[BASIS.ITEM];
 
 const finite = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
-/** Israeli evidence that can lead: a listing known to be old is Israeli, and still says little about today. */
-const leads = (p) => p.evidence.market === 'IL' && p.freshness !== 'older' && p.freshness !== 'archived';
+/** Israeli PRIVATE evidence that can lead: a listing known to be old is Israeli, and still says little about today; a shop's refurbished offer supports, never leads. */
+const leads = (p) => p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind) && p.freshness !== 'older' && p.freshness !== 'archived';
 const localWeight = (points) => points.filter(leads).reduce((sum, p) => sum + p.weight, 0);
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -129,8 +140,14 @@ const isNewPrice = (e, market) => anchorLike(e, market) && isBound(e);
 /**
  * The new price in a market: the exact item's when the search found one, else
  * the close comparable's. A shop that has it today says more about today's new
- * price than a page for a unit that is out of stock, so stocked offers are
- * used when there are any, and the answer says which it was.
+ * price than a page for a unit that is out of stock, so offers not known to be
+ * out of stock are used when there are any, and the answer says which it was.
+ *
+ * Shops that agree give their median. Shops that DISAGREE (the live search of
+ * 2026-10-11 found the same mouse at ₪399 and ₪659) give the LOWEST offer: a
+ * buyer pays the cheapest shop that has it, and one expensive shop must not
+ * lift the line a used price is measured against. The range is returned so
+ * the answer can say the shops disagreed. Retail is context, not used value.
  */
 function newPrice(evidence, market) {
   const all = evidence.filter((e) => isNewPrice(e, market));
@@ -138,7 +155,12 @@ function newPrice(evidence, market) {
   const use = exact.length ? exact : all;
   const stocked = use.filter((e) => e.stock !== 'out_of_stock');
   const from = stocked.length ? stocked : use;
-  return from.length ? { price: median(from.map((e) => e.price_ils)), inStock: stocked.length > 0 } : null;
+  if (!from.length) return null;
+  const prices = from.map((e) => e.price_ils);
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  const dispersed = high / low > DISPERSION.agrees;
+  return { price: dispersed ? low : median(prices), inStock: stocked.length > 0, low, high, dispersed };
 }
 
 // ── WEIGH AND NORMALIZE ─────────────────────────────────────────────────────
@@ -173,14 +195,21 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
       freshness: WEIGHT.freshness[freshness],
       kind: WEIGHT.kind[e.kind] ?? 1,
       page: WEIGHT.page[e.page] ?? WEIGHT.page.other,
+      stock: e.kind === 'refurbished' ? (WEIGHT.stock[e.stock] ?? 1) : 1,
     };
     // A used unit priced above a new one is a different thing: a bundle, a mislabelled new unit, a mistake.
+    // A sealed unit a private seller asks more for than the shop does is not a second-hand price either.
     const aboveNew = anchorIl && (abroad ? e.price_ils * (scale ?? 1) : e.price_ils) > anchorIl * ABOVE_NEW;
     points.push({
       evidence: e, value: local / CONDITION_FACTOR[condition], condition, stated, freshness, asking,
-      weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page, factors,
+      weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page * factors.stock, factors,
       dropped: aboveNew ? SET_ASIDE.ABOVE_NEW : null,
     });
+  }
+
+  // A SHOP'S REFURBISHED OFFER SUPPORTS PRIVATE RESALE AND NEVER REPLACES IT: with no private reference standing it is set aside.
+  if (!points.some((p) => !p.dropped && PRIVATE_RESALE.has(p.evidence.kind))) {
+    for (const p of points) if (!p.dropped && p.evidence.kind === 'refurbished') p.dropped = SET_ASIDE.REFURBISHED_ALONE;
   }
 
   // LOCAL DRIVES. Good Israeli evidence prices an Israeli item by itself; what was found abroad is then context.
@@ -194,7 +223,7 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     const mad = median(kept.map((p) => Math.abs(p.value - med)));
     if (mad > 0) for (const p of kept) if ((0.6745 * Math.abs(p.value - med)) / mad > MAD_THRESHOLD) p.dropped = SET_ASIDE.OUTLIER;
   }
-  return { points, anchorIl, anchorInStock: il ? il.inStock : null, scale, local, localDrives };
+  return { points, anchorIl, anchorInStock: il ? il.inStock : null, anchorRange: il ? { low: il.low, high: il.high, dispersed: il.dispersed } : null, scale, local, localDrives };
 }
 
 // ── AGGREGATE ───────────────────────────────────────────────────────────────
@@ -251,12 +280,14 @@ export function aggregate(kept) {
  *           rather than a model, or evidence that disagrees
  */
 export function priceConfidence({ kept, scale, approximate = false, basis = BASIS.ITEM }) {
-  if (approximate || basis === BASIS.SIMILAR || kept.length < 2) return 'low';
+  // Confidence is earned by PRIVATE references: a shop's refurbished offers support a price and vouch for none.
+  const privately = kept.filter((p) => PRIVATE_RESALE.has(p.evidence.kind)).length;
+  if (approximate || basis === BASIS.SIMILAR || privately < 2) return 'low';
   const dispersion = dispersionOf(kept);
   if (dispersion > DISPERSION.dispersed) return 'low';
   const local = localWeight(kept);
   const scaledExact = kept.filter((p) => p.evidence.market !== 'IL' && p.evidence.match === 'exact').length;
-  if (local >= LOCAL_STRENGTH.high && kept.length >= 3 && dispersion <= DISPERSION.agrees && basis === BASIS.ITEM) return 'high';
+  if (local >= LOCAL_STRENGTH.high && privately >= 3 && dispersion <= DISPERSION.agrees && basis === BASIS.ITEM) return 'high';
   if (local >= LOCAL_STRENGTH.medium || (scale && scaledExact >= 3 && dispersion <= DISPERSION.agrees)) return 'medium';
   return 'low';
 }
@@ -303,7 +334,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     const similar = normalizeReferences(evidence, { basis: BASIS.SIMILAR, today: day });
     if (similar.points.some((p) => !p.dropped)) { basis = BASIS.SIMILAR; norm = similar; }
   }
-  const { points, anchorIl, anchorInStock, scale, localDrives } = norm;
+  const { points, anchorIl, anchorInStock, anchorRange, scale, localDrives } = norm;
   // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
   const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || anchorLike(e, 'IL') || anchorLike(e, 'INTL'))));
   const kept = points.filter((p) => !p.dropped);
@@ -335,6 +366,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       intl_used_close: count((e) => e.market !== 'IL' && e.match !== 'exact'),
       sold: count((e) => SOLD_KINDS.has(e.kind)),
       retail_il: evidence.filter((e) => isNewPrice(e, 'IL')).length,
+      // A shop's refurbished offers that qualified: supporting evidence at most, never the used market by themselves.
+      retail_refurbished: points.filter((p) => p.evidence.kind === 'refurbished').length,
       not_comparable: evidence.filter((e) => !loose.has(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
       unbound: loose.size,
       // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.
@@ -346,6 +379,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     retail_new_ils: anchorIl ? roundNice(anchorIl) : null,
     // false when every shop page behind the new price showed the item out of stock: an older price, not today's.
     retail_new_in_stock: anchorIl ? anchorInStock : null,
+    // What the shops behind it asked, lowest to highest; `dispersed` when they disagreed and the lowest was taken.
+    retail_new_range: anchorRange ? { low: roundNice(anchorRange.low), high: roundNice(anchorRange.high), dispersed: anchorRange.dispersed } : null,
     // The references priced from, as they were found: the spread a person would see looking at the same pages.
     reference_range: prices.length ? { low: Math.min(...prices), high: Math.max(...prices) } : null,
     local_strength: round2(localWeight(kept)),

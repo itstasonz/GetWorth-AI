@@ -325,3 +325,42 @@ describe('CB-7 the provider\'s own text, as the live search returned it', () => 
     assert.deepEqual([sibling.level, sibling.reason], [BOUND.UNBOUND, BIND_REASON.OTHER_MODEL]);
   });
 });
+
+// ── ONE NAME IN TWO ALPHABETS ───────────────────────────────────────────────
+// A seller writing for Israeli buyers may write the product's name in Hebrew.
+// It is the same name, pronounced: api/_lib/script-normalization.js compares
+// consonant skeletons, with no dictionary and no meanings. Numbers and model
+// codes are compared exactly, and the variant words that tell products apart
+// keep them apart in either alphabet.
+describe('CB-8 one name in two alphabets, and never two products in one', () => {
+  const PRO = identity({ brand: 'Apple', product_family: 'iPhone', model: 'iPhone 13 Pro', display_name: 'Apple iPhone 13 Pro', canonical_name: 'apple iphone 13 pro', item_type: 'smartphone', size_or_capacity: '256 GB' });
+  const S24 = identity({ brand: 'Samsung', product_family: 'Galaxy', model: 'Galaxy S24', display_name: 'Samsung Galaxy S24', canonical_name: 'samsung galaxy s24', item_type: 'smartphone', size_or_capacity: null });
+  const AIRPODS = identity({ brand: 'Apple', product_family: 'AirPods', model: 'AirPods Pro', display_name: 'Apple AirPods Pro', canonical_name: 'apple airpods pro', item_type: 'earbuds', size_or_capacity: null });
+  const row = (text, who, price = 3000) => bindPrice(claim({ price, title: text, match: 'exact' }), list(text), who);
+  const exact = { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.ONE_LISTING, match: 'exact' };
+
+  test('CB-8a the same product written in Hebrew binds as exact, its capacity read in Hebrew units; another capacity is a comparable', () => {
+    assert.deepEqual(row('אייפון 13 פרו 256 גיגה ₪3,000', PRO), exact);
+    assert.deepEqual(row('Apple iPhone 13 Pro 256GB ₪3,000', PRO), exact);
+    assert.deepEqual(row('אייפון 13 פרו 128 גיגה ₪3,000', PRO), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' });
+    assert.deepEqual(row('גלקסי S24 ₪3,000', S24), exact);
+    assert.deepEqual(row('איירפודס פרו ₪500', AIRPODS, 500), exact, 'a name of words alone, with no number in it');
+  });
+  test('CB-8b variants and generations stay apart in either alphabet', () => {
+    assert.deepEqual(row('אייפון 13 פרו מקס 256 גיגה ₪3,000', PRO), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'close_comparable' }, '13 Pro Max is not 13 Pro');
+    assert.equal(row('אייפון 13 256 גיגה ₪3,000', PRO).level, BOUND.WEAK, '13 is not 13 Pro');
+    assert.deepEqual(row('אייפון 13 פרו 128 גיגה ₪2,000', PHONE, 2000).reason, BIND_REASON.VARIANT, '13 Pro is not 13');
+    assert.equal(row('אייפון 14 פרו 256 גיגה ₪3,000', PRO).level, BOUND.WEAK, 'another generation is another product');
+    assert.deepEqual(row('גלקסי S24 אולטרה ₪3,000', S24).reason, BIND_REASON.VARIANT, 'S24 Ultra is not S24');
+    assert.equal(row('גלקסי S23 ₪3,000', S24).level, BOUND.WEAK);
+    assert.equal(row('איירפודס פרו 2 ₪500', AIRPODS, 500).match, 'close_comparable', 'the second generation is a comparable');
+    assert.equal(row('איירפודס 3 ₪500', AIRPODS, 500).level, BOUND.WEAK, 'AirPods 3 are not AirPods Pro');
+    assert.equal(level({ price: 300 }, list('לוגיטק G703 ₪300')), BOUND.WEAK, 'a model code is compared exactly: G703 is not G Pro Wireless');
+  });
+  test('CB-8c a short word alone, a Hebrew word for what the thing is, or a mistranscribed letter never names the product', () => {
+    assert.equal(row('פרו ₪500', AIRPODS, 500).level, BOUND.WEAK, '"pro" alone is two consonants: it names nothing');
+    assert.equal(level({ price: 300 }, list('ג\'י פרו אלחוטי ₪300')), BOUND.WEAK, '"wireless" is not "אלחוטי": transliteration knows no meanings, and a one-letter word is never read across alphabets');
+    assert.equal(row('איירפודס פרה ₪500', AIRPODS, 500).level, BOUND.VERIFIED_ROW, 'a vowel-only difference is the same consonants: Hebrew spelling varies, and this is what corroboration by the other word is for');
+    assert.equal(row('אייפודס פרו ₪500', AIRPODS, 500).level, BOUND.WEAK, 'a consonant gone is another word');
+  });
+});
