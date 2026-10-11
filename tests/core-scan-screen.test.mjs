@@ -411,6 +411,19 @@ describe('CV-4 the two sheets', () => {
     assert.match(links[1].textContent, /≈ ₪245/);
     assert.doesNotMatch(said, /Mouse skates|overpriced/);
   });
+  test('CV-4g a shop\'s refurbished offer that was used is counted as support, not as a second-hand listing', async () => {
+    const v = {
+      ...VALUATION, counts: { ...VALUATION.counts, resale: 4, il_used_exact: 3, refurbished_used: 1 },
+      evidence: [...VALUATION.evidence, { url: 'https://www.ivory.co.il/catalog.php?id=121262', domain: 'ivory.co.il', title: 'refurbished', price: 389, currency: 'ILS', price_ils: 389, kind: 'refurbished', match: 'exact', market: 'IL', page: 'shop_product', stock: 'out_of_stock', freshness: 'unknown', used: true, weight: 0.22, set_aside: null }],
+    };
+    await settle(await open({ identify: [identified()], price: [pricedAnswer(v)] }));
+    await click(button('Why this price?'));
+    const said = container.querySelector('[role="dialog"]').textContent;
+    assert.match(said, /3 second-hand listings found/);
+    assert.match(said, /Israel: 2 · Abroad: 1/);
+    assert.match(said, /Also used, with a smaller weight: 1 refurbished offer from a shop, as supporting evidence\./);
+    assert.match([...container.querySelectorAll('[role="dialog"] a')].find((a) => a.getAttribute('href').includes('ivory')).textContent, /Refurbished · exact · Israel/);
+  });
   test('CV-4c when foreign prices were scaled to Israeli price level, the sheet says by how much', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, intl_adjusted: true, intl_scale: 1.22 })] }));
     await click(button('Why this price?'));

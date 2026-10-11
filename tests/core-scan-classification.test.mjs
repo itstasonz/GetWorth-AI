@@ -23,13 +23,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { buildValuation, normalizeReferences, priceConfidence, verifyEvidence, requalify, localStrength, SET_ASIDE, WEIGHT, LOCAL_STRENGTH, WITHDRAWN } from '../api/_lib/scan/valuation.js';
-import { kindOf, freshnessOf } from '../api/_lib/scan/evidence.js';
+import { kindOf, conditionOf, freshnessOf } from '../api/_lib/scan/evidence.js';
 import { isBound } from '../api/_lib/scan/binding.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
 import { buildMarketPrompt } from '../api/_lib/scan/market.js';
 import { extractSearchProvenance } from '../api/_lib/phaseb/search-provenance.js';
 import { parseBoiRates } from '../api/_lib/scan/fx.js';
-import { TODAY, BOI_JSON } from './helpers/core-scan-fakes.mjs';
+import { TODAY, BOI_JSON, searchItems } from './helpers/core-scan-fakes.mjs';
 
 const LIVE = JSON.parse(readFileSync(new URL('./fixtures/core-scan/gpw-live-search.raw.json', import.meta.url), 'utf8'));
 const FX = parseBoiRates(BOI_JSON);
@@ -115,6 +115,21 @@ describe('CC-2 a private seller\'s unit is resale, sealed or not', () => {
     assert.deepEqual([v.status, v.price_confidence, v.prices.new_sealed.basis, v.prices.good.basis], ['priced', 'low', 'listings', 'adjusted']);
     assert.ok(v.prices.good.list < v.prices.new_sealed.list);
   });
+  test('CC-2d when the model leaves the condition unknown and the listing\'s own page says the unit is sealed, the condition is sealed — and only that, only on a listing page', () => {
+    assert.equal(conditionOf('unknown', 'listing', 'Logitech g pro wireless חדש באריזה.'), 'new_sealed');
+    assert.equal(conditionOf('unknown', 'listing', 'Logitech G Pro Wireless, brand new, never opened'), 'new_sealed');
+    assert.equal(conditionOf('unknown', 'listing', 'unsealed and used daily'), 'unknown', '"unsealed" is not "sealed"');
+    assert.equal(conditionOf('unknown', 'listing', 'עכבר במצב מעולה'), 'unknown', 'no word on the page makes a unit "good"');
+    assert.equal(conditionOf('unknown', 'search_or_category', 'Logitech G703 חדש באריזה ₪300\nLogitech G Pro Wireless ₪430'), 'unknown', 'a list page\'s words belong to many listings');
+    assert.equal(conditionOf('good', 'listing', 'חדש באריזה'), 'good', 'the model\'s own reading is never overridden');
+    assert.equal(conditionOf('mint', 'listing', ''), 'unknown');
+    const url = 'https://m.homeless.co.il/yad2/viewad%2C994310.aspx';
+    const reached = extractSearchProvenance(searchItems([url], { text: { [url]: 'g pro wireless עכבר גיימינג למכירה 430 שח\nLogitech g pro wireless חדש באריזה.' } }));
+    const [e] = verifyEvidence([{ url, title: 'g pro wireless עכבר גיימינג למכירה 430 שח', price: 430, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown', page: 'listing', listed: null, stock: 'unknown', shipping: null }], reached, FX, TODAY, { identity: normalizeIdentity(LIVE.identity_raw), answer: null }).evidence;
+    assert.deepEqual([e.condition, e.condition_claimed], ['new_sealed', 'unknown']);
+    const [p] = normalizeReferences([{ ...e, listed: '2025-04-11' }], { today: TODAY }).points;
+    assert.deepEqual([p.condition, p.stated, Math.round(p.value)], ['new_sealed', true, 271], 'a sealed asking price of ₪430 is a good-condition price of about ₪270, not ₪387');
+  });
   test('CC-2c the prompt says so to the model', () => {
     const prompt = buildMarketPrompt({ identity: normalizeIdentity(LIVE.identity_raw), today: TODAY });
     assert.match(prompt, /used_listing \(a PRIVATE SELLER's/);
@@ -146,20 +161,42 @@ describe('CC-3 a shop\'s refurbished offer supports and never leads', () => {
     assert.equal(value([...two, refurbished(389), refurbished(379), refurbished(369)]).price_confidence, 'medium');
     assert.equal(value([...two, item({ price: 310 })]).price_confidence, 'high');
     assert.equal(priceConfidence({ kept: normalizeReferences([item({ price: 300 }), refurbished(389)], { today: TODAY }).points, scale: null }), 'low');
+    // A private listing ABROAD does not let an Israeli shop's refurbished offer stand for the Israeli used market.
+    const abroadOnly = value([item({ price: 62, currency: 'USD', price_ils: 189, market: 'INTL', domain: 'used.example.com' }), refurbished(389)]);
+    assert.deepEqual([abroadOnly.counts.resale, abroadOnly.evidence.find((e) => e.kind === 'refurbished').set_aside], [1, SET_ASIDE.REFURBISHED_ALONE]);
   });
 });
 
 describe('CC-4 the new-price anchor: context, not proof', () => {
   const anchor = (shops) => { const v = value([item({ price: 200 }), ...shops]); return [v.retail_new_ils, v.retail_new_in_stock, v.retail_new_range]; };
   test('CC-4a offers not known to be out of stock come first; out-of-stock pages count only when they are all there is, and the answer says so', () => {
-    assert.deepEqual(anchor([shop(399), shop(450, { stock: 'out_of_stock' })]), [400, true, { low: 400, high: 400, dispersed: false }]);
-    assert.deepEqual(anchor([shop(399, { stock: 'unknown' }), shop(450, { stock: 'out_of_stock' })]), [400, true, { low: 400, high: 400, dispersed: false }]);
+    assert.deepEqual(anchor([shop(399), shop(450, { stock: 'out_of_stock' })]), [400, true, { low: 400, high: 450, dispersed: false }]);
+    assert.deepEqual(anchor([shop(399, { stock: 'unknown' }), shop(450, { stock: 'out_of_stock' })]), [400, true, { low: 400, high: 450, dispersed: false }]);
     assert.deepEqual(anchor([shop(450, { stock: 'out_of_stock' }), shop(470, { stock: 'out_of_stock' })]), [460, false, { low: 450, high: 470, dispersed: false }]);
   });
   test('CC-4b shops that agree give their median; shops that disagree give the cheapest, and the range says they disagreed', () => {
     assert.deepEqual(anchor([shop(399), shop(419), shop(429)]), [420, true, { low: 400, high: 430, dispersed: false }]);
     assert.deepEqual(anchor([shop(399), shop(659)]), [400, true, { low: 400, high: 660, dispersed: true }], 'one expensive shop does not lift the line');
     assert.deepEqual(anchor([shop(399), shop(409), shop(659)]), [400, true, { low: 400, high: 660, dispersed: true }]);
+  });
+  test('CC-4d the first real scan (2026-10-11): the cheaper shop was out of the mouse, the dearer one had it — the cheaper shop still sets the line, and the answer says it was out of stock', () => {
+    assert.deepEqual(anchor([shop(399, { stock: 'out_of_stock' }), shop(659, { stock: 'in_stock' })]), [400, false, { low: 400, high: 660, dispersed: true }], 'not ₪660 because one shop happened to have it');
+    assert.deepEqual(anchor([shop(399, { stock: 'out_of_stock' }), shop(419, { stock: 'in_stock' })]), [420, true, { low: 400, high: 420, dispersed: false }], 'shops that agree: the one that has it today');
+    // The five sources of that scan, as the record would have held them with the model's own classification; the sealed ad is then above the new price.
+    const live = [
+      item({ price: 430, condition: 'new_sealed', listed: '2025-04-11', domain: 'm.homeless.co.il' }),
+      refurbished(389, { stock: 'out_of_stock', domain: 'ivory.co.il' }),
+      item({ price: 62, currency: 'USD', price_ils: 189, market: 'INTL', domain: 'reddit.com', page: 'other', condition: 'unknown', listed: null }),
+      shop(659, { stock: 'in_stock', shipping: 60, domain: 'zap.co.il' }),
+      shop(399, { stock: 'out_of_stock', domain: 'bug.co.il' }),
+    ];
+    const v = value(live, { today: '2026-10-11' });
+    const aside = Object.fromEntries(v.evidence.map((e) => [e.domain, e.set_aside]));
+    assert.deepEqual([v.retail_new_ils, v.retail_new_in_stock, v.retail_new_range], [400, false, { low: 400, high: 660, dispersed: true }]);
+    assert.equal(aside['m.homeless.co.il'], SET_ASIDE.ABOVE_NEW, 'a sealed unit asked above the cheaper shop\'s price is not a second-hand price');
+    assert.equal(aside['ivory.co.il'], SET_ASIDE.REFURBISHED_ALONE, 'with no Israeli private listing standing, the shop\'s refurbished unit is not the Israeli used market');
+    assert.deepEqual([v.counts.resale, v.counts.il_used_exact, v.counts.intl_used_exact, v.counts.refurbished_used, v.price_confidence], [1, 0, 1, 0, 'low'], 'what is left is one private listing abroad, unscaled: a low-confidence price, not ₪430');
+    assert.ok(v.prices.good.list < 200 && v.prices.good.list > 100, JSON.stringify(v.prices.good));
   });
   test('CC-4c a refurbished offer, a price without binding, a variant and a sealed private unit are never the new price; the anchor still caps a sealed price and sets aside a used price above it', () => {
     assert.deepEqual(anchor([refurbished(389)]), [null, null, null]);

@@ -153,14 +153,21 @@ function newPrice(evidence, market) {
   const all = evidence.filter((e) => isNewPrice(e, market));
   const exact = all.filter((e) => e.match === 'exact');
   const use = exact.length ? exact : all;
-  const stocked = use.filter((e) => e.stock !== 'out_of_stock');
-  const from = stocked.length ? stocked : use;
-  if (!from.length) return null;
-  const prices = from.map((e) => e.price_ils);
+  if (!use.length) return null;
+  const prices = use.map((e) => e.price_ils);
   const low = Math.min(...prices);
   const high = Math.max(...prices);
-  const dispersed = high / low > DISPERSION.agrees;
-  return { price: dispersed ? low : median(prices), inStock: stocked.length > 0, low, high, dispersed };
+  // Disagreement is measured across EVERY shop, stocked or not. The first real scan (2026-10-11) had the mouse at
+  // ₪399 in a shop that was temporarily out of it and ₪659 in the one shop that had it; reading only the stocked
+  // shop made ₪659 "the new price", and a ₪430 sealed ad then passed as below new. The cheapest shop sets the
+  // line, and the answer says whether that shop had it.
+  if (high / low > DISPERSION.agrees) {
+    const cheapest = use.reduce((a, b) => (b.price_ils < a.price_ils ? b : a));
+    return { price: cheapest.price_ils, inStock: cheapest.stock !== 'out_of_stock', low, high, dispersed: true };
+  }
+  const stocked = use.filter((e) => e.stock !== 'out_of_stock');
+  const from = stocked.length ? stocked : use;
+  return { price: median(from.map((e) => e.price_ils)), inStock: stocked.length > 0, low, high, dispersed: false };
 }
 
 // ── WEIGH AND NORMALIZE ─────────────────────────────────────────────────────
@@ -207,8 +214,9 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     });
   }
 
-  // A SHOP'S REFURBISHED OFFER SUPPORTS PRIVATE RESALE AND NEVER REPLACES IT: with no private reference standing it is set aside.
-  if (!points.some((p) => !p.dropped && PRIVATE_RESALE.has(p.evidence.kind))) {
+  // A SHOP'S REFURBISHED OFFER SUPPORTS PRIVATE RESALE AND NEVER REPLACES IT: with no ISRAELI private reference
+  // standing it is set aside. One private listing abroad does not make an Israeli shop's offer the Israeli used market.
+  if (!points.some((p) => !p.dropped && PRIVATE_RESALE.has(p.evidence.kind) && p.evidence.market === 'IL')) {
     for (const p of points) if (!p.dropped && p.evidence.kind === 'refurbished') p.dropped = SET_ASIDE.REFURBISHED_ALONE;
   }
 
@@ -368,6 +376,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       retail_il: evidence.filter((e) => isNewPrice(e, 'IL')).length,
       // A shop's refurbished offers that qualified: supporting evidence at most, never the used market by themselves.
       retail_refurbished: points.filter((p) => p.evidence.kind === 'refurbished').length,
+      // Of the references priced from, how many are a shop's refurbished offers: the screen counts second-hand listings without them.
+      refurbished_used: kept.filter((p) => p.evidence.kind === 'refurbished').length,
       not_comparable: evidence.filter((e) => !loose.has(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
       unbound: loose.size,
       // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.

@@ -109,6 +109,23 @@ export function kindOf(url, page, claimed) {
   return kind;
 }
 
+// ── WHAT CONDITION ──────────────────────────────────────────────────────────
+// The first real scan (2026-10-11): a Homeless ad whose own text said "חדש
+// באריזה" came back from the model with condition unknown, so the valuation
+// read a sealed asking price as a good-condition one. When the model gives no
+// condition and the LISTING's own page states that the unit is new and
+// sealed, that is the condition. Only this one upgrade is read from text: a
+// page never makes a unit "good" or "poor" by a word, and a list page, whose
+// text is many listings, says nothing about one of them.
+const SEALED = /(חדש(?:ה|ים)? באריזה|חדש(?:ה)? לגמרי|סגור(?:ה)? באריזה|באריזה סגורה|לא נפתח(?:ה)?|\b(?:brand new|new in (?:the )?box|sealed|unopened)\b)/iu;
+
+/** The listing's condition: the model's, or new_sealed when it said unknown and the listing's own page says sealed. */
+export function conditionOf(claimed, page, pageText) {
+  const condition = EVIDENCE_CONDITIONS.includes(claimed) ? claimed : 'unknown';
+  if (condition === 'unknown' && page === 'listing' && SEALED.test(String(pageText ?? ''))) return 'new_sealed';
+  return condition;
+}
+
 // ── WHEN ────────────────────────────────────────────────────────────────────
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const DAY_MS = 86_400_000;
@@ -280,6 +297,8 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
     const claimed = EVIDENCE_MATCHES.includes(e?.match) ? e.match : 'irrelevant';
     const claimedKind = EVIDENCE_KINDS.includes(e?.kind) ? e.kind : 'other';
     const kind = kindOf(url, page, claimedKind);
+    const claimedCondition = EVIDENCE_CONDITIONS.includes(e?.condition) ? e.condition : 'unknown';
+    const condition = conditionOf(claimedCondition, page, pageText.get(key));
     const shipping = finite(e?.shipping);
     const bound = bindPrice({ price, currency, title: e?.title, match: claimed, shipping }, { type: page, title: pageTitle.get(key), text: pageText.get(key) }, item?.identity, item?.answer);
     evidence.push({
@@ -296,7 +315,9 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
       match: bound.match ?? claimed,
       ...(bound.match && bound.match !== claimed ? { match_claimed: claimed } : {}),
       market: localityOf(domain, e?.market),
-      condition: EVIDENCE_CONDITIONS.includes(e?.condition) ? e.condition : 'unknown',
+      // The condition the listing states, read from its own page when the model left it unknown.
+      condition,
+      ...(condition !== claimedCondition ? { condition_claimed: claimedCondition } : {}),
       page,
       binding: bound.level,
       binding_reason: bound.reason,

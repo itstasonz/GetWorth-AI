@@ -117,8 +117,11 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
   const evidence = Array.isArray(v.evidence) ? v.evidence : [];
   // What the price rests on, then the new prices it was measured against. What was set aside is counted, not listed.
   const shown = evidence.filter((e) => e.used || (e.kind === 'new_retail' && !e.set_aside));
-  const il = (counts.il_used_exact ?? 0) + (counts.il_used_close ?? 0);
-  const intl = (counts.intl_used_exact ?? 0) + (counts.intl_used_close ?? 0);
+  // A shop's refurbished offers that were used are support, not second-hand listings: counted apart from them.
+  const refurbishedUsed = counts.refurbished_used ?? evidence.filter((e) => e.used && e.kind === 'refurbished').length;
+  const privateUsed = Math.max(0, (counts.resale ?? 0) - refurbishedUsed);
+  const il = (counts.il_used_exact ?? 0) + (counts.il_used_close ?? 0) - evidence.filter((e) => e.used && e.kind === 'refurbished' && e.market === 'IL').length;
+  const intl = (counts.intl_used_exact ?? 0) + (counts.intl_used_close ?? 0) - evidence.filter((e) => e.used && e.kind === 'refurbished' && e.market !== 'IL').length;
   // Why each found price was not used, one line per reason. Unbound prices and prices from abroad left unused have their own lines.
   const reasons = {};
   for (const e of evidence) {
@@ -132,10 +135,11 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
     <Sheet open={open} onClose={onClose} title={priced ? copy.whyTitle : copy.whatFound}>
       <div className="space-y-4 overflow-y-auto" style={{ maxHeight: '62vh' }}>
         <div className="space-y-1 text-body text-text-primary">
-          <p className="font-semibold">{copy.found(counts.resale ?? 0)}</p>
-          {(counts.resale ?? 0) > 0 && (
-            <p className="text-body-sm text-text-secondary">{copy.fromIsrael(il)} · {copy.fromAbroad(intl)}</p>
+          <p className="font-semibold">{copy.found(privateUsed)}</p>
+          {privateUsed > 0 && (
+            <p className="text-body-sm text-text-secondary">{copy.fromIsrael(Math.max(0, il))} · {copy.fromAbroad(Math.max(0, intl))}</p>
           )}
+          {refurbishedUsed > 0 && <p className="text-body-sm text-text-secondary">{copy.refurbishedSupport(refurbishedUsed)}</p>}
           {range && <p>{copy.relevantRange}: {copy.range(range)}</p>}
           {v.retail_new_ils && (
             <p>{copy.newInIsrael}: <bdi dir="ltr">{formatPrice(v.retail_new_ils)}</bdi>{v.retail_new_in_stock === false ? ` ${copy.outOfStock}` : ''}</p>
