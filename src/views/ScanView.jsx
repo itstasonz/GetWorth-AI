@@ -195,7 +195,7 @@ export default function ScanView() {
             <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
               <p className="text-body text-text-primary"><Bidi>{copy.insufficient(identity.display_name)}</Bidi></p>
               {s.valuation?.retail_new_ils && (
-                <p className="text-body-sm text-text-secondary">{copy.retailContext(formatPrice(s.valuation.retail_new_ils))}</p>
+                <p className="text-body-sm text-text-secondary">{(s.valuation.retail_new_in_stock === false ? copy.retailContextUnavailable : copy.retailContext)(formatPrice(s.valuation.retail_new_ils))}</p>
               )}
             </div>
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} />

@@ -131,7 +131,8 @@ describe('LM-1 where a price is from, what page it was on, and how old the listi
     const [e] = verifyEvidence([{ ...RAW_MARKET.evidence[1], url, price: 400, listed: null }], reached, parseBoiRates(BOI_JSON), TODAY, ITEM).evidence;
     assert.deepEqual([e.archived, e.listed, e.seen], [true, null, TODAY]);
     const v = value([e]);
-    assert.deepEqual([v.evidence[0].freshness, v.evidence[0].weight, v.local_strength], ['archived', WEIGHT.freshness.archived, 0]);
+    assert.deepEqual([v.evidence[0].freshness, v.evidence[0].used, v.evidence[0].set_aside, v.local_strength, v.status], ['archived', false, SET_ASIDE.NOT_CURRENT, 0, 'insufficient_evidence'], 'an archived ad alone does not price a used unit today');
+    assert.equal(weightOf(e), WEIGHT.freshness.archived, 'beside current evidence it would count, at the archived weight');
   });
   test('LM-1h the provider\'s note on a result: its crawl date never dates a listing; its publication age is the provider\'s word, kept as such', () => {
     // Every result of the live search of 2026-10-11 opened with this note. The one below is the Homeless ad for the mouse.
@@ -210,16 +211,20 @@ describe('LM-2 the weighing: general rules, on items of no category', () => {
     assert.ok(localStrength([il(300, { listed: CURRENT }), il(310, { listed: CURRENT })], { today: TODAY }) >= LOCAL_STRENGTH.drives, 'two that stand do');
     assert.ok(localStrength([il(300), il(310), il(320)], { today: TODAY }) >= LOCAL_STRENGTH.drives, 'so do three with no date on them');
   });
-  test('LM-2e [4] with no Israeli evidence, evidence from abroad prices the item — scaled when it can be, and said to be foreign', () => {
+  test('LM-2e [4] with no Israeli evidence, evidence from abroad prices nothing: it is context, scaled or not. Beside an Israeli listing it is scaled when it can be, and said to be foreign', () => {
     const sold = [200, 210, 220].map((p) => abroad(p, { kind: 'sold', listed: CURRENT }));
     const levels = [shop(600), shop(500, { market: 'INTL', currency: 'USD' })];
-    const scaled = value([...sold, ...levels]);
-    // Scale 600 / 500 = 1.2: 240, 252, 264. Centre 252.
+    const foreignOnly = value([...sold, ...levels]);
+    assert.deepEqual([foreignOnly.status, foreignOnly.no_price_reason, foreignOnly.prices, foreignOnly.retail_new_ils], ['insufficient_evidence', 'no_verified_israeli_second_hand_reference', null, 600], 'three sales abroad say what it sells for abroad');
+    assert.ok(foreignOnly.evidence.filter((e) => e.market === 'INTL' && e.kind === 'sold').every((e) => e.set_aside === SET_ASIDE.ABROAD_ONLY && !e.used));
+    // One current Israeli listing opens the gate; the sales abroad then join, scaled 600 / 500 = 1.2: 240, 252, 264.
+    const scaled = value([il(250, { listed: CURRENT }), ...sold, ...levels]);
     assert.deepEqual([scaled.status, scaled.intl_adjusted, scaled.intl_scale, scaled.price_confidence], ['priced', true, 1.2, 'medium']);
-    assert.deepEqual([scaled.counts.il_used_exact + scaled.counts.il_used_close, scaled.counts.intl_used_exact, scaled.local_strength], [0, 3, 0]);
-    assert.equal(scaled.prices.good.low < 252 && scaled.prices.good.high > 252, true);
-    const unscaled = value(sold);
-    assert.deepEqual([unscaled.status, unscaled.intl_adjusted, unscaled.intl_scale, unscaled.price_confidence], ['priced', false, null, 'low'], 'converted, not adjusted: priced, and not trusted');
+    assert.deepEqual([scaled.counts.il_used_exact, scaled.counts.intl_used_exact, scaled.counts.il_qualifying], [1, 3, 1]);
+    // The Israeli listing (225 after negotiation) weighs 1 against 0.48 each abroad: the centre lands on 240, between it and the sales abroad.
+    assert.ok(scaled.prices.good.low < 240 && scaled.prices.good.high >= 250, JSON.stringify(scaled.prices.good));
+    const unscaled = value([il(250, { listed: CURRENT }), ...sold]);
+    assert.deepEqual([unscaled.status, unscaled.intl_adjusted, unscaled.intl_scale], ['priced', false, null], 'converted, not adjusted: they take part, and count for little');
   });
   test('LM-2f [5] new prices alone are never a second-hand valuation', () => {
     const v = value([shop(600), shop(580, { match: 'close_comparable' }), shop(500, { market: 'INTL', currency: 'USD' })]);

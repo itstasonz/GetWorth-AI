@@ -65,6 +65,7 @@ export const SCAN_COPY = {
     uploadPhoto: 'Upload a photo',
     insufficient: (name) => `I identified this as ${name}, but I don't have enough reliable current second-hand evidence to give you a confident Israeli market price.`,
     retailContext: (price) => `New, it currently sells for about ${price} in Israel.`,
+    retailContextUnavailable: (price) => `New, it was listed at about ${price} in Israel; that shop is currently out of stock.`,
     noItem: 'I couldn\'t find an item to sell in this photo.',
     noItemHint: 'Take a photo with the item filling most of the frame.',
     retry: 'Try again',
@@ -105,7 +106,19 @@ export const SCAN_COPY = {
       retail_refurbished_without_private_resale: (n) => (n === 1
         ? '1 refurbished offer from a shop was found. Without a private second-hand listing to support it, it was not used as a used price.'
         : `${n} refurbished offers from shops were found. Without a private second-hand listing to support them, they were not used as used prices.`),
+      abroad_without_israeli_reference: (n) => (n === 1
+        ? '1 listing from abroad was found. Without an Israeli second-hand listing to compare it with, it is context only: a price abroad does not say what the item sells for in Israel.'
+        : `${n} listings from abroad were found. Without an Israeli second-hand listing to compare them with, they are context only: prices abroad do not say what the item sells for in Israel.`),
+      israeli_listing_old_or_sealed: (n) => (n === 1
+        ? '1 Israeli listing was old or for a sealed unit, so it does not show what a used one sells for today.'
+        : `${n} Israeli listings were old or for sealed units, so they do not show what a used one sells for today.`),
     },
+    // Why there is no price, when there is none.
+    noPriceWhy: {
+      no_verified_second_hand_reference: 'No second-hand listing for this item could be verified, so there is no price to stand behind.',
+      no_verified_israeli_second_hand_reference: 'No current second-hand listing for a used unit of this item was verified in Israel. What was found is shown below as context; none of it says what the item sells for second-hand in Israel.',
+    },
+    retailDisagree: (low, high) => `Shops disagree on the new price: from ${low} to ${high}. The lower price is used as the reference.`,
     olderUsed: (n) => (n === 1 ? '1 of the listings used is old, so it counts for less.' : `${n} of the listings used are old, so they count for less.`),
     refurbishedSupport: (n) => (n === 1 ? 'Also used, with a smaller weight: 1 refurbished offer from a shop, as supporting evidence.' : `Also used, with a smaller weight: ${n} refurbished offers from shops, as supporting evidence.`),
     setAside: (n) => `${n} other ${n === 1 ? 'result was' : 'results were'} set aside.`,
@@ -153,6 +166,7 @@ export const SCAN_COPY = {
     uploadPhoto: 'להעלות תמונה',
     insufficient: (name) => `זיהיתי את הפריט כ־${name}, אבל אין לי מספיק ראיות אמינות ועדכניות ממכירות יד שנייה כדי לתת מחיר שוק בטוח בישראל.`,
     retailContext: (price) => `חדש, הוא נמכר היום בישראל בכ־${ltr(price)}.`,
+    retailContextUnavailable: (price) => `חדש, הוא הוצע בישראל בכ־${ltr(price)}; בחנות הזו הוא כרגע לא במלאי.`,
     noItem: 'לא מצאתי בתמונה פריט למכירה.',
     noItemHint: 'צלמו כך שהפריט ימלא את רוב התמונה.',
     retry: 'לנסות שוב',
@@ -190,7 +204,18 @@ export const SCAN_COPY = {
       retail_refurbished_without_private_resale: (n) => (n === 1
         ? 'נמצאה הצעה אחת למוצר מחודש מחנות. בלי מודעת יד שנייה פרטית שתתמוך בה, היא לא שימשה כמחיר משומש.'
         : `נמצאו ${n} הצעות למוצר מחודש מחנויות. בלי מודעת יד שנייה פרטית שתתמוך בהן, הן לא שימשו כמחירי משומש.`),
+      abroad_without_israeli_reference: (n) => (n === 1
+        ? 'נמצאה מודעה אחת מחו״ל. בלי מודעת יד שנייה מישראל להשוואה, היא רק הקשר: מחיר בחו״ל לא אומר במה הפריט נמכר בישראל.'
+        : `נמצאו ${n} מודעות מחו״ל. בלי מודעת יד שנייה מישראל להשוואה, הן רק הקשר: מחירים בחו״ל לא אומרים במה הפריט נמכר בישראל.`),
+      israeli_listing_old_or_sealed: (n) => (n === 1
+        ? 'מודעה אחת מישראל הייתה ישנה או למוצר חדש באריזה, ולכן אינה מראה במה נמכר היום מוצר משומש.'
+        : `${n} מודעות מישראל היו ישנות או למוצרים חדשים באריזה, ולכן אינן מראות במה נמכר היום מוצר משומש.`),
     },
+    noPriceWhy: {
+      no_verified_second_hand_reference: 'לא ניתן היה לאמת אף מודעת יד שנייה לפריט הזה, ולכן אין מחיר שאפשר לעמוד מאחוריו.',
+      no_verified_israeli_second_hand_reference: 'לא אומתה בישראל מודעת יד שנייה עדכנית למוצר משומש מהדגם הזה. מה שנמצא מוצג למטה כהקשר בלבד; שום דבר ממנו לא אומר במה הפריט נמכר יד שנייה בישראל.',
+    },
+    retailDisagree: (low, high) => `החנויות חלוקות על המחיר החדש: בין ${ltr(low)} ל־${ltr(high)}. המחיר הנמוך משמש כנקודת ייחוס.`,
     olderUsed: (n) => (n === 1 ? 'אחת מהמודעות שנכללו ישנה, ולכן משקלה קטן.' : `${n} מהמודעות שנכללו ישנות, ולכן משקלן קטן.`),
     refurbishedSupport: (n) => (n === 1 ? 'נכללה גם, במשקל קטן יותר: הצעה אחת למוצר מחודש מחנות, כראיה תומכת.' : `נכללו גם, במשקל קטן יותר: ${n} הצעות למוצר מחודש מחנויות, כראיות תומכות.`),
     setAside: (n) => (n === 1 ? 'תוצאה אחת נוספת לא נכללה.' : `${n} תוצאות נוספות לא נכללו.`),

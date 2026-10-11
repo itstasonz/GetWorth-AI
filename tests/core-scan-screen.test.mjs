@@ -276,25 +276,39 @@ describe('CV-3 honest when it cannot price', () => {
   });
   test('CV-3d the live shape of 2026-10-11: a sealed ad above the new price and a shop\'s refurbished unit alone — "What I found" says why each was not used, and no used price is shown', async () => {
     const live = {
-      ...UNPRICED, retail_new_ils: 400, retail_new_in_stock: true, retail_new_range: { low: 400, high: 660, dispersed: true },
-      counts: { ...UNPRICED.counts, retail_il: 2, retail_refurbished: 1, set_aside: 2, not_comparable: 0 },
+      ...UNPRICED, withdrawn: 'no_verified_israeli_second_hand_reference', no_price_reason: 'no_verified_israeli_second_hand_reference',
+      retail_new_ils: 400, retail_new_in_stock: false, retail_new_range: { low: 400, high: 660, dispersed: true },
+      counts: { ...UNPRICED.counts, retail_il: 2, retail_refurbished: 1, set_aside: 3, not_comparable: 0 },
       evidence: [
         { url: 'https://m.homeless.co.il/yad2/viewad%2C994310.aspx', domain: 'm.homeless.co.il', title: 'g pro wireless', price: 430, currency: 'ILS', price_ils: 430, kind: 'used_listing', kind_claimed: 'other', match: 'exact', market: 'IL', page: 'listing', listed: '2025-04-11', freshness: 'older', used: false, set_aside: 'above_new_price' },
         { url: 'https://www.ivory.co.il/catalog.php?id=121262', domain: 'ivory.co.il', title: 'refurbished', price: 389, currency: 'ILS', price_ils: 389, kind: 'refurbished', match: 'exact', market: 'IL', page: 'shop_product', stock: 'out_of_stock', freshness: 'unknown', used: false, set_aside: 'retail_refurbished_without_private_resale' },
-        { url: 'https://www.bug.co.il/brand/logitech/gprowireless/', domain: 'bug.co.il', title: 'new', price: 399, currency: 'ILS', price_ils: 399, kind: 'new_retail', match: 'exact', market: 'IL', page: 'shop_product', used: false, set_aside: null },
+        { url: 'https://www.reddit.com/r/hardwareswap/comments/x', domain: 'reddit.com', title: '[USA-IL] [H] Logitech G Pro Wireless', price: 62, currency: 'USD', price_ils: 189, kind: 'used_listing', match: 'exact', market: 'INTL', page: 'other', freshness: 'unknown', used: false, set_aside: 'abroad_without_israeli_reference' },
+        { url: 'https://www.zap.co.il/model.aspx?modelid=1005972', domain: 'zap.co.il', title: 'zap', price: 659, currency: 'ILS', price_ils: 659, kind: 'new_retail', match: 'exact', market: 'IL', page: 'shop_product', stock: 'in_stock', used: false, set_aside: null },
+        { url: 'https://www.bug.co.il/brand/logitech/gprowireless/', domain: 'bug.co.il', title: 'new', price: 399, currency: 'ILS', price_ils: 399, kind: 'new_retail', match: 'exact', market: 'IL', page: 'shop_product', stock: 'out_of_stock', used: false, set_aside: null },
       ],
     };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(live)] }));
-    assert.doesNotMatch(text(), /Recommended listing price|₪430|₪389/, 'no used price, invented or borrowed');
-    assert.match(text(), /New, it currently sells for about ₪400 in Israel\./);
+    assert.doesNotMatch(text(), /Recommended listing price|Sell for|₪430|₪389|₪190/, 'no used price, invented or borrowed, and no "Sell for ₪X"');
+    assert.match(text(), /New, it was listed at about ₪400 in Israel; that shop is currently out of stock\./);
+    assert.ok(button('Sell at your own price'));
     await click(button('What I found'));
     const said = container.querySelector('[role="dialog"]').textContent;
     assert.match(said, /No second-hand listings were found/);
+    assert.match(said, /No current second-hand listing for a used unit of this item was verified in Israel\./);
+    assert.match(said, /New in Israel: ₪400 \(out of stock\)/);
+    assert.match(said, /Shops disagree on the new price: from ₪400 to ₪660\./);
     assert.match(said, /1 price was higher than the item's new price, so it is not a second-hand price and was not used\./);
     assert.match(said, /1 refurbished offer from a shop was found\. Without a private second-hand listing to support it, it was not used as a used price\./);
+    assert.match(said, /1 listing from abroad was found\. Without an Israeli second-hand listing to compare it with, it is context only/);
     assert.doesNotMatch(said, /Confidence|set aside/);
-    const links = [...container.querySelectorAll('[role="dialog"] a')].map((a) => a.getAttribute('href'));
-    assert.deepEqual(links, ['https://www.bug.co.il/brand/logitech/gprowireless/'], 'the new price is the only source shown; set-aside prices are explained, not listed');
+    // Every verified price is shown as context, each labelled for what it is, each a link.
+    const links = [...container.querySelectorAll('[role="dialog"] a')];
+    assert.deepEqual(links.map((a) => a.getAttribute('href')), live.evidence.map((e) => e.url));
+    assert.match(links[0].textContent, /Used · exact · Israel · older/);
+    assert.match(links[1].textContent, /Refurbished · exact · Israel/);
+    assert.match(links[2].textContent, /Used · exact · abroad/);
+    assert.match(links[2].textContent, /62 USD/);
+    assert.match(links[3].textContent, /New · exact · Israel/);
   });
   test('CV-3b a failure keeps the item on screen and offers the step again', async () => {
     await settle(await open({ identify: [identified()], price: [{ payload: { status: 'failed', failure: 'timeout' } }, pricedAnswer()] }));

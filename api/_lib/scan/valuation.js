@@ -49,6 +49,8 @@ export { pageKey, verifyEvidence, mergeEvidence, requalify } from './evidence.js
 export const WITHDRAWN = Object.freeze({
   NO_SEARCH: 'no_search_recorded',
   NO_RESALE_EVIDENCE: 'no_verified_second_hand_reference',
+  /** References were found, none of them an Israeli second-hand listing that is current and for a used unit. */
+  NO_LOCAL_EVIDENCE: 'no_verified_israeli_second_hand_reference',
 });
 /** What the valuation rests on. */
 export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR: 'similar_models' });
@@ -96,7 +98,12 @@ export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
  */
 export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 });
 /** Why a reference that qualifies took no part in the price. */
-export const SET_ASIDE = Object.freeze({ ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product', REFURBISHED_ALONE: 'retail_refurbished_without_private_resale' });
+export const SET_ASIDE = Object.freeze({
+  ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product',
+  REFURBISHED_ALONE: 'retail_refurbished_without_private_resale',
+  /** Context when the gate is closed: a listing abroad with no Israeli listing to compare it with; an Israeli listing that is old or for a sealed unit. */
+  ABROAD_ONLY: 'abroad_without_israeli_reference', NOT_CURRENT: 'israeli_listing_old_or_sealed',
+});
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
 /**
@@ -345,6 +352,19 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const { points, anchorIl, anchorInStock, anchorRange, scale, localDrives } = norm;
   // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
   const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || anchorLike(e, 'IL') || anchorLike(e, 'INTL'))));
+  // THE GATE. An Israeli second-hand price rests on at least one Israeli PRIVATE reference that is current (not known
+  // to be old) and for a USED unit, tied to this product. Listings abroad, a shop's refurbished units, new prices and
+  // old or sealed Israeli ads are context: with no such reference standing they price nothing, and each is marked
+  // with why. Once one stands, every reference that qualified takes part as before. (The first real scan, 2026-10-11:
+  // one sealed ad from April 2025, one refurbished unit, one listing in the United States — and ₪430 on the screen.)
+  const qualifies = (p) => p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind) && p.freshness !== 'older' && p.freshness !== 'archived' && p.condition !== 'new_sealed';
+  const localEvidence = points.some((p) => !p.dropped && qualifies(p));
+  if (!localEvidence) {
+    for (const p of points) {
+      if (p.dropped) continue;
+      p.dropped = p.evidence.kind === 'refurbished' ? SET_ASIDE.REFURBISHED_ALONE : (p.evidence.market === 'IL' ? SET_ASIDE.NOT_CURRENT : SET_ASIDE.ABROAD_ONLY);
+    }
+  }
   const kept = points.filter((p) => !p.dropped);
   const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
@@ -378,6 +398,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       retail_refurbished: points.filter((p) => p.evidence.kind === 'refurbished').length,
       // Of the references priced from, how many are a shop's refurbished offers: the screen counts second-hand listings without them.
       refurbished_used: kept.filter((p) => p.evidence.kind === 'refurbished').length,
+      // Israeli private references, current and for a used unit: what opens the gate.
+      il_qualifying: kept.filter(qualifies).length,
       not_comparable: evidence.filter((e) => !loose.has(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
       unbound: loose.size,
       // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.
@@ -395,6 +417,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     reference_range: prices.length ? { low: Math.min(...prices), high: Math.max(...prices) } : null,
     local_strength: round2(localWeight(kept)),
     local_drives: localDrives,
+    // Whether an Israeli second-hand reference stands behind the price at all.
+    local_evidence: localEvidence,
     dispersion: round2(dispersion),
     dispersed: dispersion > DISPERSION.dispersed,
     // Foreign prices in the valuation: whether they were brought to Israeli price level, and by how much.
@@ -404,11 +428,13 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     family_level: basis !== BASIS.ITEM,
     searched,
   };
-  const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason });
+  // `no_price_reason` is the same code under the name the screen reads it by.
+  const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason, no_price_reason: reason });
 
   if (!searchPerformed && evidence.length === 0) return withdraw(WITHDRAWN.NO_SEARCH);
   const good = aggregate(kept);
-  if (!good) return withdraw(WITHDRAWN.NO_RESALE_EVIDENCE);
+  // References were found and none of them is an Israeli second-hand listing that stands: say that, not "nothing found".
+  if (!good) return withdraw(points.length > 0 && !localEvidence ? WITHDRAWN.NO_LOCAL_EVIDENCE : WITHDRAWN.NO_RESALE_EVIDENCE);
 
   return {
     ...base,
@@ -416,6 +442,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     prices: conditionPrices(good, kept, anchorIl),
     price_confidence: priceConfidence({ kept, scale, approximate: rough, basis }),
     withdrawn: null,
+    no_price_reason: null,
   };
 }
 

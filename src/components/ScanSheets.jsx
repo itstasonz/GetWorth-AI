@@ -115,8 +115,9 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
   const v = valuation ?? {};
   const counts = v.counts ?? {};
   const evidence = Array.isArray(v.evidence) ? v.evidence : [];
-  // What the price rests on, then the new prices it was measured against. What was set aside is counted, not listed.
-  const shown = evidence.filter((e) => e.used || (e.kind === 'new_retail' && !e.set_aside));
+  // Priced: what the price rests on, then the new prices it was measured against; what was set aside is counted, not listed.
+  // Unpriced: every verified price that was found, each labelled for what it is, so the context can be seen and checked.
+  const shown = evidence.filter((e) => e.used || (e.kind === 'new_retail' && !e.set_aside) || (!priced && e.set_aside && e.set_aside !== 'price_not_tied_to_product'));
   // A shop's refurbished offers that were used are support, not second-hand listings: counted apart from them.
   const refurbishedUsed = counts.refurbished_used ?? evidence.filter((e) => e.used && e.kind === 'refurbished').length;
   const privateUsed = Math.max(0, (counts.resale ?? 0) - refurbishedUsed);
@@ -144,7 +145,9 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
           {v.retail_new_ils && (
             <p>{copy.newInIsrael}: <bdi dir="ltr">{formatPrice(v.retail_new_ils)}</bdi>{v.retail_new_in_stock === false ? ` ${copy.outOfStock}` : ''}</p>
           )}
+          {v.retail_new_range?.dispersed && <p className="text-body-sm text-text-secondary">{copy.retailDisagree(formatPrice(v.retail_new_range.low), formatPrice(v.retail_new_range.high))}</p>}
           {priced && <p>{copy.confidenceLine}: {copy.levels[v.price_confidence] ?? copy.levels.low}</p>}
+          {!priced && v.no_price_reason && copy.noPriceWhy?.[v.no_price_reason] && <p className="text-body-sm text-text-secondary">{copy.noPriceWhy[v.no_price_reason]}</p>}
         </div>
 
         {priced && (

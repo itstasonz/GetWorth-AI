@@ -223,15 +223,15 @@ describe('CB-5 only a bound price moves the valuation', () => {
     for (const order of [[...pool].reverse(), [3, 5, 0, 4, 1, 2].map((k) => pool[k]), [...pool.slice(2), ...pool.slice(0, 2)]]) assert.equal(facts(value(order)), first);
     assert.equal(value(pool).retail_new_ils, 400, 'and the unbound ₪250 is not the new price');
   });
-  test('CB-5d [12] when every Israeli price turns out unbound, evidence abroad prices the item, with less confidence', () => {
+  test('CB-5d [12] when every Israeli price turns out unbound, evidence abroad does not price the item: there is no Israeli price, and the foreign prices are context', () => {
     const abroad = () => [200, 210, 220].map((price) => item({ price, market: 'INTL', currency: 'USD', domain: 'used.example.com', kind: 'sold' }));
     const local = (binding) => [item({ price: 300, binding }), item({ price: 310, binding }), item({ price: 320, binding })];
     const bound = value([...local('strong'), ...abroad()]);
     const unbound = value([...local('weak'), ...abroad()]);
     assert.deepEqual([bound.price_confidence, bound.local_drives, bound.counts.il_used_exact], ['high', true, 3]);
-    assert.deepEqual([unbound.status, unbound.price_confidence, unbound.local_drives, unbound.local_strength], ['priced', 'low', false, 0]);
-    assert.deepEqual([unbound.counts.il_used_exact, unbound.counts.intl_used_exact, unbound.counts.unbound], [0, 3, 3]);
-    assert.ok(unbound.prices.good.list < bound.prices.good.list, 'the price is the foreign evidence\'s, not a blend with what could not be trusted');
+    assert.deepEqual([unbound.status, unbound.withdrawn, unbound.prices, unbound.price_confidence, unbound.local_strength], ['insufficient_evidence', 'no_verified_israeli_second_hand_reference', null, null, 0]);
+    assert.deepEqual([unbound.counts.il_used_exact, unbound.counts.intl_used_exact, unbound.counts.unbound], [0, 0, 3]);
+    assert.ok(unbound.evidence.filter((e) => e.market === 'INTL').every((e) => !e.used && e.set_aside === 'abroad_without_israeli_reference'), 'shown, labelled, not priced from');
   });
   test('CB-5e [13] when no trustworthy second-hand price is left, there is no second-hand price', () => {
     const v = value([item({ price: 300, binding: 'weak' }), item({ price: 89, market: 'INTL', binding: 'unbound' }), item({ price: 399, kind: 'new_retail', page: 'shop_product', stock: 'in_stock' })]);
@@ -271,9 +271,9 @@ describe('CB-6 through the whole price step', () => {
     const by = (url) => v.evidence.find((e) => e.url === url);
     assert.deepEqual([by(URLS.category).binding, by(URLS.category).used, by(URLS.category).set_aside], ['weak', false, SET_ASIDE.UNBOUND]);
     assert.deepEqual([by(URLS.shop).binding, v.retail_new_ils, v.retail_new_in_stock], ['strong', 400, false], 'the new price is the one with VAT, and is known to be an out-of-stock page\'s');
-    assert.deepEqual([by(URLS.abroad).binding, by(URLS.abroad).used, by(URLS.abroad).shipping, by(URLS.abroad).shipping_ils], ['strong', true, 26, 91], 'its shipping is kept beside it, and is not a second price');
-    assert.deepEqual([r.status, v.price_confidence, v.counts.resale, v.counts.il_used_exact, v.counts.intl_used_exact, v.counts.unbound], [SCAN_STATUS.PRICED, 'low', 1, 0, 1, 1]);
-    assert.ok(v.prices.good.list < 150, 'what is left is one sale abroad: a low-confidence price, not ₪300');
+    assert.deepEqual([by(URLS.abroad).binding, by(URLS.abroad).used, by(URLS.abroad).set_aside, by(URLS.abroad).shipping, by(URLS.abroad).shipping_ils], ['strong', false, 'abroad_without_israeli_reference', 26, 91], 'its shipping is kept beside it, and is not a second price');
+    assert.deepEqual([r.status, v.withdrawn, v.prices, v.counts.resale, v.counts.il_used_exact, v.counts.intl_used_exact, v.counts.unbound], [SCAN_STATUS.INSUFFICIENT, 'no_verified_israeli_second_hand_reference', null, 0, 0, 0, 1]);
+    assert.equal(v.retail_new_ils, 400, 'what is left is one sale abroad and the new price: context, and no Israeli price, neither ₪300 nor the sale abroad');
   });
   test('CB-6b the same search, with nothing bound at all: no price, and no new price either', async () => {
     const local = { evidence: [ev({ url: URLS.category, price: 300, page: 'search_or_category' }), ev({ url: URLS.shop, price: 399, kind: 'new_retail', page: 'shop_product' })] };

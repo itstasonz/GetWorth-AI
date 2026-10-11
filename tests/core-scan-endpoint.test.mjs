@@ -241,13 +241,14 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
 });
 
 describe('CE-2F an item known only by its family is priced from the family', () => {
-  const SIBLINGS = { evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match: 'sibling_model', market: 'IL', condition: 'new_sealed', page: 'listing', listed: null })) };
+  // Read as used listings: sealed listings alone open no gate (core-scan-valuation CS-2Fe), and this suite is about the family.
+  const SIBLINGS = { evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: 'AirPods Pro 2', price, currency: 'ILS', kind: 'used_listing', match: 'sibling_model', market: 'IL', condition: 'unknown', page: 'listing', listed: null })) };
   const family = normalizeIdentity({ ...RAW_IDENTITY, canonical_name: 'apple airpods pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], followup: { kind: 'photo', affects: 'identity', question: 'Take a close-up photo of the text inside the lid', options: [] } });
   const run = (identity) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [SIBLINGS], pageText: {} }), store: fakeStore(), scanUuid: UUID });
   test('CE-2Fa listings the model called "sibling" price an item whose generation is unknown, as an approximate range', async () => {
     const r = await run(family);
     assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.price_confidence, r.valuation.counts.resale], [SCAN_STATUS.PRICED, true, true, 'low', 3]);
-    assert.deepEqual(band(r.valuation.prices.good), { list: 400, low: 190, high: 400 });
+    assert.deepEqual(band(r.valuation.prices.good), { list: 570, low: 270, high: 570 });
   });
   test('CE-2Fb for an item whose exact model is known, the same listings are "similar models": an approximate range, never its own price', async () => {
     resetMarketCache();
