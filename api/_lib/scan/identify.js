@@ -19,7 +19,8 @@ import { promptSafe } from '../prompt-trust.js';
 import { streamResponse } from '../v2/openai-stream.js';
 import { CONDITIONS, IDENTIFY_TIMEOUT_MS, IDENTIFY_MAX_OUTPUT_TOKENS, resolveIdentityEffort } from './config.js';
 import { buildIdentityPrompt, languageName, MAX_VISIBLE_TEXT, MAX_ALTERNATIVES, MAX_OPTIONS, MAX_ATTRIBUTES, MAX_CLARIFICATIONS } from './identity-prompt.js';
-import { STRATEGY, strategyFor, changesSearch } from './strategy.js';
+import { STRATEGY, strategyFor, changesSearch, isListingVariant } from './strategy.js';
+import { applyConfirmed, sameAttribute, fieldOf, ASKED_ATTRIBUTE } from './confirmed.js';
 
 // The prompt lives beside the schema it fills: identity-prompt.js. Re-exported so callers read it from here.
 export { buildIdentityPrompt, languageName };
@@ -271,6 +272,15 @@ const REMAINING = {
   he: { question: 'כמה בושם נשאר בבקבוק?', options: ['מלא או סגור', 'בערך 75%', 'בערך חצי', 'פחות מ־25%'] },
 };
 const REMAINING_ANSWERED = /(%|full|sealed|half|quarter|מלא|סגור|חצי|רבע)/iu;
+// THE SERVER'S OWN STORAGE QUESTION (the founder's Huawei P30 Pro, 2026-10-11): a phone, a tablet or a laptop whose
+// storage the model called unknown and high without proposing the question. The usual values; the owner's own words
+// take any other, and "not sure" is added by the app.
+const STORAGE = {
+  en: { question: 'How much storage does it have?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
+  he: { question: 'מה נפח האחסון שלו?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
+};
+const STORAGE_NAME = /^storage( capacity| size)?$/;
+const isTechnical = (i) => i?.market_class === 'consumer_electronics' || i?.category === 'Electronics' || APPLIANCE.test(String(i?.item_type ?? ''));
 
 /** Is this item a fragrance? Read from what the photograph established, never from the brand alone. */
 export const isFragrance = (i) => FRAGRANCE.test([i?.item_type, i?.product_family, i?.canonical_name, i?.display_name].filter(Boolean).join(' '));
@@ -283,8 +293,31 @@ export function identityGap(identity) {
   // A descriptive item (a sofa, a handmade bowl) has no model to be missing: its type and attributes name it.
   if (isDescriptive(i)) return null;
   if (!i.model && !i.product_family && !i.model_number) return i.brand ? INCOMPLETE.BRAND_ONLY : null;
-  const technical = i.market_class === 'consumer_electronics' || i.category === 'Electronics' || APPLIANCE.test(String(i.item_type ?? ''));
-  if (technical && !i.exact_model_established && !i.model_number && (i.alternatives?.length ?? 0) === 0) return INCOMPLETE.MODEL_UNREAD;
+  if (isTechnical(i) && !i.exact_model_established && !i.model_number && (i.alternatives?.length ?? 0) === 0) return INCOMPLETE.MODEL_UNREAD;
+  return null;
+}
+
+/**
+ * A LISTING-DEFINING VARIANT STILL OPEN, or null. A technical item sold by
+ * exact model is sold as a variant of it — a phone by its storage, a laptop by
+ * its generation and memory — and a listing for the model whose variant is not
+ * known may be a listing for a different product at a different price. When the
+ * model lists such an attribute as unknown and high, and neither the photograph
+ * nor the owner has settled it, its name is returned: the server asks for it
+ * where it can (selectQuestion), and a price made without it is approximate,
+ * never exact (service.js isApproximate). The model is not the only one who notices.
+ */
+export function openVariant(identity) {
+  const i = identity ?? {};
+  if (strategyFor(i) !== STRATEGY.EXACT || !isTechnical(i)) return null;
+  const settled = (i.confirmed ?? []).filter((c) => !c.unsure).map((c) => c.attribute);
+  for (const a of i.attributes ?? []) {
+    if (a.basis !== 'unknown' || a.matters !== 'high' || !isListingVariant(a.name)) continue;
+    if (settled.some((n) => sameAttribute(n, a.name))) continue;
+    const field = fieldOf(a.name);
+    if (field && i[field]) continue;
+    return a.name;
+  }
   return null;
 }
 
@@ -339,7 +372,6 @@ export function completeIdentity(identity, { lang = 'he', followupsLeft = 1, con
 // no loop: each answer is kept (confirmed) and never asked again.
 const RANK = { high: 0, medium: 1, low: 2 };
 const AFFECTS_RANK = { identity: 0, eligibility: 1, price: 2 };
-const ASKED_ATTRIBUTE = /^(followup|detail)$/;
 export function selectQuestion(identity, { lang = 'he', followupsLeft = 1 } = {}) {
   if (followupsLeft <= 0) return null;
   const l = lang === 'en' ? 'en' : 'he';
@@ -356,46 +388,17 @@ export function selectQuestion(identity, { lang = 'he', followupsLeft = 1 } = {}
   const required = (c) => !noNumber && c.impact === 'high' && (c.affects === 'identity' || changesSearch(c.attribute));
   const open = (identity.clarifications ?? [])
     .filter((c) => c.impact !== 'low' && c.affects !== 'eligibility' && !(noNumber && c.affects === 'price'))
-    .filter((c) => !confirmedQuestions.has(c.question) && !(confirmedNames.has(c.attribute) && !ASKED_ATTRIBUTE.test(c.attribute)))
-    .sort((a, b) => Number(required(b)) - Number(required(a)) || RANK[a.impact] - RANK[b.impact] || AFFECTS_RANK[a.affects] - AFFECTS_RANK[b.affects]);
+    .filter((c) => !confirmedQuestions.has(c.question) && !(confirmedNames.has(c.attribute) && !ASKED_ATTRIBUTE.test(c.attribute)));
+  // THE SERVER'S OWN QUESTION, when the model called a phone's storage unknown and high and proposed no question for it:
+  // storage decides which listings are the same product, so it is asked, before the search, like the model's own would
+  // be. Once asked — answered or "not sure" — it is not asked again.
+  const variant = openVariant(identity);
+  if (variant && STORAGE_NAME.test(variant) && !open.some((c) => sameAttribute(c.attribute, variant)) && !(identity.confirmed ?? []).some((c) => sameAttribute(c.attribute, variant))) {
+    open.push({ attribute: 'storage', kind: 'choice', question: STORAGE[l].question, options: [...STORAGE[l].options], unit: null, impact: 'high', affects: 'price' });
+  }
+  open.sort((a, b) => Number(required(b)) - Number(required(a)) || RANK[a.impact] - RANK[b.impact] || AFFECTS_RANK[a.affects] - AFFECTS_RANK[b.affects]);
   const best = open[0] ?? null;
   return best ? { ...best, required: required(best) } : null;
-}
-
-// Core fields a confirmed attribute may settle, by the names the model is asked to use.
-const CORE_FIELDS = { model: 'model', model_number: 'model_number', variant: 'variant', storage: 'size_or_capacity', capacity: 'size_or_capacity', size: 'size_or_capacity', 'bottle size': 'size_or_capacity', volume: 'size_or_capacity', color: 'color', colour: 'color' };
-// The model names an attribute in its own words on every look: "remaining" one round, "remaining volume" the next. The
-// owner's answer settles both. Only these qualifiers are read as the same attribute: "model" is never "model number".
-const QUALIFIERS = /^(volume|capacity|amount|level|left|remaining|size)$/;
-const sameAttribute = (a, b) => {
-  const x = tokens(a); const y = tokens(b);
-  if (!x.length || !y.length) return false;
-  if (x.join(' ') === y.join(' ')) return true;
-  const [short, long] = x.length < y.length ? [x, y] : [y, x];
-  return long.length === short.length + 1 && short.every((t, k) => t === long[k]) && QUALIFIERS.test(long.at(-1));
-};
-// What a note about the unknown says, once the owner has said it: "remaining amount unknown" beside "remaining: about half".
-const REMAINING_WORDS = /(remaining|left|fill|quantity|נשאר|נותר|כמות|מלא)/iu;
-const settledBy = (note, c) => {
-  const n = String(note).toLowerCase();
-  return tokens(c.attribute).some((t) => t.length >= 3 && n.includes(t)) || (c.attribute === 'remaining' && REMAINING_WORDS.test(n));
-};
-/**
- * The owner's confirmed facts, written over the model's guesses: a confirmed attribute is never silently replaced, is
- * marked as the OWNER's word (basis "confirmed", never "observed"), and a note the model wrote about not knowing it is
- * taken down: what the owner has answered is no longer uncertain.
- */
-function applyConfirmed(identity) {
-  for (const c of identity.confirmed ?? []) {
-    // "Not sure" is recorded so the question is not asked again; it settles nothing and names nothing.
-    if (c.unsure) continue;
-    const have = (identity.attributes ?? []).find((a) => sameAttribute(a.name, c.attribute));
-    if (have) { have.value = c.value; have.basis = 'confirmed'; have.matters = have.matters === 'low' ? 'medium' : have.matters; }
-    else if ((identity.attributes?.length ?? 0) < MAX_ATTRIBUTES && !ASKED_ATTRIBUTE.test(c.attribute)) identity.attributes.push({ name: c.attribute, value: c.value, basis: 'confirmed', matters: 'high' });
-    const field = CORE_FIELDS[c.attribute];
-    if (field && c.value) identity[field] = c.value;
-    if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c)) identity.uncertainty_note = null;
-  }
 }
 
 /**

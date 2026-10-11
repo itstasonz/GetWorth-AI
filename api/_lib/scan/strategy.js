@@ -45,6 +45,16 @@ export function strategyFor(identity) {
  */
 export const SEARCHABLE_ATTRIBUTES = /^(year|model year|storage|capacity|generation|trim|edition|model|model number|variant|size|bottle size|volume|engine|reference|followup|detail)$/i;
 export const changesSearch = (attribute) => SEARCHABLE_ATTRIBUTES.test(String(attribute ?? ''));
+/**
+ * THE VARIANTS A TECHNICAL ITEM IS SOLD AS. Of the searchable attributes, the
+ * ones that split one exact model into products with different prices — a
+ * phone's storage, a laptop's generation or memory — so that a listing for the
+ * model with the variant unknown may be a listing for a different product. An
+ * exact-model valuation with one of these still open is not exact
+ * (identify.js openVariant, service.js isApproximate).
+ */
+export const LISTING_VARIANTS = /^(storage|storage capacity|storage size|capacity|memory|ram|generation|year|model year|edition|variant)$/i;
+export const isListingVariant = (attribute) => LISTING_VARIANTS.test(String(attribute ?? ''));
 
 // ── THE MARKET IDENTITY ─────────────────────────────────────────────────────
 const STOP = new Set(['the', 'a', 'an', 'and', 'with', 'series', 'model', 'edition']);
@@ -61,16 +71,28 @@ const SCOPE = { complete_item: 'complete', bundle: 'complete', unknown: 'complet
  * language, not the wording of a display name. Two photographs of the same
  * product share one key, and so share one market research; one scan's
  * confirmed facts never read another's.
+ *
+ * THE MODEL CODE IS PART OF WHAT THE ITEM IS. A code read off the label (or
+ * given by the owner) leads the search queries (market.js), so research made
+ * without it is not the research made with it: the founder's Ninja blender
+ * (2026-10-11) photographed its label after a fruitless search, and the price
+ * step reused the hour-old research instead of searching under the code. The
+ * code joins the key only when there is one, so every key made before this
+ * rule — none of which had a code — reads the same research as before. The
+ * model's guesses at other codes (search.model_numbers) are not the item and
+ * change from one look to the next: they stay out.
  */
 export function marketKey(identity, answer = null) {
   const i = identity ?? {};
   const name = tokens(i.canonical_name || [i.brand, i.model ?? i.product_family ?? i.item_type, i.variant].filter(Boolean).join(' '));
   const confirmed = (Array.isArray(i.confirmed) ? i.confirmed : []).filter((c) => !c.unsure).map((c) => `${tokens(c.attribute).join('')}=${tokens(c.value).join('')}`).sort();
+  const code = tokens(i.model_number).join('');
   return [
     [...new Set(name)].sort().join(' '),
     tokens(i.size_or_capacity).join(''),
     SCOPE[i.configuration] ?? i.configuration ?? 'complete',
     tokens(answer?.text).join(' '),
     confirmed.join(','),
+    ...(code ? [`code=${code}`] : []),
   ].join('|');
 }

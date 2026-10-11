@@ -7,13 +7,16 @@
 // role, and prints one root-cause view per scan: the identity as it stood, the
 // queries planned and run, how many pages the search reached, every price found
 // with where it came from and why it was or was not used. It prints no user id,
-// no token, no photograph and no secret, and writes nothing.
+// no token, no photograph and no secret, and nothing the owner TYPED: a
+// correction ("Wrong item?") or an answer in their own words is shown by its
+// length only, so the output can be shared. Options the app offered are shown.
 //
-//   node --env-file=.env.local scripts/scan-trace.mjs [--days 2] [--limit 40] [--json out.json]
+//   node --env-file=.env.local scripts/scan-trace.mjs [--days 2] [--limit 40] [--json out.scan-trace.json]
 //
 // Needs SUPABASE_URL and SUPABASE_SERVICE_KEY in the environment. Without them
 // it says so and exits 2. It never guesses an environment: the URL it reads
-// from is printed so the reader knows which database answered.
+// from is printed so the reader knows which database answered. The JSON it
+// writes is always named *.scan-trace.json, which .gitignore keeps out of git.
 // ══════════════════════════════════════════════════════════════════════════════
 import { writeFileSync } from 'node:fs';
 
@@ -21,7 +24,11 @@ const args = process.argv.slice(2);
 const opt = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const days = Number(opt('--days', 2));
 const limit = Number(opt('--limit', 40));
-const jsonOut = opt('--json', null);
+const JSON_SUFFIX = '.scan-trace.json';
+const given = opt('--json', null);
+const jsonOut = given ? (given.endsWith(JSON_SUFFIX) ? given : given.replace(/\.json$/i, '') + JSON_SUFFIX) : null;
+/** Text the owner typed, by its length only: never the words. */
+const typed = (s) => (typeof s === 'string' && s ? `(${s.length} chars, not shown)` : null);
 
 const url = process.env.SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_KEY;
@@ -62,11 +69,12 @@ for (const v of vals ?? []) {
   byScan.set(v.scan_uuid, row);
 }
 
-const report = [];
+let report = [];
 for (const row of byScan.values()) {
   const v = row.valuation;
   const raw = v?.ai_raw_response ?? {};
   const id = raw.identity ?? {};
+  const ownWords = new Set((id.confirmed ?? []).filter((c) => c.stated).map((c) => c.value));
   const val = raw.valuation ?? null;
   const priced = row.events.filter((e) => e.event_type === 'core_scan_priced').map((e) => e.payload);
   const markets = row.events.filter((e) => e.event_type === 'core_scan_market').map((e) => e.payload);
@@ -77,10 +85,12 @@ for (const row of byScan.values()) {
       name: id.display_name, canonical: id.canonical_name, hebrew: id.search?.hebrew_name ?? null, brand: id.brand, model: id.model, model_number: id.model_number,
       codes: id.search?.model_numbers ?? [], aliases: id.search?.aliases ?? [], size: id.size_or_capacity, exact: id.exact_model_established, confidence: id.identity_confidence,
       market_class: id.market_class, precision: id.identity_precision, incomplete: id.incomplete ?? null,
-      attributes: (id.attributes ?? []).map((a) => `${a.name}=${a.value ?? '?'} (${a.basis})`),
-      confirmed: (id.confirmed ?? []).map((c) => `${c.attribute}=${c.value}${c.unsure ? ' (unsure)' : ''}${c.stated ? ' (own words)' : ''}`),
+      // An answer in the owner's own words is theirs: its length is shown, not the words, wherever it was written —
+      // the confirmed facts and the attribute it settled. An option the app offered is the app's.
+      attributes: (id.attributes ?? []).map((a) => `${a.name}=${a.basis === 'confirmed' && ownWords.has(a.value) ? typed(a.value) : (a.value ?? '?')} (${a.basis})`),
+      confirmed: (id.confirmed ?? []).map((c) => `${c.attribute}=${c.stated ? typed(c.value) : c.value}${c.unsure ? ' (unsure)' : ''}`),
       followup: id.followup?.kind && id.followup.kind !== 'none' ? `${id.followup.kind}${id.followup.required ? ' REQUIRED' : ''}: ${id.followup.question}` : null,
-      owner_correction: id.owner_correction ?? null,
+      owner_correction: typed(id.owner_correction),
     } : null,
     outcome: val ? {
       status: val.status, withdrawn: val.withdrawn ?? null, strategy: val.strategy ?? priced[0]?.strategy ?? null, basis: val.basis, approximate: val.approximate, confidence: val.price_confidence,
@@ -89,7 +99,8 @@ for (const row of byScan.values()) {
     } : null,
     timings: priced.map((p) => ({ identify_ms: p.identify_ms, market_ms: p.market_ms, first_search_ms: p.first_search_ms, tool_calls: p.tool_calls, stages: p.stages, model: p.model, reused: p.reused, stale: p.stale })),
     diagnostics: priced.map((p) => p.diagnostics ?? null).filter(Boolean),
-    market_research: markets.map((m) => ({ identity: m.market_identity, searched: m.record?.searched, unverified: m.record?.unverified, evidence: (m.record?.evidence ?? []).length })),
+    // The market identity (the research key) carries the owner's answers: the key's hash is shown, never the key.
+    market_research: markets.map((m) => ({ key: String(m.key ?? '').slice(0, 12), searched: m.record?.searched, unverified: m.record?.unverified, evidence: (m.record?.evidence ?? []).length })),
     sources: (val?.sources ?? []).map((s) => ({
       used: s.used, why: s.set_aside ?? null, binding: s.binding, binding_reason: s.binding_reason ?? null, kind: s.kind, match: s.match, market: s.market, condition: s.condition, page: s.page,
       listed: s.listed, freshness: s.freshness, price: s.price, currency: s.currency, host: host(s.url),
@@ -98,6 +109,14 @@ for (const row of byScan.values()) {
   out.set_aside = histogram(val?.sources ?? []);
   report.push(out);
 }
+
+// THE LAST CHECK, before anything is printed or written: nothing the owner typed — a correction, an answer in their own
+// words — appears anywhere in the report, whichever field carried it (the model echoes a correction into the name it
+// gives). A field added later cannot leak by omission: every occurrence is replaced by its length.
+const typedTexts = [...byScan.values()].flatMap((row) => { const id = row.valuation?.ai_raw_response?.identity ?? {}; return [id.owner_correction, ...(id.confirmed ?? []).filter((c) => c.stated).map((c) => c.value)]; }).filter((t) => typeof t === 'string' && t.length >= 3);
+let printed = JSON.stringify(report);
+for (const t of typedTexts) printed = printed.split(JSON.stringify(t).slice(1, -1)).join(typed(t));
+report = JSON.parse(printed);
 
 for (const r of report) {
   console.log(`\n━━ scan ${r.scan} · ${r.at}`);

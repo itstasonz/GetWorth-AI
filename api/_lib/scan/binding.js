@@ -42,6 +42,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { pricedNumbers, MAX_DISTANCE } from '../phaseb/content-binding.js';
 import { transliterates } from '../script-normalization.js';
+import { openVariant } from './identify.js';
+
+// A storage variant still open on the item, and the units a row states storage in.
+const STORAGE_VARIANT = /^(storage|capacity|memory|ram)/;
+const STORAGE_UNIT = /^(gb|tb)$/;
 
 export const BOUND = Object.freeze({ STRONG: 'strong', VERIFIED_ROW: 'verified_row', WEAK: 'weak', UNBOUND: 'unbound' });
 export const BIND_REASON = Object.freeze({
@@ -56,6 +61,7 @@ export const BIND_REASON = Object.freeze({
   FOR_THE_PRODUCT: 'row_sells_something_for_the_product',
   VARIANT: 'row_names_a_variant',
   OTHER_SIZE: 'row_states_another_size',
+  SIZE_OPEN: 'row_states_a_size_the_item_has_not_settled',
   LEGACY: 'kept_from_before_binding_was_checked',
 });
 const UNBOUND_REASONS = new Set([BIND_REASON.OTHER_PRICE, BIND_REASON.AMBIGUOUS, BIND_REASON.OTHER_MODEL, BIND_REASON.NO_VAT_PRICE, BIND_REASON.FOR_THE_PRODUCT]);
@@ -207,6 +213,7 @@ export function bindPrice(claim, page, identity, answer = null) {
   const single = SINGLE_ITEM_PAGES.has(page?.type);
   const level = single ? BOUND.STRONG : BOUND.VERIFIED_ROW;
   const mine = sizesIn(norm(`${identity?.size_or_capacity ?? ''} ${answer?.text ?? ''}`));
+  const storageOpen = STORAGE_VARIANT.test(openVariant(identity) ?? '');
 
   /** Who a stretch of text names: the item itself, or (for a listing not claimed to be it) the listing by its own title. */
   const whoIn = (row, at) => {
@@ -240,7 +247,11 @@ export function bindPrice(claim, page, identity, answer = null) {
     const theirs = sizesIn(stretch);
     const unitOf = (s) => s.replace(/^[\d.]+/, '');
     const clash = mine.some((m) => { const u = theirs.filter((s) => unitOf(s) === unitOf(m)); return u.length > 0 && !u.includes(m); });
-    return clash ? { level, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' } : { level, reason: BIND_REASON.ONE_LISTING, match: 'exact' };
+    if (clash) return { level, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' };
+    // THE ITEM'S OWN STORAGE IS NOT KNOWN (identify.js openVariant): a row that states one is a listing for ONE of the
+    // variants the item may be, not for the item. A comparable, and said to be — never exact evidence by default.
+    if (!mine.length && storageOpen && theirs.some((s) => STORAGE_UNIT.test(unitOf(s)))) return { level, reason: BIND_REASON.SIZE_OPEN, match: 'close_comparable' };
+    return { level, reason: BIND_REASON.ONE_LISTING, match: 'exact' };
   };
 
   const all = words(text);

@@ -31,3 +31,6 @@ db-expansion.log
 # Mutation-harness scratch copies (tests/mutations/ui-run.mjs). They are removed
 # on exit, including on ^C — this is the net for a hard kill.
 *.__mutant__.*
+
+# scripts/scan-trace.mjs output: a founder's read of production scans, never committed.
+*.scan-trace.json

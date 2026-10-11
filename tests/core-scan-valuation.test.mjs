@@ -341,6 +341,16 @@ describe('CS-6 the market identity: one key per thing on the market, whatever th
   test('CS-6c with no catalogue name the key falls back to brand and model', () => {
     assert.equal(marketKey({ brand: 'Logitech', model: 'G502 HERO', configuration: 'complete_item' }), marketKey({ canonical_name: 'logitech g502 hero', configuration: 'complete_item' }));
   });
+  test('CS-6e a model code read off the item is part of what the item is: it changes the key; a key without a code is what it always was; the model\'s guesses at codes are not a reading', () => {
+    const k = marketKey(id({ canonical_name: 'ninja power blender duo pro', model_number: null }));
+    assert.equal(k.split('|').length, 5, 'without a code the key has the five parts it always had: research kept before the code joined the key is still read');
+    const coded = marketKey(id({ canonical_name: 'ninja power blender duo pro', model_number: 'BN751' }));
+    assert.notEqual(coded, k);
+    assert.ok(coded.endsWith('|code=bn751'), coded);
+    assert.equal(marketKey(id({ canonical_name: 'ninja power blender duo pro', model_number: 'bn-751' })), coded, 'the same code, however written');
+    assert.notEqual(marketKey(id({ canonical_name: 'ninja power blender duo pro', model_number: 'BN801' })), coded, 'another code is another product');
+    assert.equal(marketKey(id({ canonical_name: 'ninja power blender duo pro', model_number: null, search: { hebrew_name: null, aliases: [], model_numbers: ['BN751'] } })), k, 'a guess at a code is not the item');
+  });
   test('CS-6d earlier evidence joins new evidence: the newer sighting of a page wins, and the pool is bounded', () => {
     const old = [item({ url: 'https://a.example.co.il/1', price: 300, seen: '2026-10-01' }), item({ url: 'https://a.example.co.il/2', price: 310, seen: '2026-10-01' })];
     const fresh = [item({ url: 'https://a.example.co.il/1?utm_source=x', price: 300, seen: '2026-10-06' }), item({ url: 'https://a.example.co.il/3', price: 320, seen: '2026-10-06' })];

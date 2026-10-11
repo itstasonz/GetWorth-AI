@@ -30,7 +30,7 @@
 // a made-up answer. Every provider call is made here and nowhere else.
 // ══════════════════════════════════════════════════════════════════════════════
 import { classifyOpenAIFailure } from '../openai-recognition.js';
-import { identifyItem, completeIdentity } from './identify.js';
+import { identifyItem, completeIdentity, openVariant } from './identify.js';
 import { researchMarket, marketDate } from './market.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
@@ -128,9 +128,12 @@ async function recall(key, store, now) {
 /**
  * Is the item's exact model or generation still an open question that would
  * move the price? Step 1 asks a question only then, so an unanswered question
- * means the price is for the family and must say so.
+ * means the price is for the family and must say so. So does a listing-defining
+ * variant of a technical item — a phone's storage — that nobody asked about and
+ * nobody settled (identify.js openVariant): the listings found may be for
+ * another variant, and the price is not presented as the exact product's.
  */
-export const isApproximate = (identity, answer) => ((!answer || answer.unsure === true) && !!identity?.followup?.kind && identity.followup.kind !== 'none') || (identity?.confirmed ?? []).some((c) => c.unsure === true);
+export const isApproximate = (identity, answer) => ((!answer || answer.unsure === true) && !!identity?.followup?.kind && identity.followup.kind !== 'none') || (identity?.confirmed ?? []).some((c) => c.unsure === true) || openVariant(identity) !== null;
 /** Is only the item's family established, not its exact model? Then the family's members are its comparables. */
 export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_model_established !== true && identity?.identity_precision !== 'descriptive';
 
