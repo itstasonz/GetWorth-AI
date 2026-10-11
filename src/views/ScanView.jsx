@@ -25,7 +25,7 @@ import { useApp } from '../contexts/AppContext';
 import { Btn, Chip, InputField } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 import {
-  scanStore, STAGE, CONDITIONS, bandFor, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
+  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
 } from '../lib/coreScan';
 import { scanCopy, localColor } from '../lib/scanCopy';
 import { WrongItemSheet, WhyPriceSheet, Bidi } from '../components/ScanSheets';
@@ -72,18 +72,31 @@ function Identity({ identity, copy, done, lang }) {
  */
 function Question({ question: f, copy, lang, onPhoto, onUpload, required = false }) {
   const [figure, setFigure] = useState('');
+  // The owner's own words for a choice whose options do not fit: null until "Something else" opens the box.
+  const [other, setOther] = useState(null);
   const number = Number(figure);
   const canSubmit = figure.trim() !== '' && Number.isFinite(number) && number >= 0;
+  const ownWords = (other ?? '').trim();
   return (
     <div className="rounded-container border border-subtle bg-surface p-4 space-y-3">
       <p className="text-label text-text-muted">{required ? copy.needed : copy.refine}</p>
       <p className="text-title-sm text-text-primary"><Bidi>{f.question}</Bidi></p>
       {f.kind === 'choice' || f.kind === 'yes_no' ? (
-        <div className="flex flex-wrap gap-2">
-          {f.options.map((option, index) => (
-            <Chip key={option} onClick={() => answerQuestion(index, lang)}><Bidi>{option}</Bidi></Chip>
-          ))}
-          <Chip onClick={dismissQuestion}>{copy.notSure}</Chip>
+        <div className="space-y-2">
+          <div className="flex flex-wrap gap-2">
+            {f.options.map((option, index) => (
+              <Chip key={option} onClick={() => answerQuestion(index, lang)}><Bidi>{option}</Bidi></Chip>
+            ))}
+            {f.kind === 'choice' && other === null && <Chip onClick={() => setOther('')}>{copy.other}</Chip>}
+            <Chip onClick={dismissQuestion}>{copy.notSure}</Chip>
+          </div>
+          {/* A choice lists what the model thought likely; a 64 GB phone is still a 64 GB phone. Short words, one line. */}
+          {f.kind === 'choice' && other !== null && (
+            <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); if (ownWords) { answerQuestion(ownWords, lang); setOther(null); } }}>
+              <InputField type="text" maxLength={MAX_ANSWER_CHARS} value={other} onChange={(e) => setOther(e.target.value)} placeholder={copy.otherPlaceholder} aria-label={copy.other} className="flex-1" />
+              <Btn primary type="submit" disabled={!ownWords}>{copy.answer}</Btn>
+            </form>
+          )}
         </div>
       ) : f.kind === 'number' ? (
         // A figure the owner knows (mileage, width, year), in the question's own unit: a number box, never a chat.

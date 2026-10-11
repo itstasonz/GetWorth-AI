@@ -40,6 +40,8 @@ const PRICE_TIMEOUT_MS = 65_000;      // server ceiling 50s
 const MIN_IMAGE_BYTES = 512;
 export const MAX_SCAN_IMAGES = 3;
 export const MAX_CORRECTION_CHARS = 160;
+/** The owner's own words as an answer to a choice whose options do not fit: short, and the server bounds it again. */
+export const MAX_ANSWER_CHARS = 40;
 
 // Learned from the server, once: the core scan is not available to this account
 // (switched off, or the account is not on the rollout list). It outlives a
@@ -267,17 +269,28 @@ export function addScanPhoto({ dataUrl, lang, onIdentified = null }) {
 export const openQuestion = (s = state) => (s.identity?.followup?.kind && s.identity.followup.kind !== 'none' && s.answered === null ? s.identity.followup : null);
 const settled = () => state.stage === STAGE.PRICED || state.stage === STAGE.INSUFFICIENT || state.stage === STAGE.NEEDS_DETAIL;
 
+/** An answer in the owner's own words, as the server takes it, or null when there are no words in it. */
+const ownWords = (value) => {
+  const other = typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, MAX_ANSWER_CHARS) : '';
+  return other ? { other } : null;
+};
+const isAnswer = (a) => Number.isInteger(a) || (typeof a === 'number' && Number.isFinite(a)) || (!!a && typeof a === 'object' && typeof a.other === 'string');
+
 /**
  * Answer the question: one of its options (by index) for a choice or yes/no, a number in its unit for a number
- * question. The price is done, or redone, for that answer.
+ * question, or — for a choice whose options do not fit — the owner's own short words. The price is done, or redone,
+ * for that answer.
  */
 export function answerQuestion(value, lang) {
   const q = openQuestion();
   if (!state.active || !settled() || !q || !deps) return Promise.resolve();
-  const numeric = q.kind === 'number';
-  if (numeric ? !(typeof value === 'number' && Number.isFinite(value) && value >= 0) : !Number.isInteger(value)) return Promise.resolve();
+  let answer = null;
+  if (q.kind === 'number') answer = typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+  else if (Number.isInteger(value)) answer = value;
+  else if (q.kind === 'choice') answer = ownWords(value);
+  if (answer === null) return Promise.resolve();
   deps.lang = lang;
-  return guarded('price', () => price({ answer: value }));
+  return guarded('price', () => price({ answer }));
 }
 
 /**
@@ -310,7 +323,7 @@ export function retryScan(lang) {
   if (!state.active || state.stage !== STAGE.ERROR || !deps) return Promise.resolve();
   deps.lang = lang;
   const step = state.error?.step;
-  if (step === 'price' && state.token) return guarded('price', () => price({ answer: Number.isInteger(state.answered) ? state.answered : null }));
+  if (step === 'price' && state.token) return guarded('price', () => price({ answer: isAnswer(state.answered) ? state.answered : null }));
   if (state.images.length === 0) return Promise.resolve();
   return guarded('identify', () => identify({ correction: state.correction }));
 }

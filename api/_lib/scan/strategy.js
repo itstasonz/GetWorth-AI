@@ -33,6 +33,19 @@ export function strategyFor(identity) {
   return STRATEGY.EXACT;
 }
 
+// ── WHAT A CONFIRMED FACT CHANGES ───────────────────────────────────────────
+/**
+ * THE ATTRIBUTES THAT CHANGE THE SEARCH. A confirmed fact that names WHAT the
+ * item is — a car's year, a phone's storage, a trim, an edition — joins the
+ * search queries (market.js), so a question about it has to be answered BEFORE
+ * the search: its answer decides what is searched for. A fact that describes
+ * the unit — mileage, width, whether it works — reaches the research only as
+ * context on the item, so it is asked beside the price, never in front of it
+ * (identify.js selectQuestion).
+ */
+export const SEARCHABLE_ATTRIBUTES = /^(year|model year|storage|capacity|generation|trim|edition|model|model number|variant|size|bottle size|volume|engine|reference|followup|detail)$/i;
+export const changesSearch = (attribute) => SEARCHABLE_ATTRIBUTES.test(String(attribute ?? ''));
+
 // ── THE MARKET IDENTITY ─────────────────────────────────────────────────────
 const STOP = new Set(['the', 'a', 'an', 'and', 'with', 'series', 'model', 'edition']);
 const tokens = (v) => String(v ?? '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((t) => t && !STOP.has(t));

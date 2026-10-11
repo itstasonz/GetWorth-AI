@@ -44,6 +44,10 @@ import { CONDITIONS } from './config.js';
 import { freshnessOf } from './evidence.js';
 import { isBound } from './binding.js';
 import { STRATEGY } from './strategy.js';
+import { MAD_THRESHOLD, MAD_MIN_SAMPLE, median, clamp, round2, roundNice, weightedQuantile, dispersionOf, aggregate } from './aggregate.js';
+
+// The arithmetic of a price — the weighted median, where the weight lies, how far apart it is — is aggregate.js.
+export { roundNice, weightedQuantile, dispersionOf, aggregate } from './aggregate.js';
 
 export { pageKey, verifyEvidence, mergeEvidence, requalify } from './evidence.js';
 
@@ -56,6 +60,10 @@ export const WITHDRAWN = Object.freeze({
   NO_LOCAL_EVIDENCE: 'no_verified_israeli_second_hand_reference',
   /** This KIND of item (a car, a luxury watch, a collectible) is valued by methods this engine has no calibration for: no number. */
   NO_CALIBRATED_METHOD: 'no_calibrated_valuation_method_for_this_market',
+  /** A range from SIMILAR items needs at least COMPARABLE_MIN Israeli comparables that stand: one similar thing's price is one seller's opinion of another thing. */
+  TOO_FEW_COMPARABLES: 'too_few_comparable_items',
+  /** The similar items that stand disagree too widely for a range to describe a market: shown, not priced from. */
+  COMPARABLES_DISAGREE: 'comparable_items_disagree',
 });
 /** What the valuation rests on: this item; the models it may be, when only its family is established; or similar items, for a thing identified by description. */
 export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR_ITEMS: 'similar_items' });
@@ -90,11 +98,6 @@ export const WEIGHT = Object.freeze({
 const ABOVE_NEW = 1.05;
 /** Israeli price level relative to abroad, when the same item's new price is known in both: kept within sane bounds. */
 const SCALE_BOUNDS = [0.8, 2];
-/** Median-absolute-deviation outlier rule, applied only when there is a distribution to be an outlier from. */
-const MAD_THRESHOLD = 3.5;
-const MAD_MIN_SAMPLE = 4;
-/** The expected selling range around the centre: the least it may be by how much evidence there is, and the most. */
-const RANGE = Object.freeze({ one: [0.25, 0.12], few: [0.18, 0.09], many: [0.08, 0.04], max: [0.5, 0.4] });
 /** Where the weight of the evidence spans more than this (P90 / P10), the evidence disagrees. */
 export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
 /**
@@ -114,7 +117,15 @@ export const SET_ASIDE = Object.freeze({
   DIFFERENT_MODEL: 'different_model',
   /** Verified, shown, and not priced from: this kind of item is valued by methods this engine does not have. */
   SPECIALISED_CONTEXT: 'specialised_market_context',
+  /** A shop's price for a SIMILAR item is not this item's new price: context, never a ceiling and never a level. */
+  SIMILAR_RETAIL: 'retail_price_of_similar_item',
+  /** A similar item abroad says nothing about what a similar item sells for in Israel. */
+  SIMILAR_ABROAD: 'similar_item_abroad',
+  /** A similar item that stood, when too few stood or they disagreed: shown as context, no number from it. */
+  SIMILAR_CONTEXT: 'similar_item_context',
 });
+/** How many Israeli comparables, current and for a used unit, a range from similar items needs. */
+export const COMPARABLE_MIN = 2;
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
 /**
@@ -143,22 +154,9 @@ const MATCHES = Object.freeze({
 });
 const ANCHOR_MATCHES = MATCHES[BASIS.ITEM];
 
-const finite = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 /** Israeli PRIVATE evidence that can lead: a listing known to be old is Israeli, and still says little about today; a shop's refurbished offer supports, never leads. */
 const leads = (p) => p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind) && p.freshness !== 'older' && p.freshness !== 'archived';
 const localWeight = (points) => points.filter(leads).reduce((sum, p) => sum + p.weight, 0);
-const median = (xs) => { const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const round2 = (v) => Math.round(v * 100) / 100;
-
-/** A natural price: ₪290, ₪900, ₪1,250. Never ₪847. */
-export function roundNice(n) {
-  const v = finite(n);
-  if (!v) return null;
-  const step = v < 100 ? 5 : v < 1000 ? 10 : v < 5000 ? 50 : v < 20000 ? 100 : 500;
-  return Math.max(step, Math.round(v / step) * step);
-}
-
 // What a price WOULD be, were it tied to its product — and what it IS, when it is.
 const resaleLike = (e, basis) => RESALE_KINDS.has(e.kind) && MATCHES[basis].has(e.match);
 const anchorLike = (e, market) => e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && e.market === market && !!e.price_ils;
@@ -204,9 +202,13 @@ function newPrice(evidence, market) {
  * and why it was set aside when it was.
  */
 export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null } = {}) {
-  const il = newPrice(evidence, 'IL');
+  // SIMILAR ITEMS HAVE NO NEW PRICE. A shop's price for a similar sofa is not this sofa's new price: it is neither a
+  // ceiling that sets a used price aside nor a level that brings a foreign price to Israel. For a thing valued from
+  // similar items there is no anchor, and a similar item abroad is never a reference: it says nothing about Israel.
+  const similar = basis === BASIS.SIMILAR_ITEMS;
+  const il = similar ? null : newPrice(evidence, 'IL');
   const anchorIl = il?.price ?? null;
-  const anchorIntl = newPrice(evidence, 'INTL')?.price ?? null;
+  const anchorIntl = similar ? null : (newPrice(evidence, 'INTL')?.price ?? null);
   // Abroad is not Israel. Converting the currency does not convert the market.
   // The level is taken from the same item's NEW price in both markets when both
   // are known; otherwise foreign prices stay as converted and count for less.
@@ -237,7 +239,7 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     points.push({
       evidence: e, value: local / CONDITION_FACTOR[condition], condition, stated, freshness, asking,
       weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page * factors.stock, factors,
-      dropped: aboveNew ? SET_ASIDE.ABOVE_NEW : null,
+      dropped: aboveNew ? SET_ASIDE.ABOVE_NEW : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null),
     });
   }
 
@@ -259,46 +261,6 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     if (mad > 0) for (const p of kept) if ((0.6745 * Math.abs(p.value - med)) / mad > MAD_THRESHOLD) p.dropped = SET_ASIDE.OUTLIER;
   }
   return { points, anchorIl, anchorInStock: il ? il.inStock : null, anchorRange: il ? { low: il.low, high: il.high, dispersed: il.dispersed } : null, scale, local, localDrives };
-}
-
-// ── AGGREGATE ───────────────────────────────────────────────────────────────
-/**
- * The value below which `q` of the total weight lies. When the weight splits
- * exactly at a boundary the answer is the midpoint of the two neighbours, never
- * whichever happened to be lower. Deterministic: ties are ordered by value, then page.
- */
-export function weightedQuantile(points, q) {
-  const sorted = [...points].sort((a, b) => a.value - b.value || String(a.evidence?.url).localeCompare(String(b.evidence?.url)));
-  const total = sorted.reduce((s, p) => s + p.weight, 0);
-  if (!sorted.length || !(total > 0)) return null;
-  const target = total * q;
-  let acc = 0;
-  for (let i = 0; i < sorted.length; i += 1) {
-    acc += sorted[i].weight;
-    if (Math.abs(acc - target) < total * 1e-9 && i + 1 < sorted.length) return (sorted[i].value + sorted[i + 1].value) / 2;
-    if (acc > target) return sorted[i].value;
-  }
-  return sorted.at(-1).value;
-}
-
-/** How far apart the weight of the evidence lies: P90 over P10. 1 when it agrees or there is one reference. */
-export function dispersionOf(kept) {
-  if (kept.length < 2) return 1;
-  const lo = weightedQuantile(kept, 0.1);
-  const hi = weightedQuantile(kept, 0.9);
-  return lo > 0 ? hi / lo : 1;
-}
-
-/** The centre and the expected selling range in "good" condition, from the references that stand. */
-export function aggregate(kept) {
-  if (kept.length === 0) return null;
-  const centre = weightedQuantile(kept, 0.5);
-  if (kept.length === 1) return { centre, low: centre * (1 - RANGE.one[0]), high: centre * (1 + RANGE.one[1]) };
-  const least = kept.length >= MAD_MIN_SAMPLE ? RANGE.many : RANGE.few;
-  // The range is where the weight of the evidence lies: evidence that disagrees gives a wide range.
-  const below = clamp(1 - weightedQuantile(kept, 0.25) / centre, least[0], RANGE.max[0]);
-  const above = clamp(weightedQuantile(kept, 0.75) / centre - 1, least[1], RANGE.max[1]);
-  return { centre, low: centre * (1 - below), high: centre * (1 + above) };
 }
 
 // ── CONFIDENCE ──────────────────────────────────────────────────────────────
@@ -368,8 +330,11 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const { points, anchorIl, anchorInStock, anchorRange, scale, localDrives } = norm;
   // A SPECIALISED MARKET: every reference is verified and shown, and none is priced from — the engine has no method for it.
   if (strategy === STRATEGY.SPECIALISED) for (const p of points) if (!p.dropped) p.dropped = SET_ASIDE.SPECIALISED_CONTEXT;
+  const similar = basis === BASIS.SIMILAR_ITEMS;
+  // A shop's price for a SIMILAR item: shown as context, never an anchor, never counted as this item's new price.
+  const similarRetail = (e) => similar && e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && !!e.price_ils;
   // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
-  const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || anchorLike(e, 'IL') || anchorLike(e, 'INTL'))));
+  const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || (!similar && (anchorLike(e, 'IL') || anchorLike(e, 'INTL'))))));
   // THE GATE. An Israeli second-hand price rests on at least one Israeli PRIVATE reference that is current (not known
   // to be old) and for a USED unit, tied to this product. Listings abroad, a shop's refurbished units, new prices and
   // old or sealed Israeli ads are context: with none standing they price nothing, each marked with why; once one
@@ -383,6 +348,14 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       p.dropped = p.evidence.kind === 'refurbished' ? SET_ASIDE.REFURBISHED_ALONE : (p.evidence.market === 'IL' ? SET_ASIDE.NOT_CURRENT : SET_ASIDE.ABROAD_ONLY);
     }
   }
+  // SIMILAR ITEMS ARE NOT THIS ITEM. A range from them is honest only when several Israeli comparables stand and
+  // roughly agree: one similar thing's price is one seller's opinion of another thing, and similar things that
+  // disagree widely describe no market. Otherwise they are shown as context and no number is made from them.
+  const standing = points.filter((p) => !p.dropped);
+  const comparableReason = similar && standing.length
+    ? (standing.filter(qualifies).length < COMPARABLE_MIN ? WITHDRAWN.TOO_FEW_COMPARABLES : (dispersionOf(standing) > DISPERSION.dispersed ? WITHDRAWN.COMPARABLES_DISAGREE : null))
+    : null;
+  if (comparableReason) for (const p of standing) p.dropped = SET_ASIDE.SIMILAR_CONTEXT;
   const kept = points.filter((p) => !p.dropped);
   const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
@@ -391,19 +364,21 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   // A family-level valuation, or one from similar items, is approximate by construction, question or no question: the
   // listings are not for this item. (Found 2026-10-11: with no open question a family price showed as an exact one.)
   const rough = approximate || basis !== BASIS.ITEM;
-  const dispersion = dispersionOf(kept);
-  const prices = kept.map((p) => p.evidence.price_ils);
+  // When similar items were set aside for being too few or too far apart, their spread is still what was found.
+  const shown = comparableReason ? standing : kept;
+  const dispersion = dispersionOf(shown);
+  const prices = shown.map((p) => p.evidence.price_ils);
 
   const base = {
     evidence: sortEvidence(evidence.map((e) => {
       const p = byEvidence.get(e);
-      const anchor = isNewPrice(e, 'IL') || isNewPrice(e, 'INTL');
+      const anchor = !similar && (isNewPrice(e, 'IL') || isNewPrice(e, 'INTL'));
       return {
         ...e,
         freshness: freshnessOf(e.listed, day, e.archived),
         used: !!p && !p.dropped,
         weight: p && !p.dropped ? round2(p.weight) : 0,
-        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (p || anchor ? null : (e.match === 'sibling_model' ? SET_ASIDE.DIFFERENT_MODEL : 'not_comparable'))),
+        set_aside: p?.dropped ?? (loose.has(e) ? SET_ASIDE.UNBOUND : (similarRetail(e) ? SET_ASIDE.SIMILAR_RETAIL : (p || anchor ? null : (e.match === 'sibling_model' ? SET_ASIDE.DIFFERENT_MODEL : 'not_comparable')))),
       };
     })),
     counts: {
@@ -413,14 +388,14 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
       intl_used_exact: count((e) => e.market !== 'IL' && e.match === 'exact'),
       intl_used_close: count((e) => e.market !== 'IL' && e.match !== 'exact'),
       sold: count((e) => SOLD_KINDS.has(e.kind)),
-      retail_il: evidence.filter((e) => isNewPrice(e, 'IL')).length,
+      retail_il: similar ? 0 : evidence.filter((e) => isNewPrice(e, 'IL')).length,
       // A shop's refurbished offers that qualified: supporting evidence at most, never the used market by themselves.
       retail_refurbished: points.filter((p) => p.evidence.kind === 'refurbished').length,
       // Of the references priced from, how many are a shop's refurbished offers: the screen counts second-hand listings without them.
       refurbished_used: kept.filter((p) => p.evidence.kind === 'refurbished').length,
       // Israeli private references, current and for a used unit: what opens the gate.
       il_qualifying: kept.filter(qualifies).length,
-      not_comparable: evidence.filter((e) => !loose.has(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
+      not_comparable: evidence.filter((e) => !loose.has(e) && !similarRetail(e) && (e.kind !== 'new_retail' ? !byEvidence.has(e) : !ANCHOR_MATCHES.has(e.match))).length,
       unbound: loose.size,
       // Found abroad and not needed, because the Israeli evidence was enough: context, not a rejected result.
       abroad_unused: unused,
@@ -454,6 +429,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
 
   if (!searchPerformed && evidence.length === 0) return withdraw(WITHDRAWN.NO_SEARCH);
   if (strategy === STRATEGY.SPECIALISED) return withdraw(WITHDRAWN.NO_CALIBRATED_METHOD);
+  if (comparableReason) return withdraw(comparableReason);
   const good = aggregate(kept);
   // References were found and none of them is an Israeli second-hand listing that stands: say that, not "nothing found".
   if (!good) return withdraw(points.length > 0 && !localEvidence ? WITHDRAWN.NO_LOCAL_EVIDENCE : WITHDRAWN.NO_RESALE_EVIDENCE);
@@ -479,6 +455,7 @@ const RANK = (e) => (e.used ? 0 : e.kind === 'new_retail' && ANCHOR_MATCHES.has(
 function sortEvidence(evidence) { return evidence.map((e, i) => [e, i]).sort((a, b) => RANK(a[0]) - RANK(b[0]) || b[0].weight - a[0].weight || a[1] - b[1]).map(([e]) => e); }
 
 /** How strong the Israeli second-hand evidence in a pool is: what decides whether to look further afield. */
-export function localStrength(evidence, { familyLevel = false, today = null } = {}) {
-  return normalizeReferences(Array.isArray(evidence) ? evidence : [], { basis: familyLevel ? BASIS.FAMILY : BASIS.ITEM, today: today ?? new Date().toISOString().slice(0, 10) }).local;
+export function localStrength(evidence, { familyLevel = false, strategy = STRATEGY.EXACT, today = null } = {}) {
+  const basis = strategy === STRATEGY.COMPARABLE ? BASIS.SIMILAR_ITEMS : (familyLevel ? BASIS.FAMILY : BASIS.ITEM);
+  return normalizeReferences(Array.isArray(evidence) ? evidence : [], { basis, today: today ?? new Date().toISOString().slice(0, 10) }).local;
 }

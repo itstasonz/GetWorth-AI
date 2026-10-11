@@ -32,7 +32,7 @@
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity } from './identify.js';
 import { researchMarket, marketDate } from './market.js';
-import { buildValuation, incompleteValuation, strategyFor, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
+import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import {
@@ -212,9 +212,11 @@ export async function runPrice({
   // evidence in hand (this search and the pool), not left to the model: enough
   // good local evidence stops the search, thin local evidence widens it once.
   // The line is the one the valuation itself draws: from LOCAL_STRENGTH.drives the Israeli evidence prices
-  // the item alone, so a search abroad would buy nothing.
-  const local = localStrength(mergeEvidence(found, earlier?.evidence), { familyLevel, today });
-  if (local < LOCAL_STRENGTH.drives) {
+  // the item alone, so a search abroad would buy nothing. A thing valued from SIMILAR items never goes abroad
+  // either: a similar sofa in another country is never priced from (valuation.js), so the second search would
+  // buy nothing but foreign context.
+  const local = localStrength(mergeEvidence(found, earlier?.evidence), { familyLevel, strategy, today });
+  if (local < LOCAL_STRENGTH.drives && strategy !== STRATEGY.COMPARABLE) {
     try { await search('expand'); } catch (err) {
       // The wider search failing leaves the local search's evidence standing.
       console.warn(`[Scan] market failed stage=expand code=${classifyOpenAIFailure(err?.message)}`);

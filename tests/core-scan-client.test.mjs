@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
-  scanStore, STAGE, CONDITIONS, LISTING_CONDITION, startScan, addScanPhoto, answerQuestion, dismissQuestion, openQuestion, correctItem, retryScan,
+  scanStore, STAGE, CONDITIONS, LISTING_CONDITION, MAX_ANSWER_CHARS, startScan, addScanPhoto, answerQuestion, dismissQuestion, openQuestion, correctItem, retryScan,
   setScanCondition, scanActive, bandFor, buildListingDraft,
 } from '../src/lib/coreScan.js';
 import { IMG, RAW_IDENTITY, PRICES } from './helpers/core-scan-fakes.mjs';
@@ -157,7 +157,20 @@ describe('CC-2 the one question never stands in front of the answer', () => {
     assert.equal(snap().stage, STAGE.PRICED);
     assert.equal(requests.length, 2);
     await answerQuestion('512 GB', 'he');
-    assert.equal(requests.length, 2, 'only an offered option can be sent');
+    assert.equal(requests.length, 2, 'a question put away takes no answer');
+  });
+  test('CC-2f the owner\'s own words: for a choice whose options do not fit a string is sent as { other }, bounded; empty words send nothing; a yes/no question takes no words', async () => {
+    server({ identify: [identified({ followup: CHOICE })], price: [pricedAnswer(), pricedAnswer()] });
+    await startScan(deps());
+    await answerQuestion('   ', 'he');
+    assert.equal(requests.length, 2, 'nothing said, nothing sent');
+    await answerQuestion(`  64 GB ${'x'.repeat(60)}`, 'he');
+    assert.deepEqual(requests[2].body.answer, { other: `64 GB ${'x'.repeat(60)}`.slice(0, MAX_ANSWER_CHARS) });
+    assert.deepEqual([snap().stage, openQuestion()], [STAGE.PRICED, null]);
+    server({ identify: [identified({ followup: { kind: 'yes_no', affects: 'price', question: 'Does it work?', options: ['Yes', 'No'] } })], price: [pricedAnswer()] });
+    await startScan(deps());
+    await answerQuestion('mostly', 'he');
+    assert.equal(requests.length, 2, 'yes or no, or not sure');
   });
   test('CC-2c a photograph the scan asked for is added to the same scan, looked at again and re-priced', async () => {
     server({ identify: [identified({ followup: PHOTO }, 1), identified({}, 2)], price: [pricedAnswer(), pricedAnswer()] });

@@ -12,7 +12,9 @@
 //       The live web is searched for what that item sells for second-hand in
 //       Israel today, and the server prices it from the evidence. Research
 //       for the same item is reused for an hour instead of searched again. `answer` is the INDEX of an option the identification
-//       offered, or 'unsure' — never free text.
+//       offered, 'unsure', a number in a number question's own unit, or — for a choice whose options do not fit —
+//       { other: "64 GB" }: the owner's own short words, bounded and cleaned at the boundary (identify.js recordAnswer).
+//       Never free text to a model.
 //
 // Every request passes the same gate, in the order that makes a refused request
 // cost nothing:  method → session → body (bounded) → configuration → rollout
@@ -127,8 +129,9 @@ export function createScanHandler({
       let answer = null;
       let identity = prior.identity;
       if (body?.answer !== undefined && body?.answer !== null) {
-        // The answer is an option the scan offered (by index), "unsure", or a number in the question's own unit — never free
-        // text. It becomes a confirmed fact on the identity, and the server then chooses the next question, if any.
+        // The answer is an option the scan offered (by index), "unsure", a number in the question's own unit, or the owner's
+        // own short words when no option fits a choice ({ other }) — bounded and cleaned before it is anything. It becomes a
+        // confirmed fact on the identity, and the server then chooses the next question, if any.
         const recorded = recordAnswer(identity, body.answer, { lang, followupsLeft: MAX_FOLLOWUPS - (prior.followups ?? 0) });
         if (recorded.error) return done({ error: 'bad_request', detail: recorded.error }, 400);
         ({ identity, answer } = recorded);

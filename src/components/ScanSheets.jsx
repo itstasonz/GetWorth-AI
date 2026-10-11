@@ -122,7 +122,11 @@ function Source({ e, copy }) {
 //              refurbished unit with no private listing beside it, a price from abroad Israel made unnecessary
 //   rejected   not this product (another model, an accessory, a part), above the new price, far out of line, or
 //              a price the page did not tie to the product
-const CONTEXT = new Set(['abroad_without_israeli_reference', 'israeli_listing_old_or_sealed', 'retail_refurbished_without_private_resale', 'local_evidence_sufficient']);
+// Verified and shown, not priced from: context, never "not this product".
+const CONTEXT = new Set([
+  'abroad_without_israeli_reference', 'israeli_listing_old_or_sealed', 'retail_refurbished_without_private_resale', 'local_evidence_sufficient',
+  'specialised_market_context', 'retail_price_of_similar_item', 'similar_item_abroad', 'similar_item_context',
+]);
 const isAnchor = (e) => e.kind === 'new_retail' && !e.set_aside && (e.match === 'exact' || e.match === 'close_comparable');
 export function groupEvidence(evidence) {
   const groups = { used: [], context: [], rejected: [] };

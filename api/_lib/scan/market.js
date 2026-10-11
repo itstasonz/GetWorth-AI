@@ -30,6 +30,7 @@ import { streamResponse } from '../v2/openai-stream.js';
 import {
   CONDITIONS, MARKET, MARKET_STAGE_TIMEOUT_MS, MARKET_MAX_OUTPUT_TOKENS, MARKET_SEARCH_CONTEXT_SIZE, MAX_USER_TEXT, resolveMarketEffort,
 } from './config.js';
+import { SEARCHABLE_ATTRIBUTES as SEARCHABLE } from './strategy.js';
 
 export const EVIDENCE_KINDS = Object.freeze(['used_listing', 'sold', 'refurbished', 'new_retail', 'price_guide', 'other']);
 export const EVIDENCE_MATCHES = Object.freeze(['exact', 'close_comparable', 'sibling_model', 'accessory', 'part', 'box_only', 'bundle', 'irrelevant']);
@@ -123,8 +124,8 @@ export const MAX_QUERIES = Object.freeze({ local: 8, expand: 6 });
 const CLASSIFIEDS_SITES = 'site:homeless.co.il OR site:ad.co.il OR site:yad2.co.il';
 const SHOP_SITES = 'zap.co.il OR ksp.co.il OR ivory.co.il OR bug.co.il';
 const clean = (v, max = 80) => promptSafe(v, max);
-// The confirmed attributes that name what an item IS, and so belong in a search for it.
-const SEARCHABLE = /^(year|model year|storage|capacity|generation|trim|edition|model|model number|variant|size|bottle size|volume|engine|reference|followup|detail)$/i;
+// The confirmed attributes that name what an item IS, and so belong in a search for it: strategy.js SEARCHABLE_ATTRIBUTES,
+// the same rule that decides which question must be answered before the search.
 
 /**
  * What the item is called, for a search: its exact name (brand, model or

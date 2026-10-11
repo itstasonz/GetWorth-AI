@@ -247,6 +247,21 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     assert.match(text(), /Recommended listing price₪290/);
     assert.doesNotMatch(text(), /What storage size is it\?/, 'answered, the question is gone');
   });
+  test('CV-2h "Something else" opens a one-line box for the owner\'s own words; Continue sends them as { other }', async () => {
+    await settle(await open({ identify: [identified({ followup: CHOICE })], price: [pricedAnswer(), pricedAnswer()] }));
+    assert.equal(container.querySelector('form input[type="text"]'), null, 'closed until asked for');
+    await click(button('Something else'));
+    const box = container.querySelector('form input[type="text"]');
+    assert.ok(box && box.maxLength === 40, 'one short line');
+    assert.ok(button('Continue').disabled, 'nothing typed, nothing sent');
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, 'value').set.call(box, ' 64 GB ');
+      box.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    });
+    await act(async () => { box.closest('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); await new Promise((r) => setTimeout(r, 30)); });
+    assert.deepEqual(requests.map((r) => [r.action, r.answer]), [['identify', undefined], ['price', undefined], ['price', { other: '64 GB' }]]);
+    assert.doesNotMatch(text(), /What storage size is it\?/, 'answered, the question is gone');
+  });
   test('CV-2b "Not sure" puts the question away and asks the server nothing', async () => {
     await settle(await open({ identify: [identified({ followup: CHOICE })], price: [pricedAnswer()] }));
     await click(button('Not sure'));

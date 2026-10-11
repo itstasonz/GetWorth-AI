@@ -68,10 +68,14 @@ export const SCAN_COPY = {
     similarItemsWhy: 'This kind of item is compared by type, size, material and condition, so the listings are for similar items, not the same one.',
     // Why there is no price on the result, by reason, when the general sentence would mislead.
     insufficientBy: {
+      too_few_comparable_items: (name) => `I identified this as ${name}. Only one similar item was verified in Israel, and a range from similar items needs at least two, so I show what I found without a number.`,
+      comparable_items_disagree: (name) => `I identified this as ${name}. The similar items found in Israel are too far apart in price for a range to mean anything, so I show what I found without a number.`,
       no_calibrated_valuation_method_for_this_market: (name) => `I identified this as ${name}. Items like this are valued by year, mileage, reference, authentication or grading, which I cannot price reliably yet, so I show what I found without a number.`,
       identity_incomplete: (name) => `I can see this is ${name}, but not the exact product, so the market was not searched.`,
     },
     notSure: 'Not sure',
+    other: 'Something else',
+    otherPlaceholder: 'Type it',
     takePhoto: 'Take the photo',
     uploadPhoto: 'Upload a photo',
     insufficient: (name) => `I identified this as ${name}, but I don't have enough reliable current second-hand evidence to give you a confident Israeli market price.`,
@@ -110,6 +114,10 @@ export const SCAN_COPY = {
     abroadUnused: (n) => `The Israeli listings were enough to price this, so ${n === 1 ? '1 price from abroad was' : `${n} prices from abroad were`} not used.`,
     // Why a found price was not used: one line per reason, so a set-aside price explains itself. `setAside` is for a reason this copy does not know.
     aside: {
+      retail_price_of_similar_item: (n) => (n === 1 ? '1 shop price was for a similar item, not this one, so it was not used as the new price.' : `${n} shop prices were for similar items, not this one, so they were not used as new prices.`),
+      similar_item_abroad: (n) => (n === 1 ? '1 similar item was listed abroad. What a similar item sells for abroad says nothing about Israel, so it was not used.' : `${n} similar items were listed abroad. What similar items sell for abroad says nothing about Israel, so they were not used.`),
+      similar_item_context: (n) => (n === 1 ? '1 similar item was found in Israel, but a range from similar items needs at least two that agree, so it is shown as context only.' : `${n} similar items were found in Israel, but they are too few or too far apart for a range, so they are shown as context only.`),
+      specialised_market_context: (n) => (n === 1 ? '1 result was verified and is shown as context: this market needs a method GetWorth does not have yet, so no price was made from it.' : `${n} results were verified and are shown as context: this market needs a method GetWorth does not have yet, so no price was made from them.`),
       not_comparable: (n) => (n === 1 ? '1 result was a different product or variant, an accessory or a part, so it was not used.' : `${n} results were a different product or variant, an accessory or a part, so they were not used.`),
       above_new_price: (n) => (n === 1 ? '1 price was higher than the item\'s new price, so it is not a second-hand price and was not used.' : `${n} prices were higher than the item's new price, so they are not second-hand prices and were not used.`),
       outlier: (n) => (n === 1 ? '1 price was far out of line with the other listings, so it was not used.' : `${n} prices were far out of line with the other listings, so they were not used.`),
@@ -126,6 +134,9 @@ export const SCAN_COPY = {
     },
     // One short reason beside a source that was not used.
     why: {
+      retail_price_of_similar_item: 'a shop price for a similar item, not this one',
+      similar_item_abroad: 'a similar item abroad',
+      similar_item_context: 'a similar item: context only, not enough to price from',
       above_new_price: 'above the new price',
       outlier: 'far from the other listings',
       different_model: 'another model, not this product',
@@ -143,6 +154,8 @@ export const SCAN_COPY = {
     details: 'How this was worked out',
     // Why there is no price, when there is none.
     noPriceWhy: {
+      too_few_comparable_items: 'Only one similar item was verified in Israel. A range from similar items needs at least two that stand, so what was found is shown as context only.',
+      comparable_items_disagree: 'The similar items found in Israel are too far apart in price for a range to mean anything, so they are shown as context only and no number is made from them.',
       no_verified_second_hand_reference: 'No second-hand listing for this item could be verified, so there is no price to stand behind.',
       no_verified_israeli_second_hand_reference: 'No current second-hand listing for a used unit of this item was verified in Israel. What was found is shown below as context; none of it says what the item sells for second-hand in Israel.',
       identity_incomplete: 'The exact product was not identified, so the market was not searched: a brand alone brings other products\' prices.',
@@ -198,10 +211,14 @@ export const SCAN_COPY = {
     similarItemsNote: 'לפריט מהסוג הזה אין דגם מדויק. הטווח מבוסס על מודעות לפריטים דומים, לא לאותו פריט.',
     similarItemsWhy: 'פריט מהסוג הזה מושווה לפי סוג, גודל, חומר ומצב, ולכן המודעות הן לפריטים דומים, לא לאותו פריט.',
     insufficientBy: {
+      too_few_comparable_items: (name) => `זיהיתי את הפריט כ־${name}. אומת בישראל רק פריט דומה אחד, וטווח מפריטים דומים צריך לפחות שניים, ולכן אני מציג מה שמצאתי בלי מספר.`,
+      comparable_items_disagree: (name) => `זיהיתי את הפריט כ־${name}. הפריטים הדומים שנמצאו בישראל רחוקים מדי זה מזה במחיר כדי שטווח יאמר משהו, ולכן אני מציג מה שמצאתי בלי מספר.`,
       no_calibrated_valuation_method_for_this_market: (name) => `זיהיתי את הפריט כ־${name}. פריטים כאלה מוערכים לפי שנה, קילומטראז׳, דגם מדויק, אימות או דירוג, שאותם עדיין איני יכול לתמחר באופן אמין, ולכן אני מציג את מה שמצאתי בלי מספר.`,
       identity_incomplete: (name) => `זיהיתי שזה ${name}, אבל לא את המוצר המדויק, ולכן השוק לא נבדק.`,
     },
     notSure: 'לא בטוח/ה',
+    other: 'משהו אחר',
+    otherPlaceholder: 'כתבו כאן',
     takePhoto: 'לצלם',
     uploadPhoto: 'להעלות תמונה',
     insufficient: (name) => `זיהיתי את הפריט כ־${name}, אבל אין לי מספיק ראיות אמינות ועדכניות ממכירות יד שנייה כדי לתת מחיר שוק בטוח בישראל.`,
@@ -237,6 +254,10 @@ export const SCAN_COPY = {
     conditionsHow: 'המחירים למצבים האחרים הם התאמה קבועה ממצב "טוב", ולא ממצאי שוק נפרדים.',
     abroadUnused: (n) => (n === 1 ? 'המודעות מישראל הספיקו לקביעת המחיר, ולכן מחיר אחד מחו״ל לא נכלל.' : `המודעות מישראל הספיקו לקביעת המחיר, ולכן ${n} מחירים מחו״ל לא נכללו.`),
     aside: {
+      retail_price_of_similar_item: (n) => (n === 1 ? 'מחיר חנות אחד היה לפריט דומה, לא לפריט הזה, ולכן לא שימש כמחיר חדש.' : `${n} מחירי חנות היו לפריטים דומים, לא לפריט הזה, ולכן לא שימשו כמחירים חדשים.`),
+      similar_item_abroad: (n) => (n === 1 ? 'פריט דומה אחד הוצע בחו״ל. מחיר של פריט דומה בחו״ל לא אומר דבר על ישראל, ולכן לא נכלל.' : `${n} פריטים דומים הוצעו בחו״ל. מחירים של פריטים דומים בחו״ל לא אומרים דבר על ישראל, ולכן לא נכללו.`),
+      similar_item_context: (n) => (n === 1 ? 'פריט דומה אחד נמצא בישראל, אבל טווח מפריטים דומים צריך לפחות שניים שמסכימים, ולכן הוא מוצג כהקשר בלבד.' : `${n} פריטים דומים נמצאו בישראל, אבל הם מעטים מדי או רחוקים מדי זה מזה בשביל טווח, ולכן הם מוצגים כהקשר בלבד.`),
+      specialised_market_context: (n) => (n === 1 ? 'תוצאה אחת אומתה ומוצגת כהקשר: לשוק הזה דרושה שיטה שעדיין אין ל־GetWorth, ולכן לא נקבע ממנה מחיר.' : `${n} תוצאות אומתו ומוצגות כהקשר: לשוק הזה דרושה שיטה שעדיין אין ל־GetWorth, ולכן לא נקבע מהן מחיר.`),
       not_comparable: (n) => (n === 1 ? 'תוצאה אחת הייתה מוצר או דגם אחר, אביזר או חלק, ולכן לא נכללה.' : `${n} תוצאות היו מוצר או דגם אחר, אביזר או חלק, ולכן לא נכללו.`),
       above_new_price: (n) => (n === 1 ? 'מחיר אחד היה גבוה ממחיר המוצר החדש, ולכן אינו מחיר יד שנייה ולא נכלל.' : `${n} מחירים היו גבוהים ממחיר המוצר החדש, ולכן אינם מחירי יד שנייה ולא נכללו.`),
       outlier: (n) => (n === 1 ? 'מחיר אחד היה רחוק מאוד משאר המודעות, ולכן לא נכלל.' : `${n} מחירים היו רחוקים מאוד משאר המודעות, ולכן לא נכללו.`),
@@ -252,6 +273,9 @@ export const SCAN_COPY = {
       different_model: (n) => (n === 1 ? 'תוצאה אחת הייתה דגם אחר של אותו מותג: מוצר אחר, ולכן לא נכללה.' : `${n} תוצאות היו דגמים אחרים של אותו מותג: מוצרים אחרים, ולכן לא נכללו.`),
     },
     why: {
+      retail_price_of_similar_item: 'מחיר חנות לפריט דומה, לא לפריט הזה',
+      similar_item_abroad: 'פריט דומה בחו״ל',
+      similar_item_context: 'פריט דומה: הקשר בלבד, לא מספיק לקביעת מחיר',
       above_new_price: 'מעל מחיר המוצר החדש',
       outlier: 'רחוק משאר המודעות',
       different_model: 'דגם אחר, לא המוצר הזה',
@@ -268,6 +292,8 @@ export const SCAN_COPY = {
     groupRejected: 'לא המוצר הזה, או לא שמיש',
     details: 'איך זה חושב',
     noPriceWhy: {
+      too_few_comparable_items: 'אומת בישראל רק פריט דומה אחד. טווח מפריטים דומים צריך לפחות שניים שעומדים, ולכן מה שנמצא מוצג כהקשר בלבד.',
+      comparable_items_disagree: 'הפריטים הדומים שנמצאו בישראל רחוקים מדי זה מזה במחיר כדי שטווח יאמר משהו, ולכן הם מוצגים כהקשר בלבד ולא נקבע מהם מספר.',
       no_verified_second_hand_reference: 'לא ניתן היה לאמת אף מודעת יד שנייה לפריט הזה, ולכן אין מחיר שאפשר לעמוד מאחוריו.',
       no_verified_israeli_second_hand_reference: 'לא אומתה בישראל מודעת יד שנייה עדכנית למוצר משומש מהדגם הזה. מה שנמצא מוצג למטה כהקשר בלבד; שום דבר ממנו לא אומר במה הפריט נמכר יד שנייה בישראל.',
       identity_incomplete: 'המוצר המדויק לא זוהה, ולכן השוק לא נבדק: חיפוש לפי מותג בלבד מביא מחירים של מוצרים אחרים.',

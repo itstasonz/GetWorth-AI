@@ -12,11 +12,15 @@
 //   CU-1  the universal identity: market class, precision, attributes with
 //         their basis, candidate questions, eligibility notes; unbranded is
 //         not unidentified; an inferred value never passes for a fact
-//   CU-2  which question, when: the stated policy, one at a time, answers kept
-//         and never asked twice, a conflicting answer replaced not duplicated,
-//         and when to stop
+//   CU-2  which question, when: OUTCOME-AWARE — required only when the answer
+//         changes the search, nothing required where no number is made,
+//         eligibility never asked; one at a time, answers kept and never asked
+//         twice, a conflicting answer replaced not duplicated, the owner's own
+//         words when no option fits, and when to stop
 //   CU-3  the sixteen-item matrix: class, precision, strategy, first question
-//   CU-4  research and valuation follow the kind of item: a car is not a mouse
+//   CU-4  research and valuation follow the kind of item: a car is not a mouse;
+//         similar items are not this item — no anchor from a similar thing,
+//         nothing from abroad, two Israeli comparables that agree or no number
 //   CU-5  the endpoint, round by round: answer → next question → search
 //
 //   node --test tests/core-scan-universal.test.mjs
@@ -26,10 +30,10 @@ import assert from 'node:assert/strict';
 
 import {
   normalizeIdentity, completeIdentity, selectQuestion, recordAnswer, identityGap, marketClassOf, precisionOf, buildIdentityPrompt, IDENTITY_SCHEMA,
-  MARKET_CLASSES, PRECISIONS, INCOMPLETE,
+  MARKET_CLASSES, PRECISIONS, INCOMPLETE, MAX_ANSWER_TEXT,
 } from '../api/_lib/scan/identify.js';
 import { buildSearchQueries, buildMarketPrompt, searchNames } from '../api/_lib/scan/market.js';
-import { buildValuation, strategyFor, marketKey, STRATEGY, BASIS, WITHDRAWN, SET_ASIDE } from '../api/_lib/scan/valuation.js';
+import { buildValuation, strategyFor, marketKey, STRATEGY, BASIS, WITHDRAWN, SET_ASIDE, COMPARABLE_MIN } from '../api/_lib/scan/valuation.js';
 import { bindPrice, BOUND, namesOf } from '../api/_lib/scan/binding.js';
 import { runPrice, isApproximate, resetMarketCache, SCAN_STATUS } from '../api/_lib/scan/service.js';
 import { createScanHandler } from '../api/scan.js';
@@ -91,6 +95,8 @@ const ITEMS = {
     search: { hebrew_name: null, aliases: [], model_numbers: [] }, attributes: [A('purpose', null, 'unknown', 'high')],
     clarifications: [Q('purpose', 'photo', 'Take one photo showing the whole object next to a coin for scale', { affects: 'identity' })] }),
 };
+/** A laptop with two questions whose answers change the search (generation, storage) and one whose answer does not (works). */
+const TWO_QUESTIONS = raw({ ...ITEMS.laptop, clarifications: [...ITEMS.laptop.clarifications, Q('storage', 'choice', 'How much storage?', { options: ['256 GB', '512 GB'] }), Q('works', 'yes_no', 'Does everything work?', { options: ['Yes', 'No'], impact: 'medium' })] });
 
 describe('CU-1 the universal identity', () => {
   test('CU-1a the schema carries a market class, a precision, attributes with their basis, candidate questions and eligibility notes; the prompt asks for them', () => {
@@ -119,30 +125,40 @@ describe('CU-1 the universal identity', () => {
 });
 
 describe('CU-2 which question, when — and when to stop', () => {
-  test('CU-2a high impact is asked before the search and is required; medium is offered beside the price; low is never asked; identity before price', () => {
+  test('CU-2a outcome-aware: a question is required only when its answer changes the search; where no number is made nothing is required and nothing about the price is asked; eligibility is never asked; low never; the required one first', () => {
+    const phone = scan(ITEMS.phone);
+    assert.deepEqual([phone.followup.kind, phone.followup.required, phone.followup.attribute], ['choice', true, 'storage'], 'storage decides what is searched for: before the search');
+    const drill = scan(ITEMS.drill);
+    assert.deepEqual([drill.followup.kind, drill.followup.required, drill.followup.attribute], ['choice', undefined, 'batteries included'], 'high impact, but it describes the unit: offered beside the price');
     const car = scan(ITEMS.car);
-    assert.deepEqual([car.followup.kind, car.followup.question, car.followup.required, car.followup.attribute], ['number', 'What year is the car?', true, 'year']);
+    assert.deepEqual([car.followup.kind, car.followup.question, car.followup.required], ['number', 'What year is the car?', undefined], 'a car gets no number from this engine: nothing stands before the search');
+    const dated = recordAnswer(car, 2019, { lang: 'en', followupsLeft: 2 }).identity;
+    assert.equal(dated.followup.kind, 'none', 'mileage and accidents move a price this engine does not make: never asked');
     const mouse = scan(ITEMS.mouse);
     assert.deepEqual([mouse.followup.kind, mouse.followup.required], ['yes_no', undefined], 'a medium question waits beside the price');
     const low = scan(raw({ clarifications: [Q('color', 'choice', 'Which colour?', { options: ['Black', 'White'], impact: 'low' })] }));
     assert.equal(low.followup.kind, 'none');
+    const eligibility = scan(raw({ clarifications: [Q('authenticity', 'yes_no', 'Is it genuine?', { options: ['Yes', 'No'], affects: 'eligibility' })] }));
+    assert.equal(eligibility.followup.kind, 'none', 'no outcome turns on it: eligibility_notes say what a photograph cannot establish');
     const mixed = scan(raw({ clarifications: [Q('a', 'yes_no', 'Price thing?', { options: ['Yes', 'No'] }), Q('b', 'yes_no', 'Identity thing?', { options: ['Yes', 'No'], affects: 'identity' })] }));
-    assert.equal(mixed.followup.question, 'Identity thing?');
+    assert.deepEqual([mixed.followup.question, mixed.followup.required], ['Identity thing?', true]);
+    const later = scan(raw({ clarifications: [Q('works', 'yes_no', 'Does it work?', { options: ['Yes', 'No'] }), Q('storage', 'choice', 'How much storage?', { options: ['64 GB', '128 GB'] })] }));
+    assert.deepEqual([later.followup.question, later.followup.required], ['How much storage?', true], 'the one that changes the search comes first, whatever order the model gave');
   });
   test('CU-2b each answer is kept as a confirmed fact, written over the model\'s guess, never asked again; a later answer to the same question replaces, not duplicates', () => {
-    let car = scan(ITEMS.car);
-    car = recordAnswer(car, 2019, { lang: 'en', followupsLeft: 2 }).identity;
-    assert.deepEqual(car.confirmed, [{ attribute: 'year', value: '2019', question: 'What year is the car?' }]);
-    assert.deepEqual(car.attributes.find((a) => a.name === 'year'), { name: 'year', value: '2019', basis: 'confirmed', matters: 'high' });
-    assert.deepEqual([car.followup.question, car.followup.unit, car.followup.required], ['How many kilometres has it travelled?', 'km', true]);
-    car = recordAnswer(car, 85000, { lang: 'en', followupsLeft: 1 }).identity;
-    assert.equal(car.followup.question, 'Has it been in an accident?');
-    assert.equal(car.followup.required, undefined, 'medium: beside the price');
-    assert.equal(selectQuestion({ ...car, confirmed: [...car.confirmed, { attribute: 'accidents', value: 'No', question: 'Has it been in an accident?' }] }, { lang: 'en', followupsLeft: 1 }), null, 'everything asked: nothing left');
+    let laptop = scan(TWO_QUESTIONS);
+    assert.deepEqual([laptop.followup.question, laptop.followup.required], ['Which MacBook Air is it?', true]);
+    laptop = recordAnswer(laptop, 1, { lang: 'en', followupsLeft: 2 }).identity;
+    assert.deepEqual(laptop.confirmed, [{ attribute: 'generation', value: 'M2 (2022)', question: 'Which MacBook Air is it?' }]);
+    assert.deepEqual(laptop.attributes.find((a) => a.name === 'generation'), { name: 'generation', value: 'M2 (2022)', basis: 'confirmed', matters: 'high' });
+    assert.deepEqual([laptop.followup.question, laptop.followup.required], ['How much storage?', true], 'storage joins the search: still before it');
+    laptop = recordAnswer(laptop, 0, { lang: 'en', followupsLeft: 1 }).identity;
+    assert.deepEqual([laptop.followup.question, laptop.followup.required, laptop.size_or_capacity], ['Does everything work?', undefined, '256 GB'], 'medium: beside the price');
+    assert.equal(selectQuestion({ ...laptop, confirmed: [...laptop.confirmed, { attribute: 'works', value: 'Yes', question: 'Does everything work?' }] }, { lang: 'en', followupsLeft: 1 }), null, 'everything asked: nothing left');
     // The owner changes their mind: the same attribute is confirmed once, with the latest value.
-    const again = recordAnswer({ ...car, followup: { kind: 'number', question: 'What year is the car?', options: [], unit: null, attribute: 'year' } }, 2021, { lang: 'en', followupsLeft: 1 }).identity;
-    assert.deepEqual(again.confirmed.filter((c) => c.attribute === 'year').map((c) => c.value), ['2021']);
-    assert.equal(again.attributes.find((a) => a.name === 'year').value, '2021');
+    const again = recordAnswer({ ...laptop, followup: { kind: 'choice', question: 'Which MacBook Air is it?', options: ['M1 (2020)', 'M2 (2022)', 'M3 (2024)'], unit: null, attribute: 'generation' } }, 2, { lang: 'en', followupsLeft: 1 }).identity;
+    assert.deepEqual(again.confirmed.filter((c) => c.attribute === 'generation').map((c) => c.value), ['M3 (2024)']);
+    assert.equal(again.attributes.find((a) => a.name === 'generation').value, 'M3 (2024)');
   });
   test('CU-2c "unsure" is kept as such, the price stays approximate, and the search does not carry it; a wrong-typed answer is refused', () => {
     const phone = scan(ITEMS.phone);
@@ -163,10 +179,29 @@ describe('CU-2 which question, when — and when to stop', () => {
     assert.equal(scan(ITEMS.mouse, { followupsLeft: 0 }).followup.kind, 'none');
     assert.equal(CFG.MAX_FOLLOWUPS, 3);
   });
+  test('CU-2e the owner\'s own words: a choice whose options do not fit takes { other } — short, cleaned, a confirmed fact that joins the search; bare text, markup-only or empty words are refused, and so are words for a yes/no or a number question; "not sure" typed is "unsure"', () => {
+    const phone = scan(ITEMS.phone);
+    const own = recordAnswer(phone, { other: '  64  GB ' }, { lang: 'en', followupsLeft: 2 });
+    assert.deepEqual([own.answer, own.identity.confirmed, own.identity.size_or_capacity], [
+      { question: 'What storage size is it?', text: '64 GB', stated: true },
+      [{ attribute: 'storage', value: '64 GB', question: 'What storage size is it?', stated: true }],
+      '64 GB',
+    ]);
+    assert.ok(buildSearchQueries({ identity: own.identity, answer: own.answer }).some((q) => /iPhone 13 64 GB/.test(q)), 'the owner\'s storage is searched for like an offered one');
+    assert.equal(recordAnswer(phone, { other: '<64 GB>' }, { lang: 'en' }).answer.text, '64 GB', 'markup never survives the boundary');
+    assert.equal(recordAnswer(phone, { other: 'x'.repeat(100) }, { lang: 'en' }).answer.text.length, MAX_ANSWER_TEXT);
+    assert.deepEqual([recordAnswer(phone, { other: 'not sure' }, { lang: 'en' }).answer.unsure, recordAnswer(phone, { other: 'לא יודע' }, { lang: 'en' }).answer.unsure], [true, true]);
+    for (const bad of [{ other: '' }, { other: '   ' }, { other: '<<>>' }, { other: 42 }, { text: '64 GB' }, '64 GB', ['64 GB']]) assert.ok(recordAnswer(phone, bad, { lang: 'en' }).error, JSON.stringify(bad));
+    assert.ok(recordAnswer(scan(ITEMS.mouse), { other: 'mostly' }, { lang: 'en' }).error, 'a yes/no question takes yes or no');
+    assert.ok(recordAnswer(scan(ITEMS.sofa), { other: '180 cm' }, { lang: 'en' }).error, 'a number question takes a number');
+  });
 });
 
 describe('CU-3 the sixteen, through the same door', () => {
   // kind of thing → [market class, precision, strategy, first question kind, required, incomplete]
+  // Required only where the answer changes the search (identity, or an attribute that joins the queries) and a number
+  // will be made: a car, a watch and a card are specialised markets with no number, so nothing stands before their
+  // search; a drill's "what comes with it" and a camera's "does it work" describe the unit, so they wait beside the price.
   const EXPECT = {
     mouse: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'yes_no', false, undefined],
     phone: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'choice', true, undefined],
@@ -174,14 +209,14 @@ describe('CU-3 the sixteen, through the same door', () => {
     blender: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'photo', true, INCOMPLETE.BRAND_ONLY],
     sofa: ['furniture', 'descriptive', STRATEGY.COMPARABLE, 'number', false, undefined],
     sneakers: ['fashion', 'exact_model', STRATEGY.EXACT, 'choice', true, undefined],
-    watch: ['luxury_watch_jewelry', 'exact_model', STRATEGY.SPECIALISED, 'photo', true, undefined],
+    watch: ['luxury_watch_jewelry', 'exact_model', STRATEGY.SPECIALISED, 'photo', false, undefined],
     perfume: ['fragrance_cosmetics', 'exact_model', STRATEGY.EXACT, 'photo', true, INCOMPLETE.FRAGRANCE_NAME_OR_SIZE],
-    drill: ['tools', 'exact_model', STRATEGY.EXACT, 'choice', true, undefined],
-    card: ['collectible', 'exact_model', STRATEGY.SPECIALISED, 'choice', true, undefined],
+    drill: ['tools', 'exact_model', STRATEGY.EXACT, 'choice', false, undefined],
+    card: ['collectible', 'exact_model', STRATEGY.SPECIALISED, 'choice', false, undefined],
     bicycle: ['other', 'exact_model', STRATEGY.EXACT, 'choice', false, undefined],
-    car: ['vehicle', 'exact_model', STRATEGY.SPECIALISED, 'number', true, undefined],
+    car: ['vehicle', 'exact_model', STRATEGY.SPECIALISED, 'number', false, undefined],
     lamp: ['household', 'descriptive', STRATEGY.COMPARABLE, 'yes_no', false, undefined],
-    vintage: ['handmade_vintage', 'exact_model', STRATEGY.COMPARABLE, 'yes_no', true, undefined],
+    vintage: ['handmade_vintage', 'exact_model', STRATEGY.COMPARABLE, 'yes_no', false, undefined],
     handmade: ['handmade_vintage', 'descriptive', STRATEGY.COMPARABLE, 'number', false, undefined],
     unknown: ['other', 'descriptive', STRATEGY.COMPARABLE, 'photo', true, undefined],
   };
@@ -205,9 +240,9 @@ describe('CU-3 the sixteen, through the same door', () => {
 describe('CU-4 research and valuation follow the kind of item', () => {
   beforeEach(() => { resetMarketCache(); resetFxCache(); });
   test('CU-4a the queries: a car with the words of the car market and no shop price; a sofa in Hebrew first and by description; a mouse by model and shop', () => {
-    let car = scan(ITEMS.car);
-    car = recordAnswer(car, 2019, { lang: 'en', followupsLeft: 2 }).identity;
-    car = recordAnswer(car, 85000, { lang: 'en', followupsLeft: 1 }).identity;
+    // The year was answered (offered beside the evidence); the mileage, a fact about the unit, sits on the identity as a confirmed fact.
+    let car = recordAnswer(scan(ITEMS.car), 2019, { lang: 'en', followupsLeft: 2 }).identity;
+    car = { ...car, confirmed: [...car.confirmed, { attribute: 'mileage', value: '85000 km', question: 'How many kilometres has it travelled?' }] };
     const q = buildSearchQueries({ identity: car });
     assert.ok(q.some((s) => /Toyota Corolla 2019 יד שנייה למכירה/.test(s)), 'the year names the car; the mileage does not');
     assert.ok(q.every((s) => !/85000/.test(s)));
@@ -240,7 +275,7 @@ describe('CU-4 research and valuation follow the kind of item', () => {
     assert.deepEqual([sofa.status, sofa.valuation.strategy, sofa.valuation.basis, sofa.valuation.approximate, sofa.valuation.price_confidence, sofa.valuation.counts.resale], [SCAN_STATUS.PRICED, STRATEGY.COMPARABLE, BASIS.SIMILAR_ITEMS, true, 'low', 3]);
     resetMarketCache();
     const carPages = Object.fromEntries(Object.values(SOURCES).map((u) => [u, 'טויוטה קורולה 2019 יד שנייה ₪90,000 · פורסם 01/10/2026']));
-    let car = scan(ITEMS.car); car = recordAnswer(car, 2019, { lang: 'en', followupsLeft: 2 }).identity; car = recordAnswer(car, 85000, { lang: 'en', followupsLeft: 1 }).identity;
+    const car = recordAnswer(scan(ITEMS.car), 2019, { lang: 'en', followupsLeft: 2 }).identity;
     const carMarket = { evidence: [listing(SOURCES.IL_USED_1, 90000, 'exact'), listing(SOURCES.IL_USED_2, 90000, 'exact')] };
     const priced = await runPrice({ identity: car, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [carMarket], reached: Object.values(SOURCES), pageText: carPages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([priced.status, priced.valuation.prices, priced.valuation.withdrawn, priced.valuation.no_price_reason, priced.valuation.strategy], [SCAN_STATUS.INSUFFICIENT, null, WITHDRAWN.NO_CALIBRATED_METHOD, WITHDRAWN.NO_CALIBRATED_METHOD, STRATEGY.SPECIALISED]);
@@ -257,6 +292,43 @@ describe('CU-4 research and valuation follow the kind of item', () => {
     assert.notEqual(marketKey(b), marketKey(c));
     assert.notEqual(marketKey(a), marketKey(b));
     assert.equal(marketKey(b), marketKey({ ...b, display_name: 'קורולה', color: 'red' }), 'wording and colour are not the item');
+  });
+  test('CU-4e similar items are not this item: no new-price anchor from a similar thing, nothing from abroad, at least two Israeli comparables that stand, and no number when they disagree', () => {
+    const ref = (url, price, over = {}) => ({ url, domain: new URL(url).host, title: 'ספה תלת מושבית', price, currency: 'ILS', price_ils: price, kind: 'used_listing', match: 'close_comparable', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', binding: 'strong', stock: 'unknown', shipping: null, seen: TODAY, ...over });
+    const similar = (evidence) => buildValuation({ evidence, strategy: STRATEGY.COMPARABLE, today: TODAY });
+    // ONE similar item is one seller's opinion of another thing: shown, not priced from.
+    const one = similar([ref(SOURCES.IL_USED_1, 900)]);
+    assert.deepEqual([one.status, one.withdrawn, one.no_price_reason, one.prices, one.evidence[0].set_aside, one.evidence[0].used, one.reference_range], ['insufficient_evidence', WITHDRAWN.TOO_FEW_COMPARABLES, WITHDRAWN.TOO_FEW_COMPARABLES, null, SET_ASIDE.SIMILAR_CONTEXT, false, { low: 900, high: 900 }]);
+    assert.equal(COMPARABLE_MIN, 2);
+    // Two that agree: a range, approximate, low.
+    const two = similar([ref(SOURCES.IL_USED_1, 900), ref(SOURCES.IL_USED_2, 1100)]);
+    assert.deepEqual([two.status, two.basis, two.approximate, two.price_confidence, two.counts.resale], ['priced', BASIS.SIMILAR_ITEMS, true, 'low', 2]);
+    // Three that disagree (₪300 to ₪2,500) describe no market: shown with their spread, no number.
+    const apart = similar([ref(SOURCES.IL_USED_1, 300), ref(SOURCES.IL_USED_2, 900), ref('https://ads.example.co.il/3', 2500)]);
+    assert.deepEqual([apart.status, apart.withdrawn, apart.dispersed, apart.reference_range, apart.evidence.every((e) => e.set_aside === SET_ASIDE.SIMILAR_CONTEXT && !e.used)], ['insufficient_evidence', WITHDRAWN.COMPARABLES_DISAGREE, true, { low: 300, high: 2500 }, true]);
+    // A shop's new price for a SIMILAR sofa is not this sofa's new price: it sets nothing aside and caps nothing.
+    const shop = ref(SOURCES.IL_RETAIL, 1000, { kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock' });
+    const withShop = similar([ref(SOURCES.IL_USED_1, 900), ref(SOURCES.IL_USED_2, 1100), ref('https://ads.example.co.il/3', 1500), shop]);
+    assert.deepEqual([withShop.status, withShop.retail_new_ils, withShop.counts.retail_il, withShop.counts.resale, withShop.evidence.find((e) => e.kind === 'new_retail').set_aside], ['priced', null, 0, 3, SET_ASIDE.SIMILAR_RETAIL]);
+    assert.ok(withShop.evidence.every((e) => e.set_aside !== SET_ASIDE.ABOVE_NEW), 'a used sofa dearer than a similar new one is not "above new"');
+    assert.ok(withShop.prices.new_sealed.list > 1000, 'and no similar item\'s shop price caps the sealed band');
+    // The same evidence for an EXACT item uses the anchor and sets the dearer listing aside: the rule is the strategy's, not the data's.
+    const exact = buildValuation({ evidence: [ref(SOURCES.IL_USED_1, 900, { match: 'exact' }), ref(SOURCES.IL_USED_2, 1100, { match: 'exact' }), ref('https://ads.example.co.il/3', 1500, { match: 'exact' }), { ...shop, match: 'exact' }], today: TODAY });
+    assert.deepEqual([exact.retail_new_ils, exact.evidence.find((e) => e.price === 1500).set_aside, exact.evidence.find((e) => e.price === 900).set_aside], [1000, SET_ASIDE.ABOVE_NEW, null]);
+    // A similar item abroad says nothing about Israel: never a reference, whatever stands locally.
+    const abroad = similar([ref(SOURCES.IL_USED_1, 900), ref(SOURCES.IL_USED_2, 1100), ref(SOURCES.INTL_USED, 700, { market: 'INTL', currency: 'USD', price: 200 })]);
+    assert.deepEqual([abroad.status, abroad.counts.resale, abroad.evidence.find((e) => e.market === 'INTL').set_aside], ['priced', 2, SET_ASIDE.SIMILAR_ABROAD]);
+  });
+  test('CU-4f a thing valued from similar items is searched in Israel only: with one similar item found the search does not go abroad, and the answer says the comparables were too few; an exact item with thin Israeli evidence still looks further', async () => {
+    const market = { evidence: [{ url: SOURCES.IL_USED_1, title: 'ספה תלת מושבית אפורה', price: 900, currency: 'ILS', kind: 'used_listing', match: 'close_comparable', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', stock: 'unknown', shipping: null }] };
+    const pages = { [SOURCES.IL_USED_1]: 'ספה תלת מושבית אפורה יד שנייה ₪900 · פורסם 01/10/2026' };
+    const fetchImpl = fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText: pages, rows: false });
+    const sofa = await runPrice({ identity: scan(ITEMS.sofa), model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    assert.deepEqual([sofa.status, sofa.valuation.withdrawn, fetchImpl.stages(), sofa.call.stages], [SCAN_STATUS.INSUFFICIENT, WITHDRAWN.TOO_FEW_COMPARABLES, ['local'], ['local']]);
+    resetMarketCache();
+    const thin = fakeProvider({ markets: [{ evidence: [] }], reached: Object.values(SOURCES), pageText: {}, rows: false });
+    const mouse = await runPrice({ identity: scan(ITEMS.mouse), model: 'm', apiKey: 'k', fetchImpl: thin, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    assert.deepEqual([mouse.call.stages, thin.stages()], [['local', 'expand'], ['local', 'expand']]);
   });
 });
 
@@ -282,23 +354,36 @@ describe('CU-5 the endpoint, round by round', () => {
   }
   beforeEach(() => { for (const [k, v] of Object.entries(env)) process.env[k] = v; });
 
-  test('CU-5a a car: year, then mileage, each answer a confirmed fact in a re-signed token; the accident question waits beside the result; the search runs once, with every confirmed fact on the identity', async () => {
-    const { call, log } = harness(scan(ITEMS.car));
+  test('CU-5a a laptop: generation, then storage — each required because its answer changes the search, each a confirmed fact in a re-signed token; "does it work" waits beside the result; the search runs once, with every confirmed fact on the identity', async () => {
+    const { call, log } = harness(scan(TWO_QUESTIONS));
     const first = await call({ action: 'identify', scan_uuid: UUID, lang: 'en', images: [IMG] });
-    assert.deepEqual([first.payload.status, first.payload.identity.followup.question, first.payload.identity.followup.required], ['identified', 'What year is the car?', true]);
-    const second = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: first.payload.token, answer: 2019 });
-    assert.deepEqual([second.status, second.payload.status, second.payload.identity.followup.question, second.payload.identity.followup.required, log.price], [200, 'identified', 'How many kilometres has it travelled?', true, 0], 'another required question: no search yet');
-    assert.deepEqual(second.payload.identity.confirmed.map((c) => c.value), ['2019']);
+    assert.deepEqual([first.payload.status, first.payload.identity.followup.question, first.payload.identity.followup.required], ['identified', 'Which MacBook Air is it?', true]);
+    const second = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: first.payload.token, answer: 1 });
+    assert.deepEqual([second.status, second.payload.status, second.payload.identity.followup.question, second.payload.identity.followup.required, log.price], [200, 'identified', 'How much storage?', true, 0], 'another required question: no search yet');
+    assert.deepEqual(second.payload.identity.confirmed.map((c) => c.value), ['M2 (2022)']);
     assert.notEqual(second.payload.token, first.payload.token);
-    const third = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: second.payload.token, answer: 85000 });
+    const third = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: second.payload.token, answer: 0 });
     assert.deepEqual([third.status, third.payload.status, log.price, log.records], [200, 'priced', 1, 1]);
-    assert.deepEqual(log.priceArgs.identity.confirmed.map((c) => c.value), ['2019', '85000 km']);
-    assert.deepEqual(log.priceArgs.answer, { question: 'How many kilometres has it travelled?', text: '85000 km' });
-    assert.deepEqual([third.payload.identity.followup.question, third.payload.identity.followup.required], ['Has it been in an accident?', undefined], 'the medium question is offered beside the result');
+    assert.deepEqual(log.priceArgs.identity.confirmed.map((c) => c.value), ['M2 (2022)', '256 GB']);
+    assert.deepEqual(log.priceArgs.answer, { question: 'How much storage?', text: '256 GB' });
+    assert.deepEqual([third.payload.identity.followup.question, third.payload.identity.followup.required], ['Does everything work?', undefined], 'the medium question is offered beside the result');
     assert.ok(third.payload.token, 'the client carries the newest token');
     // A stale token cannot answer a question that was already answered differently: the server re-selects from ITS state.
-    const replay = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: first.payload.token, answer: 2015 });
-    assert.equal(replay.payload.identity.confirmed[0].value, '2015');
+    const replay = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: first.payload.token, answer: 2 });
+    assert.equal(replay.payload.identity.confirmed[0].value, 'M3 (2024)');
+  });
+  test('CU-5c a car at the endpoint: nothing is required, so the price step runs at once and the year question is offered beside the evidence; the owner\'s own words answer a choice whose options do not fit, and empty or bare words are refused before any search', async () => {
+    const car = harness(scan(ITEMS.car));
+    const seen = await car.call({ action: 'identify', scan_uuid: UUID, lang: 'en', images: [IMG] });
+    assert.deepEqual([seen.payload.identity.followup.question, seen.payload.identity.followup.required], ['What year is the car?', undefined]);
+    const priced = await car.call({ action: 'price', scan_uuid: UUID, lang: 'en', token: seen.payload.token });
+    assert.deepEqual([priced.payload.status, car.log.price], ['priced', 1]);
+    const phone = harness(scan(ITEMS.phone));
+    const { token } = (await phone.call({ action: 'identify', scan_uuid: UUID, lang: 'en', images: [IMG] })).payload;
+    for (const answer of [{ other: '' }, { other: '   ' }, { other: '<>' }, { text: '64 GB' }, 'other']) assert.equal((await phone.call({ action: 'price', scan_uuid: UUID, token, answer })).status, 400, JSON.stringify(answer));
+    assert.equal(phone.log.price, 0);
+    const own = await phone.call({ action: 'price', scan_uuid: UUID, lang: 'en', token, answer: { other: '  64  GB ' } });
+    assert.deepEqual([own.status, own.payload.status, phone.log.priceArgs.identity.size_or_capacity, phone.log.priceArgs.answer], [200, 'priced', '64 GB', { question: 'What storage size is it?', text: '64 GB', stated: true }]);
   });
   test('CU-5b an answer that is not an offered option, not a number for a number question, or free text is refused before any search', async () => {
     const { call, log } = harness(scan(ITEMS.phone));
