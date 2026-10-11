@@ -119,7 +119,14 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
   const shown = evidence.filter((e) => e.used || (e.kind === 'new_retail' && !e.set_aside));
   const il = (counts.il_used_exact ?? 0) + (counts.il_used_close ?? 0);
   const intl = (counts.intl_used_exact ?? 0) + (counts.intl_used_close ?? 0);
-  const aside = (counts.not_comparable ?? 0) + (counts.set_aside ?? 0);
+  // Why each found price was not used, one line per reason. Unbound prices and prices from abroad left unused have their own lines.
+  const reasons = {};
+  for (const e of evidence) {
+    if (e.set_aside && e.set_aside !== 'local_evidence_sufficient' && e.set_aside !== 'price_not_tied_to_product') reasons[e.set_aside] = (reasons[e.set_aside] ?? 0) + 1;
+  }
+  const explained = Object.entries(reasons).filter(([reason]) => copy.aside?.[reason]);
+  const unexplained = Object.entries(reasons).filter(([reason]) => !copy.aside?.[reason]).reduce((sum, [, n]) => sum + n, 0);
+  const older = evidence.filter((e) => e.used && (e.freshness === 'older' || e.freshness === 'archived')).length;
   const range = v.reference_range;
   return (
     <Sheet open={open} onClose={onClose} title={priced ? copy.whyTitle : copy.whatFound}>
@@ -152,7 +159,9 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
         <div className="space-y-1 text-body-sm text-text-secondary">
           {(counts.unbound ?? 0) > 0 && <p>{copy.unbound(counts.unbound)}</p>}
           {(counts.abroad_unused ?? 0) > 0 && <p>{copy.abroadUnused(counts.abroad_unused)}</p>}
-          {aside > 0 && <p>{copy.setAside(aside)}</p>}
+          {explained.map(([reason, n]) => <p key={reason}>{copy.aside[reason](n)}</p>)}
+          {unexplained > 0 && <p>{copy.setAside(unexplained)}</p>}
+          {older > 0 && <p>{copy.olderUsed(older)}</p>}
           {v.searched?.date && <p>{copy.searchedOn(v.searched.date)}</p>}
         </div>
 

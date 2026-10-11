@@ -97,7 +97,17 @@ export const SCAN_COPY = {
     how: 'The price is calculated from these listings, not chosen. Listings from Israel count most, then how exact, how recent and how reliable each one is. Asking prices are lowered by an assumed 10% for negotiation.',
     conditionsHow: 'Prices for other conditions are a standard adjustment from Good condition, not separate market findings.',
     abroadUnused: (n) => `The Israeli listings were enough to price this, so ${n === 1 ? '1 price from abroad was' : `${n} prices from abroad were`} not used.`,
-    setAside: (n) => `${n} other ${n === 1 ? 'result was' : 'results were'} set aside (a different model, an accessory, a part, or a price out of line).`,
+    // Why a found price was not used: one line per reason, so a set-aside price explains itself. `setAside` is for a reason this copy does not know.
+    aside: {
+      not_comparable: (n) => (n === 1 ? '1 result was a different product or variant, an accessory or a part, so it was not used.' : `${n} results were a different product or variant, an accessory or a part, so they were not used.`),
+      above_new_price: (n) => (n === 1 ? '1 price was higher than the item\'s new price, so it is not a second-hand price and was not used.' : `${n} prices were higher than the item's new price, so they are not second-hand prices and were not used.`),
+      outlier: (n) => (n === 1 ? '1 price was far out of line with the other listings, so it was not used.' : `${n} prices were far out of line with the other listings, so they were not used.`),
+      retail_refurbished_without_private_resale: (n) => (n === 1
+        ? '1 refurbished offer from a shop was found. Without a private second-hand listing to support it, it was not used as a used price.'
+        : `${n} refurbished offers from shops were found. Without a private second-hand listing to support them, they were not used as used prices.`),
+    },
+    olderUsed: (n) => (n === 1 ? '1 of the listings used is old, so it counts for less.' : `${n} of the listings used are old, so they count for less.`),
+    setAside: (n) => `${n} other ${n === 1 ? 'result was' : 'results were'} set aside.`,
     searchedOn: (date) => `Market searched on ${date}`,
     sources: 'Sources',
     kinds: { used_listing: 'Used', sold: 'Sold', refurbished: 'Refurbished', new_retail: 'New', price_guide: 'Price guide', other: 'Other' },
@@ -172,7 +182,16 @@ export const SCAN_COPY = {
     how: 'המחיר מחושב מהמודעות האלה ולא נבחר. מודעות מישראל שוקלות הכי הרבה, ואחריהן עד כמה כל מודעה מדויקת, עדכנית ואמינה. מחירי מודעות מופחתים ב־10% למיקוח, כהנחה ולא כמדידה.',
     conditionsHow: 'המחירים למצבים האחרים הם התאמה קבועה ממצב "טוב", ולא ממצאי שוק נפרדים.',
     abroadUnused: (n) => (n === 1 ? 'המודעות מישראל הספיקו לקביעת המחיר, ולכן מחיר אחד מחו״ל לא נכלל.' : `המודעות מישראל הספיקו לקביעת המחיר, ולכן ${n} מחירים מחו״ל לא נכללו.`),
-    setAside: (n) => (n === 1 ? 'תוצאה אחת נוספת לא נכללה (דגם אחר, אביזר, חלק או מחיר חריג).' : `${n} תוצאות נוספות לא נכללו (דגם אחר, אביזר, חלק או מחיר חריג).`),
+    aside: {
+      not_comparable: (n) => (n === 1 ? 'תוצאה אחת הייתה מוצר או דגם אחר, אביזר או חלק, ולכן לא נכללה.' : `${n} תוצאות היו מוצר או דגם אחר, אביזר או חלק, ולכן לא נכללו.`),
+      above_new_price: (n) => (n === 1 ? 'מחיר אחד היה גבוה ממחיר המוצר החדש, ולכן אינו מחיר יד שנייה ולא נכלל.' : `${n} מחירים היו גבוהים ממחיר המוצר החדש, ולכן אינם מחירי יד שנייה ולא נכללו.`),
+      outlier: (n) => (n === 1 ? 'מחיר אחד היה רחוק מאוד משאר המודעות, ולכן לא נכלל.' : `${n} מחירים היו רחוקים מאוד משאר המודעות, ולכן לא נכללו.`),
+      retail_refurbished_without_private_resale: (n) => (n === 1
+        ? 'נמצאה הצעה אחת למוצר מחודש מחנות. בלי מודעת יד שנייה פרטית שתתמוך בה, היא לא שימשה כמחיר משומש.'
+        : `נמצאו ${n} הצעות למוצר מחודש מחנויות. בלי מודעת יד שנייה פרטית שתתמוך בהן, הן לא שימשו כמחירי משומש.`),
+    },
+    olderUsed: (n) => (n === 1 ? 'אחת מהמודעות שנכללו ישנה, ולכן משקלה קטן.' : `${n} מהמודעות שנכללו ישנות, ולכן משקלן קטן.`),
+    setAside: (n) => (n === 1 ? 'תוצאה אחת נוספת לא נכללה.' : `${n} תוצאות נוספות לא נכללו.`),
     searchedOn: (date) => `השוק נבדק בתאריך ${date}`,
     sources: 'מקורות',
     kinds: { used_listing: 'משומש', sold: 'נמכר', refurbished: 'מחודש', new_retail: 'חדש', price_guide: 'מחירון', other: 'אחר' },
