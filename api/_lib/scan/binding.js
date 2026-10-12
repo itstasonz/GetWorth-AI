@@ -212,8 +212,11 @@ export function bindPrice(claim, page, identity, answer = null) {
   const descriptive = identity?.identity_precision === 'descriptive';
   const single = SINGLE_ITEM_PAGES.has(page?.type);
   const level = single ? BOUND.STRONG : BOUND.VERIFIED_ROW;
-  const mine = sizesIn(norm(`${identity?.size_or_capacity ?? ''} ${answer?.text ?? ''}`));
   const storageOpen = STORAGE_VARIANT.test(openVariant(identity) ?? '');
+  // WITH THE STORAGE OPEN, a GB/TB figure in the item's own capacity field is not its storage (identify.js openVariant:
+  // the model's inferred or unknown storage beside a figure it wrote anyway): it is not matched against rows, so a row
+  // that states that same figure is a comparable like any other, never the exact item.
+  const mine = sizesIn(norm(`${identity?.size_or_capacity ?? ''} ${answer?.text ?? ''}`)).filter((s) => !(storageOpen && STORAGE_UNIT.test(s.replace(/^[\d.]+/, ''))));
 
   /** Who a stretch of text names: the item itself, or (for a listing not claimed to be it) the listing by its own title. */
   const whoIn = (row, at) => {
@@ -250,8 +253,8 @@ export function bindPrice(claim, page, identity, answer = null) {
     if (clash) return { level, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' };
     // THE ITEM'S OWN STORAGE IS NOT KNOWN (identify.js openVariant): a row that states one is a listing for ONE of the
     // variants the item may be, not for the item. A comparable, and said to be — never exact evidence by default. The
-    // item's other sizes (a screen's inches) do not settle its storage: only a GB/TB figure of its own would.
-    if (storageOpen && !mine.some((m) => STORAGE_UNIT.test(unitOf(m))) && theirs.some((s) => STORAGE_UNIT.test(unitOf(s)))) return { level, reason: BIND_REASON.SIZE_OPEN, match: 'close_comparable' };
+    // item's other sizes (a screen's inches) do not settle its storage, and its own GB figure was set aside above.
+    if (storageOpen && theirs.some((s) => STORAGE_UNIT.test(unitOf(s)))) return { level, reason: BIND_REASON.SIZE_OPEN, match: 'close_comparable' };
     return { level, reason: BIND_REASON.ONE_LISTING, match: 'exact' };
   };
 

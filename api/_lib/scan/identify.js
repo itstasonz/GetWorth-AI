@@ -272,9 +272,7 @@ const REMAINING = {
   he: { question: 'כמה בושם נשאר בבקבוק?', options: ['מלא או סגור', 'בערך 75%', 'בערך חצי', 'פחות מ־25%'] },
 };
 const REMAINING_ANSWERED = /(%|full|sealed|half|quarter|מלא|סגור|חצי|רבע)/iu;
-// THE SERVER'S OWN STORAGE QUESTION (the founder's Huawei P30 Pro, 2026-10-11): a phone, a tablet or a laptop whose
-// storage the model called unknown and high without proposing the question. The usual values; the owner's own words
-// take any other, and "not sure" is added by the app.
+// THE SERVER'S OWN STORAGE QUESTION (the Huawei P30 Pro, 2026-10-11): a device whose storage is open (openVariant) with no question proposed.
 const STORAGE = {
   en: { question: 'How much storage does it have?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
   he: { question: 'מה נפח האחסון שלו?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
@@ -298,14 +296,14 @@ export function identityGap(identity) {
 }
 
 /**
- * A LISTING-DEFINING VARIANT STILL OPEN, or null. A technical item sold by exact model is sold as a variant of it — a
- * phone by its storage, a laptop by its generation — and a listing for the model whose variant is not known may be for
- * a different product at a different price. Open: an attribute the model listed as unknown OR INFERRED (a guess is not
- * a reading) and high, settled neither by the photograph nor by the owner; and the storage of a phone, a tablet or a
- * laptop (strategy.js isStorageDevice) WHATEVER the model listed or left out — the server decides, never the model's
- * report. Storage is settled only by the owner's answer or a GB/TB figure the photograph put in size_or_capacity (a
- * screen size there is not storage). The name returned makes the server ask (selectQuestion), the price approximate
- * (service.js isApproximate) and a row that states a size a comparable (binding.js SIZE_OPEN); it supplies no value.
+ * A LISTING-DEFINING VARIANT STILL OPEN, or null: a listing for the model whose variant is not known may be for another
+ * product at another price. Open: an attribute the model listed as unknown OR INFERRED (a guess is not a reading) and
+ * high, settled neither by the photograph nor by the owner; and a phone's, tablet's or laptop's storage (strategy.js
+ * isStorageDevice) WHATEVER the model listed or left out — the server decides. Storage is settled only by the owner's
+ * answer or by a GB/TB figure the photograph put in size_or_capacity (a screen size is not storage) — and not by that
+ * figure beside a storage the model itself called inferred or unknown: its word against its field, the doubt wins.
+ * The name returned makes the server ask (selectQuestion), the price approximate (service.js isApproximate) and a row
+ * that states a size a comparable (binding.js SIZE_OPEN).
  */
 const STORAGE_FIGURE = /\d\s?(gb|tb)(?![\p{L}\p{N}])/iu;
 export function openVariant(identity) {
@@ -318,8 +316,10 @@ export function openVariant(identity) {
     return a.name;
   }
   if (!isStorageDevice(i)) return null;
-  const storage = (i.attributes ?? []).find((a) => STORAGE_NAME.test(a.name))?.name ?? 'storage';
-  return confirmed.some((n) => sameAttribute(n, storage)) || STORAGE_FIGURE.test(String(i.size_or_capacity ?? '')) ? null : storage;
+  const named = (i.attributes ?? []).find((a) => STORAGE_NAME.test(a.name));
+  if (confirmed.some((n) => sameAttribute(n, named?.name ?? 'storage'))) return null;
+  const doubted = !!named && named.basis !== 'observed' && named.basis !== 'confirmed';
+  return !doubted && STORAGE_FIGURE.test(String(i.size_or_capacity ?? '')) ? null : (named?.name ?? 'storage');
 }
 
 /**
