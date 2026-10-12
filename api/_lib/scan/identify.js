@@ -19,7 +19,7 @@ import { promptSafe } from '../prompt-trust.js';
 import { streamResponse } from '../v2/openai-stream.js';
 import { CONDITIONS, IDENTIFY_TIMEOUT_MS, IDENTIFY_MAX_OUTPUT_TOKENS, resolveIdentityEffort } from './config.js';
 import { buildIdentityPrompt, languageName, MAX_VISIBLE_TEXT, MAX_ALTERNATIVES, MAX_OPTIONS, MAX_ATTRIBUTES, MAX_CLARIFICATIONS } from './identity-prompt.js';
-import { STRATEGY, strategyFor, changesSearch, isListingVariant } from './strategy.js';
+import { STRATEGY, strategyFor, changesSearch, isListingVariant, isStorageDevice } from './strategy.js';
 import { applyConfirmed, sameAttribute, fieldOf, ASKED_ATTRIBUTE } from './confirmed.js';
 
 // The prompt lives beside the schema it fills: identity-prompt.js. Re-exported so callers read it from here.
@@ -298,27 +298,28 @@ export function identityGap(identity) {
 }
 
 /**
- * A LISTING-DEFINING VARIANT STILL OPEN, or null. A technical item sold by
- * exact model is sold as a variant of it — a phone by its storage, a laptop by
- * its generation and memory — and a listing for the model whose variant is not
- * known may be a listing for a different product at a different price. When the
- * model lists such an attribute as unknown and high, and neither the photograph
- * nor the owner has settled it, its name is returned: the server asks for it
- * where it can (selectQuestion), and a price made without it is approximate,
- * never exact (service.js isApproximate). The model is not the only one who notices.
+ * A LISTING-DEFINING VARIANT STILL OPEN, or null. A technical item sold by exact model is sold as a variant of it — a
+ * phone by its storage, a laptop by its generation — and a listing for the model whose variant is not known may be for
+ * a different product at a different price. Open: an attribute the model listed as unknown OR INFERRED (a guess is not
+ * a reading) and high, settled neither by the photograph nor by the owner; and the storage of a phone, a tablet or a
+ * laptop (strategy.js isStorageDevice) WHATEVER the model listed or left out — the server decides, never the model's
+ * report. Storage is settled only by the owner's answer or a GB/TB figure the photograph put in size_or_capacity (a
+ * screen size there is not storage). The name returned makes the server ask (selectQuestion), the price approximate
+ * (service.js isApproximate) and a row that states a size a comparable (binding.js SIZE_OPEN); it supplies no value.
  */
+const STORAGE_FIGURE = /\d\s?(gb|tb)(?![\p{L}\p{N}])/iu;
 export function openVariant(identity) {
   const i = identity ?? {};
   if (strategyFor(i) !== STRATEGY.EXACT || !isTechnical(i)) return null;
-  const settled = (i.confirmed ?? []).filter((c) => !c.unsure).map((c) => c.attribute);
+  const confirmed = (i.confirmed ?? []).filter((c) => !c.unsure).map((c) => c.attribute);
+  const settled = (name) => confirmed.some((n) => sameAttribute(n, name)) || !!(fieldOf(name) && i[fieldOf(name)]);
   for (const a of i.attributes ?? []) {
-    if (a.basis !== 'unknown' || a.matters !== 'high' || !isListingVariant(a.name)) continue;
-    if (settled.some((n) => sameAttribute(n, a.name))) continue;
-    const field = fieldOf(a.name);
-    if (field && i[field]) continue;
+    if ((a.basis !== 'unknown' && a.basis !== 'inferred') || a.matters !== 'high' || !isListingVariant(a.name) || settled(a.name)) continue;
     return a.name;
   }
-  return null;
+  if (!isStorageDevice(i)) return null;
+  const storage = (i.attributes ?? []).find((a) => STORAGE_NAME.test(a.name))?.name ?? 'storage';
+  return confirmed.some((n) => sameAttribute(n, storage)) || STORAGE_FIGURE.test(String(i.size_or_capacity ?? '')) ? null : storage;
 }
 
 /**

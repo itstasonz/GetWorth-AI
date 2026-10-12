@@ -55,6 +55,19 @@ export const changesSearch = (attribute) => SEARCHABLE_ATTRIBUTES.test(String(at
  */
 export const LISTING_VARIANTS = /^(storage|storage capacity|storage size|capacity|memory|ram|generation|year|model year|edition|variant)$/i;
 export const isListingVariant = (attribute) => LISTING_VARIANTS.test(String(attribute ?? ''));
+/**
+ * THE DEVICES SOLD BY STORAGE. A phone, a tablet or a laptop is listed by its
+ * storage before anything else: with it unknown, "iPhone 13" names four
+ * products at four prices. The server treats such an item's storage as open
+ * until the photograph or the owner settles it (identify.js openVariant),
+ * whatever the model listed or left out — the release gate of 2026-10-12 found
+ * a 256 GB listing priced as the exact item whenever the model omitted the
+ * storage, called it medium, or guessed it. Read from the item's TYPE alone
+ * (the plain noun the model is asked for), anchored, so a phone case or a
+ * laptop stand is not a phone or a laptop and is asked nothing.
+ */
+export const STORAGE_DEVICES = /^(?:(?:smart|mobile|cell|cellular|flip|gaming|business|android|apple|ios|windows)[ -]?)?(?:phone|smartphone|iphone|tablet|ipad|laptop|notebook|chromebook|macbook|ultrabook)(?:[ -]?(?:computer|pc))?$/i;
+export const isStorageDevice = (identity) => STORAGE_DEVICES.test(String(identity?.item_type ?? '').trim());
 
 // ── THE MARKET IDENTITY ─────────────────────────────────────────────────────
 const STOP = new Set(['the', 'a', 'an', 'and', 'with', 'series', 'model', 'edition']);

@@ -304,8 +304,10 @@ describe('RW-5 a variant nobody asked about', () => {
     assert.deepEqual([own.followup.question, own.followup.required], ['What storage size is it?', true]);
     assert.equal(openVariant(phone({ size_or_capacity: '128 GB' })), null, 'the photograph showed it');
     assert.equal(phone({ size_or_capacity: '128 GB' }).followup.kind, 'none');
-    assert.equal(openVariant(phone({ attributes: [A('storage', null, 'unknown', 'medium')] })), null, 'matters less: no question, and exact');
-    assert.equal(openVariant(phone({ attributes: [A('carrier lock', null, 'unknown', 'high')] })), null, 'not a variant the item is sold as');
+    // A camera is technical but not sold by storage: the model's "medium" is taken at its word there, and a high unknown that is not a variant asks nothing.
+    const camera = (attributes) => scan(raw({ category: 'Electronics', item_type: 'camera', brand: 'Sony', model: 'A7 III', canonical_name: 'sony a7 iii', exact_model_established: true, market_class: 'consumer_electronics', identity_precision: 'exact_model', attributes }));
+    assert.equal(openVariant(camera([A('storage', null, 'unknown', 'medium')])), null, 'matters less, and not a device sold by storage: no question, and exact');
+    assert.equal(openVariant(camera([A('lens mount', null, 'unknown', 'high')])), null, 'not a variant the item is sold as');
     assert.equal(openVariant(scan(raw({ category: 'Tools', item_type: 'cordless drill', market_class: 'tools', attributes: [A('storage', null, 'unknown', 'high')] }))), null, 'not a technical item');
     assert.equal(openVariant(scan(raw({ category: 'Vehicles', item_type: 'car', market_class: 'vehicle', attributes: [A('year', null, 'unknown', 'high')] }))), null, 'a specialised market gets no number anyway');
     assert.equal(openVariant(scan(raw({ category: 'Furniture', item_type: 'sofa', market_class: 'furniture', identity_precision: 'descriptive', attributes: [A('size', null, 'unknown', 'high')] }))), null, 'similar items are approximate by construction');
@@ -341,5 +343,57 @@ describe('RW-5 a variant nobody asked about', () => {
     resetMarketCache();
     const nothing = await runPrice({ identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [] }], reached: [], pageText: {} }), store: fakeStore(), now: () => NOW });
     assert.deepEqual([nothing.status, nothing.valuation.prices], ['insufficient_evidence', null]);
+  });
+  test('RW-5e THE SERVER DECIDES when a phone\'s storage is open, not the model\'s report (release gate 2026-10-12): omitted, guessed, or called medium, the storage is asked for, the price is approximate, and a row that states a size is a comparable — never the exact variant the item was not shown to be; settled by the owner or the photograph, it is exact', async () => {
+    const S128 = 'https://www.secondhand.example.co.il/item/128';
+    const S256 = 'https://market.example.co.il/ads/256';
+    const PLAIN = 'https://www.secondhand.example.co.il/item/plain';
+    const rows = { [S128]: listing(S128, 'Huawei P30 Pro 128GB יד שנייה', 700), [S256]: listing(S256, 'Huawei P30 Pro 256GB יד שנייה', 900), [PLAIN]: listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800) };
+    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
+    const bound = (r, url) => { const e = r.valuation.evidence.find((x) => x.url === url); return [e.match, e.binding_reason, e.used]; };
+    /** One way the model reported the storage: what the server asks, and how a 256 GB row and a silent row are priced with the allowance spent. */
+    const unresolved = async (label, attributes) => {
+      const asked = phone({ attributes });
+      assert.deepEqual([asked.followup.required, asked.followup.attribute, openVariant(asked), isApproximate(asked, null)], [true, 'storage', 'storage', true], `${label}: the storage is asked for, required, before the search`);
+      const spent = phone({ attributes }, { followupsLeft: 0 });
+      const r = await price(spent, [S256]);
+      assert.deepEqual([r.status, r.valuation.approximate, ...bound(r, S256), r.valuation.counts.il_used_exact], ['priced', true, 'close_comparable', BIND_REASON.SIZE_OPEN, true, 0], `${label}: a 256 GB row is a comparable, the price approximate, no exact variant`);
+      const p = await price(spent, [PLAIN]);
+      assert.deepEqual([p.status, p.valuation.approximate, ...bound(p, PLAIN)], ['priced', true, 'exact', BIND_REASON.ONE_LISTING, true], `${label}: a row that states no size is the model itself, and the price still approximate`);
+    };
+    await unresolved('storage omitted by the model', [A('color', 'blue')]);
+    await unresolved('storage guessed (inferred 128 GB, high)', [A('storage', '128 GB', 'inferred', 'high'), A('color', 'blue')]);
+    await unresolved('storage unknown, medium', [A('storage', null, 'unknown', 'medium')]);
+    await unresolved('storage unknown, high', [A('storage', null, 'unknown', 'high')]);
+    // The guess never becomes the item's storage: not the core field, not the search.
+    const guessed = phone({ attributes: [A('storage', '128 GB', 'inferred', 'high')] });
+    assert.deepEqual([guessed.size_or_capacity, guessed.attributes.find((a) => a.name === 'storage').basis], [null, 'inferred']);
+    assert.ok(!buildSearchQueries({ identity: guessed }).some((q) => /128/.test(q)));
+    // "Not sure": not asked again, still open, approximate, a 256 GB row a comparable.
+    const unsure = recordAnswer(phone({ attributes: [A('color', 'blue')] }), 'unsure', { lang: 'en', followupsLeft: 2 });
+    assert.deepEqual([unsure.identity.followup.kind, openVariant(unsure.identity), isApproximate(unsure.identity, unsure.answer)], ['none', 'storage', true]);
+    const u = await price(unsure.identity, [S256], unsure.answer);
+    assert.deepEqual([u.valuation.approximate, ...bound(u, S256), u.valuation.counts.il_used_exact], [true, 'close_comparable', BIND_REASON.SIZE_OPEN, true, 0]);
+    // The owner confirmed 128 GB where the model had listed nothing: settled, exact, nothing more asked; a 128 GB row is the item, a 256 GB row another size.
+    const confirmed = recordAnswer(phone({ attributes: [A('color', 'blue')] }), 1, { lang: 'en', followupsLeft: 2 });
+    assert.deepEqual([confirmed.identity.size_or_capacity, confirmed.identity.followup.kind, openVariant(confirmed.identity), isApproximate(confirmed.identity, confirmed.answer)], ['128 GB', 'none', null, false]);
+    const same = await price(confirmed.identity, [S128], confirmed.answer);
+    assert.deepEqual([same.valuation.approximate, ...bound(same, S128), same.valuation.counts.il_used_exact], [false, 'exact', BIND_REASON.ONE_LISTING, true, 1]);
+    const other = await price(confirmed.identity, [S256], confirmed.answer);
+    assert.deepEqual([other.valuation.approximate, ...bound(other, S256), other.valuation.counts.il_used_exact, other.valuation.counts.il_used_close], [false, 'close_comparable', BIND_REASON.OTHER_SIZE, true, 0, 1]);
+    // The photograph showed the storage: nothing asked, exact. A screen size in the capacity field is not storage: still open, and a 256 GB row still a comparable.
+    const shown = phone({ size_or_capacity: '128 GB', attributes: [] });
+    assert.deepEqual([shown.followup.kind, openVariant(shown)], ['none', null]);
+    const screen = phone({ size_or_capacity: '6.1 inch', attributes: [] }, { followupsLeft: 0 });
+    assert.equal(openVariant(screen), 'storage');
+    const s = await price(screen, [S256]);
+    assert.deepEqual([s.valuation.approximate, ...bound(s, S256)], [true, 'close_comparable', BIND_REASON.SIZE_OPEN, true]);
+    // Storage is irrelevant to a mouse, a camera, a watch, or a phone's case: no storage question, nothing approximate.
+    for (const item_type of ['gaming mouse', 'camera', 'phone case', 'laptop stand', 'smartwatch', 'feature phone']) {
+      const o = scan(raw({ ...PHONE, item_type, attributes: [A('color', 'black')] }));
+      assert.deepEqual([o.followup.kind, openVariant(o), isApproximate(o, null)], ['none', null, false], item_type);
+    }
+    // A tablet and a laptop are sold by storage too, under any of the plain nouns the model uses.
+    for (const item_type of ['tablet', 'laptop', 'mobile phone', 'notebook computer', 'iPad', 'MacBook']) assert.equal(openVariant(scan(raw({ ...PHONE, item_type, attributes: [] }))), 'storage', item_type);
   });
 });
