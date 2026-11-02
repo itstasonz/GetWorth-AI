@@ -77,6 +77,16 @@ export const IDENTIFY_TIMEOUT_MS = 20_000;
  */
 export const MARKET_STAGE_TIMEOUT_MS = 22_000;
 export const MARKET_MAX_STAGES = 2;
+/**
+ * THE WIDER SEARCH STARTS WITH THE ISRAELI ONE (2026-11-02). Its request is built from the identity alone, never from
+ * what the Israeli search found, so it can run alongside it: a thin-evidence scan then waits for the slower of two
+ * searches instead of their sum (~10 s less per stage at the measured ~10 s). The server still decides from the Israeli
+ * evidence whether the wider search's evidence is used; when Israel answered, the wider request is cancelled and its
+ * evidence never joins the price. The cost: a cancelled request may already have been billed. Set to exactly 'false'
+ * to go back to one search after the other.
+ */
+export const SCAN_MARKET_PARALLEL_ENV = 'CORE_SCAN_MARKET_PARALLEL';
+export const resolveMarketParallel = (env = process.env) => String(env?.[SCAN_MARKET_PARALLEL_ENV] ?? '').trim().toLowerCase() !== 'false';
 /** The identity now carries attributes and candidate questions: more room, still one short answer. */
 export const IDENTIFY_MAX_OUTPUT_TOKENS = 2_000;
 export const MARKET_MAX_OUTPUT_TOKENS = 3_000;

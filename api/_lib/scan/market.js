@@ -267,7 +267,7 @@ EVIDENCE — every usable price you found, up to ${MAX_EVIDENCE}: second-hand pr
  */
 export async function researchMarket({
   identity, answer = null, stage = 'local',
-  model, effort = resolveMarketEffort(), apiKey, timeoutMs = MARKET_STAGE_TIMEOUT_MS, safetyIdentifier = null, fetchImpl = fetch, now = Date.now(),
+  model, effort = resolveMarketEffort(), apiKey, timeoutMs = MARKET_STAGE_TIMEOUT_MS, safetyIdentifier = null, fetchImpl = fetch, now = Date.now(), signal = null,
 } = {}) {
   const body = {
     model,
@@ -296,7 +296,7 @@ export async function researchMarket({
       firstSearchMs ??= at();
     }
   };
-  const res = await streamResponse({ stage: `scan_market_${stage}`, body, apiKey, timeoutMs, onEvent, fetchImpl });
+  const res = await streamResponse({ stage: `scan_market_${stage}`, body, apiKey, timeoutMs, onEvent, fetchImpl, signal });
   return {
     raw: extractOpenAIJson(res.final),
     provenance: extractSearchProvenance(res.items),

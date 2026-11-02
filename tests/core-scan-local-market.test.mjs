@@ -19,6 +19,9 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+// These cases pin the sequential search order (one search, then the wider one only if needed); the parallel default
+// is covered by core-scan-parallel-market.test.mjs. Read at call time, so setting it here is enough.
+process.env.CORE_SCAN_MARKET_PARALLEL = 'false';
 
 import {
   buildValuation, normalizeReferences, aggregate, weightedQuantile, localStrength, verifyEvidence, requalify,

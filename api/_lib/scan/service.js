@@ -37,6 +37,7 @@ import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import {
   CONDITIONS, DEFAULT_CONDITION, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
+  resolveMarketParallel,
 } from './config.js';
 
 export const SCAN_STATUS = Object.freeze({
@@ -144,6 +145,7 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
  */
 export async function runPrice({
   identity, answer = null, scanUuid = null, model, apiKey, safetyIdentifier, fetchImpl = fetch, now = Date.now, store = defaultStore,
+  parallel = resolveMarketParallel(),
 } = {}) {
   const t0 = now();
   const key = marketKey(identity, answer);
@@ -169,11 +171,13 @@ export async function runPrice({
   // for the photograph that would settle it.
   if (identity?.incomplete) return { status: SCAN_STATUS.INSUFFICIENT, valuation: incompleteValuation(identity.incomplete), market_key: null, fx_date: null, reused: false, call: noCall };
 
+  // The exchange rates are only needed once a search has answered: they are fetched alongside it, never before it
+  // (a cold instance waited up to FX_TIMEOUT_MS here first). getFxTable never throws.
+  const fxPending = getFxTable({ fetchImpl });
   const earlier = await recall(key, store, t0);
   // Fresh research for this item: reuse it. No search, the same evidence, the same price.
   if (earlier && t0 - earlier.at <= MARKET_FRESH_MS) return priced(earlier, { reused: true, call: { ...noCall, ms: now() - t0 } });
 
-  const fx = await getFxTable({ fetchImpl });
   const today = marketDate(t0);
   const stages = [];
   const usage = { input_tokens: 0, output_tokens: 0, reasoning_tokens: 0 };
@@ -185,9 +189,11 @@ export async function runPrice({
   let searched = false;
   let firstSearchMs = null;
   let usedModel = model;
-  /** One search stage: its verified evidence joins what is in hand. Throws what the provider threw. */
-  const search = async (stage) => {
-    const { raw, provenance, meta } = await researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0 });
+  /** One stage's provider request. Throws what the provider threw. */
+  const request = (stage, signal = null) => researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0, signal });
+  /** A stage's answer, verified: its evidence joins what is in hand. */
+  const accept = async (stage, { raw, provenance, meta }) => {
+    const fx = await fxPending;
     const verified = verifyEvidence(raw?.evidence, provenance, fx, today, { identity, answer });
     found = mergeEvidence(found, verified.evidence);
     unverified += verified.unverified;
@@ -203,30 +209,48 @@ export async function runPrice({
   const call = () => ({
     stage: 'market', model: usedModel, ms: now() - t0, usage: stages.length ? usage : null,
     tool_calls: stages.length, first_search_ms: firstSearchMs, stages: [...stages],
+    // Stages that were started alongside the Israeli search and cancelled: their evidence is not in the price, but the
+    // request was made and may have been billed.
+    cancelled: [...cancelled],
   });
 
+  // LOOK FURTHER ONLY WHEN ISRAEL DID NOT ANSWER. Decided by the server, from the verified evidence in hand (this
+  // search and the pool), not left to the model: enough good local evidence stops the search, thin local evidence
+  // widens it once. The line is the one the valuation itself draws: from LOCAL_STRENGTH.drives the Israeli evidence
+  // prices the item alone, so a search abroad would buy nothing. A thing valued from SIMILAR items never goes abroad
+  // either: a similar sofa in another country is never priced from (valuation.js), so the second search would buy
+  // nothing but foreign context.
+  const widens = (evidence) => strategy !== STRATEGY.COMPARABLE
+    && localStrength(mergeEvidence(evidence, earlier?.evidence), { familyLevel, strategy, today }) < LOCAL_STRENGTH.drives;
+  // The wider request depends on the identity alone, so it starts WITH the Israeli one (config.js
+  // SCAN_MARKET_PARALLEL_ENV) whenever it could be needed at all; whether its evidence is used is still decided above.
+  const cancel = new AbortController();
+  const cancelled = [];
+  const settle = (p) => p.then((res) => ({ res }), (err) => ({ err }));
+  const early = parallel && widens([]) ? settle(request('expand', cancel.signal)) : null;
+  const drop = () => { if (early && !cancel.signal.aborted) { cancel.abort(); cancelled.push('expand'); } };
+
   // ISRAEL FIRST.
-  try { await search('local'); } catch (err) {
+  try { await accept('local', await request('local')); } catch (err) {
+    drop();
     const failure = classifyOpenAIFailure(err?.message);
     console.warn(`[Scan] market failed stage=local code=${failure}`);
     // The search failed, but evidence gathered for this item in the last days is still evidence.
     if (earlier) return priced(earlier, { reused: true, stale: true, call: call() });
     return { status: SCAN_STATUS.FAILED, failure, valuation: null, reused: false, call: call() };
   }
-  // LOOK FURTHER ONLY WHEN ISRAEL DID NOT ANSWER. Decided here, from the verified
-  // evidence in hand (this search and the pool), not left to the model: enough
-  // good local evidence stops the search, thin local evidence widens it once.
-  // The line is the one the valuation itself draws: from LOCAL_STRENGTH.drives the Israeli evidence prices
-  // the item alone, so a search abroad would buy nothing. A thing valued from SIMILAR items never goes abroad
-  // either: a similar sofa in another country is never priced from (valuation.js), so the second search would
-  // buy nothing but foreign context.
-  const local = localStrength(mergeEvidence(found, earlier?.evidence), { familyLevel, strategy, today });
-  if (local < LOCAL_STRENGTH.drives && strategy !== STRATEGY.COMPARABLE) {
-    try { await search('expand'); } catch (err) {
+  if (widens(found)) {
+    const wide = early ?? settle(request('expand'));
+    try {
+      const { res, err } = await wide;
+      if (err) throw err;
+      await accept('expand', res);
+    } catch (err) {
       // The wider search failing leaves the local search's evidence standing.
       console.warn(`[Scan] market failed stage=expand code=${classifyOpenAIFailure(err?.message)}`);
     }
-  }
+  } else drop();
+  const fx = await fxPending;
 
   const record = {
     at: t0,

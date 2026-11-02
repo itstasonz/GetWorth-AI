@@ -36,13 +36,17 @@ export async function streamResponse({
   // A default parameter, evaluated at CALL time, so a test harness that
   // replaces globalThis.fetch is what runs (see phaseb/openai-client.js).
   fetchImpl = fetch,
+  // Optional: the caller no longer needs the answer (core scan: a speculative stage whose evidence is not wanted).
+  signal = null,
 } = {}) {
   if (!apiKey) throw new Error('[OpenAI] OPENAI_API_KEY not configured');
   if (!body || typeof body !== 'object') throw new Error('[OpenAI] no request body supplied');
+  if (signal?.aborted) throw new Error(`[OpenAI] cancelled: ${stage}`);
 
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  signal?.addEventListener('abort', () => controller.abort(), { once: true });
   const t0 = Date.now();
   const at = () => Date.now() - t0;
   const timings = { headers_ms: null, first_event_ms: null, first_output_ms: null, total_ms: null };
