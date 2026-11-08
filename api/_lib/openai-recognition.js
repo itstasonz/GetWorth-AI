@@ -179,6 +179,8 @@ export function classifyOpenAIFailure(message) {
   if (/no fallback budget/.test(m)) return 'no_fallback_budget';
   if (/OPENAI_API_KEY not configured/.test(m)) return 'not_configured';
   if (/no images supplied/.test(m)) return 'no_images';
+  // The account is out of credit (2026-11-08): every call fails until it is topped up — its own code, so it is alerted on.
+  if (/insufficient_quota|credit_balance_exhausted|no credits remaining/i.test(m)) return 'credit_exhausted';
   const status = m.match(/\[OpenAI\] API (\d{3})/);
   if (status) {
     const code = Number(status[1]);

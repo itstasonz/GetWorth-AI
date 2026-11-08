@@ -3,6 +3,7 @@ import { RefreshCw, Loader2, AlertTriangle } from 'lucide-react';
 import { Card } from '../components/ui';
 import { supabase } from '../lib/supabase';
 import { groupScans, summarise, accountRefOf, SLOW_MS } from '../lib/scanMonitor';
+import PrewarmPanel from '../components/PrewarmPanel';
 
 // Admin-only: scan_events is readable only by profiles.is_admin under RLS, so a
 // non-admin session gets no rows here even if this component were reached.
@@ -65,6 +66,7 @@ export default function ScanMonitor({ lang }) {
 
   return (
     <div className="space-y-3">
+      <PrewarmPanel lang={lang} />
       <div className="flex flex-wrap gap-1.5 items-center">
         {RANGES.map((r) => (
           <button key={r.id} onClick={() => setDays(r.id)} className={`px-2.5 py-1 rounded-control text-xs ${days === r.id ? 'bg-accent/12 text-accent' : 'bg-white/5 text-slate-400'}`}>{r.label}</button>

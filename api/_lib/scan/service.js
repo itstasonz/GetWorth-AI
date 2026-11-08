@@ -54,7 +54,7 @@ export const SCAN_STATUS = Object.freeze({
 // The failures in which the provider answered with an error status or was never
 // reached, so nothing was generated and nothing charged. A timeout is NOT here:
 // it can strike mid-stream, after the tokens were billed.
-const NOT_BILLED = /^(network|auth|rate_limited|upstream_5xx|not_configured|no_images|http_\d{3})$/;
+const NOT_BILLED = /^(network|auth|rate_limited|credit_exhausted|upstream_5xx|not_configured|no_images|http_\d{3})$/;
 
 /** The condition the screen starts on: what the photograph shows, else the middle of the ladder. */
 export const startingCondition = (identity) => (CONDITIONS.includes(identity?.visible_condition) ? identity.visible_condition : DEFAULT_CONDITION);

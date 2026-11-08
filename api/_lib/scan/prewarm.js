@@ -14,18 +14,28 @@
 // and a product whose evidence does not qualify stays unpriced. Nothing is
 // invented and nothing new is collected.
 //
-// COST-CONTROLLED. Every research is a paid call. The job does NOTHING unless
-// the deployment names how many products a run may research
-// (PREWARM_MAX_PRODUCTS, 0 by default, at most PREWARM_HARD_MAX), and the
-// estimate is stated before a run. Enabling it is the founder's decision.
+// COST-CONTROLLED (founder approval 2026-11-08: at most 10 products and $0.30 a
+// day, only once OpenAI credit is restored, with monitoring, alerts and an
+// immediate off switch). The limits are in this file, not only in settings:
+//   • PREWARM_HARD_MAX products and PREWARM_USD_HARD_MAX dollars per UTC day —
+//     the deployment's settings may lower them, never raise them;
+//   • the day's spend is a LEDGER of every run's measured cost (scan_events
+//     core_scan_prewarm), so a second run the same day gets only what is left;
+//   • no research starts unless the worst it can cost still fits
+//     (WORST_RESEARCH_USD: 2 stages × 1 search call × $0.01, 2 × 3,000 output
+//     tokens, and a generous input allowance — measured mean $0.021);
+//   • a one-token credit check runs first: no credit, no run, and an alert;
+//   • an admin pause (core_scan_prewarm_control) is read before EVERY product.
 // ══════════════════════════════════════════════════════════════════════════════
 import { researchKey } from './service.js';
 import { strategyFor, STRATEGY } from './strategy.js';
+import { streamResponse } from '../v2/openai-stream.js';
+import { classifyOpenAIFailure } from '../openai-recognition.js';
 
 export const PREWARM_MAX_ENV = 'PREWARM_MAX_PRODUCTS';
 /** The most a run may spend, in US dollars, measured from each call's own usage. 0 (unset) means the job does nothing. */
 export const PREWARM_USD_ENV = 'PREWARM_DAILY_USD_CAP';
-export const PREWARM_USD_HARD_MAX = 2;
+export const PREWARM_USD_HARD_MAX = 0.30;
 /**
  * Published prices (developers.openai.com/api/docs/pricing, read 2026-11-08): gpt-6-luna $0.10 / $0.50 per million
  * input / output tokens; web search $10 per 1,000 calls, search content billed as input tokens. The 2026-11-08 controlled
@@ -43,7 +53,7 @@ export function resolvePrewarmUsd(env = process.env) {
   const n = Number.parseFloat(String(env?.[PREWARM_USD_ENV] ?? ''));
   return Number.isFinite(n) && n > 0 ? Math.min(n, PREWARM_USD_HARD_MAX) : 0;
 }
-export const PREWARM_HARD_MAX = 25;
+export const PREWARM_HARD_MAX = 10;
 export const DEMAND_WINDOW_DAYS = 30;
 /**
  * The measured cost of one fresh research, in US dollars: the 2026-10-11 live probe of one market stage cost $0.014
@@ -93,12 +103,17 @@ export function planPrewarm(demand, { max }) {
  * is still fresh and searched again otherwise — inline, never in the background. Sequential, inside `budgetMs`.
  * Resolves to counts only: no identity, no account, no page text.
  */
-export async function runPrewarm(plan, { price, budgetMs = 240_000, usdCap = 0, now = Date.now, ...priceArgs }) {
+export async function runPrewarm(plan, { price, budgetMs = 240_000, usdCap = 0, paused = async () => false, now = Date.now, ...priceArgs }) {
   const t0 = now();
-  const out = { planned: plan.products.length, reused: 0, researched: 0, priced: 0, failed: 0, skipped: 0, spent_usd: 0 };
+  const out = { planned: plan.products.length, reused: 0, researched: 0, priced: 0, failed: 0, skipped: 0, spent_usd: 0, stopped: null };
   for (const p of plan.products) {
-    // THE SPENDING CAP: no research starts that could take the run past it.
-    if (now() - t0 > budgetMs || out.spent_usd + WORST_RESEARCH_USD > usdCap) { out.skipped += 1; continue; }
+    // THE SPENDING CAP: no research starts that could take the run past it. THE OFF SWITCH: read before every product.
+    if (out.stopped) { out.skipped += 1; continue; }
+    if (out.spent_usd + WORST_RESEARCH_USD > usdCap) { out.stopped = 'cap'; out.skipped += 1; continue; }
+    if (now() - t0 > budgetMs) { out.stopped = 'time'; out.skipped += 1; continue; }
+    let stop = true;
+    try { stop = await paused(); } catch { stop = true; }
+    if (stop) { out.stopped = 'paused'; out.skipped += 1; continue; }
     try {
       const r = await price({ identity: p.identity, answer: null, scanUuid: crypto.randomUUID(), freshMs: REFRESH_AFTER_MS, swr: false, ...priceArgs });
       out.spent_usd = Math.round((out.spent_usd + costOf(r?.call)) * 10000) / 10000;
@@ -109,4 +124,47 @@ export async function runPrewarm(plan, { price, budgetMs = 240_000, usdCap = 0, 
     } catch { out.failed += 1; out.spent_usd = Math.round((out.spent_usd + WORST_RESEARCH_USD) * 10000) / 10000; }
   }
   return out;
+}
+
+// ── MONITORING, ALERTS AND THE OFF SWITCH ───────────────────────────────────
+export const RUN_EVENT = 'core_scan_prewarm';
+export const CONTROL_EVENT = 'core_scan_prewarm_control';
+export const ALERT_EVENT = 'core_scan_alert';
+export const ALERT = Object.freeze({
+  CREDIT: 'openai_credit_exhausted', CAP: 'prewarm_daily_cap_reached', FAILURES: 'prewarm_failures',
+  OVER_CAP: 'prewarm_spend_over_cap', DEMAND: 'prewarm_demand_unreadable',
+});
+/** The start of today, UTC: the day a daily cap is counted in. */
+export const dayStart = (now = Date.now()) => new Date(Math.floor(now / 86_400_000) * 86_400_000).toISOString();
+/** What today's runs spent, from their own recorded summaries. */
+export const spentToday = (runs) => Math.round((Array.isArray(runs) ? runs : []).reduce((n, r) => n + (Number(r?.payload?.spent_usd) || 0) + (Number(r?.payload?.preflight_usd) || 0), 0) * 10000) / 10000;
+/** Paused when the most recent control event says so. No control event: not paused. */
+export const isPaused = (controls) => {
+  const latest = [...(Array.isArray(controls) ? controls : [])].sort((a, b) => String(b?.created_at).localeCompare(String(a?.created_at)))[0];
+  return latest?.payload?.enabled === false;
+};
+/** The alerts a finished run raises. */
+export function alertsFor(summary, { usdCap }) {
+  const out = [];
+  const tried = (summary.researched ?? 0) + (summary.reused ?? 0) + (summary.failed ?? 0);
+  if (tried > 0 && summary.failed * 2 >= tried) out.push({ kind: ALERT.FAILURES, failed: summary.failed, tried });
+  if (summary.spent_today_usd > usdCap) out.push({ kind: ALERT.OVER_CAP, spent_today_usd: summary.spent_today_usd, cap_usd: usdCap });
+  if (summary.skipped > 0 && summary.stopped === 'cap') out.push({ kind: ALERT.CAP, spent_today_usd: summary.spent_today_usd, cap_usd: usdCap });
+  return out;
+}
+
+/**
+ * Is there OpenAI credit? One request of a few tokens (a fraction of a hundredth of a cent), through the one shared
+ * streaming client every scan call uses. Resolves to { ok, credit_exhausted, status, cost_usd }. Never throws; a network
+ * failure is "not ok", not "no credit".
+ */
+export async function checkCredit({ apiKey, model, stream = streamResponse, timeoutMs = 10_000 }) {
+  try {
+    const r = await stream({ stage: 'prewarm_credit', apiKey, timeoutMs, body: { model, input: 'ok', max_output_tokens: 16, store: false } });
+    return { ok: true, credit_exhausted: false, status: 200, cost_usd: costOf({ usage: r?.usage ?? { input_tokens: 50, output_tokens: 16 } }) };
+  } catch (err) {
+    const code = classifyOpenAIFailure(err?.message);
+    const status = Number(String(err?.message ?? '').match(/API (\d{3})/)?.[1]) || null;
+    return { ok: false, credit_exhausted: code === 'credit_exhausted', status, cost_usd: 0 };
+  }
 }
