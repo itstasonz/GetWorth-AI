@@ -114,18 +114,14 @@ describe('CC-1 photograph in, answer out', () => {
     await startScan(deps({ assess: async () => null }));
     assert.equal(snap().stage, STAGE.PRICED);
   });
-  test('CC-1d a deployment with the scan switched off says so, and leaves nothing behind', async () => {
+  test('CC-1d a deployment with the scan switched off says so ON SCREEN, with a retry — no other engine runs (2026-11-08)', async () => {
     server({ identify: [{ status: 503, payload: { status: 'unavailable' } }] });
     assert.equal(await startScan(deps()), 'unavailable');
-    assert.equal(scanActive(), false);
-    assert.equal(snap().stage, STAGE.IDLE);
-    assert.equal(snap().unavailable, true);
-    // It is remembered: the next scan goes straight to the older path without asking again.
-    assert.equal(await startScan(deps()), 'unavailable');
-    assert.equal(requests.length, 1);
-    // A different account may get a different answer: on an account change it is asked again.
-    scanStore.forgetAvailability();
-    assert.equal(snap().unavailable, false);
+    assert.equal(snap().stage, STAGE.ERROR);
+    assert.deepEqual([snap().error.code, snap().error.retryable], ['scan_unavailable', true]);
+    assert.match(snap().error.message, /הסריקה אינה זמינה כרגע/);
+    assert.equal(snap().unavailable, false, 'not remembered: the next scan asks again');
+    // When the scan is back, the next photograph is scanned normally.
     server({ identify: [identified()], price: [pricedAnswer()] });
     assert.equal(await startScan(deps()), 'ok');
     assert.equal(snap().stage, STAGE.PRICED);

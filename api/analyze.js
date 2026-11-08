@@ -4245,6 +4245,14 @@ async function handleRequest(req) {
     // compared false everywhere downstream anyway, so this changes no behaviour
     // beyond removing the throw.
     const lang = typeof rawLang === 'string' ? rawLang : 'he';
+    // THE OLDER ENGINE NO LONGER PRICES (founder decision 2026-11-08: no AI-generated price as a fallback). Its pricing
+    // path answers 410 before any quota is charged or provider called, unless LEGACY_SCAN_ENABLED is exactly 'true'.
+    // The serial-label OCR the listing flow uses is not pricing and keeps working.
+    // On every Vercel deployment (Production and Preview set VERCEL_ENV); local runs of the older engine's own suites are unaffected.
+    if (serialOCR !== true && !!process.env.VERCEL_ENV && String(process.env.LEGACY_SCAN_ENABLED ?? '').trim().toLowerCase() !== 'true') {
+      console.warn(`[Legacy] pricing request refused on ${process.env.VERCEL_ENV}: the older engine is retired (LEGACY_SCAN_ENABLED is not true)`);
+      return json({ error: 'legacy_scan_retired', code: 'LEGACY_SCAN_RETIRED', retryable: false }, 410, cors);
+    }
     // TIMING: req.json() blocks until the full request body has uploaded. On Edge
     // this upload time is inside the budget clock — this log isolates it.
     blog(`[Timing] body read+parsed (req.json) bodyLen=${bodyLen}B`);

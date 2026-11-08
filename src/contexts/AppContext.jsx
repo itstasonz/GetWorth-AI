@@ -2759,7 +2759,10 @@ export function AppProvider({ children }) {
       } finally {
         pipelineActiveRef.current = false;
       }
-      if (outcome !== 'unavailable') return;
+      // Every outcome ends here, 'unavailable' included: it is on screen with a retry. The older pipeline below no
+      // longer runs for a scan (founder decision 2026-11-08: no AI-generated price as a fallback; api/analyze.js refuses it).
+      void outcome;
+      return;
     }
 
     pipelineActiveRef.current = true;

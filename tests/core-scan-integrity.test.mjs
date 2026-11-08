@@ -136,11 +136,12 @@ describe('IN-3 the listing keeps the engine\'s prices', () => {
 });
 
 describe('IN-4 no other engine and no model-stated price behind a core-scan number', () => {
-  test('IN-4a the older engine runs only when /api/scan answered 503, and says so', () => {
+  test('IN-4a no fallback: a core scan that is unavailable shows an error; the older engine refuses to price on any deployment', () => {
     const ctx = read('src/contexts/AppContext.jsx');
-    assert.match(ctx, /if \(outcome !== 'unavailable'\) return;/);
-    assert.match(ctx, /'X-GW-Fallback': 'core_scan_unavailable'/);
-    assert.match(read('api/analyze.js'), /\[Fallback\] legacy engine serving a scan reason=/);
+    assert.doesNotMatch(ctx, /if \(outcome !== 'unavailable'\) return;/, 'the scan path never falls through to the older pipeline');
+    assert.match(ctx, /void outcome;\n\s+return;\n\s+\}/);
+    assert.match(read('src/lib/coreScan.js'), /if \(r\.status === 503\) \{ fail\('identify', 'unavailable'/);
+    assert.match(read('api/analyze.js'), /if \(serialOCR !== true && !!process\.env\.VERCEL_ENV && String\(process\.env\.LEGACY_SCAN_ENABLED/);
   });
   test('IN-4b the market model returns evidence and nothing else: it has no field in which to state a value', () => {
     assert.deepEqual(Object.keys(MARKET_SCHEMA.properties), ['evidence']);

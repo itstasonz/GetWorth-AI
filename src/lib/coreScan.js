@@ -98,6 +98,7 @@ const MESSAGES = {
   too_large: ['The photo is too large. Please take it again.', 'התמונה גדולה מדי. צלמו שוב.'],
   expired: ['This scan expired. Please scan the item again.', 'פג תוקף הסריקה. סרקו את הפריט שוב.'],
   other: ['Something went wrong. Please try again.', 'משהו השתבש. נסו שוב.'],
+  unavailable: ['Scanning is temporarily unavailable. Please try again in a few minutes.', 'הסריקה אינה זמינה כרגע. נסו שוב בעוד כמה דקות.'],
 };
 const say = (lang, key) => MESSAGES[key][lang === 'he' ? 1 : 0];
 
@@ -179,7 +180,9 @@ async function prepare(dataUrl) {
 async function identify({ correction = null } = {}) {
   set({ stage: STAGE.IDENTIFYING, error: null });
   const r = await post({ action: 'identify', images: state.images, ...(state.token ? { token: state.token } : {}), ...(correction ? { correction } : {}) }, IDENTIFY_TIMEOUT_MS);
-  if (r.status === 503) return 'unavailable';
+  // NO OTHER ENGINE STANDS BEHIND THIS ONE (2026-11-08): a scan that is switched off says so and offers a retry. The older
+  // engine's model-invented prices are not a fallback.
+  if (r.status === 503) { fail('identify', 'unavailable', { code: 'scan_unavailable' }); return 'unavailable'; }
   if (refused('identify', r)) return 'refused';
   const p = r.payload ?? {};
   if (p.status === 'failed') { fail('identify', 'other', { code: p.failure ?? 'failed' }); return 'failed'; }
@@ -237,10 +240,9 @@ async function price({ answer = null } = {}) {
 /**
  * Start a scan from one photograph.
  * Resolves to 'unavailable' when this deployment has the core scan switched
- * off, so the caller can fall back; otherwise the outcome is in the store.
+ * off — the error is on screen, with a retry; there is no fallback. Otherwise the outcome is in the store.
  */
 export async function startScan({ dataUrl, scanUuid, lang, getToken, compress, assess, onIdentified = null }) {
-  if (unavailable) return 'unavailable';
   controller?.abort();
   controller = new AbortController();
   deps = { getToken, compress, assess, lang, onIdentified };
@@ -254,7 +256,6 @@ export async function startScan({ dataUrl, scanUuid, lang, getToken, compress, a
     set({ images: [image] });
     outcome = await identify();
   });
-  if (outcome === 'unavailable') { unavailable = true; scanStore.reset(); return 'unavailable'; }
   return outcome;
 }
 

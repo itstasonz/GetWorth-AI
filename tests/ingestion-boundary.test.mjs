@@ -316,3 +316,27 @@ test('IB-13 the budget is re-asserted AT THE POINT OF USE, not only at the gate'
   assert.equal(/cap=(\d+)ms/.test(r.log) && Number(/cap=(\d+)ms/.exec(r.log)[1]) < 28_000, false,
     'no Stage-1 call may run with less than the full intended cap');
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE OLDER ENGINE IS RETIRED ON EVERY DEPLOYMENT (2026-11-08): no AI-generated price as a fallback for the core scan.
+// ─────────────────────────────────────────────────────────────────────────────
+test('LG-1 on a deployment the older engine refuses to price — 410, nothing charged, no provider called; the serial OCR still runs; an explicit switch restores it', async () => {
+  const saved = { env: process.env.VERCEL_ENV, flag: process.env.LEGACY_SCAN_ENABLED };
+  try {
+    process.env.VERCEL_ENV = 'production';
+    delete process.env.LEGACY_SCAN_ENABLED;
+    const refused = await drive({ bodyChunks: validBody() });
+    assert.equal(refused.status, 410);
+    assert.equal(refused.body.code, 'LEGACY_SCAN_RETIRED');
+    assert.deepEqual([refused.quotaCharges, refused.providerCalls], [0, 0], 'refused before the quota and before any provider');
+    assert.match(refused.log, /\[Legacy\] pricing request refused on production/);
+    const serial = await drive({ bodyChunks: function* () { yield JSON.stringify({ imageData: JPEG, lang: 'en', serialOCR: true }); }, anthropic: async () => new Response(JSON.stringify({ content: [{ type: 'text', text: '{}' }] }), { status: 200 }) });
+    assert.notEqual(serial.status, 410, 'the serial-label OCR is not pricing');
+    process.env.LEGACY_SCAN_ENABLED = 'true';
+    const restored = await drive({ bodyChunks: validBody(), anthropic: async () => new Response('{}', { status: 500 }) });
+    assert.notEqual(restored.status, 410, 'the switch brings it back, deliberately');
+  } finally {
+    if (saved.env === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = saved.env;
+    if (saved.flag === undefined) delete process.env.LEGACY_SCAN_ENABLED; else process.env.LEGACY_SCAN_ENABLED = saved.flag;
+  }
+});
