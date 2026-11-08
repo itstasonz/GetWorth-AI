@@ -90,27 +90,35 @@ function Source({ e, copy }) {
     copy.freshness[e.freshness] ?? null,
   ].filter(Boolean).join(' · ');
   const why = !e.used && e.set_aside ? copy.why[e.set_aside] ?? null : null;
+  // A GetWorth sale has no public page: it is said to be one, and to be the buyer's word, and it is not a link.
+  const sale = e.source === 'getworth_sale';
+  const Row = sale ? 'div' : 'a';
+  const rowProps = sale ? {} : { href: e.url, target: '_blank', rel: 'noopener noreferrer' };
   return (
     <li>
-      <a
-        href={e.url} target="_blank" rel="noopener noreferrer"
+      <Row
+        {...rowProps}
         className="flex items-start justify-between gap-3 py-3 state-layer rounded-control"
       >
         <span className="min-w-0 flex-1 space-y-0.5">
           <span className="block text-body-sm text-text-primary line-clamp-2 break-words"><Bidi>{e.title || e.domain}</Bidi></span>
           <span className="block text-meta text-text-muted">{facts}</span>
           {why && <span className="block text-meta text-text-secondary">{why}</span>}
-          <span className="flex items-center gap-1 text-meta text-text-muted">
-            <bdi dir="ltr">{e.domain}</bdi>
-            <ExternalLink className="w-3 h-3" aria-hidden="true" />
-          </span>
+          {sale ? (
+            <span className="block text-meta text-text-muted" data-testid="getworth-sale">{copy.getworthSale}</span>
+          ) : (
+            <span className="flex items-center gap-1 text-meta text-text-muted">
+              <bdi dir="ltr">{e.domain}</bdi>
+              <ExternalLink className="w-3 h-3" aria-hidden="true" />
+            </span>
+          )}
         </span>
         <span className="shrink-0 text-end whitespace-nowrap">
           <bdi dir="ltr" className="block text-label text-text-primary">{original}</bdi>
           {converted && <bdi dir="ltr" className="block text-meta text-text-muted">{converted}</bdi>}
           {shipping && <span className="block text-meta text-text-muted"><Bidi>{shipping}</Bidi></span>}
         </span>
-      </a>
+      </Row>
     </li>
   );
 }

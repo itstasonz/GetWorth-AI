@@ -28,6 +28,13 @@ export default function ScanMonitor({ lang }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(null);
+  // Pricing accuracy on independent GetWorth sales (admin_accuracy_report): null = unavailable, [] = unmeasured.
+  const [accuracy, setAccuracy] = useState(null);
+  useEffect(() => {
+    let live = true;
+    supabase.rpc('admin_accuracy_report').then(({ data, error }) => { if (live) setAccuracy(error ? null : (data ?? [])); }, () => {});
+    return () => { live = false; };
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -91,6 +98,16 @@ export default function ScanMonitor({ lang }) {
         <Stat label={t('Tokens / scan', 'טוקנים לסריקה')} value={sum.tokens_per_scan ?? '—'} />
       </div>
       <p className="text-xs text-slate-500">{t('Identification accuracy: not measured — no confirmed labels exist yet.', 'דיוק זיהוי: לא נמדד — אין עדיין תוויות מאומתות.')}</p>
+      {accuracy && (
+        <div className="rounded-control bg-white/5 px-3 py-2 text-xs text-slate-300 space-y-1" data-testid="pricing-accuracy">
+          <p className="font-semibold">{t('Pricing accuracy (independent GetWorth sales)', 'דיוק תמחור (מכירות GetWorth עצמאיות)')}</p>
+          {accuracy.length === 0 ? (
+            <p className="text-slate-400">{t('Unmeasured — no independent buyer-confirmed sale yet.', 'לא נמדד — אין עדיין מכירה עצמאית שאושרה על ידי קונה.')}</p>
+          ) : accuracy.map((a) => (
+            <p key={a.category} dir="ltr">{a.category}: n={a.n} · median error {Math.round(a.median_ape * 100)}% (IQR {Math.round(a.ape_p25 * 100)}–{Math.round(a.ape_p75 * 100)}%) · ₪{Math.round(a.median_abs_error_ils)}{a.anchored_excluded ? ` · ${a.anchored_excluded} anchored excluded` : ''}{a.n < 10 ? ' · small sample' : ''}</p>
+          ))}
+        </div>
+      )}
 
       {rows.length >= MAX_ROWS && <p className="text-xs text-amber-300">{t(`Showing the newest ${MAX_ROWS} requests only.`, `מוצגות ${MAX_ROWS} הבקשות האחרונות בלבד.`)}</p>}
 

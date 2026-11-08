@@ -238,7 +238,8 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
       where: WEIGHT.where[abroad ? (scale ? 'INTL_scaled' : 'INTL') : 'IL'],
       match: WEIGHT.match[e.match] ?? WEIGHT.match.sibling_model,
       freshness: WEIGHT.freshness[freshness],
-      kind: WEIGHT.kind[e.kind] ?? 1,
+      // A sale only the buyer confirmed (a GetWorth sale: marketplace.js) is not a verified sale: it weighs as a listing does.
+      kind: e.kind === 'sold' && e.verification === 'buyer_confirmed' ? WEIGHT.kind.used_listing : (WEIGHT.kind[e.kind] ?? 1),
       page: WEIGHT.page[e.page] ?? WEIGHT.page.other,
       stock: e.kind === 'refurbished' ? (WEIGHT.stock[e.stock] ?? 1) : 1,
     };

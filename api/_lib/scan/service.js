@@ -35,6 +35,7 @@ import { researchMarket, marketDate, buildSearchQueries } from './market.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
+import { loadMarketplaceSales, salesEvidenceFor } from './marketplace.js';
 import {
   CONDITIONS, DEFAULT_CONDITION, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
   resolveMarketParallel,
@@ -166,6 +167,8 @@ export function researchKey(identity, answer = null) {
 export async function runPrice({
   identity, answer = null, scanUuid = null, model, apiKey, safetyIdentifier, fetchImpl = fetch, now = Date.now, store = defaultStore,
   parallel = resolveMarketParallel(),
+  // Genuine GetWorth sales (marketplace.js): read alongside the research, never cached with it, never blocking it.
+  marketplace = loadMarketplaceSales,
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -173,9 +176,11 @@ export async function runPrice({
   const familyLevel = isFamilyLevel(identity, answer);
   // How this KIND of item is valued, chosen from what it is (valuation.js strategyFor), never from the evidence found.
   const strategy = strategyFor(identity);
-  const priced = (record, extra) => {
+  const salesPending = identity?.incomplete ? Promise.resolve([]) : Promise.resolve().then(() => marketplace({ now: t0 })).catch(() => []);
+  const priced = async (record, extra) => {
+    const sales = salesEvidenceFor(identity, await salesPending, { today: marketDate(t0) });
     const valuation = buildValuation({
-      evidence: record.evidence, searchPerformed: record.search_performed !== false, unverified: record.unverified ?? 0,
+      evidence: [...record.evidence, ...sales], searchPerformed: record.search_performed !== false, unverified: record.unverified ?? 0,
       approximate, familyLevel, strategy, searched: { ...record.searched, at: new Date(record.at).toISOString() },
       // A listing's age is measured to TODAY, not to the day it was retrieved: pooled and reused evidence ages.
       today: marketDate(t0),

@@ -175,6 +175,7 @@ export const SCAN_COPY = {
     searchedOn: (date) => `Market searched on ${date}`,
     sources: 'Sources',
     kinds: { used_listing: 'Used', sold: 'Sold', refurbished: 'Refurbished', new_retail: 'New', price_guide: 'Price guide', other: 'Other' },
+    getworthSale: 'Sold on GetWorth · price confirmed by the buyer, not a payment record',
     matches: { exact: 'exact', close_comparable: 'comparable', sibling_model: 'other model' },
     places: { IL: 'Israel', INTL: 'abroad' },
     // A listing's own age. With no date on the page there is nothing to say, so nothing is said.
@@ -320,6 +321,7 @@ export const SCAN_COPY = {
     searchedOn: (date) => `השוק נבדק בתאריך ${date}`,
     sources: 'מקורות',
     kinds: { used_listing: 'משומש', sold: 'נמכר', refurbished: 'מחודש', new_retail: 'חדש', price_guide: 'מחירון', other: 'אחר' },
+    getworthSale: 'נמכר ב-GetWorth · המחיר אושר על ידי הקונה, לא רישום תשלום',
     matches: { exact: 'מדויק', close_comparable: 'דומה', sibling_model: 'דגם אחר' },
     places: { IL: 'ישראל', INTL: 'חו״ל' },
     freshness: { current: 'עדכני', recent: 'מהחודשים האחרונים', older: 'ישן', archived: 'מודעה ישנה' },

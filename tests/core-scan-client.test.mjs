@@ -359,6 +359,7 @@ describe('CC-6 the screen', () => {
     }
   });
   test('CC-6c sources are real links that open safely', () => {
-    assert.match(sheets, /href=\{e\.url\} target="_blank" rel="noopener noreferrer"/);
+    // Web sources are links that open safely; a GetWorth sale (no public page) is not a link at all.
+    assert.match(sheets, /const rowProps = sale \? \{\} : \{ href: e\.url, target: '_blank', rel: 'noopener noreferrer' \};/);
   });
 });
