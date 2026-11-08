@@ -1,0 +1,15 @@
+-- ══════════════════════════════════════════════════════════════════════════════
+-- PROFILE UPDATES WORK AGAIN (founder-approved 2026-11-08) — one policy condition, nothing else.
+--
+-- The policy "Admin update any profile" tested admin-ness with a subquery on profiles.is_admin, evaluated as the
+-- CALLER. The authenticated role may not SELECT profiles.is_admin (column privileges), so every UPDATE on profiles by
+-- any signed-in user — the avatar upload included — failed with "permission denied for table profiles".
+-- The condition now calls auth_is_admin(), the SECURITY DEFINER helper the listings and orders policies already use:
+-- the same rule (the caller's own profile has is_admin), read without needing that column privilege.
+--
+-- Unchanged: the policy's name, command and roles; every other policy; every grant (users still UPDATE only
+-- avatar_url, full_name, location, phone, updated_at); the update guard trigger (non-admins' changes outside that
+-- allow-list are reverted; is_admin / is_test / verification fields stay protected).
+-- Rollback: supabase/manual/20261108160000_rollback_profiles_admin_policy_fix.sql
+-- ══════════════════════════════════════════════════════════════════════════════
+ALTER POLICY "Admin update any profile" ON public.profiles USING (public.auth_is_admin());

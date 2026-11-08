@@ -172,3 +172,31 @@ test('MS-6 the evidence list shows a GetWorth sale for what it is: no link, buye
   assert.match(sheets, /const rowProps = sale \? \{\} : \{ href: e\.url/);
   assert.match(read('src/lib/scanCopy.js'), /getworthSale: 'Sold on GetWorth · price confirmed by the buyer, not a payment record'/);
 });
+
+test('MS-7 the evidence function returns only the identity fields the market key reads — never visible text — and the key is unchanged by the projection', async () => {
+  const d = await db();
+  const full = { ...IDENTITY, visible_text: ['MOSHE COHEN 050-0000000'], listing_description: 'private text', uncertainty_note: 'x' };
+  await sale(d, { identity: full });
+  const [r] = await asService(d, `SELECT * FROM marketplace_sale_evidence()`);
+  assert.deepEqual(Object.keys(r.identity).sort().filter((k) => !['canonical_name', 'display_name', 'brand', 'model', 'product_family', 'item_type', 'variant', 'size_or_capacity', 'configuration', 'model_number', 'confirmed'].includes(k)), []);
+  assert.ok(!JSON.stringify(r).includes('050-0000000') && !JSON.stringify(r).includes('private text'));
+  assert.equal(marketKey(r.identity), marketKey(IDENTITY), 'the projection keeps everything the match needs');
+});
+
+test('MS-8 the order-email function is hardened, and its trigger repair stays a proposal until approved', async () => {
+  const fn = read('supabase/functions/notify-order-email/index.ts');
+  assert.doesNotMatch(fn, /body\?\.seller_id|body\?\.listing_title/, 'recipient and title are never taken from the request');
+  assert.match(fn, /\.select\('id, price, delivery_method, buyer_id, seller_id, listing_id'\)/);
+  assert.match(fn, /const sellerId = order\.seller_id as string;/);
+  assert.match(fn, /buyerName = escapeHtml\(buyerName\);/);
+  assert.match(fn, /listingTitle = escapeHtml\(listingTitle\);/);
+  assert.match(fn, /await sameSecret\(incomingSecret, expectedSecret\)/);
+  assert.doesNotMatch(fn, /console\.log\([^)]*sellerEmail/, 'no email address in the logs');
+  assert.doesNotMatch(fn, /re_[A-Za-z0-9]{12,}|sk_[A-Za-z0-9]{12,}/, 'no key in the source');
+  const proposed = read('supabase/manual/PROPOSED_notify_order_email_trigger.sql');
+  assert.match(proposed, /PROPOSED — NOT APPLIED/);
+  assert.match(proposed, /net\.http_post\(/);
+  assert.match(proposed, /body    := jsonb_build_object\('order_id', NEW\.data->>'order_id'\)/);
+  const { readdirSync } = await import('node:fs');
+  assert.equal(readdirSync(new URL('../supabase/migrations/', import.meta.url)).some((f) => /notify_order/.test(f)), false, 'never in migrations until approved');
+});

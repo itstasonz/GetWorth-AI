@@ -26,8 +26,22 @@ CREATE OR REPLACE FUNCTION public.marketplace_sale_evidence(p_since timestamptz 
  STABLE SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
+  -- Only the product fields the engine's market identity is built from (strategy.js marketKey), and its display name:
+  -- never the photograph's visible text, the listing's text, or anything about a person.
   SELECT left(md5('getworth-sale:' || o.id::text), 16), o.final_price, o.completed_at, l.condition, l.category,
-         o.final_price_source, v.ai_raw_response -> 'identity'
+         o.final_price_source,
+         jsonb_strip_nulls(jsonb_build_object(
+           'canonical_name',   v.ai_raw_response -> 'identity' -> 'canonical_name',
+           'display_name',     v.ai_raw_response -> 'identity' -> 'display_name',
+           'brand',            v.ai_raw_response -> 'identity' -> 'brand',
+           'model',            v.ai_raw_response -> 'identity' -> 'model',
+           'product_family',   v.ai_raw_response -> 'identity' -> 'product_family',
+           'item_type',        v.ai_raw_response -> 'identity' -> 'item_type',
+           'variant',          v.ai_raw_response -> 'identity' -> 'variant',
+           'size_or_capacity', v.ai_raw_response -> 'identity' -> 'size_or_capacity',
+           'configuration',    v.ai_raw_response -> 'identity' -> 'configuration',
+           'model_number',     v.ai_raw_response -> 'identity' -> 'model_number',
+           'confirmed',        v.ai_raw_response -> 'identity' -> 'confirmed'))
   FROM orders o
   JOIN listings l   ON l.id = o.listing_id
   JOIN valuations v ON v.id = l.valuation_id

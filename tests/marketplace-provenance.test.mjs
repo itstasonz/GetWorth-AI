@@ -310,3 +310,40 @@ test('MP-8c the listing form states its pricing intent, only once the database r
   assert.match(ctx, /priceOrigin: draft\.price === '' \? 'seller' : 'suggestion'/);
   assert.match(read('src/views/SellViews.jsx'), /priceOrigin: 'seller' \}\);/);
 });
+
+describe('MP-9 profile updates (policy fix 20261108160000)', () => {
+  const FIX = read('supabase/migrations/20261108160000_profiles_admin_policy_fix.sql');
+  const UNFIX = read('supabase/manual/20261108160000_rollback_profiles_admin_policy_fix.sql');
+  const userUpdate = (db, uid, set, id = uid) => as(db, uid, (tx) => tx.query(`UPDATE profiles SET ${set} WHERE id = $1`, [id]));
+  test('MP-9a before the fix every signed-in profile update is denied (the avatar defect); after it, a user saves their own avatar and name', async () => {
+    const db = await fresh();
+    await rejects(userUpdate(db, SELLER, `avatar_url = 'https://x/a.jpg'`), /permission denied for table profiles/);
+    await db.exec(FIX);
+    await userUpdate(db, SELLER, `avatar_url = 'https://x/a.jpg', full_name = 'n', location = 'Haifa', phone = '050', updated_at = now()`);
+    assert.deepEqual(await one(db, `SELECT avatar_url, full_name, location FROM profiles WHERE id = $1`, [SELLER]), { avatar_url: 'https://x/a.jpg', full_name: 'n', location: 'Haifa' });
+  });
+  test('MP-9b after the fix a user still cannot change protected fields, nor another user\'s profile; anonymous cannot update', async () => {
+    const db = await fresh();
+    await db.exec(FIX);
+    for (const set of [`is_admin = true`, `is_test = true`, `verification_status = 'verified'`, `is_verified = true`, `total_sales = 99`, `rating = 5`]) {
+      await rejects(userUpdate(db, SELLER, set), /permission denied/, set);
+    }
+    assert.deepEqual(await one(db, `SELECT is_admin, is_test, is_verified FROM profiles WHERE id = $1`, [SELLER]), { is_admin: false, is_test: false, is_verified: false });
+    await userUpdate(db, SELLER, `full_name = 'hijack'`, BUYER);
+    assert.equal((await one(db, `SELECT full_name FROM profiles WHERE id = $1`, [BUYER])).full_name, 'b', 'RLS: another user\'s row is not touched');
+    await rejects(db.transaction(async (tx) => { await tx.exec('SET LOCAL ROLE anon'); await tx.query(`UPDATE profiles SET full_name = 'x'`); }), /permission denied/);
+  });
+  test('MP-9c an admin keeps the intended right: editing another user\'s permitted fields; the rollback restores the exact old condition', async () => {
+    const db = await fresh();
+    const cond = async () => (await one(db, `SELECT qual FROM pg_policies WHERE tablename = 'profiles' AND policyname = 'Admin update any profile'`)).qual;
+    const original = await cond();
+    await db.exec(FIX);
+    assert.match(await cond(), /auth_is_admin\(\)/);
+    await userUpdate(db, ADMIN, `full_name = 'set by admin'`, BUYER);
+    assert.equal((await one(db, `SELECT full_name FROM profiles WHERE id = $1`, [BUYER])).full_name, 'set by admin');
+    const policies = (await db.query(`SELECT policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY 1`)).rows;
+    await db.exec(UNFIX);
+    assert.equal(await cond(), original, 'rollback restores the condition text exactly');
+    assert.deepEqual((await db.query(`SELECT policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY 1`)).rows, policies);
+  });
+});
