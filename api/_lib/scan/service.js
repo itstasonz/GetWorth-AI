@@ -224,7 +224,7 @@ export async function runPrice({
     planned += meta.queries_planned ?? 0;
     pages += provenance.sources?.length ?? 0;
     const hosts = {};
-    for (const u of provenance.sources ?? []) { let h = '?'; try { h = new URL(typeof u === 'string' ? u : u?.url).hostname.replace(/^www./, ''); } catch { /* unparseable */ } hosts[h] = (hosts[h] ?? 0) + 1; }
+    for (const u of provenance.sources ?? []) { const h = (String(typeof u === 'string' ? u : u?.url ?? '').match(/^https?:\/\/(?:www\.)?([^/?#:]+)/i)?.[1] ?? '?').toLowerCase(); hosts[h] = (hosts[h] ?? 0) + 1; }
     funnel.push({ stage, reached: provenance.sources?.length ?? 0, hosts: Object.fromEntries(Object.entries(hosts).sort((a, b) => b[1] - a[1]).slice(0, 15)), reported: Array.isArray(raw?.evidence) ? raw.evidence.length : 0, verified: verified.evidence.length, unverified: verified.unverified });
     searched = searched || provenance.search_performed;
     firstSearchMs ??= meta.timings?.first_search_ms ?? null;
