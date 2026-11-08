@@ -183,7 +183,7 @@ test('MS-7 the evidence function returns only the identity fields the market key
   assert.equal(marketKey(r.identity), marketKey(IDENTITY), 'the projection keeps everything the match needs');
 });
 
-test('MS-8 the order-email function is hardened, and its trigger repair stays a proposal until approved', async () => {
+test('MS-8 the order-email function is hardened, and its trigger reads the secret from Vault and sends only the order id', async () => {
   const fn = read('supabase/functions/notify-order-email/index.ts');
   assert.doesNotMatch(fn, /body\?\.seller_id|body\?\.listing_title/, 'recipient and title are never taken from the request');
   assert.match(fn, /\.select\('id, price, delivery_method, buyer_id, seller_id, listing_id'\)/);
@@ -193,10 +193,10 @@ test('MS-8 the order-email function is hardened, and its trigger repair stays a 
   assert.match(fn, /await sameSecret\(incomingSecret, expectedSecret\)/);
   assert.doesNotMatch(fn, /console\.log\([^)]*sellerEmail/, 'no email address in the logs');
   assert.doesNotMatch(fn, /re_[A-Za-z0-9]{12,}|sk_[A-Za-z0-9]{12,}/, 'no key in the source');
-  const proposed = read('supabase/manual/PROPOSED_notify_order_email_trigger.sql');
-  assert.match(proposed, /PROPOSED — NOT APPLIED/);
-  assert.match(proposed, /net\.http_post\(/);
-  assert.match(proposed, /body    := jsonb_build_object\('order_id', NEW\.data->>'order_id'\)/);
-  const { readdirSync } = await import('node:fs');
-  assert.equal(readdirSync(new URL('../supabase/migrations/', import.meta.url)).some((f) => /notify_order/.test(f)), false, 'never in migrations until approved');
+  const trigger = read('supabase/migrations/20261108170000_notify_order_email_trigger.sql');
+  assert.ok(trigger.includes('PERFORM net.http_post('));
+  assert.ok(!trigger.replace(/--.*$/gm, '').includes('extensions.http_post'));
+  assert.ok(trigger.includes("body    := jsonb_build_object('order_id', NEW.data->>'order_id')"), 'the request names the order only');
+  assert.ok(trigger.includes("vault.decrypted_secrets WHERE name = 'notify_order_email_webhook_secret'"), 'the secret comes from Vault, never from the source');
+  assert.ok(read('supabase/manual/20261108170000_rollback_notify_order_email_trigger.sql').includes('extensions.http_post'), 'rollback restores the previous body exactly');
 });

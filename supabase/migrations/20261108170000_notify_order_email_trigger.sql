@@ -1,23 +1,14 @@
 -- ══════════════════════════════════════════════════════════════════════════════
--- PROPOSED — NOT APPLIED. Requires the founder's approval (it activates a credential and replaces a
--- SECURITY DEFINER trigger function). Kept outside supabase/migrations so nothing can push it by accident.
+-- ORDER EMAILS (founder-approved 2026-11-08). Replaces ONLY the body of public.notify_order_email_webhook()
+-- (same name, signature, owner, SECURITY DEFINER; the trigger trg_notify_order_email on notifications is unchanged).
 --
--- WHY ORDER EMAILS ARE NEVER SENT TODAY
---   notify_order_email_webhook() returns early because app.webhook_secret and app.supabase_url are unset; were they
---   set, it would fail on extensions.http_post, which does not exist (pg_net provides net.http_post). The edge
---   function notify-order-email is deployed with RESEND_API_KEY, RESEND_FROM_EMAIL and WEBHOOK_SECRET configured.
---
--- THE FIX, IN ORDER (each step separately approved):
---   1. Deploy the hardened edge function (supabase/functions/notify-order-email/index.ts): recipient and title from
---      the database, HTML escaped, constant-time secret check, no email addresses in logs.
---   2. Generate ONE new random secret and store it in both places — never in chat, never in the repository:
---        supabase secrets set WEBHOOK_SECRET=<new>                         (edge function)
---        select vault.create_secret('<new>', 'notify_order_email_webhook_secret');   (database)
---        select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');
---   3. Apply the function below (same name, same trigger; only its body changes).
---   4. Verify with one rolled-back order rehearsal that net.http_request_queue receives exactly one request with only
---      {order_id} in its body, then one real order by the founder's own test accounts.
--- Rollback: re-apply the previous body (captured in the session scratch fn2-pretty.json / pg_get_functiondef).
+-- Before: it returned early (app.webhook_secret / app.supabase_url unset) and, if not, called extensions.http_post,
+-- which does not exist. Now it reads the shared secret and the project URL from Supabase Vault
+-- (notify_order_email_webhook_secret, project_url) and queues ONE pg_net request carrying only {order_id}; the
+-- hardened edge function notify-order-email reads the recipient (the order's seller), title and price from the
+-- database. pg_net sends after commit: a rolled-back order sends nothing. Any failure is a warning; the order
+-- always proceeds.
+-- Rollback: supabase/manual/20261108170000_rollback_notify_order_email_trigger.sql
 -- ══════════════════════════════════════════════════════════════════════════════
 CREATE OR REPLACE FUNCTION public.notify_order_email_webhook()
  RETURNS trigger
