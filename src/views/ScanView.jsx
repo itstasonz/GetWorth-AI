@@ -203,28 +203,38 @@ export default function ScanView() {
 
         {s.stage === STAGE.PRICED && band && (
           <div className="space-y-4">
-            <div className="space-y-1">
-              {rough ? (
-                <>
-                  <p className="text-label text-text-muted">{copy.approxLabel}</p>
-                  <p className="text-display text-text-primary">{copy.range(band)}</p>
-                  {approximate && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_items' ? copy.similarItemsNote : copy.approxNote}</p>}
-                </>
-              ) : (
-                <>
-                  <p className="text-label text-text-muted">{copy.recommended}</p>
-                  <p className="text-display text-text-primary"><bdi dir="ltr">{formatPrice(band.list)}</bdi></p>
-                  <p className="text-body text-text-secondary">
-                    {copy.expected}: <span className="text-text-primary">{copy.range(band)}</span>
-                  </p>
-                </>
-              )}
+            <div className="space-y-2">
+              {/* PRIMARY: one central worth. SECONDARY: what to ask, and what a quick sale brings. All three from the same
+                  references (valuation.js conditionPrices); a band from before the three prices falls back to its range. */}
+              <div className="text-center space-y-1" data-testid="scan-worth">
+                <p className="text-label text-text-muted">{rough ? copy.worthApprox : copy.worth}</p>
+                {band.worth && <p className="text-display text-text-primary"><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.worth)}</bdi></p>}
+                {/* An approximate result names its range as approximate, and never as the expected one. */}
+                {rough ? (
+                  <><p className="text-body-sm text-text-muted">{copy.approxLabel}</p><p className="text-body text-text-primary">{copy.range(band)}</p></>
+                ) : (
+                  <p className="text-body-sm text-text-secondary">{copy.expected}: <span className="text-text-primary">{copy.range(band)}</span></p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2" data-testid="scan-secondary-prices">
+                <div className="rounded-container border border-subtle bg-surface p-3 text-center">
+                  {/* Approximate: what to ask is "about", never an exact-looking recommended price. */}
+                  <p className="text-meta text-text-muted">{rough ? copy.listAbout : copy.recommended}</p>
+                  <p className="text-body font-semibold text-text-primary"><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.list)}</bdi></p>
+                </div>
+                <div className="rounded-container border border-subtle bg-surface p-3 text-center">
+                  <p className="text-meta text-text-muted">{copy.quickSale}</p>
+                  <p className="text-body font-semibold text-text-primary"><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.quick ?? band.low)}</bdi></p>
+                </div>
+              </div>
+              {s.valuation.estimate_basis === 'abroad_scaled' && <p className="text-body-sm text-text-secondary" data-testid="scan-abroad-estimate">{copy.abroadEstimate}</p>}
+              {approximate && s.valuation.estimate_basis !== 'abroad_scaled' && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_items' ? copy.similarItemsNote : copy.approxNote}</p>}
               <p className="text-body-sm text-text-secondary">
                 {copy.priceConfidence}: <span className="font-semibold text-text-primary">{copy.levels[s.valuation.price_confidence] ?? copy.levels.low}</span>
               </p>
               {/* Thin evidence is said out loud, beside the price it weakens. */}
               {(counts.resale ?? 0) < 3 && <p className="text-body-sm text-text-muted">{copy.thin(counts.resale ?? 0)}</p>}
-              {(counts.resale ?? 0) > 0 && israeli === 0 && <p className="text-body-sm text-text-muted">{copy.abroadOnly}</p>}
+              {(counts.resale ?? 0) > 0 && israeli === 0 && s.valuation.estimate_basis !== 'abroad_scaled' && <p className="text-body-sm text-text-muted">{copy.abroadOnly}</p>}
               {s.valuation.dispersed && <p className="text-body-sm text-text-muted">{copy.dispersed}</p>}
             </div>
             {/* Every reference is brought to Good condition; any other choice is the ladder applied to that. */}
@@ -240,6 +250,11 @@ export default function ScanView() {
               {s.valuation?.retail_new_ils && (
                 <p className="text-body-sm text-text-secondary">{(s.valuation.retail_new_in_stock === false ? copy.retailContextUnavailable : copy.retailContext)(formatPrice(s.valuation.retail_new_ils))}</p>
               )}
+              {/* The specific gap, in counts, and what would help: not a generic "not enough evidence". */}
+              {s.valuation?.evidence_gap && s.valuation.no_price_reason === 'no_verified_israeli_second_hand_reference' && (
+                <p className="text-body-sm text-text-secondary" data-testid="scan-evidence-gap">{copy.gap(s.valuation.evidence_gap)}</p>
+              )}
+              {s.valuation?.no_price_reason && <p className="text-body-sm text-text-muted">{copy.gapNext}</p>}
             </div>
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{copy.sellOwnPrice}</Btn>

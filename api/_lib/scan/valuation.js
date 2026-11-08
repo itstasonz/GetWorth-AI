@@ -126,6 +126,23 @@ export const SET_ASIDE = Object.freeze({
 });
 /** How many Israeli comparables, current and for a used unit, a range from similar items needs. */
 export const COMPARABLE_MIN = 2;
+/**
+ * AN ESTIMATE FROM ABROAD — documented, gated, and labelled (founder request 2026-11-08, after the first public scan of a
+ * G Pro Wireless found shops in Israel and a used unit abroad, and no Israeli second-hand listing at all).
+ *
+ * With no Israeli second-hand listing standing, the item is still priced — as an ESTIMATE, at LOW confidence, marked
+ * `estimate_basis: 'abroad_scaled'` and approximate — only when ALL of these hold:
+ *   • the exact product, identified at item level, valued by the exact-model strategy;
+ *   • at least FOREIGN_MIN private second-hand references abroad for the EXACT model (no close comparable, no shop's
+ *     refurbished offer), current or of unknown age (not old, not archived), for a used unit (not sealed), tied to the
+ *     product by their page, and not above the Israeli new price;
+ *   • the Israeli price level MEASURED for this item: its new price in Israel and abroad both found (normalizeReferences
+ *     `scale`, bounded 0.8–2). Without it a converted foreign price is a foreign price, and nothing is estimated.
+ * Each reference: converted at the day's rate (fx.js), less the stated negotiation allowance (an asking price is not a
+ * sale), times the measured level, brought to "good" by the condition ladder. No other adjustment, no percentage of new.
+ */
+export const FOREIGN_MIN = 2;
+export const ESTIMATE_BASIS = Object.freeze({ ISRAEL: 'israeli_listings', ABROAD: 'abroad_scaled' });
 
 const RESALE_KINDS = new Set(['used_listing', 'sold', 'refurbished', 'price_guide']);
 /**
@@ -304,11 +321,16 @@ export function conditionPrices(good, kept, anchorIl) {
   const out = {};
   for (const c of CONDITIONS) {
     const f = CONDITION_FACTOR[c];
-    let low = good.low * f; let high = good.high * f; let list = Math.max(good.centre / NEGOTIATION, good.high) * f;
-    if (c === 'new_sealed' && anchorIl && list > anchorIl) { const k = anchorIl / list; low *= k; high *= k; list = anchorIl; }
-    const band = { list: roundNice(list), low: roundNice(low), high: roundNice(high) };
+    let low = good.low * f; let high = good.high * f; let centre = good.centre * f; let list = Math.max(good.centre / NEGOTIATION, good.high) * f;
+    if (c === 'new_sealed' && anchorIl && list > anchorIl) { const k = anchorIl / list; low *= k; high *= k; centre *= k; list = anchorIl; }
+    const band = { list: roundNice(list), low: roundNice(low), high: roundNice(high), worth: roundNice(centre) };
     band.high = Math.max(band.high, band.low);
     band.list = Math.max(band.list, band.high);
+    // THREE PRICES, ONE EVIDENCE. worth = the weighted median selling price of the references (asking prices less the
+    // negotiation allowance); quick = the low end of where that weight lies (weighted 25th percentile, bounded by how much
+    // evidence there is: aggregate.js); list = what to ask so a normal negotiation lands near worth. No fixed percentages.
+    band.worth = Math.min(Math.max(band.worth, band.low), band.high);
+    band.quick = band.low;
     out[c] = { ...band, basis: stated.has(c) ? 'listings' : 'adjusted' };
   }
   return out;
@@ -347,9 +369,13 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   // April 2025, one refurbished unit, one listing in the United States — and ₪430 on the screen.)
   const qualifies = (p) => p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind) && p.freshness !== 'older' && p.freshness !== 'archived' && p.condition !== 'new_sealed';
   const localEvidence = points.some((p) => !p.dropped && qualifies(p));
+  // The estimate from abroad (FOREIGN_MIN above): which foreign references could carry it, and whether they may.
+  const abroadUsable = points.filter((p) => !p.dropped && p.evidence.market !== 'IL' && PRIVATE_RESALE.has(p.evidence.kind) && p.evidence.match === 'exact'
+    && p.freshness !== 'older' && p.freshness !== 'archived' && p.condition !== 'new_sealed');
+  const fromAbroad = !localEvidence && !!scale && basis === BASIS.ITEM && strategy === STRATEGY.EXACT && abroadUsable.length >= FOREIGN_MIN;
   if (!localEvidence) {
     for (const p of points) {
-      if (p.dropped) continue;
+      if (p.dropped || (fromAbroad && abroadUsable.includes(p))) continue;
       p.dropped = p.evidence.kind === 'refurbished' ? SET_ASIDE.REFURBISHED_ALONE : (p.evidence.market === 'IL' ? SET_ASIDE.NOT_CURRENT : SET_ASIDE.ABROAD_ONLY);
     }
   }
@@ -368,7 +394,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const abroad = kept.some((p) => p.evidence.market !== 'IL');
   // A family-level valuation, or one from similar items, is approximate by construction, question or no question: the
   // listings are not for this item. (Found 2026-10-11: with no open question a family price showed as an exact one.)
-  const rough = approximate || basis !== BASIS.ITEM;
+  const rough = approximate || basis !== BASIS.ITEM || fromAbroad;
   // When similar items were set aside for being too few or too far apart, their spread is still what was found.
   const shown = comparableReason ? standing : kept;
   const dispersion = dispersionOf(shown);
@@ -425,6 +451,16 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     intl_adjusted: abroad ? !!scale : null,
     intl_scale: abroad && scale ? round2(scale) : null,
     approximate: rough,
+    // Where the number comes from: Israeli listings, or an estimate from listings abroad at the measured Israeli level.
+    estimate_basis: fromAbroad ? ESTIMATE_BASIS.ABROAD : ESTIMATE_BASIS.ISRAEL,
+    // Exactly what was missing when there is no price, so the screen can say it and say what would help.
+    evidence_gap: localEvidence ? null : {
+      israeli_private_found: points.filter((p) => p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind)).length,
+      abroad_usable: abroadUsable.length,
+      abroad_needed: FOREIGN_MIN,
+      price_level_measured: !!scale,
+      new_price_il: anchorIl ? roundNice(anchorIl) : null,
+    },
     family_level: basis === BASIS.FAMILY,
     strategy,
     searched,
@@ -443,7 +479,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     ...base,
     status: 'priced',
     prices: conditionPrices(good, kept, anchorIl),
-    price_confidence: priceConfidence({ kept, scale, approximate: rough, basis }),
+    price_confidence: fromAbroad ? 'low' : priceConfidence({ kept, scale, approximate: rough, basis }),
     withdrawn: null,
     no_price_reason: null,
   };

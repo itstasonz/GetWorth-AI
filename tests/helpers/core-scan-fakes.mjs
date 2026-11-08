@@ -86,7 +86,8 @@ export function pageTexts(answer, given = {}) {
 /** What the server computes from RAW_MARKET on TODAY: worked out by hand in the valuation suite. */
 export const GOOD_BAND = Object.freeze({ list: 260, low: 190, high: 260 });
 
-const band = (list, low, high, basis = 'adjusted') => ({ list, low, high, basis });
+// worth and quick as the server sends them since the three-price result (valuation.js conditionPrices).
+const band = (list, low, high, basis = 'adjusted') => ({ list, low, high, worth: Math.round((low + high) / 20) * 10, quick: low, basis });
 /** A priced valuation's bands as the client receives them. */
 export const PRICES = Object.freeze({
   new_sealed: band(420, 360, 400), like_new: band(340, 290, 320), good: band(290, 240, 270, 'listings'), fair: band(230, 180, 210), poor: band(150, 100, 130),

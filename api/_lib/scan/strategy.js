@@ -94,17 +94,30 @@ const SCOPE = { complete_item: 'complete', bundle: 'complete', unknown: 'complet
  * rule — none of which had a code — reads the same research as before. The
  * model's guesses at other codes (search.model_numbers) are not the item and
  * change from one look to the next: they stay out.
+ *
+ * ONLY WHAT CHANGES THE SEARCH CHANGES THE KEY. An answer that describes the
+ * owner's unit — the receiver is missing, the box is gone, "about half left" —
+ * changes no query (market.js searchNames takes a confirmed fact or an answer
+ * into the search only when it names WHAT the item is: a searchable attribute
+ * with a figure in it). The founder's first public scan (2026-11-08, G Pro
+ * Wireless) answered the receiver question and paid a second 10 s web search
+ * for the same queries. Those answers now reuse the research; the valuation is
+ * still rebuilt with them (service.js priced).
  */
+export const namesProduct = (value) => !!value && /\d/.test(String(value)) && !/%/.test(String(value));
 export function marketKey(identity, answer = null) {
   const i = identity ?? {};
   const name = tokens(i.canonical_name || [i.brand, i.model ?? i.product_family ?? i.item_type, i.variant].filter(Boolean).join(' '));
-  const confirmed = (Array.isArray(i.confirmed) ? i.confirmed : []).filter((c) => !c.unsure).map((c) => `${tokens(c.attribute).join('')}=${tokens(c.value).join('')}`).sort();
+  const confirmed = (Array.isArray(i.confirmed) ? i.confirmed : [])
+    .filter((c) => !c.unsure && changesSearch(c.attribute) && namesProduct(c.value))
+    .map((c) => `${tokens(c.attribute).join('')}=${tokens(c.value).join('')}`).sort();
   const code = tokens(i.model_number).join('');
+  const detail = answer?.unsure !== true && namesProduct(answer?.text) ? tokens(answer.text).join(' ') : '';
   return [
     [...new Set(name)].sort().join(' '),
     tokens(i.size_or_capacity).join(''),
     SCOPE[i.configuration] ?? i.configuration ?? 'complete',
-    tokens(answer?.text).join(' '),
+    detail,
     confirmed.join(','),
     ...(code ? [`code=${code}`] : []),
   ].join('|');

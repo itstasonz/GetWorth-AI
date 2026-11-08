@@ -214,12 +214,25 @@ describe('LM-2 the weighing: general rules, on items of no category', () => {
     assert.ok(localStrength([il(300, { listed: CURRENT }), il(310, { listed: CURRENT })], { today: TODAY }) >= LOCAL_STRENGTH.drives, 'two that stand do');
     assert.ok(localStrength([il(300), il(310), il(320)], { today: TODAY }) >= LOCAL_STRENGTH.drives, 'so do three with no date on them');
   });
-  test('LM-2e [4] with no Israeli evidence, evidence from abroad prices nothing: it is context, scaled or not. Beside an Israeli listing it is scaled when it can be, and said to be foreign', () => {
+  test('LM-2e [4] with no Israeli evidence, exact sales abroad give a LABELLED low-confidence estimate only at a MEASURED Israeli level (FOREIGN_MIN, 2026-11-08); otherwise they are context. Beside an Israeli listing they are scaled when they can be, and said to be foreign', () => {
     const sold = [200, 210, 220].map((p) => abroad(p, { kind: 'sold', listed: CURRENT }));
     const levels = [shop(600), shop(500, { market: 'INTL', currency: 'USD' })];
     const foreignOnly = value([...sold, ...levels]);
-    assert.deepEqual([foreignOnly.status, foreignOnly.no_price_reason, foreignOnly.prices, foreignOnly.retail_new_ils], ['insufficient_evidence', 'no_verified_israeli_second_hand_reference', null, 600], 'three sales abroad say what it sells for abroad');
-    assert.ok(foreignOnly.evidence.filter((e) => e.market === 'INTL' && e.kind === 'sold').every((e) => e.set_aside === SET_ASIDE.ABROAD_ONLY && !e.used));
+    assert.deepEqual([foreignOnly.status, foreignOnly.estimate_basis, foreignOnly.price_confidence, foreignOnly.approximate, foreignOnly.local_evidence, foreignOnly.intl_scale], ['priced', 'abroad_scaled', 'low', true, false, 1.2]);
+    // 200/210/220 sold abroad x the measured level 600/500 = 240/252/264: the worth is the middle one, nothing invented.
+    assert.equal(foreignOnly.prices.good.worth, 250);
+    assert.ok(foreignOnly.prices.good.quick <= foreignOnly.prices.good.worth && foreignOnly.prices.good.worth <= foreignOnly.prices.good.list);
+    assert.deepEqual(foreignOnly.evidence_gap, { israeli_private_found: 0, abroad_usable: 3, abroad_needed: 2, price_level_measured: true, new_price_il: 600 });
+    // No level measured (no new price abroad): converted foreign prices are foreign prices, and nothing is estimated.
+    const noLevel = value([...sold, shop(600)]);
+    assert.deepEqual([noLevel.status, noLevel.no_price_reason, noLevel.prices, noLevel.evidence_gap.price_level_measured], ['insufficient_evidence', 'no_verified_israeli_second_hand_reference', null, false]);
+    assert.ok(noLevel.evidence.filter((e) => e.market === 'INTL' && e.kind === 'sold').every((e) => e.set_aside === SET_ASIDE.ABROAD_ONLY && !e.used));
+    // One listing abroad is one seller's opinion: no estimate, and the gap says one of two.
+    const one = value([sold[0], ...levels]);
+    assert.deepEqual([one.status, one.evidence_gap.abroad_usable, one.evidence_gap.abroad_needed], ['insufficient_evidence', 1, 2]);
+    // A close comparable abroad does not count toward it.
+    const close = value([abroad(200, { kind: 'sold', listed: CURRENT, match: 'close_comparable' }), abroad(210, { kind: 'sold', listed: CURRENT, match: 'close_comparable' }), ...levels]);
+    assert.equal(close.status, 'insufficient_evidence');
     // One current Israeli listing opens the gate; the sales abroad then join, scaled 600 / 500 = 1.2: 240, 252, 264.
     const scaled = value([il(250, { listed: CURRENT }), ...sold, ...levels]);
     assert.deepEqual([scaled.status, scaled.intl_adjusted, scaled.intl_scale, scaled.price_confidence], ['priced', true, 1.2, 'medium']);

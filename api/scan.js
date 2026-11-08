@@ -213,6 +213,11 @@ export function createScanHandler({
       ]);
       // With an answer recorded the token was re-signed: the client carries the newest one.
       const v = result.valuation;
+      // What the research found and why it priced or did not — hosts, counts and reasons only — in the runtime log as well
+      // as in scan_events, so a scan can be explained from either. No page text, no person.
+      console.log(`[Scan] research scan=${scanUuid.slice(0, 8)} ${JSON.stringify({ ...diagnosticsOf(v), withdrawn: v?.withdrawn ?? null, estimate_basis: v?.estimate_basis ?? null, gap: v?.evidence_gap ?? null, retail_new_ils: v?.retail_new_ils ?? null, reused: result.reused === true }).slice(0, 3000)}`);
+      // Every reference by its public page: what it was, what it cost in shekels, and whether it counted and why not.
+      console.log(`[Scan] evidence scan=${scanUuid.slice(0, 8)} ${JSON.stringify((v?.evidence ?? []).slice(0, 16).map((e) => ({ u: String(e.url ?? '').slice(0, 140), k: e.kind, m: e.match, mk: e.market, ils: e.price_ils ?? null, c: e.condition ?? null, f: e.freshness ?? null, b: e.binding ?? null, used: e.used === true, why: e.set_aside ?? null })))}`);
       return done({ status: result.status, valuation: v, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call, {
         item: String(identity.display_name ?? '').slice(0, 120) || null, category: identity.category ?? null,
         priced: result.status === 'priced', withdrawn: v?.withdrawn ?? null, price_confidence: v?.price_confidence ?? null,
@@ -253,6 +258,7 @@ export function createScanHandler({
       userId: user.id, scanUuid, identity: result.identity, started: prior?.iat ?? null,
       counters: { revisions: prior ? (prior.revisions ?? 0) + 1 : 0, followups: result.followups, identify_ms: result.call?.ms ?? null },
     });
+    console.log(`[Scan] identity scan=${scanUuid.slice(0, 8)} ${JSON.stringify({ item: String(result.identity?.display_name ?? '').slice(0, 120), confidence: result.identity?.identity_confidence ?? null, precision: result.identity?.identity_precision ?? null, exact: result.identity?.exact_model_established === true, incomplete: result.identity?.incomplete ?? null, question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? `${result.identity.followup.kind}:${result.identity.followup.attribute ?? ''}` : null })}`);
     return done({ status: result.status, identity: result.identity, default_condition: result.default_condition, token }, 200, result.call, {
       item: String(result.identity?.display_name ?? '').slice(0, 120) || null, category: result.identity?.category ?? null,
       identity_confidence: result.identity?.identity_confidence ?? null, identity_precision: result.identity?.identity_precision ?? null,

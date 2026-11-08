@@ -187,6 +187,9 @@ export function buildSearchQueries({ identity, answer = null, stage = 'local' } 
   if (stage === 'expand') {
     out.push(`${name} used sold price`);
     if (codes[0]) out.push(`${codes[0]} used`);
+    // A single used listing abroad — an eBay item page — names its product, condition and price on one page and can be
+    // tied to the exact model; a search-results page cannot (binding.js). The first public scan (2026-11-08) found one.
+    if (terms.shops) out.push(`${name} pre-owned ebay`);
     if (terms.shops) out.push(`${name} new price`);
     for (const t of terms.expand) out.push(`${name} ${t}`);
     out.push(`${hebrew ?? aliases[0] ?? name} משומש למכירה`);

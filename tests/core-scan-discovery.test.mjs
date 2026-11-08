@@ -88,6 +88,7 @@ describe('CD-1 the queries are the server\'s, built from the identity', () => {
     assert.deepEqual(q, [
       'Logitech G Pro Wireless used sold price',
       '910-005272 used',
+      'Logitech G Pro Wireless pre-owned ebay',
       'Logitech G Pro Wireless new price',
       'עכבר גיימינג אלחוטי Logitech G Pro Wireless משומש למכירה',
     ]);
