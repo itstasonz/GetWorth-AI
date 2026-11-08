@@ -153,3 +153,25 @@ describe('IN-4 no other engine and no model-stated price behind a core-scan numb
     assert.doesNotMatch(view, /band\.(list|worth|quick|low|high)\s*[*/+-]\s*\d/);
   });
 });
+
+describe('IN-5 the scan history shows a price only where the current engine stands behind it (DB audit 2026-11-08)', () => {
+  test('IN-5a a reproducible core-scan price shows; an older AI estimate or a pre-rules core price reads as older; no price is none', async () => {
+    const { historyPriceOf, HISTORY_COLUMNS } = await import('../src/lib/valuationHistory.js');
+    assert.deepEqual(historyPriceOf({ price_mid: 355, price_method: 'core_scan_web', reproducible: { today: '2026-11-08' } }), { price: 355 });
+    assert.deepEqual(historyPriceOf({ price_mid: 75, price_method: 'core_scan_web', reproducible: null }), { older: true }, 'the 6 October ₪75 mouse');
+    assert.deepEqual(historyPriceOf({ price_mid: 600, price_method: 'ai_estimate' }), { older: true }, 'a model estimate is never shown as a price');
+    assert.deepEqual(historyPriceOf({ price_mid: 350, price_method: 'comp_based', reproducible: { x: 1 } }), { older: true });
+    assert.deepEqual(historyPriceOf({ price_mid: null, price_method: 'manual_required' }), {});
+    assert.match(HISTORY_COLUMNS, /, reproducible:ai_raw_response->valuation->inputs$/);
+    // The row the engine writes today carries exactly that path.
+    const v = buildValuation({ evidence: pool(3), today: TODAY });
+    const row = buildValuationRow({ id: 'v', userId: 'u', scanUuid: 's', identity: normalizeIdentity(RAW_IDENTITY), valuation: v, lang: 'he' });
+    assert.ok(row.ai_raw_response.valuation.inputs && typeof row.ai_raw_response.valuation.inputs === 'object');
+  });
+  test('IN-5b the history list renders through the rule, never price_mid directly', () => {
+    const view = read('src/views/AuthProfileView.jsx');
+    assert.doesNotMatch(view, /v\.price_mid\.toLocaleString/);
+    assert.match(view, /historyPriceOf\(v\)\.price/);
+    assert.match(read('src/contexts/AppContext.jsx'), /query\(HISTORY_COLUMNS\.replace\(/, 'the list still loads if the path column is refused');
+  });
+});

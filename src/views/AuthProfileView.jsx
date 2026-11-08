@@ -13,6 +13,7 @@ import { STAT_COLORS, timeAgo } from '../lib/utils';
 // 0.6 in CameraResultsView, so glass panels were different weights on
 // adjacent screens. Key names are unchanged, so no call site moved.
 import { STITCH } from '../lib/tokens';
+import { historyPriceOf } from '../lib/valuationHistory';
 
 export function AuthView() {
   const { t, lang, rtl, authMode, setAuthMode, authForm, setAuthForm, authError, setAuthError, authLoading, signInGoogle, signInEmail, sendPasswordReset, updatePassword } = useApp();
@@ -813,7 +814,9 @@ export function ProfileView() {
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
-                      {v.price_mid > 0 && <p className="text-sm font-bold text-[#6FEEE1]">₪{v.price_mid.toLocaleString()}</p>}
+                      {/* Only a current, evidence-based price is shown as a price (lib/valuationHistory.js). */}
+                      {historyPriceOf(v).price && <p className="text-sm font-bold text-[#6FEEE1]">₪{historyPriceOf(v).price.toLocaleString()}</p>}
+                      {historyPriceOf(v).older && <p className="text-xs text-slate-500">{lang === 'he' ? 'הערכה ישנה · סרקו שוב' : 'Older estimate · scan again'}</p>}
                       <p className="text-[10px] text-slate-600">{new Date(v.created_at).toLocaleDateString()}</p>
                     </div>
                     {/* Delete button */}

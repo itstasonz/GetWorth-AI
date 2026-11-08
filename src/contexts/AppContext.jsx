@@ -9,6 +9,7 @@ import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
 import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor } from '../lib/coreScan';
+import { HISTORY_COLUMNS } from '../lib/valuationHistory';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -2387,12 +2388,10 @@ export function AppProvider({ children }) {
     const ownerId = user.id;
     setValuationsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('valuations')
-        .select('id, ai_name, ai_name_hebrew, ai_category, ai_confidence, price_mid, price_method, user_confirmed, user_correction, created_at')
-        .eq('user_id', ownerId)
-        .order('created_at', { ascending: false })
-        .limit(50);
+      const query = (columns) => supabase.from('valuations').select(columns).eq('user_id', ownerId).order('created_at', { ascending: false }).limit(50);
+      let { data, error } = await query(HISTORY_COLUMNS);
+      // Should the JSON-path column be refused, the list still loads: without it every stored price reads as older.
+      if (error) ({ data, error } = await query(HISTORY_COLUMNS.replace(/, reproducible:[^,]+$/, '')));
       if (error) throw error;
       if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004 ownership
       setValuations(data || []);
