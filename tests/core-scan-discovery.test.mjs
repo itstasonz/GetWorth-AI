@@ -83,12 +83,12 @@ describe('CD-1 the queries are the server\'s, built from the identity', () => {
     assert.deepEqual(buildSearchQueries({ identity: MOUSE }), q, 'the same identity, the same queries');
     assert.deepEqual(buildSearchQueries({ identity: { ...MOUSE, color: 'White', display_name: 'עכבר Logitech G Pro Wireless' } }), q, 'colour and display name are not the product');
   });
-  test('CD-1b the wider stage: sold and used abroad, the new price abroad, Israel again in other words; still the exact product', () => {
+  test('CD-1b the wider stage: Israel again first (Homeless ads carry their price in the title), then sold and used abroad, the new price abroad, Israel again in other words; still the exact product', () => {
     const q = buildSearchQueries({ identity: MOUSE, stage: 'expand' });
     assert.deepEqual(q, [
+      'עכבר גיימינג אלחוטי Logitech G Pro Wireless יד שנייה site:homeless.co.il',
       'Logitech G Pro Wireless used sold price',
       '910-005272 used',
-      'Logitech G Pro Wireless pre-owned ebay',
       'Logitech G Pro Wireless new price',
       'עכבר גיימינג אלחוטי Logitech G Pro Wireless משומש למכירה',
     ]);

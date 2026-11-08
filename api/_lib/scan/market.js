@@ -185,11 +185,13 @@ export function buildSearchQueries({ identity, answer = null, stage = 'local' } 
   const terms = termsFor(identity);
   const out = [];
   if (stage === 'expand') {
+    // ISRAEL FIRST (2026-11-08). The wider stage looks in Israel again before it looks abroad: a Homeless ad's title
+    // carries its price ("… 430 ש\"ח"), so its search result can be read and tied to one ad — the one Israeli classifieds
+    // source a search can price from today (Yad2 answers automated access with a bot check; Facebook disallows it).
+    // Abroad is asked only for what can bring an Israeli price to level later: sold prices and the new price there.
+    out.push(`${hebrew ?? name} יד שנייה site:homeless.co.il`);
     out.push(`${name} used sold price`);
     if (codes[0]) out.push(`${codes[0]} used`);
-    // A single used listing abroad — an eBay item page — names its product, condition and price on one page and can be
-    // tied to the exact model; a search-results page cannot (binding.js). The first public scan (2026-11-08) found one.
-    if (terms.shops) out.push(`${name} pre-owned ebay`);
     if (terms.shops) out.push(`${name} new price`);
     for (const t of terms.expand) out.push(`${name} ${t}`);
     out.push(`${hebrew ?? aliases[0] ?? name} משומש למכירה`);
@@ -226,7 +228,7 @@ They look for: Israeli second-hand listings for THIS product, in Hebrew and in E
 Do not search abroad in this call. Read prices from the search results; do not open pages.`,
   expand: (queries) => `SEARCH — LOOK FURTHER. The first search found little Israeli second-hand evidence for this item. Make ONE search call that carries EXACTLY these queries at once. Run each line as one query, as written:
 ${queryBlock(queries)}
-They look for: used and SOLD prices abroad for this exact item (eBay sold or completed listings, a price guide, a resale marketplace that fits this kind of item); the price abroad for a NEW unit of this exact item, in the same currency: it is what lets a foreign used price be brought to Israeli price level; and the Israeli second-hand market once more in DIFFERENT words.
+They look, in this order, for: the ISRAELI second-hand market once more in different words — a Homeless ad shows its price in its title, read it from there; then used and SOLD prices abroad for this exact item (sold or completed listings, a price guide); and the price abroad for a NEW unit of this exact item, in the same currency. Prices abroad are context: they never make an Israeli price by themselves, and only bring one to Israeli price level once Israeli evidence exists.
 Read prices from the search results; do not open pages.`,
 };
 

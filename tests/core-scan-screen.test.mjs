@@ -652,20 +652,16 @@ describe('CV-10 the approved result: one worth, then what to ask and a quick sal
     assert.equal(worth.querySelector('bdi').getAttribute('dir'), 'ltr');
     assert.equal(container.querySelector('[data-testid="scan-secondary-prices"]').textContent, 'מחיר מומלץ לפרסום₪290מכירה מהירה₪240');
   });
-  test('CV-10c an estimate from abroad says so in place of the generic note, and stays approximate', async () => {
-    const abroadEstimate = { ...VALUATION, approximate: true, price_confidence: 'low', estimate_basis: 'abroad_scaled', counts: { ...VALUATION.counts, il_used_exact: 0, il_used_close: 0, intl_used_exact: 3 } };
-    await settle(await open({ identify: [identified()], price: [pricedAnswer(abroadEstimate)] }));
-    assert.match(text(), /No Israeli second-hand listing was found\. This estimate comes from used listings of this exact model abroad/);
-    assert.match(text(), /Estimated worth \(approximate\)≈ ₪260/);
-    assert.doesNotMatch(text(), /Recommended listing price|No Israeli second-hand prices were found; this rests/);
-    assert.match(text(), /Price confidence: Low/);
+  test('CV-10c ISRAEL FIRST: the screen has no estimate-from-abroad state at all', async () => {
+    const src = (await import('node:fs')).readFileSync(new URL('../src/views/ScanView.jsx', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /abroad_scaled|abroadEstimate/);
   });
   test('CV-10d no price: the exact gap in counts, and what to do next — never a number', async () => {
     const gap = { ...UNPRICED, no_price_reason: 'no_verified_israeli_second_hand_reference', withdrawn: 'no_verified_israeli_second_hand_reference', retail_new_ils: 390,
-      evidence_gap: { israeli_private_found: 0, abroad_usable: 1, abroad_needed: 2, price_level_measured: true, new_price_il: 390 } };
+      evidence_gap: { israeli_private_found: 0, abroad_found: 1, price_level_measured: true, new_price_il: 390 } };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(gap)] }));
-    assert.match(container.querySelector('[data-testid="scan-evidence-gap"]').textContent, /^Found: no Israeli second-hand listing; 1 used listing of this exact model abroad \(an estimate needs 2\)\./);
-    assert.match(text(), /You can still list it at your own price/);
+    assert.equal(container.querySelector('[data-testid="scan-evidence-gap"]').textContent, 'In Israel: no second-hand listing of this item was found. 1 used listing of this model abroad is shown as context only: prices abroad do not say what it sells for here.');
+    assert.match(text(), /You can list it at your own price; the new price in Israel is the ceiling buyers compare with/);
     assert.equal(container.querySelector('[data-testid="scan-worth"]'), null);
     assert.doesNotMatch(text(), /Quick sale|Estimated worth/);
   });

@@ -227,14 +227,13 @@ export default function ScanView() {
                   <p className="text-body font-semibold text-text-primary"><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.quick ?? band.low)}</bdi></p>
                 </div>
               </div>
-              {s.valuation.estimate_basis === 'abroad_scaled' && <p className="text-body-sm text-text-secondary" data-testid="scan-abroad-estimate">{copy.abroadEstimate}</p>}
-              {approximate && s.valuation.estimate_basis !== 'abroad_scaled' && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_items' ? copy.similarItemsNote : copy.approxNote}</p>}
+              {approximate && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_items' ? copy.similarItemsNote : copy.approxNote}</p>}
               <p className="text-body-sm text-text-secondary">
                 {copy.priceConfidence}: <span className="font-semibold text-text-primary">{copy.levels[s.valuation.price_confidence] ?? copy.levels.low}</span>
               </p>
               {/* Thin evidence is said out loud, beside the price it weakens. */}
               {(counts.resale ?? 0) < 3 && <p className="text-body-sm text-text-muted">{copy.thin(counts.resale ?? 0)}</p>}
-              {(counts.resale ?? 0) > 0 && israeli === 0 && s.valuation.estimate_basis !== 'abroad_scaled' && <p className="text-body-sm text-text-muted">{copy.abroadOnly}</p>}
+              {(counts.resale ?? 0) > 0 && israeli === 0 && <p className="text-body-sm text-text-muted">{copy.abroadOnly}</p>}
               {s.valuation.dispersed && <p className="text-body-sm text-text-muted">{copy.dispersed}</p>}
             </div>
             {/* Every reference is brought to Good condition; any other choice is the ladder applied to that. */}

@@ -3,7 +3,7 @@
 // These pin what changed and what must not.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildValuation, marketKey, FOREIGN_MIN, ESTIMATE_BASIS, WITHDRAWN, CONDITION_FACTOR } from '../api/_lib/scan/valuation.js';
+import { buildValuation, marketKey, ESTIMATE_BASIS, WITHDRAWN, CONDITION_FACTOR } from '../api/_lib/scan/valuation.js';
 import { buildSearchQueries } from '../api/_lib/scan/market.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
 import { buildValuationRow } from '../api/_lib/scan/persist.js';
@@ -44,26 +44,20 @@ describe('FP-2 the evidence the scan had, and what each shape of it gives', () =
     assert.deepEqual([v.status, v.prices, v.retail_new_ils], ['insufficient_evidence', null, 390]);
     assert.equal(v.retail_new_range.dispersed, true, '389 and 659 disagree: the cheapest shop sets the line');
   });
-  test('FP-2b new prices in Israel + ONE used listing abroad (the founder\'s scan): no price; gap = 0 Israeli, 1 of 2 abroad', () => {
+  test('FP-2b new prices in Israel + ONE used listing abroad (the founder\'s scan): no price; gap = 0 Israeli, 1 abroad as context', () => {
     const v = value([...IL_SHOPS(), abroad(60, { price_ils: 220 })]);
     assert.deepEqual([v.status, v.withdrawn], ['insufficient_evidence', WITHDRAWN.NO_LOCAL_EVIDENCE]);
-    assert.deepEqual(v.evidence_gap, { israeli_private_found: 0, abroad_usable: 1, abroad_needed: FOREIGN_MIN, price_level_measured: false, new_price_il: 390 });
+    assert.deepEqual(v.evidence_gap, { israeli_private_found: 0, abroad_found: 1, price_level_measured: false, new_price_il: 390 });
   });
   test('FP-2c two exact used listings abroad, but no new price abroad to measure the level: still no number', () => {
     const v = value([...IL_SHOPS(), abroad(60, { price_ils: 220 }), abroad(65, { price_ils: 240 })]);
-    assert.deepEqual([v.status, v.evidence_gap.price_level_measured, v.evidence_gap.abroad_usable], ['insufficient_evidence', false, 2]);
+    assert.deepEqual([v.status, v.evidence_gap.price_level_measured, v.evidence_gap.abroad_found], ['insufficient_evidence', false, 2]);
   });
-  test('FP-2d two exact used listings abroad AND the level measured: a labelled low-confidence estimate, traceable to its pages', () => {
+  test('FP-2d ISRAEL FIRST: two exact used listings abroad AND the level measured still make no Israeli price', () => {
     const v = value([...IL_SHOPS(), shop(130, { market: 'INTL', currency: 'USD', price_ils: 480, url: 'https://www.amazon.com/gpw', domain: 'www.amazon.com' }), abroad(60, { price_ils: 220 }), abroad(65, { price_ils: 240 })]);
-    assert.deepEqual([v.status, v.estimate_basis, v.price_confidence, v.approximate], ['priced', ESTIMATE_BASIS.ABROAD, 'low', true]);
-    // Level 389 / 480 = 0.81. 220 and 240 asked abroad → x0.9 negotiation → x0.81 = 160 and 175.
-    assert.equal(v.intl_scale, 0.81, "the cheapest Israeli shop (389) over the new price abroad (480)");
-    const used = v.evidence.filter((e) => e.used);
-    assert.deepEqual(used.map((e) => e.url).sort(), v.evidence.filter((e) => e.market === 'INTL' && e.kind === 'used_listing').map((e) => e.url).sort());
-    assert.ok(used.every((e) => /^https:\/\/www\.ebay\.com\/itm\//.test(e.url)), 'every price that counts links to its own page');
-    const g = v.prices.good;
-    assert.ok(g.quick <= g.worth && g.worth <= g.list, JSON.stringify(g));
-    assert.ok(g.worth >= 150 && g.worth <= 180, JSON.stringify(g));
+    assert.deepEqual([v.status, v.prices, v.estimate_basis, v.withdrawn], ['insufficient_evidence', null, ESTIMATE_BASIS.ISRAEL, WITHDRAWN.NO_LOCAL_EVIDENCE]);
+    assert.deepEqual(v.evidence_gap, { israeli_private_found: 0, abroad_found: 2, price_level_measured: true, new_price_il: 390 });
+    assert.ok(v.evidence.filter((e) => e.market === 'INTL' && e.kind === 'used_listing').every((e) => !e.used && e.set_aside === 'abroad_without_israeli_reference'));
   });
   test('FP-2e a sealed or an old unit abroad, or a different model, never makes the estimate', () => {
     const level = shop(130, { market: 'INTL', currency: 'USD', price_ils: 480 });
@@ -122,16 +116,20 @@ describe('FP-5 the research is the search that made it', () => {
   test('FP-5a the logged evidence gives exactly what the screen said: no price, 0 Israeli, 0 usable abroad, level measured', () => {
     const v = value(LOGGED_6F0A57D4);
     assert.deepEqual([v.status, v.withdrawn], ['insufficient_evidence', WITHDRAWN.NO_LOCAL_EVIDENCE]);
-    assert.deepEqual(v.evidence_gap, { israeli_private_found: 0, abroad_usable: 0, abroad_needed: 2, price_level_measured: true, new_price_il: 400 }, 'as the Production log recorded it');
+    assert.deepEqual(v.evidence_gap, { israeli_private_found: 0, abroad_found: 0, price_level_measured: true, new_price_il: 400 }, 'the gap of scan 6f0a57d4 (logged then as 0 / 0 abroad usable)');
     // Archived Reddit posts (2019–2022) are history, not today's market; ad.co.il archive LIST pages tie no price to one ad.
     for (const e of v.evidence.filter((x) => /reddit/.test(x.url))) assert.equal(e.used, false);
     for (const e of v.evidence.filter((x) => /ad\.co\.il/.test(x.url))) assert.equal(e.set_aside, 'price_not_tied_to_product');
   });
-  test('FP-5b two current single used listings of the exact model abroad, beside that evidence, give the labelled estimate', () => {
+  test('FP-5b ISRAEL FIRST: two current single used listings of the exact model abroad, beside that evidence, are context and price nothing', () => {
     const ebay = (n, ils) => ({ url: `https://www.ebay.com/itm/${n}`, domain: 'www.ebay.com', title: 't', price: ils, currency: 'USD', price_ils: ils, kind: 'used_listing', match: 'exact', market: 'INTL', condition: 'good', page: 'listing', listed: null, binding: 'strong', seen: TODAY });
     const v = value([...LOGGED_6F0A57D4, ebay(167883108555, 165), ebay(175809022704, 185)]);
-    assert.deepEqual([v.status, v.estimate_basis, v.price_confidence], ['priced', ESTIMATE_BASIS.ABROAD, 'low']);
-    assert.deepEqual(v.evidence.filter((e) => e.used).map((e) => e.url).sort(), ['https://www.ebay.com/itm/167883108555', 'https://www.ebay.com/itm/175809022704']);
+    assert.deepEqual([v.status, v.prices, v.evidence_gap.abroad_found], ['insufficient_evidence', null, 2]);
+    // ...and one current Israeli used listing beside them opens the gate: the Israeli listing leads, abroad joins at the measured level.
+    const il = { url: 'https://m.homeless.co.il/yad2/viewad%2C1.aspx', domain: 'm.homeless.co.il', title: 't', price: 250, currency: 'ILS', price_ils: 250, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-11-01', binding: 'strong', seen: TODAY };
+    const opened = value([...LOGGED_6F0A57D4, ebay(167883108555, 165), ebay(175809022704, 185), il]);
+    assert.deepEqual([opened.status, opened.estimate_basis, opened.local_evidence], ['priced', ESTIMATE_BASIS.ISRAEL, true]);
+    assert.ok(opened.evidence.find((e) => e.url === il.url).used);
   });
   test('FP-5c the research key carries the query plan: a change to the search is a new key; an answer that changes no query is not', async () => {
     const { researchKey, RESEARCH_VERSION } = await import('../api/_lib/scan/service.js');

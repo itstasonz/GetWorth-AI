@@ -151,7 +151,8 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
  * (and RESEARCH_VERSION for changes to how pages are read and classified): change the search, and the next scan searches.
  * An answer that changes no query still changes no key (strategy.js marketKey, market.js searchNames).
  */
-export const RESEARCH_VERSION = 2;
+// 3: the Israel-first wider stage (2026-11-08).
+export const RESEARCH_VERSION = 3;
 function fnv1a(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
