@@ -95,10 +95,22 @@ describe('MP-1 history is preserved, nothing is invented', () => {
 });
 
 describe('MP-1b the existing profile guard keeps working (regression: a fast default read back as NULL)', () => {
-  test('MP-1b a user edits their own profile after the migration, on a row that existed before it', async () => {
+  // In Production a user cannot UPDATE profiles directly (column privileges; the admin policy reads is_admin, which
+  // authenticated may not select) — unchanged by the migration. Profiles are written by the service role (the
+  // verification edge function), by trusted functions, and — the path this regression pins — by any write made in a
+  // user's identity, which runs the update guard's jsonb_populate_record(OLD, …) rebuild.
+  test('MP-1b a write in a user\'s identity still works after the migration, on a row that existed before it; a direct user write stays denied', async () => {
+    const before = await fresh({ migrate: false });
+    await rejects(as(before, SELLER, (tx) => tx.query(`UPDATE profiles SET full_name = 'x' WHERE id = $1`, [SELLER])), /permission denied/);
     const db = await fresh();
-    await as(db, SELLER, (tx) => tx.query(`UPDATE profiles SET full_name = 'renamed', location = 'Haifa' WHERE id = $1`, [SELLER]));
+    await rejects(as(db, SELLER, (tx) => tx.query(`UPDATE profiles SET full_name = 'x' WHERE id = $1`, [SELLER])), /permission denied/);
+    await db.transaction(async (tx) => {
+      await tx.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [SELLER]);
+      await tx.query(`UPDATE profiles SET full_name = 'renamed', location = 'Haifa' WHERE id = $1`, [SELLER]);
+    });
     assert.deepEqual(await one(db, `SELECT full_name, location, is_test FROM profiles WHERE id = $1`, [SELLER]), { full_name: 'renamed', location: 'Haifa', is_test: false });
+    await db.query(`UPDATE profiles SET verification_status = 'pending' WHERE id = $1`, [SELLER]);
+    assert.equal((await one(db, `SELECT verification_status FROM profiles WHERE id = $1`, [SELLER])).verification_status, 'pending', 'the service-role path');
   });
 });
 
@@ -167,8 +179,8 @@ describe('MP-3 the order lifecycle records what the buyer confirms, and only tha
     const db = await fresh();
     const o = await orderReady(db, await listing(db, { title: 'y', price: 100 }), 100);
     await rejects(complete(db, o, { final_price: 999 }, SELLER), /Only the buyer/);
-    const n = await as(db, BUYER, async (tx) => (await tx.query(`UPDATE orders SET final_price = 1, final_price_source = 'buyer_confirmed', final_price_confirmed_at = now() WHERE id = $1`, [o])).affectedRows);
-    assert.equal(n, 0, 'no UPDATE policy on orders: the row is not touched');
+    await rejects(as(db, BUYER, (tx) => tx.query(`UPDATE orders SET final_price = 1, final_price_source = 'buyer_confirmed', final_price_confirmed_at = now() WHERE id = $1`, [o])), /permission denied/);
+    assert.equal((await one(db, `SELECT final_price FROM orders WHERE id = $1`, [o])).final_price, null);
     await rejects(as(db, null, (tx) => tx.query(`SELECT transition_order($1, 'completed', '{"final_price": 5}'::jsonb)`, [o])), /Not authenticated|permission denied/);
   });
   test('MP-3e a sale at GetWorth\'s own suggestion is recorded, measured against its valuation, and never a comp', async () => {
@@ -196,7 +208,9 @@ describe('MP-3 the order lifecycle records what the buyer confirms, and only tha
 describe('MP-4 test accounts are set by admins only', () => {
   test('MP-4a a user cannot flag or unflag themselves, by update or by insert; the RPCs refuse non-admins; an admin can', async () => {
     const db = await fresh();
-    await as(db, BUYER, (tx) => tx.query(`UPDATE profiles SET is_test = true WHERE id = $1`, [BUYER]));
+    await rejects(as(db, BUYER, (tx) => tx.query(`UPDATE profiles SET is_test = true WHERE id = $1`, [BUYER])), /permission denied/);
+    // And should a write in the user's identity ever reach the row, the existing guard reverts it.
+    await db.transaction(async (tx) => { await tx.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [BUYER]); await tx.query(`UPDATE profiles SET is_test = true WHERE id = $1`, [BUYER]); });
     assert.equal((await one(db, `SELECT is_test FROM profiles WHERE id = $1`, [BUYER])).is_test, false, 'the existing guard reverts it');
     await rejects(as(db, BUYER, (tx) => tx.query(`SELECT admin_set_test_account($1, true)`, [BUYER])), /Admin access required/);
     await rejects(as(db, BUYER, (tx) => tx.query(`SELECT * FROM admin_test_account_ids()`)), /Admin access required/);
@@ -207,7 +221,7 @@ describe('MP-4 test accounts are set by admins only', () => {
     await as(db, ADMIN, (tx) => tx.query(`SELECT admin_set_test_account($1, true)`, [BUYER]));
     const ids = await as(db, ADMIN, async (tx) => (await tx.query(`SELECT * FROM admin_test_account_ids()`)).rows);
     assert.deepEqual(ids.map((r) => Object.values(r)[0]), [BUYER]);
-    await as(db, BUYER, (tx) => tx.query(`UPDATE profiles SET is_test = false WHERE id = $1`, [BUYER]));
+    await db.transaction(async (tx) => { await tx.query(`SELECT set_config('request.jwt.claim.sub', $1, true)`, [BUYER]); await tx.query(`UPDATE profiles SET is_test = false WHERE id = $1`, [BUYER]); });
     assert.equal((await one(db, `SELECT is_test FROM profiles WHERE id = $1`, [BUYER])).is_test, true, 'nor unflag');
   });
 });

@@ -134,8 +134,49 @@ ALTER TABLE public.orders ADD CONSTRAINT orders_seller_profile_fkey FOREIGN KEY 
 ALTER TABLE public.orders ADD CONSTRAINT orders_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text, 'shipped'::text, 'ready_pickup'::text, 'delivered'::text, 'completed'::text, 'cancelled'::text, 'disputed'::text])));
 ALTER TABLE public.orders ADD CONSTRAINT orders_status_valid CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'declined'::text, 'shipped'::text, 'ready_pickup'::text, 'delivered'::text, 'completed'::text, 'cancelled'::text, 'disputed'::text])));
 
--- Supabase's default table grants: RLS, not grants, decides.
+-- Supabase's default table grants, then Production's own narrowing for orders and profiles (captured per column).
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+REVOKE SELECT ON public.orders FROM anon;
+GRANT SELECT ON public.orders TO anon;
+REVOKE SELECT ON public.profiles FROM anon;
+GRANT SELECT (id, full_name, avatar_url, location, reputation_points, badge, total_sales, rating, is_verified, response_rate, created_at, updated_at, review_count) ON public.profiles TO anon;
+REVOKE SELECT ON public.listings FROM anon;
+GRANT SELECT ON public.listings TO anon;
+REVOKE SELECT ON public.orders FROM authenticated;
+GRANT SELECT ON public.orders TO authenticated;
+REVOKE SELECT ON public.profiles FROM authenticated;
+GRANT SELECT (id, full_name, avatar_url, location, reputation_points, badge, total_sales, rating, is_verified, response_rate, created_at, updated_at, review_count) ON public.profiles TO authenticated;
+REVOKE SELECT ON public.listings FROM authenticated;
+GRANT SELECT ON public.listings TO authenticated;
+REVOKE INSERT ON public.orders FROM anon;
+REVOKE INSERT ON public.profiles FROM anon;
+GRANT INSERT ON public.profiles TO anon;
+REVOKE INSERT ON public.listings FROM anon;
+GRANT INSERT ON public.listings TO anon;
+REVOKE INSERT ON public.orders FROM authenticated;
+REVOKE INSERT ON public.profiles FROM authenticated;
+GRANT INSERT ON public.profiles TO authenticated;
+REVOKE INSERT ON public.listings FROM authenticated;
+GRANT INSERT ON public.listings TO authenticated;
+REVOKE UPDATE ON public.orders FROM anon;
+REVOKE UPDATE ON public.profiles FROM anon;
+REVOKE UPDATE ON public.listings FROM anon;
+GRANT UPDATE ON public.listings TO anon;
+REVOKE UPDATE ON public.orders FROM authenticated;
+REVOKE UPDATE ON public.profiles FROM authenticated;
+GRANT UPDATE (phone, full_name, avatar_url, location, updated_at) ON public.profiles TO authenticated;
+REVOKE UPDATE ON public.listings FROM authenticated;
+GRANT UPDATE ON public.listings TO authenticated;
+REVOKE DELETE ON public.orders FROM anon;
+REVOKE DELETE ON public.profiles FROM anon;
+GRANT DELETE ON public.profiles TO anon;
+REVOKE DELETE ON public.listings FROM anon;
+GRANT DELETE ON public.listings TO anon;
+REVOKE DELETE ON public.orders FROM authenticated;
+REVOKE DELETE ON public.profiles FROM authenticated;
+GRANT DELETE ON public.profiles TO authenticated;
+REVOKE DELETE ON public.listings FROM authenticated;
+GRANT DELETE ON public.listings TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.auth_is_admin()
  RETURNS boolean
