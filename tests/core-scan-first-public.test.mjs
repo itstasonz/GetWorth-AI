@@ -155,3 +155,25 @@ describe('FP-5 the research is the search that made it', () => {
     resetMarketCache();
   });
 });
+
+// ── The third public scan of the same mouse (2026-11-08 11:20, scan 62a07b50, release ac630a0): a fresh search, 83 pages
+// reached, five references kept, and no record of WHERE the 78 others were lost. The research now says, stage by stage.
+test('FP-6 the research records its funnel: hosts reached, prices the model reported, prices the page text verified', async () => {
+  const { runPrice, resetMarketCache } = await import('../api/_lib/scan/service.js');
+  const { fakeProvider, RAW_MARKET, RAW_EXPAND, NOW } = await import('./helpers/core-scan-fakes.mjs');
+  const { resetFxCache } = await import('../api/_lib/scan/fx.js');
+  resetMarketCache(); resetFxCache();
+  const fetchImpl = fakeProvider({ markets: [{ evidence: [] }], expand: [RAW_EXPAND] });
+  const store = { load: async () => null, save: async () => {} };
+  const r = await runPrice({ identity: normalizeIdentity(RAW_IDENTITY), store, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's', now: () => NOW });
+  const funnel = r.valuation.searched.funnel;
+  assert.deepEqual(funnel.map((f) => f.stage), ['local', 'expand']);
+  for (const f of funnel) {
+    assert.ok(f.reached > 0 && Object.values(f.hosts).reduce((a, b) => a + b, 0) === f.reached, JSON.stringify(f));
+    assert.ok(f.verified + f.unverified <= f.reported || f.reported === 0, JSON.stringify(f));
+    assert.ok(Object.keys(f.hosts).every((h) => !h.startsWith('www.')));
+  }
+  assert.equal(funnel[0].reported, 0);
+  assert.equal(funnel[1].reported, RAW_EXPAND.evidence.length);
+  resetMarketCache();
+});

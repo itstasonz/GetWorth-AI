@@ -205,6 +205,10 @@ export async function runPrice({
   let queries = 0;
   let planned = 0;
   let pages = 0;
+  // WHERE EVIDENCE IS LOST, stage by stage: the hosts the search reached, how many prices the model reported from them,
+  // and how many of those the page text verified. (Scan 62a07b50, 2026-11-08: 83 pages reached, 5 references kept, and no
+  // record of which hosts the 83 were — the loss could not be placed.) Hosts and counts only.
+  const funnel = [];
   let searched = false;
   let firstSearchMs = null;
   let usedModel = model;
@@ -219,6 +223,9 @@ export async function runPrice({
     queries += provenance.queries?.length ?? 0;
     planned += meta.queries_planned ?? 0;
     pages += provenance.sources?.length ?? 0;
+    const hosts = {};
+    for (const u of provenance.sources ?? []) { let h = '?'; try { h = new URL(typeof u === 'string' ? u : u?.url).hostname.replace(/^www./, ''); } catch { /* unparseable */ } hosts[h] = (hosts[h] ?? 0) + 1; }
+    funnel.push({ stage, reached: provenance.sources?.length ?? 0, hosts: Object.fromEntries(Object.entries(hosts).sort((a, b) => b[1] - a[1]).slice(0, 15)), reported: Array.isArray(raw?.evidence) ? raw.evidence.length : 0, verified: verified.evidence.length, unverified: verified.unverified });
     searched = searched || provenance.search_performed;
     firstSearchMs ??= meta.timings?.first_search_ms ?? null;
     usedModel = meta.model ?? usedModel;
@@ -278,7 +285,7 @@ export async function runPrice({
     unverified,
     search_performed: searched,
     // `planned` is how many queries the server built; `queries` how many the tool's own record says it ran.
-    searched: { date: today, queries, planned, pages, stages: [...stages] },
+    searched: { date: today, queries, planned, pages, stages: [...stages], funnel },
     fx_date: fx?.rate_date ?? null,
   };
   // Only research that really searched is worth keeping.
