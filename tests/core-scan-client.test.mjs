@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   scanStore, STAGE, CONDITIONS, LISTING_CONDITION, MAX_ANSWER_CHARS, startScan, addScanPhoto, answerQuestion, dismissQuestion, openQuestion, correctItem, retryScan,
-  setScanCondition, scanActive, bandFor, buildListingDraft,
+  setScanCondition, scanActive, bandFor, buildListingDraft, REFRESH_FOLLOW_MS,
 } from '../src/lib/coreScan.js';
 import { IMG, RAW_IDENTITY, PRICES } from './helpers/core-scan-fakes.mjs';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
@@ -361,5 +361,25 @@ describe('CC-6 the screen', () => {
   test('CC-6c sources are real links that open safely', () => {
     // Web sources are links that open safely; a GetWorth sale (no public page) is not a link at all.
     assert.match(sheets, /const rowProps = sale \? \{\} : \{ href: e\.url, target: '_blank', rel: 'noopener noreferrer' \};/);
+  });
+});
+
+describe('CC-7 a price from older research is renewed in place, once', () => {
+  test('CC-7a refreshing → one silent follow-up after REFRESH_FOLLOW_MS replaces the valuation; no second follow-up', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const stale = { ...VALUATION, searched: { at: new Date(Date.now() - 2 * 86_400_000).toISOString() } };
+    const fresh = { ...VALUATION, prices: { ...VALUATION.prices, good: { ...VALUATION.prices.good, list: 999 } } };
+    server({ identify: [identified()], price: [{ payload: { ...pricedAnswer(stale).payload, refreshing: true } }, { payload: { ...pricedAnswer(fresh).payload, refreshing: false } }] });
+    assert.equal(await startScan(deps()), 'ok');
+    assert.equal(snap().refreshing, true);
+    assert.equal(requests.filter((r) => r.body.action === 'price').length, 1);
+    t.mock.timers.tick(REFRESH_FOLLOW_MS);
+    for (let i = 0; i < 20 && snap().refreshing; i += 1) await new Promise((r) => setImmediate(r));
+    assert.equal(requests.filter((r) => r.body.action === 'price').length, 2, 'exactly one follow-up');
+    assert.equal(snap().refreshing, false);
+    assert.equal(snap().valuation.prices.good.list, 999, 'the newer valuation replaced the shown one');
+    t.mock.timers.tick(REFRESH_FOLLOW_MS * 3);
+    await new Promise((r) => setImmediate(r));
+    assert.equal(requests.filter((r) => r.body.action === 'price').length, 2, 'never a second follow-up');
   });
 });

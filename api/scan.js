@@ -218,7 +218,8 @@ export function createScanHandler({
       console.log(`[Scan] research scan=${scanUuid.slice(0, 8)} ${JSON.stringify({ ...diagnosticsOf(v), withdrawn: v?.withdrawn ?? null, estimate_basis: v?.estimate_basis ?? null, gap: v?.evidence_gap ?? null, retail_new_ils: v?.retail_new_ils ?? null, reused: result.reused === true }).slice(0, 3000)}`);
       // Every reference by its public page: what it was, what it cost in shekels, and whether it counted and why not.
       console.log(`[Scan] evidence scan=${scanUuid.slice(0, 8)} ${JSON.stringify((v?.evidence ?? []).slice(0, 16).map((e) => ({ u: String(e.url ?? '').slice(0, 140), k: e.kind, m: e.match, mk: e.market, ils: e.price_ils ?? null, c: e.condition ?? null, f: e.freshness ?? null, b: e.binding ?? null, used: e.used === true, why: e.set_aside ?? null })))}`);
-      return done({ status: result.status, valuation: v, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call, {
+      return done({ status: result.status, valuation: v, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, stale: result.stale === true, refreshing: result.refreshing === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call, {
+        stale: result.stale === true, refreshing: result.refreshing === true,
         item: String(identity.display_name ?? '').slice(0, 120) || null, category: identity.category ?? null,
         priced: result.status === 'priced', withdrawn: v?.withdrawn ?? null, price_confidence: v?.price_confidence ?? null,
         approximate: v?.approximate === true, basis: v?.basis ?? null, reused: result.reused === true,
@@ -236,7 +237,10 @@ export function createScanHandler({
     if (prior && (prior.revisions ?? 0) >= MAX_REVISIONS) return done({ error: 'too_many_revisions' }, 409);
     if (correction && !prior) return done({ error: 'bad_request', detail: 'a correction needs the scan it corrects' }, 400);
 
+    // Where the time before the model goes (2026-11-08: 4 s unexplained on first identifications): measured, not guessed.
+    const tQuota = Date.now();
     const quota = await charge({ ip: clientIp(req), userId: user.id });
+    const quotaMs = Date.now() - tQuota;
     if (!quota.allowed) {
       await recordRequest(logEvent, scanUuid, { action, http: 429, outcome: 'rate_limited', reason: quota.limitType, userId: user.id, totalMs: Date.now() - t0 });
       return json({
@@ -254,6 +258,7 @@ export function createScanHandler({
       if (quota.charged && !result.billed) await refund({ userId: user.id });
       return done({ status: result.status, failure: result.failure, retryable: true }, 200, result.call);
     }
+    const tSign = Date.now();
     const token = await signScanToken({
       userId: user.id, scanUuid, identity: result.identity, started: prior?.iat ?? null,
       counters: { revisions: prior ? (prior.revisions ?? 0) + 1 : 0, followups: result.followups, identify_ms: result.call?.ms ?? null },
@@ -265,6 +270,7 @@ export function createScanHandler({
       question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? String(result.identity.followup.attribute ?? result.identity.followup.kind).slice(0, 40) : null,
       incomplete: !!result.identity?.incomplete, images: read.images.length, image_bytes: read.images.reduce((n, b) => n + Math.round(b.length * 0.75), 0),
       revision: prior ? (prior.revisions ?? 0) + 1 : 0,
+      quota_ms: quotaMs, sign_ms: Date.now() - tSign,
     });
   };
 }

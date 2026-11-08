@@ -36,6 +36,8 @@ import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvide
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import { loadMarketplaceSales, salesEvidenceFor } from './marketplace.js';
+import { afterResponse } from './telemetry.js';
+import { resolveMarketFreshMs, resolveMarketSwr } from './config.js';
 import {
   CONDITIONS, DEFAULT_CONDITION, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
   resolveMarketParallel,
@@ -169,6 +171,9 @@ export async function runPrice({
   parallel = resolveMarketParallel(),
   // Genuine GetWorth sales (marketplace.js): read alongside the research, never cached with it, never blocking it.
   marketplace = loadMarketplaceSales,
+  freshMs = resolveMarketFreshMs(), swr = resolveMarketSwr(),
+  // Where a stale-while-revalidate refresh runs: after the response (telemetry.js afterResponse, Vercel's waitUntil).
+  background = afterResponse,
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -201,7 +206,20 @@ export async function runPrice({
   const fxPending = getFxTable({ fetchImpl });
   const earlier = await recall(key, store, t0);
   // Fresh research for this item: reuse it. No search, the same evidence, the same price.
-  if (earlier && t0 - earlier.at <= MARKET_FRESH_MS) return priced(earlier, { reused: true, call: { ...noCall, ms: now() - t0 } });
+  if (earlier && t0 - earlier.at <= freshMs) return priced(earlier, { reused: true, call: { ...noCall, ms: now() - t0 } });
+  // STALE WHILE REVALIDATE: older research for this product answers now, said to be refreshing; one background search
+  // per product per instance renews it for the next request (the app asks once more: coreScan.js).
+  if (earlier && swr) {
+    if (!refreshing.has(key)) {
+      refreshing.add(key);
+      background(research().catch(() => null).finally(() => refreshing.delete(key)));
+    }
+    return priced(earlier, { reused: true, stale: true, refreshing: true, call: { ...noCall, ms: now() - t0 } });
+  }
+  return research();
+
+  /** A fresh search for this product; its record joins the shared store. */
+  async function research() {
 
   const today = marketDate(t0);
   const stages = [];
@@ -300,4 +318,8 @@ export async function runPrice({
     try { await store.save(key, record, scanUuid); } catch { /* the answer does not depend on the write */ }
   }
   return priced(record, { reused: false, call: call() });
+  }
 }
+
+/** Products whose research this instance is renewing in the background. */
+const refreshing = new Set();

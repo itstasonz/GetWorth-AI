@@ -60,6 +60,8 @@ const initial = () => ({
   condition: null,
   valuation: null,
   valuationId: null,
+  // The price was answered from a product's older research while the server renews it (service.js stale-while-revalidate).
+  refreshing: false,
   answered: null,          // the option index the owner picked, 'dismissed', or null
   correction: null,        // what the owner said the item really is
   error: null,             // { message, code, step, retryable }
@@ -202,6 +204,32 @@ async function identify({ correction = null } = {}) {
   return 'ok';
 }
 
+/**
+ * ONE SILENT FOLLOW-UP when the price came from older research that the server is renewing: after REFRESH_FOLLOW_MS the
+ * same token asks again (no quota, no new search if the renewal landed) and a newer valuation replaces the shown one in
+ * place. Never more than once per scan, never an error on screen, abandoned if the scan is left or replaced.
+ */
+export const REFRESH_FOLLOW_MS = 18_000;
+let followTimer = null;
+function followUpOnce() {
+  const mine = controller;
+  clearTimeout(followTimer);
+  followTimer = setTimeout(async () => {
+    if (mine !== controller || !state.active || !state.refreshing) return;
+    try {
+      const r = await post({ action: 'price', token: state.token, client_elapsed_ms: elapsed() }, PRICE_TIMEOUT_MS);
+      const p = r.payload ?? {};
+      if (mine !== controller || r.status !== 200 || !p.valuation || p.status === 'failed') { set({ refreshing: false }); return; }
+      set({
+        stage: p.status === 'priced' ? STAGE.PRICED : STAGE.INSUFFICIENT,
+        valuation: p.valuation, valuationId: p.valuation_id ?? state.valuationId,
+        ...(p.token ? { token: p.token } : {}),
+        refreshing: false,
+      });
+    } catch { if (mine === controller) set({ refreshing: false }); }
+  }, REFRESH_FOLLOW_MS);
+}
+
 /** Tell the server how long this scan took on the phone. Best effort, fire and forget. */
 function report(outcome) {
   const { identity_shown_ms, price_shown_ms } = state.timings;
@@ -234,6 +262,8 @@ async function price({ answer = null } = {}) {
   // The phone's own clock goes back to the server's telemetry: how long the person actually waited. Never awaited by the
   // screen, never retried, never an error on screen.
   report(p.status === 'priced' ? 'priced' : 'no_price');
+  set({ refreshing: p.refreshing === true });
+  if (p.refreshing === true) followUpOnce();
 }
 
 // ── ACTIONS ─────────────────────────────────────────────────────────────────

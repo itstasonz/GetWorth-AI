@@ -152,7 +152,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
   const identity = normalizeIdentity(RAW_IDENTITY);
   const T0 = NOW;
   const at = (ms) => () => ms;
-  const run = (fetchImpl, store, extra = {}) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl, store, scanUuid: UUID, now: at(T0), ...extra });
+  const run = (fetchImpl, store, extra = {}) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl, store, scanUuid: UUID, now: at(T0), freshMs: 3_600_000, swr: false, ...extra });
   test('CE-2Ra a second scan of the same item within the hour makes no search and gets the same price', async () => {
     const fetchImpl = fakeProvider();
     const store = fakeStore();
@@ -596,7 +596,11 @@ describe('CE-6 structure', () => {
     assert.equal(CFG.resolveMarketModel({ CORE_SCAN_MARKET_MODEL: ' gpt-6.1-sol ' }), 'gpt-6.1-sol');
     assert.deepEqual([CFG.resolveIdentityEffort({}), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'medium' }), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'max!' })], ['low', 'medium', 'low']);
     assert.equal(CFG.MARKET_MAX_STAGES, 2, 'each search costs the owner several seconds');
-    assert.equal(CFG.MARKET_FRESH_MS, 60 * 60 * 1000, 'the same item is not researched twice in an hour');
+    assert.equal(CFG.MARKET_FRESH_MS, 24 * 60 * 60 * 1000, 'a product is not researched twice in a day (2026-11-08)');
+    assert.equal(CFG.resolveMarketFreshMs({ CORE_SCAN_MARKET_FRESH_HOURS: '6' }), 6 * 3_600_000);
+    assert.equal(CFG.resolveMarketFreshMs({ CORE_SCAN_MARKET_FRESH_HOURS: '999' }), CFG.MARKET_FRESH_MS, 'bounded');
+    assert.equal(CFG.resolveMarketSwr({ CORE_SCAN_MARKET_SWR: 'false' }), false);
+    assert.equal(CFG.resolveMarketSwr({}), true);
     assert.ok(CFG.MARKET_POOL_MS > CFG.MARKET_FRESH_MS);
   });
   test('CE-6b the scan reaches OpenAI through the one shared streaming client and nowhere else', () => {

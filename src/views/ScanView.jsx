@@ -153,6 +153,15 @@ function ConditionPicker({ condition, identity, copy, adjusted = false }) {
   );
 }
 
+/** "Prices checked 2 days ago" for research older than an hour; nothing for fresh research. */
+export function checkedAgo(valuation, copy) {
+  const at = Date.parse(valuation?.searched?.at ?? '');
+  if (!Number.isFinite(at)) return null;
+  const hours = Math.floor((Date.now() - at) / 3_600_000);
+  if (hours < 1) return null;
+  return copy.checkedAgo(hours < 24 ? copy.hours(hours) : copy.days(Math.floor(hours / 24)));
+}
+
 export default function ScanView() {
   const { lang, rtl, addPhoto, cancelPipeline, handleAdditionalFile, sellFromScan, images } = useApp();
   const s = useSyncExternalStore(scanStore.subscribe, scanStore.getSnapshot);
@@ -235,6 +244,9 @@ export default function ScanView() {
               {(counts.resale ?? 0) < 3 && <p className="text-body-sm text-text-muted">{copy.thin(counts.resale ?? 0)}</p>}
               {(counts.resale ?? 0) > 0 && israeli === 0 && <p className="text-body-sm text-text-muted">{copy.abroadOnly}</p>}
               {s.valuation.dispersed && <p className="text-body-sm text-text-muted">{copy.dispersed}</p>}
+              {/* When the prices were checked, if not just now; and that newer ones are on their way, when they are. */}
+              {checkedAgo(s.valuation, copy) && <p className="text-body-sm text-text-muted" data-testid="scan-checked-ago">{checkedAgo(s.valuation, copy)}</p>}
+              {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-refreshing">{copy.refreshingPrices}</p>}
             </div>
             {/* Every reference is brought to Good condition; any other choice is the ladder applied to that. */}
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} adjusted={s.condition !== 'good'} />

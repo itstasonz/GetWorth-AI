@@ -40,7 +40,7 @@ function delayed(inner, { local = 0, expand = 0 } = {}) {
   return fetchImpl;
 }
 
-const run = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, ...extra });
+const run = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, freshMs: 3_600_000, swr: false, ...extra });
 const comparable = (r) => ({ status: r.status, prices: r.valuation?.prices ?? null, counts: r.valuation?.counts ?? null, stages: r.call?.stages, withdrawn: r.valuation?.withdrawn ?? null });
 
 describe('PM-1 the wider search starts with the Israeli one; which evidence prices the item does not change', () => {

@@ -104,8 +104,21 @@ export const TOKEN_TTL_MS = 30 * 60 * 1000;
 export const MAX_REVISIONS = 3;
 /** The scan asks at most this many questions, one at a time (a car may need its year, its mileage and its trim). */
 export const MAX_FOLLOWUPS = 3;
-/** Market research for the same item is reused, with no new search, for this long. */
-export const MARKET_FRESH_MS = 60 * 60 * 1000;
+/** Market research for the same item is reused, with no new search, for this long (the default of resolveMarketFreshMs). */
+export const MARKET_FRESH_MS = 24 * 60 * 60 * 1000;
+/**
+ * PRODUCT-LEVEL RESEARCH REUSE (2026-11-08). A product's research is the same for every scan of it: second-hand
+ * prices do not move by the hour. Within CORE_SCAN_MARKET_FRESH_HOURS (default 24, bounded 1..168) it is reused as it
+ * is; older but within MARKET_POOL_MS it answers at once, marked refreshing, while a background search renews it
+ * (CORE_SCAN_MARKET_SWR, default on; exactly 'false' turns it off). Listing ages are always measured to today.
+ */
+export const SCAN_MARKET_FRESH_HOURS_ENV = 'CORE_SCAN_MARKET_FRESH_HOURS';
+export const SCAN_MARKET_SWR_ENV = 'CORE_SCAN_MARKET_SWR';
+export function resolveMarketFreshMs(env = process.env) {
+  const h = Number(String(env?.[SCAN_MARKET_FRESH_HOURS_ENV] ?? '').trim());
+  return Number.isFinite(h) && h >= 1 && h <= 168 ? h * 3_600_000 : MARKET_FRESH_MS;
+}
+export const resolveMarketSwr = (env = process.env) => String(env?.[SCAN_MARKET_SWR_ENV] ?? '').trim().toLowerCase() !== 'false';
 /** Evidence older than fresh but younger than this still joins a new search's evidence. Prices do not move in days. */
 export const MARKET_POOL_MS = 7 * 24 * 60 * 60 * 1000;
 export const MARKET_CACHE_MAX_ENTRIES = 200;
