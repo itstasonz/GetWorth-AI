@@ -15,6 +15,8 @@ import { Card, Btn, Badge, FadeIn, ScaleIn, SlideUp, InputField, BackButton, Con
 import ListingCard from '../components/ListingCard';
 import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice, getQualityBadge } from '../lib/utils';
+// A core scan's listing keeps the engine's price for each condition; the percentage ladder is for the older scan only.
+import { listingPriceFor } from '../lib/coreScan';
 
 export function MyListingsView() {
   const { t, lang, rtl, user, myListings, deleteListing, updateListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
@@ -1710,7 +1712,7 @@ export function ListingFlowView() {
               which silently made the condition selector inert here. */}
           <FadeIn delay={150}>
             {(() => {
-              const suggested = calcPrice(result?.marketValue, condition, answers, itemCategory);
+              const suggested = (result?.coreScan ? (listingPriceFor(result, condition) || null) : calcPrice(result?.marketValue, condition, answers, itemCategory));
               // null = the server found no pricing evidence (manual_required).
               // Showing ₪0 in a celebratory green card reads as "worthless".
               return suggested === null ? (
@@ -1733,7 +1735,7 @@ export function ListingFlowView() {
           </FadeIn>
           <FadeIn delay={200}>
             <Btn primary className="w-full py-4" onClick={() => {
-              const suggested = calcPrice(result?.marketValue, condition, answers, itemCategory);
+              const suggested = (result?.coreScan ? (listingPriceFor(result, condition) || null) : calcPrice(result?.marketValue, condition, answers, itemCategory));
               setListingData((prev) => ({
                 ...prev,
                 // null → leave the field empty so the user enters a price,

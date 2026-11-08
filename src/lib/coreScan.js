@@ -366,6 +366,23 @@ function fallbackTitle(identity) {
  * `price` is '' when the scan did not price: an empty box the owner fills in,
  * never a 0.
  */
+/**
+ * THE LISTING KEEPS THE ENGINE'S PRICES. Each listing condition's suggested price is that condition's listing price from
+ * the same valuation (valuation.js conditionPrices) — never the older listing flow's percentage ladder applied to a
+ * scan's number (utils.js calcPrice), which gave a core-scan listing a price the engine never computed as soon as the
+ * seller touched the condition. "used" is the engine's "good"; with no valuation there is no suggestion.
+ */
+const LISTING_BAND = Object.freeze({ newSealed: 'new_sealed', likeNew: 'like_new', used: 'good', poor: 'poor' });
+export function listingPricesOf(valuation) {
+  if (valuation?.status !== 'priced' || !valuation.prices) return null;
+  return Object.fromEntries(Object.entries(LISTING_BAND).map(([k, c]) => [k, valuation.prices[c]?.list ?? null]));
+}
+/** The listing form's suggested price for a condition: the engine's, for a core scan; '' when it gave none. */
+export function listingPriceFor(result, listingCondition) {
+  const p = result?.listingPrices?.[listingCondition];
+  return Number.isFinite(p) && p > 0 ? p : '';
+}
+
 export function buildListingDraft(s = state) {
   const band = bandFor(s.valuation, s.condition);
   const i = s.identity ?? {};
@@ -380,7 +397,9 @@ export function buildListingDraft(s = state) {
       nameHebrew: i.search?.hebrew_name || '',
       category: i.category || 'Other',
       confidence: { high: 0.9, medium: 0.7, low: 0.4 }[i.identity_confidence] ?? 0,
-      marketValue: band ? { low: band.low, mid: Math.round((band.low + band.high) / 2), high: band.high, price_method: 'core_scan_web' } : null,
+      // mid is the engine's own worth for this condition, not an average of the range's ends.
+      marketValue: band ? { low: band.low, mid: band.worth ?? Math.round((band.low + band.high) / 2), high: band.high, price_method: 'core_scan_web' } : null,
+      listingPrices: listingPricesOf(s.valuation),
       valuation_id: s.valuationId ?? undefined,
       coreScan: true,
     },

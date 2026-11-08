@@ -18,6 +18,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { getServiceClient } from './quota.js';
 import { DEFAULT_CONDITION } from './config.js';
+import { buildValuation } from './valuation.js';
 
 /** The core scan writes its own valuation version, so its rows can be told from the older engine's. */
 export const VALUATION_VERSION = 3;
@@ -63,6 +64,23 @@ export async function saveMarketResearch(key, record, scanUuid, { supa = getServ
   } catch (err) { console.warn('[Scan] market research not stored:', err?.message); }
 }
 
+/** How many references a valuation row keeps: market.js asks each stage for at most 12, two stages, merged with a pool. */
+export const MAX_STORED_EVIDENCE = 40;
+const STORED_FIELDS = ['url', 'domain', 'title', 'price', 'currency', 'price_ils', 'shipping', 'kind', 'match', 'market', 'condition', 'page', 'listed', 'archived', 'binding', 'binding_reason', 'stock', 'seen'];
+/** One reference as the calculation read it: its own fields, none of the outputs (used, weight, set_aside, freshness). */
+function storedReference(e) {
+  const out = {};
+  for (const k of STORED_FIELDS) if (e?.[k] !== undefined) out[k] = typeof e[k] === 'string' ? e[k].slice(0, k === 'url' ? 500 : 200) : e[k];
+  return out;
+}
+/** A stored valuation recomputed from the row alone. Same engine, same inputs: the same answer. */
+export function reproduceValuation(stored, build = buildValuation) {
+  const v = stored?.ai_raw_response?.valuation ?? stored;
+  if (!v?.inputs || !Array.isArray(v.evidence_full)) return null;
+  const i = v.inputs;
+  return build({ evidence: v.evidence_full, searchPerformed: i.search_performed, unverified: i.unverified, approximate: i.approximate, familyLevel: i.family_level, strategy: i.strategy, searched: v.searched, today: i.today });
+}
+
 /** The valuations row for a scan. Prices are numbers only when the scan priced; never 0. */
 export function buildValuationRow({ id, userId, scanUuid, identity, valuation, lang }) {
   const band = valuation?.status === 'priced' ? valuation.prices?.[DEFAULT_CONDITION] ?? null : null;
@@ -85,6 +103,9 @@ export function buildValuationRow({ id, userId, scanUuid, identity, valuation, l
         local_strength: valuation.local_strength, dispersion: valuation.dispersion, reference_range: valuation.reference_range,
         estimate_basis: valuation.estimate_basis ?? null, evidence_gap: valuation.evidence_gap ?? null,
         retail_new_ils: valuation.retail_new_ils, retail_new_in_stock: valuation.retail_new_in_stock, intl_scale: valuation.intl_scale, searched: valuation.searched,
+        // THE CALCULATION, REPRODUCIBLE: every reference as it was weighed, and the inputs beside it (reproduceValuation).
+        inputs: valuation.inputs ?? null,
+        evidence_full: (valuation.evidence ?? []).slice(0, MAX_STORED_EVIDENCE).map(storedReference),
         sources: (valuation.evidence ?? []).slice(0, 16).map((e) => ({ url: e.url, price: e.price, currency: e.currency, kind: e.kind, match: e.match, market: e.market, condition: e.condition, page: e.page, listed: e.listed, archived: e.archived === true, freshness: e.freshness, weight: e.weight, used: e.used, binding: e.binding, binding_reason: e.binding_reason, stock: e.stock, shipping: e.shipping })),
       } : null,
     },

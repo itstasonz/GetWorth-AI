@@ -8,7 +8,7 @@ import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
-import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft } from '../lib/coreScan';
+import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor } from '../lib/coreScan';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -4465,6 +4465,8 @@ export function AppProvider({ children }) {
   // Never 0: publishListing already blocks on a falsy price, so an empty box
   // gates publishing instead of shipping a confident ₪0.
   const suggestPrice = (c) => {
+    // A core scan's listing takes the engine's price for that condition (coreScan.js listingPriceFor), never the ladder.
+    if (result?.coreScan) return listingPriceFor(result, c);
     const p = calcPrice(result?.marketValue, c, answers, result?.category);
     return p == null ? '' : p;
   };

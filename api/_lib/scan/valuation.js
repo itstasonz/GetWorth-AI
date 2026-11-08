@@ -455,6 +455,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     family_level: basis === BASIS.FAMILY,
     strategy,
     searched,
+    // Everything besides the evidence that this calculation read: with `evidence` it reproduces the valuation exactly (persist.js reproduceValuation).
+    inputs: { search_performed: searchPerformed, unverified, approximate, family_level: familyLevel, strategy, today: day },
   };
   // `no_price_reason` is the same code under the name the screen reads it by.
   const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason, no_price_reason: reason });
