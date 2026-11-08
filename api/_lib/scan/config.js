@@ -28,7 +28,16 @@ export const SCAN_FLAG_ENV = 'CORE_SCAN_ENABLED';
 //             40-50 s; the efficient model, asked for ONE wide search, answered
 //             in ~10 s from the same kind of pages. The answer is checked by
 //             valuation.js either way.
-export const SCAN_IDENTITY_MODEL_DEFAULT = 'gpt-6.1-sol';
+//   2026-11-08 (V3 benchmark, 18 independently labelled real photographs, the
+//             production prompt and scoring identical for every model):
+//             gpt-6.1-sol low  11/18 exact, 0 confidently wrong, p50 8.1 s p90 13.0 s
+//             gpt-6.1-terra none + lean output
+//                              10/18 exact, 0 confidently wrong, p50 6.0 s p90 7.0 s
+//             gpt-5.4-mini none 8/18, one wrong product named (AirPods 3rd gen
+//             for AirPods Pro), p50 2.9 s — rejected on accuracy.
+//             Latency is set by OUTPUT length (~95 tokens/s), not the photograph:
+//             the lean output (identity-prompt.js) and no reasoning pass carry it.
+export const SCAN_IDENTITY_MODEL_DEFAULT = 'gpt-6.1-terra';
 export const SCAN_MARKET_MODEL_DEFAULT = 'gpt-6-luna';
 
 /** Secrets that may sign a scan token, in order of preference. */
@@ -59,8 +68,10 @@ export const SCAN_MARKET_EFFORT_ENV = 'CORE_SCAN_MARKET_EFFORT';
 const EFFORTS = ['none', 'low', 'medium', 'high'];
 
 const modelOf = (env, name, fallback) => String(env?.[name] ?? '').trim() || fallback;
-const effortOf = (env, name) => (EFFORTS.includes(String(env?.[name] ?? '').trim()) ? String(env[name]).trim() : 'low');
-export const resolveIdentityEffort = (env = process.env) => effortOf(env, SCAN_IDENTITY_EFFORT_ENV);
+const effortOf = (env, name, fallback = 'low') => (EFFORTS.includes(String(env?.[name] ?? '').trim()) ? String(env[name]).trim() : fallback);
+/** The identity step answers without a reasoning pass by default (the V3 benchmark above): same accuracy, ~2 s sooner. */
+export const SCAN_IDENTITY_EFFORT_DEFAULT = 'none';
+export const resolveIdentityEffort = (env = process.env) => effortOf(env, SCAN_IDENTITY_EFFORT_ENV, SCAN_IDENTITY_EFFORT_DEFAULT);
 export const resolveMarketEffort = (env = process.env) => effortOf(env, SCAN_MARKET_EFFORT_ENV);
 export const resolveIdentityModel = (env = process.env) => modelOf(env, SCAN_IDENTITY_MODEL_ENV, SCAN_IDENTITY_MODEL_DEFAULT);
 export const resolveMarketModel = (env = process.env) => modelOf(env, SCAN_MARKET_MODEL_ENV, SCAN_MARKET_MODEL_DEFAULT);

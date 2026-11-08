@@ -18,7 +18,7 @@ import { stripDataUriPrefix, detectImageMime, extractOpenAIJson } from '../opena
 import { promptSafe } from '../prompt-trust.js';
 import { streamResponse } from '../v2/openai-stream.js';
 import { CONDITIONS, IDENTIFY_TIMEOUT_MS, IDENTIFY_MAX_OUTPUT_TOKENS, resolveIdentityEffort } from './config.js';
-import { buildIdentityPrompt, languageName, MAX_VISIBLE_TEXT, MAX_ALTERNATIVES, MAX_OPTIONS, MAX_ATTRIBUTES, MAX_CLARIFICATIONS } from './identity-prompt.js';
+import { buildIdentityPrompt, languageName, MAX_VISIBLE_TEXT, MAX_ALTERNATIVES, MAX_OPTIONS, MAX_ATTRIBUTES, MAX_CLARIFICATIONS, MODEL_MAX_ATTRIBUTES } from './identity-prompt.js';
 import { STRATEGY, strategyFor, changesSearch, isListingVariant, isStorageDevice } from './strategy.js';
 import { applyConfirmed, sameAttribute, fieldOf, ASKED_ATTRIBUTE } from './confirmed.js';
 
@@ -79,7 +79,8 @@ export const IDENTITY_SCHEMA = strict({
   market_class: { type: 'string', enum: [...MARKET_CLASSES] },
   identity_precision: { type: 'string', enum: [...PRECISIONS] },
   attributes: {
-    type: 'array', maxItems: MAX_ATTRIBUTES,
+    // The model names at most MODEL_MAX_ATTRIBUTES (lean output, V3); the identity keeps room for the owner's answers.
+    type: 'array', maxItems: MODEL_MAX_ATTRIBUTES,
     // "confirmed" is what the OWNER said in an earlier round; the model may carry it, and the server checks it against its own record (applyConfirmed).
     items: strict({ name: { type: 'string' }, value: nullable, basis: { type: 'string', enum: ['observed', 'inferred', 'unknown', 'confirmed'] }, matters: { type: 'string', enum: [...IMPACTS] } }),
   },
@@ -101,7 +102,9 @@ export const IDENTITY_SCHEMA = strict({
 
 // ── NORMALISATION ───────────────────────────────────────────────────────────
 const UNKNOWN = /^(unidentified|unknown|none|n\/a|null|generic|unbranded|no brand|לא ידוע)$/i;
-const NOT_AN_ANSWER = /^(not sure|unsure|i don'?t know|don'?t know|other|לא בטוח.*|לא יודע.*|אחר)$/i;
+// "Other model", "סדרה אחרת", "none of these": the app offers its own "something else" box (the owner's own words), so an
+// option that only means "none of the above" is never offered — chosen, it would be recorded as the model's name.
+const NOT_AN_ANSWER = /^(not sure|unsure|i don'?t know|don'?t know|other|something else|none of (these|the above)|(an)?other( \p{L}+)?|לא בטוח.*|לא יודע.*|אחר|אחרת|\p{L}+ (אחר|אחרת)|משהו אחר|אף אחד מאלה)$/iu;
 const text = (v, max = 80) => {
   const s = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
   return s && !UNKNOWN.test(s) ? s.slice(0, max) : null;
@@ -192,7 +195,9 @@ export function normalizeIdentity(raw, { ownerStated = false, followupsLeft = 1 
   identity.eligibility_notes = list(r.eligibility_notes, 3, 120);
   identity.confirmed = [];
   identity.clarifications = (Array.isArray(r.clarifications) ? r.clarifications : [])
-    .map((c) => clarification(c)).filter(Boolean).slice(0, MAX_CLARIFICATIONS);
+    // The schema lets the model propose MAX_CLARIFICATIONS; the server keeps one more than that (a caller of the earlier
+    // contract may add its own question first).
+    .map((c) => clarification(c)).filter(Boolean).slice(0, MAX_CLARIFICATIONS + 1);
   // The one question of the earlier contract, when a caller still gives one: it is a candidate like the others.
   const f = r.followup ?? null;
   if (f && f.kind && f.kind !== 'none') {
@@ -278,6 +283,38 @@ const STORAGE = {
   he: { question: 'מה נפח האחסון שלו?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
 };
 const STORAGE_NAME = /^storage( capacity| size)?$/;
+
+// ── WHICH MODEL: A CHOICE, NOT ANOTHER PHOTOGRAPH ───────────────────────────
+// V3 benchmark (2026-11-08, 18 labelled photographs): the identity step asked a REQUIRED question on 14 of 18, most of
+// them "take another photo" to settle a generation that no photograph shows (iPhone X or XS, AirPods Pro 1 or 2, Apple
+// Watch Series 4, 5 or 6). The owner usually knows what they own. When the photograph has already narrowed the item to
+// named candidates, the question becomes a choice among them — one tap, "not sure" added by the app — and the photograph
+// is asked for only when nothing was narrowed. The answer is the OWNER's word (confirmed.js): nothing is guessed.
+const MODEL_CHOICE = {
+  en: 'Which model is it? (It is shown in the device settings or on its label)',
+  he: 'איזה דגם זה? (מופיע בהגדרות המכשיר או על התווית)',
+};
+const IDENTITY_ATTRIBUTE = /^(model|generation|version|model number|series|edition|identity|exact model|model name)$/;
+/** The candidate models the photograph narrowed the item to, most likely first, or [] when fewer than two. */
+export function modelCandidates(identity) {
+  const seen = new Set();
+  const out = [];
+  for (const name of [identity?.exact_model_established ? null : identity?.model, ...(identity?.alternatives ?? []).map((a) => a?.name)]) {
+    const v = text(name, 40);
+    const k = String(v ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+    if (!v || !k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
+  }
+  return out.length >= 2 ? out.slice(0, MAX_OPTIONS) : [];
+}
+/** A required photograph asked only to tell named candidates apart, as a choice among them; anything else unchanged. */
+export function asModelChoice(q, identity, lang = 'he') {
+  if (!q || q.kind !== 'photo' || q.affects !== 'identity' || q.attribute === 'identity' || !IDENTITY_ATTRIBUTE.test(String(q.attribute ?? ''))) return q;
+  const options = modelCandidates(identity);
+  if (options.length < 2) return q;
+  return { ...q, attribute: 'model', kind: 'choice', question: MODEL_CHOICE[lang === 'en' ? 'en' : 'he'], options, unit: null };
+}
 const isTechnical = (i) => i?.market_class === 'consumer_electronics' || i?.category === 'Electronics' || APPLIANCE.test(String(i?.item_type ?? ''));
 
 /** Is this item a fragrance? Read from what the photograph established, never from the brand alone. */
@@ -387,7 +424,7 @@ export function selectQuestion(identity, { lang = 'he', followupsLeft = 1 } = {}
   // OUTCOME-AWARE: what this kind of item's scan produces decides what is worth asking, and what must come first.
   const noNumber = strategyFor(identity) === STRATEGY.SPECIALISED;
   const required = (c) => !noNumber && c.impact === 'high' && (c.affects === 'identity' || changesSearch(c.attribute));
-  const open = (identity.clarifications ?? [])
+  const open = (identity.clarifications ?? []).map((c) => asModelChoice(c, identity, l))
     .filter((c) => c.impact !== 'low' && c.affects !== 'eligibility' && !(noNumber && c.affects === 'price'))
     .filter((c) => !confirmedQuestions.has(c.question) && !(confirmedNames.has(c.attribute) && !ASKED_ATTRIBUTE.test(c.attribute)));
   // THE SERVER'S OWN QUESTION, when the model called a phone's storage unknown and high and proposed no question for it:

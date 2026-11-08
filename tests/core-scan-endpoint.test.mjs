@@ -591,10 +591,11 @@ describe('CE-6 structure', () => {
     assert.ok(CFG.MAX_BODY_BYTES < 4.5 * 1024 * 1024, 'under the platform\'s request-body limit');
   });
   test('CE-6f the defaults are the measured ones, and each can be changed from the environment without code', () => {
-    assert.equal(CFG.resolveIdentityModel({}), 'gpt-6.1-sol');
+    assert.equal(CFG.resolveIdentityModel({}), 'gpt-6.1-terra', 'V3 benchmark: same accuracy class, p90 7.0 s against 13.0 s');
+    assert.equal(CFG.resolveIdentityModel({ CORE_SCAN_IDENTITY_MODEL: 'gpt-6.1-sol' }), 'gpt-6.1-sol', 'the earlier model is one variable away');
     assert.equal(CFG.resolveMarketModel({}), 'gpt-6-luna');
     assert.equal(CFG.resolveMarketModel({ CORE_SCAN_MARKET_MODEL: ' gpt-6.1-sol ' }), 'gpt-6.1-sol');
-    assert.deepEqual([CFG.resolveIdentityEffort({}), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'medium' }), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'max!' })], ['low', 'medium', 'low']);
+    assert.deepEqual([CFG.resolveIdentityEffort({}), CFG.resolveIdentityEffort({ CORE_SCAN_IDENTITY_EFFORT: 'low' }), CFG.resolveMarketEffort({}), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'medium' }), CFG.resolveMarketEffort({ CORE_SCAN_MARKET_EFFORT: 'max!' })], ['none', 'low', 'low', 'medium', 'low']);
     assert.equal(CFG.MARKET_MAX_STAGES, 2, 'each search costs the owner several seconds');
     assert.equal(CFG.MARKET_FRESH_MS, 24 * 60 * 60 * 1000, 'a product is not researched twice in a day (2026-11-08)');
     assert.equal(CFG.resolveMarketFreshMs({ CORE_SCAN_MARKET_FRESH_HOURS: '6' }), 6 * 3_600_000);

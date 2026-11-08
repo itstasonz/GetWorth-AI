@@ -1,0 +1,146 @@
+[
+ {
+  "id": "iphone12-a",
+  "file": "File:IPhone 12 - 3.jpg",
+  "brand": "Apple",
+  "model": "iPhone 12",
+  "variant": null,
+  "cat": "IPhone 12"
+ },
+ {
+  "id": "iphone12-b",
+  "file": "File:IPhone 12 - 2.jpg",
+  "brand": "Apple",
+  "model": "iPhone 12",
+  "variant": null,
+  "cat": "IPhone 12"
+ },
+ {
+  "id": "iphone11pro-a",
+  "file": "File:20191227 iPhone 11 Pro 1.jpg",
+  "brand": "Apple",
+  "model": "iPhone 11 Pro",
+  "variant": null,
+  "cat": "IPhone 11 Pro"
+ },
+ {
+  "id": "iphone11pro-b",
+  "file": "File:2019-12-22 IPhone 11 Pro.jpg",
+  "brand": "Apple",
+  "model": "iPhone 11 Pro",
+  "variant": null,
+  "cat": "IPhone 11 Pro"
+ },
+ {
+  "id": "iphonex-a",
+  "file": "File:Apple iPhone X - back (8111).jpg",
+  "brand": "Apple",
+  "model": "iPhone X",
+  "variant": null,
+  "cat": "IPhone X"
+ },
+ {
+  "id": "iphonex-b",
+  "file": "File:IPhone X rear.jpg",
+  "brand": "Apple",
+  "model": "iPhone X",
+  "variant": null,
+  "cat": "IPhone X"
+ },
+ {
+  "id": "airpodspro-a",
+  "file": "File:AirPods Pro 1.jpg",
+  "brand": "Apple",
+  "model": "AirPods Pro",
+  "variant": "1st generation",
+  "cat": "AirPods Pro"
+ },
+ {
+  "id": "airpodspro2-a",
+  "file": "File:AirPods Pro (2nd generation).jpg",
+  "brand": "Apple",
+  "model": "AirPods Pro",
+  "variant": "2nd generation",
+  "cat": "AirPods Pro"
+ },
+ {
+  "id": "airpodspro-c",
+  "file": "File:Airpods Pro in a Case.jpg",
+  "brand": "Apple",
+  "model": "AirPods Pro",
+  "variant": null,
+  "cat": "AirPods Pro"
+ },
+ {
+  "id": "ps5-a",
+  "file": "File:Playstation 5.jpg",
+  "brand": "Sony",
+  "model": "PlayStation 5",
+  "variant": null,
+  "cat": "PlayStation 5"
+ },
+ {
+  "id": "switcholed-a",
+  "file": "File:Nintendo Switch OLED Model - 1.jpg",
+  "brand": "Nintendo",
+  "model": "Switch OLED",
+  "variant": null,
+  "cat": "Nintendo Switch OLED Model"
+ },
+ {
+  "id": "switcholed-b",
+  "file": "File:Nintendo Switch OLED model (white).jpg",
+  "brand": "Nintendo",
+  "model": "Switch OLED",
+  "variant": "white",
+  "cat": "Nintendo Switch OLED Model"
+ },
+ {
+  "id": "s21-a",
+  "file": "File:Galaxy S21.jpg",
+  "brand": "Samsung",
+  "model": "Galaxy S21",
+  "variant": null,
+  "cat": "Samsung Galaxy S21"
+ },
+ {
+  "id": "s21-b",
+  "file": "File:Samsung Galaxy S21 back.jpg",
+  "brand": "Samsung",
+  "model": "Galaxy S21",
+  "variant": null,
+  "cat": "Samsung Galaxy S21"
+ },
+ {
+  "id": "5d3-a",
+  "file": "File:Canon EOS 5D Mark III 01.jpg",
+  "brand": "Canon",
+  "model": "EOS 5D Mark III",
+  "variant": null,
+  "cat": "Canon EOS 5D Mark III"
+ },
+ {
+  "id": "5d3-b",
+  "file": "File:Canon EOS 5D Mark III 05.jpg",
+  "brand": "Canon",
+  "model": "EOS 5D Mark III",
+  "variant": null,
+  "cat": "Canon EOS 5D Mark III"
+ },
+ {
+  "id": "aw4-a",
+  "file": "File:Apple Watch Series 4 40mm space gray Aluminum.jpg",
+  "brand": "Apple",
+  "model": "Apple Watch Series 4",
+  "variant": "40mm",
+  "cat": "Apple Watch Series 4"
+ },
+ {
+  "id": "aw4-b",
+  "file": "File:AppleWatch Series 4 Nike 40mm.jpg",
+  "brand": "Apple",
+  "model": "Apple Watch Series 4",
+  "variant": "40mm",
+  "cat": "Apple Watch Series 4"
+ }
+]

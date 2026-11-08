@@ -8,7 +8,7 @@ import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
-import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor } from '../lib/coreScan';
+import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, warmScan } from '../lib/coreScan';
 import { HISTORY_COLUMNS } from '../lib/valuationHistory';
 import { listingProvenanceSupported } from '../lib/marketplaceProvenance';
 
@@ -3482,6 +3482,8 @@ export function AppProvider({ children }) {
       return;
     }
     cameraStartingRef.current = true;
+    // The scan server wakes while the camera opens (coreScan.js warmScan): no photograph, no quota, no paid call.
+    warmScan(getFreshToken);
 
     try {
       releaseCamera();
@@ -3584,7 +3586,7 @@ export function AppProvider({ children }) {
       }
     }
     cameraStartingRef.current = false;
-  }, [releaseCamera, attachStreamToVideo, waitForVideoElement, detectTorch, lang, setError]);
+  }, [releaseCamera, attachStreamToVideo, waitForVideoElement, detectTorch, lang, setError, getFreshToken]);
 
   // ── Auto-start camera when view transitions to 'camera' without a stream ──
   // Fixes: addPhoto('camera') sets view but doesn't acquire camera hardware

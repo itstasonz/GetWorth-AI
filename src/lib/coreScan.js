@@ -267,6 +267,32 @@ async function price({ answer = null } = {}) {
 }
 
 // ── ACTIONS ─────────────────────────────────────────────────────────────────
+// ── WARM-UP WHILE THE CAMERA OPENS ──────────────────────────────────────────
+// The first identification of a scan spent ~4 s outside the model (2026-11-08): a server instance and its connections
+// being set up while the person waited. The camera opening is the moment to do that instead: one small request, no
+// photograph, no quota, no paid call (api/scan.js 'warm'), at most once a minute, never in the way of the scan.
+export const WARM_EVERY_MS = 60_000;
+let warmedAt = -Infinity;
+export function warmScan(getToken, { now = Date.now(), fetchImpl = (...a) => fetch(...a) } = {}) {
+  if (now - warmedAt < WARM_EVERY_MS) return null;
+  warmedAt = now;
+  return (async () => {
+    try {
+      const token = await getToken();
+      if (!token) return;
+      const id = globalThis.crypto?.randomUUID?.();
+      if (!id) return;
+      await fetchImpl('/api/scan', {
+        method: 'POST', keepalive: true,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'warm', scan_uuid: id, lang: 'en' }),
+      });
+    } catch { /* a warm-up never fails anything */ }
+  })();
+}
+/** For the suites. */
+export function resetWarm() { warmedAt = -Infinity; }
+
 /**
  * Start a scan from one photograph.
  * Resolves to 'unavailable' when this deployment has the core scan switched

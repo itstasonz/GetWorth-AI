@@ -71,6 +71,17 @@ export function applyConfirmed(identity) {
     else if ((identity.attributes?.length ?? 0) < MAX_ATTRIBUTES && !ASKED_ATTRIBUTE.test(c.attribute)) identity.attributes.push({ name: c.attribute, value: c.value, basis: 'confirmed', matters: 'high' });
     const field = fieldOf(c.attribute);
     if (field && c.value) identity[field] = c.value;
+    // THE OWNER NAMED THE MODEL (identify.js asModelChoice, or their own words): the product is established by the owner's
+    // word — the search names it, the research is kept under its own name (strategy.js marketKey reads canonical_name),
+    // and the candidates it was chosen from are no longer searched beside it.
+    if (field === 'model' && c.value) {
+      identity.exact_model_established = true;
+      const brand = String(identity.brand ?? '').trim();
+      const named = brand && !c.value.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${c.value}` : c.value;
+      identity.canonical_name = named.toLowerCase().replace(/\s+/g, ' ').trim();
+      if (!String(identity.display_name ?? '').toLowerCase().includes(c.value.toLowerCase())) identity.display_name = named;
+      identity.alternatives = [];
+    }
     if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c, identity)) identity.uncertainty_note = null;
   }
 }

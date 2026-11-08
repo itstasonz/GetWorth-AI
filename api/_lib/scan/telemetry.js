@@ -20,6 +20,18 @@
 export const REQUEST_EVENT = 'core_scan_request';
 export const ENGINE = 'core_scan';
 
+// ── WHICH INSTANCE ANSWERED ─────────────────────────────────────────────────
+// The first identification of a scan spent ~4 s outside the model (2026-11-08) and later ones ~0.6 s. Whether that is a
+// cold instance or a cold connection is answered by measurement: how old this server instance is when a request reaches
+// it, and how many requests it has served before. Module scope is instance scope.
+const BOOTED_AT = Date.now();
+let served = 0;
+/** This instance's age and request count, taken when a request arrives. */
+export function instanceInfo(now = Date.now()) {
+  served += 1;
+  return { instance_age_ms: now - BOOTED_AT, instance_requests: served };
+}
+
 /** A stable, non-reversible account reference. Same id → same reference. */
 export async function accountRef(userId) {
   if (!userId) return null;

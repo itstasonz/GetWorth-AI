@@ -80,3 +80,20 @@ export async function refundScan({ supa = getServiceClient(), userId } = {}) {
     if (error) console.error('[Scan] quota refund failed:', error.message);
   } catch (err) { console.error('[Scan] quota refund exception:', err?.message); }
 }
+
+// ── WARM-UP ─────────────────────────────────────────────────────────────────
+// While the camera opens (api/scan.js 'warm'): the database client is created and its connection opened with one read of
+// this account's own allowance row, so the charge made with the photograph does not pay for that set-up. Nothing is
+// charged or written. At most once a minute per account on this instance; never throws.
+export const WARM_EVERY_MS = 60_000;
+const warmedAt = new Map();
+export async function warmQuota({ supa = getServiceClient(), userId, now = Date.now(), timeoutMs = QUOTA_TIMEOUT_MS } = {}) {
+  if (!supa || !userId) return false;
+  if (now - (warmedAt.get(userId) ?? -Infinity) < WARM_EVERY_MS) return false;
+  if (warmedAt.size > 1000) warmedAt.clear();
+  warmedAt.set(userId, now);
+  try {
+    await withTimeout(supa.from('scan_daily_usage').select('count').eq('user_id', userId).eq('date', today()).maybeSingle(), timeoutMs);
+    return true;
+  } catch { return false; }
+}

@@ -45,9 +45,9 @@ import {
 import { runIdentify, runPrice, startingCondition, SCAN_STATUS } from './_lib/scan/service.js';
 import { recordAnswer, questionAfterResearch } from './_lib/scan/identify.js';
 import { signScanToken, verifyScanToken } from './_lib/scan/token.js';
-import { chargeScan, refundScan } from './_lib/scan/quota.js';
+import { chargeScan, refundScan, warmQuota } from './_lib/scan/quota.js';
 import { recordValuation, logScanEvent } from './_lib/scan/persist.js';
-import { recordRequest } from './_lib/scan/telemetry.js';
+import { recordRequest, instanceInfo } from './_lib/scan/telemetry.js';
 
 // Must stay a literal: Vercel reads it statically.
 export const config = { maxDuration: 60 };
@@ -92,15 +92,19 @@ export function diagnosticsOf(valuation) {
 /** The handler over injectable dependencies, so the suites drive the real gate without a network. */
 export function createScanHandler({
   identify = runIdentify, price = runPrice, charge = chargeScan, refund = refundScan, verify = verifyJWT,
-  record = recordValuation, logEvent = logScanEvent,
+  record = recordValuation, logEvent = logScanEvent, warm = warmQuota,
 } = {}) {
   return async function handleRequest(req) {
     const headers = cors(req.headers.get('origin') || '');
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, headers);
 
+    // Where a request's time goes before any step runs: instance age (cold or warm), session check, the photograph's upload.
+    const tIn = Date.now();
+    const instance = instanceInfo(tIn);
     let user = null;
     try { user = await verify(req.headers.get('authorization')); } catch { user = null; }
+    const authMs = Date.now() - tIn;
     if (!user || !user.id) return json({ error: 'unauthorized' }, 401, headers);
     if (user._expired) return json({ error: 'unauthorized', code: 'SESSION_EXPIRED' }, 401, headers);
 
@@ -108,6 +112,7 @@ export function createScanHandler({
     try { raw = await req.text(); } catch (err) {
       return json({ error: err?.bodyTooLarge ? 'payload_too_large' : 'bad_request' }, err?.bodyTooLarge ? 413 : 400, headers);
     }
+    const bodyMs = Date.now() - tIn - authMs;
     if (raw.length > MAX_BODY_BYTES) return json({ error: 'payload_too_large' }, 413, headers);
     let body;
     try { body = JSON.parse(raw); } catch { return json({ error: 'bad_request', detail: 'invalid JSON' }, 400, headers); }
@@ -116,7 +121,7 @@ export function createScanHandler({
     if (!scanUuid) return json({ error: 'bad_request', detail: 'scan_uuid must be a UUID' }, 400, headers);
     const lang = LANGS.includes(body?.lang) ? body.lang : 'he';
     const action = body?.action;
-    if (action !== 'identify' && action !== 'price' && action !== 'report') return json({ error: 'bad_request', detail: 'unknown action' }, 400, headers);
+    if (action !== 'identify' && action !== 'price' && action !== 'report' && action !== 'warm') return json({ error: 'bad_request', detail: 'unknown action' }, 400, headers);
 
     const mode = resolveScanMode(process.env);
     if (mode !== SCAN_MODE.ENABLED) {
@@ -133,12 +138,22 @@ export function createScanHandler({
       const total = Date.now() - t0;
       await recordRequest(logEvent, scanUuid, {
         action, http: status, outcome: payload.status ?? payload.error ?? 'unknown', reason: payload.failure ?? payload.detail ?? null,
-        userId: user.id, totalMs: total, call, extra,
+        userId: user.id, totalMs: total, call, extra: { ...instance, auth_ms: authMs, body_ms: bodyMs, ...extra },
       });
       console.log(`[Scan] action=${action} scan=${scanUuid.slice(0, 8)} http=${status} status=${payload.status ?? payload.error} total_ms=${total}`
         + (call ? ` model=${call.model} provider_ms=${call.ms} in=${call.usage?.input_tokens ?? '-'} out=${call.usage?.output_tokens ?? '-'} tools=${call.tool_calls ?? '-'}` : ''));
       return json({ ...base, ...payload, timings: { total_ms: total, provider_ms: call?.ms ?? null, first_output_ms: call?.first_output_ms ?? null, first_search_ms: call?.first_search_ms ?? null } }, status, headers);
     };
+
+    // ── WARM — the camera is opening (src/lib/coreScan.js warmScan) ─────────
+    // A signed-in request with no photograph: this instance, its session check and its database connection are set up
+    // now instead of while the person waits for an answer. No quota is charged and no provider is called; the one
+    // database read is this account's own allowance row. At most once a minute per account on an instance.
+    if (action === 'warm') {
+      const tWarm = Date.now();
+      const warmed = await warm({ userId: user.id });
+      return done({ status: warmed ? 'warm' : 'skipped' }, 200, null, { warm_ms: Date.now() - tWarm });
+    }
 
     // A token, when one is presented, must be this account's and this scan's.
     let prior = null;
@@ -242,7 +257,7 @@ export function createScanHandler({
     const quota = await charge({ ip: clientIp(req), userId: user.id });
     const quotaMs = Date.now() - tQuota;
     if (!quota.allowed) {
-      await recordRequest(logEvent, scanUuid, { action, http: 429, outcome: 'rate_limited', reason: quota.limitType, userId: user.id, totalMs: Date.now() - t0 });
+      await recordRequest(logEvent, scanUuid, { action, http: 429, outcome: 'rate_limited', reason: quota.limitType, userId: user.id, totalMs: Date.now() - t0, extra: { ...instance, auth_ms: authMs, body_ms: bodyMs, quota_ms: quotaMs } });
       return json({
         ...base, error: 'rate_limited', code: 'RATE_LIMITED', limitType: quota.limitType,
         retryAfterSeconds: quota.retryAfter, retryable: quota.limitType !== 'user_daily',
