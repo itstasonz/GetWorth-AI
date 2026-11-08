@@ -31,7 +31,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity, openVariant } from './identify.js';
-import { researchMarket, marketDate } from './market.js';
+import { researchMarket, marketDate, buildSearchQueries } from './market.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
@@ -143,12 +143,31 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
  * step 1 asked; both strings come from the signed identity, never from a
  * request body.
  */
+/**
+ * THE RESEARCH IS THE SEARCH THAT MADE IT. The shared market cache (an hour, across every deployment) was keyed on the
+ * item alone, so a release that changed how an item is searched for went on serving research its old searches made:
+ * the founder's second G PRO Wireless scan (2026-11-08 11:10, scan 6f0a57d4) on 01a9fc1 reused the 10:55 research from
+ * b5a587a, and the new single-listing query abroad never ran. The key now carries the planned queries of both stages
+ * (and RESEARCH_VERSION for changes to how pages are read and classified): change the search, and the next scan searches.
+ * An answer that changes no query still changes no key (strategy.js marketKey, market.js searchNames).
+ */
+export const RESEARCH_VERSION = 2;
+function fnv1a(text) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h.toString(16).padStart(8, '0');
+}
+export function researchKey(identity, answer = null) {
+  const plan = ['local', 'expand'].map((stage) => buildSearchQueries({ identity, answer, stage }).join(' ; ')).join(' || ');
+  return `${marketKey(identity, answer)}|r${RESEARCH_VERSION}:${fnv1a(plan)}`;
+}
+
 export async function runPrice({
   identity, answer = null, scanUuid = null, model, apiKey, safetyIdentifier, fetchImpl = fetch, now = Date.now, store = defaultStore,
   parallel = resolveMarketParallel(),
 } = {}) {
   const t0 = now();
-  const key = marketKey(identity, answer);
+  const key = researchKey(identity, answer);
   const approximate = isApproximate(identity, answer);
   const familyLevel = isFamilyLevel(identity, answer);
   // How this KIND of item is valued, chosen from what it is (valuation.js strategyFor), never from the evidence found.

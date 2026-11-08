@@ -221,7 +221,7 @@ describe('RW-2 one more photograph after the search', () => {
     const again = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: second.payload.token });
     assert.equal(results.length, 2);
     assert.notEqual(results[1].market_key, results[0].market_key, 'the code is part of what the item is');
-    assert.ok(results[1].market_key.endsWith('|code=bn751'), results[1].market_key);
+    assert.match(results[1].market_key, /\|code=bn751\|r\d+:[0-9a-f]{8}$/, results[1].market_key);
     assert.deepEqual([results[1].reused, results[1].call.tool_calls > 0, results[1].call.stages[0]], [false, true, 'local'], 'the second search was made');
     assert.equal(fetchImpl.of('market').length, 4, 'two more searches, not zero');
     const secondPrompt = fetchImpl.of('market')[2].body.input[0].content[0].text;

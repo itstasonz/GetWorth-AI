@@ -101,3 +101,57 @@ test('FP-4 the stored row keeps where the number came from and what was missing'
   assert.deepEqual(row.ai_raw_response.valuation.evidence_gap, none.evidence_gap);
   assert.equal(row.price_mid, null, 'no number stored for a withheld price');
 });
+
+// ── The second public scan of the same mouse (2026-11-08 11:10, scan 6f0a57d4, release 01a9fc1) ─────────────────────
+// Its research was the 10:55 research of release b5a587a, reused from the shared hour-long cache: the new query for
+// single used listings abroad never ran. These are its ten references exactly as the runtime log listed them.
+const LOGGED_6F0A57D4 = [
+  { url: 'https://www.zap.co.il/model.aspx?modelid=1005972', kind: 'new_retail', match: 'exact', market: 'IL', price_ils: 659, condition: 'new_sealed', binding: 'strong' },
+  { url: 'https://www.bug.co.il/brand/logitech/gprowireless/', kind: 'new_retail', match: 'exact', market: 'IL', price_ils: 399, condition: 'new_sealed', binding: 'strong' },
+  { url: 'https://www.wisebuy.co.il/product.aspx?category=c-mouse&productid=1005972', kind: 'new_retail', match: 'exact', market: 'IL', price_ils: 328, condition: 'new_sealed', binding: 'weak' },
+  { url: 'https://www.logitechg.com/en-us/shop/p/pro-wireless-mouse', kind: 'new_retail', match: 'exact', market: 'INTL', price_ils: 351, condition: 'new_sealed', binding: 'strong' },
+  { url: 'https://www.ad.co.il/archive/c/23?sp169=4614&view=list', kind: 'used_listing', match: 'exact', market: 'IL', price_ils: 400, condition: 'like_new', binding: 'weak', archived: true },
+  { url: 'https://www.ad.co.il/archive/c/23?pageindex=6&sp169=4614&sp58=3588&withimage=1', kind: 'used_listing', match: 'exact', market: 'IL', price_ils: 500, condition: 'like_new', binding: 'weak', archived: true },
+  { url: 'https://www.reddit.com/r/hardwareswap/comments/q6nzr1', kind: 'sold', match: 'exact', market: 'INTL', price_ils: 224, condition: 'unknown', binding: 'strong', archived: true },
+  { url: 'https://www.reddit.com/r/hardwareswap/comments/wcxhhl', kind: 'sold', match: 'exact', market: 'INTL', price_ils: 192, condition: 'unknown', binding: 'strong', archived: true },
+  { url: 'https://www.reddit.com/r/MouseMarket/comments/dz8ovb', kind: 'sold', match: 'exact', market: 'INTL', price_ils: 240, condition: 'unknown', binding: 'strong', archived: true },
+  { url: 'https://www.reddit.com/r/MouseMarket/comments/owsyim', kind: 'used_listing', match: 'exact', market: 'INTL', price_ils: 256, condition: 'good', binding: 'strong', archived: true },
+].map((e) => ({ domain: new URL(e.url).hostname, title: 't', price: e.price_ils, currency: 'ILS', page: e.kind === 'new_retail' ? 'shop_product' : 'listing', listed: null, seen: TODAY, ...e }));
+
+describe('FP-5 the research is the search that made it', () => {
+  test('FP-5a the logged evidence gives exactly what the screen said: no price, 0 Israeli, 0 usable abroad, level measured', () => {
+    const v = value(LOGGED_6F0A57D4);
+    assert.deepEqual([v.status, v.withdrawn], ['insufficient_evidence', WITHDRAWN.NO_LOCAL_EVIDENCE]);
+    assert.deepEqual(v.evidence_gap, { israeli_private_found: 0, abroad_usable: 0, abroad_needed: 2, price_level_measured: true, new_price_il: 400 }, 'as the Production log recorded it');
+    // Archived Reddit posts (2019–2022) are history, not today's market; ad.co.il archive LIST pages tie no price to one ad.
+    for (const e of v.evidence.filter((x) => /reddit/.test(x.url))) assert.equal(e.used, false);
+    for (const e of v.evidence.filter((x) => /ad\.co\.il/.test(x.url))) assert.equal(e.set_aside, 'price_not_tied_to_product');
+  });
+  test('FP-5b two current single used listings of the exact model abroad, beside that evidence, give the labelled estimate', () => {
+    const ebay = (n, ils) => ({ url: `https://www.ebay.com/itm/${n}`, domain: 'www.ebay.com', title: 't', price: ils, currency: 'USD', price_ils: ils, kind: 'used_listing', match: 'exact', market: 'INTL', condition: 'good', page: 'listing', listed: null, binding: 'strong', seen: TODAY });
+    const v = value([...LOGGED_6F0A57D4, ebay(167883108555, 165), ebay(175809022704, 185)]);
+    assert.deepEqual([v.status, v.estimate_basis, v.price_confidence], ['priced', ESTIMATE_BASIS.ABROAD, 'low']);
+    assert.deepEqual(v.evidence.filter((e) => e.used).map((e) => e.url).sort(), ['https://www.ebay.com/itm/167883108555', 'https://www.ebay.com/itm/175809022704']);
+  });
+  test('FP-5c the research key carries the query plan: a change to the search is a new key; an answer that changes no query is not', async () => {
+    const { researchKey, RESEARCH_VERSION } = await import('../api/_lib/scan/service.js');
+    const identity = normalizeIdentity(RAW_IDENTITY);
+    const key = researchKey(identity);
+    assert.ok(key.startsWith(`${marketKey(identity)}|r${RESEARCH_VERSION}:`), key);
+    assert.equal(researchKey({ ...identity, confirmed: [{ attribute: 'usb receiver included', value: 'No' }] }, { question: 'Receiver?', text: 'No' }), key);
+    assert.notEqual(researchKey({ ...identity, model_number: '910-005272' }), key);
+  });
+  test('FP-5d research stored under the old item-only key is not reused: the price step searches', async () => {
+    const { runPrice, resetMarketCache } = await import('../api/_lib/scan/service.js');
+    resetMarketCache();
+    const identity = normalizeIdentity(RAW_IDENTITY);
+    const old = { evidence: LOGGED_6F0A57D4, at: Date.now() - 15 * 60_000, searched: { date: TODAY }, fx_date: TODAY };
+    const store = { load: async (k) => (k === marketKey(identity) ? old : null), save: async () => {} };
+    let calls = 0;
+    const fetchImpl = async () => { calls += 1; return new Response(JSON.stringify({ error: { message: 'offline' } }), { status: 503 }); };
+    const r = await runPrice({ identity, store, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's' });
+    assert.ok(calls > 0, 'a search was attempted');
+    assert.notEqual(r.reused, true);
+    resetMarketCache();
+  });
+});
