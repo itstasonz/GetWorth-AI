@@ -627,3 +627,69 @@ CREATE TRIGGER trg_notify_seller_on_order AFTER INSERT ON public.orders FOR EACH
 CREATE TRIGGER trg_order_completed_comp AFTER UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION create_comp_from_sale();
 CREATE TRIGGER trg_orders_recompute_total_sales AFTER INSERT OR DELETE OR UPDATE OF status ON public.orders FOR EACH ROW EXECUTE FUNCTION recompute_profile_total_sales();
 CREATE TRIGGER trg_orders_status_guard BEFORE INSERT OR UPDATE ON public.orders FOR EACH ROW EXECUTE FUNCTION orders_status_guard();
+
+-- The valuations guard Production runs: it reverts protected columns for a non-admin caller unless the write is trusted.
+ALTER TABLE public.valuations ADD COLUMN IF NOT EXISTS user_confirmed boolean, ADD COLUMN IF NOT EXISTS user_correction text, ADD COLUMN IF NOT EXISTS identified_by text;
+CREATE OR REPLACE FUNCTION public.valuations_freeze_authoritative_update()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_caller   uuid;
+  v_is_admin boolean;
+  v_allowed  text[] := ARRAY['user_confirmed', 'user_correction', 'identified_by', 'listing_id'];
+  v_patch    jsonb;
+  v_reverted text;
+BEGIN
+  -- (a) Service role / internal (no JWT) → full trust.
+  v_caller := auth.uid();
+  IF v_caller IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- (b) Trusted server write path. PostgREST never sets app.* GUCs.
+  IF current_setting('app.valuation_trusted_write', true) = '1' THEN
+    RETURN NEW;
+  END IF;
+
+  -- (c) Admins — read is_admin from the row, never from the JWT claim.
+  SELECT is_admin INTO v_is_admin FROM profiles WHERE id = v_caller;
+  IF v_is_admin IS TRUE THEN
+    RETURN NEW;
+  END IF;
+
+  -- (d) Normal user: NEW = OLD overlaid with ONLY the allowlisted keys of NEW.
+  SELECT coalesce(jsonb_object_agg(key, value), '{}'::jsonb)
+    INTO v_patch
+  FROM jsonb_each(to_jsonb(NEW))
+  WHERE key = ANY(v_allowed);
+
+  -- identified_by is the one column that is BOTH a pipeline output
+  -- (api/analyze.js:3253) and a client write. The only client write that exists
+  -- sets it to the literal 'user_confirmed' (src/contexts/AppContext.jsx:2490),
+  -- so that is the only transition a non-trusted caller may make. Anything else
+  -- keeps the pipeline's value.
+  IF (v_patch ->> 'identified_by') IS DISTINCT FROM (to_jsonb(OLD) ->> 'identified_by')
+     AND coalesce(v_patch ->> 'identified_by', '') <> 'user_confirmed' THEN
+    RAISE WARNING 'valuations: refusing identified_by -> % (only ''user_confirmed'' is client-settable), uid=%',
+      coalesce(v_patch ->> 'identified_by', 'NULL'), v_caller;
+    v_patch := v_patch - 'identified_by';
+  END IF;
+
+  -- Observability: name every protected column the client tried to change.
+  SELECT string_agg(key, ',') INTO v_reverted
+  FROM jsonb_each(to_jsonb(NEW)) n
+  WHERE NOT (key = ANY(v_allowed))
+    AND n.value IS DISTINCT FROM (to_jsonb(OLD) -> key);
+  IF v_reverted IS NOT NULL THEN
+    RAISE WARNING 'valuations: reverting protected column change(s) [%] attempted by uid=%',
+      v_reverted, v_caller;
+  END IF;
+
+  NEW := jsonb_populate_record(OLD, v_patch);
+  RETURN NEW;
+END;
+$function$;
+CREATE TRIGGER trg_valuations_freeze_authoritative_update BEFORE UPDATE ON public.valuations FOR EACH ROW EXECUTE FUNCTION public.valuations_freeze_authoritative_update();

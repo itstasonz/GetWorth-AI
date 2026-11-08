@@ -43,6 +43,17 @@ export async function finalPriceSupported(supabase, orderId) {
   } catch { return false; }
 }
 
+/** Does this database record a listing's price source yet? Checked once per page load; a missing column is an error. */
+let provenanceSupport = null;
+export async function listingProvenanceSupported(supabase) {
+  if (provenanceSupport !== null) return provenanceSupport;
+  try {
+    const { error } = await supabase.from('listings').select('price_source').limit(1);
+    provenanceSupport = !error;
+  } catch { provenanceSupport = false; }
+  return provenanceSupport;
+}
+
 /** The ids of accounts marked as test, or null when the database has no such function yet (or the caller is no admin). */
 export async function loadTestAccountIds(supabase) {
   try {

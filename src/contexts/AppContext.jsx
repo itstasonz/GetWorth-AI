@@ -10,6 +10,7 @@ import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
 import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor } from '../lib/coreScan';
 import { HISTORY_COLUMNS } from '../lib/valuationHistory';
+import { listingProvenanceSupported } from '../lib/marketplaceProvenance';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -3905,6 +3906,8 @@ export function AppProvider({ children }) {
         attributes: Object.keys(answers).length > 0 ? answers : {},
         // Link to valuation system
         ...(result?.valuation_id && { valuation_id: result.valuation_id }),
+        // The seller's stated pricing intent (the server may only make it stricter: listings_set_price_provenance).
+        ...(await listingProvenanceSupported(supabase) && { price_source: listingData.priceOrigin === 'suggestion' ? 'getworth_valuation' : 'seller_entered' }),
         ...(result?.confidence && { ai_confidence: result.confidence }),
         // Serial/IMEI verification data (masked for public, never full serial)
         ...(serialData?.serial && {
@@ -4481,7 +4484,8 @@ export function AppProvider({ children }) {
     // a degraded valuation can never prefill a listing price.
     const mv = result?.marketValue;
     const opening = hasRealPrice(mv) ? Number(mv.mid) : '';
-    setListingData({ title: result?.name || '', desc: '', price: opening, phone: '', location: '' });
+    // priceOrigin: GetWorth filled the price ('suggestion') or the seller typed it ('seller') — sent as the listing's stated intent.
+    setListingData({ title: result?.name || '', desc: '', price: opening, priceOrigin: opening === '' ? 'seller' : 'suggestion', phone: '', location: '' });
     setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
   };
 
@@ -4498,14 +4502,14 @@ export function AppProvider({ children }) {
     setImages(scan.images);
     // The seller's phone and area rarely change: start from their latest listing.
     const last = myListings?.[0];
-    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, phone: last?.contact_phone || '', location: last?.location || '' });
+    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', phone: last?.contact_phone || '', location: last?.location || '' });
     setCondition(draft.condition); setAnswers({}); setSerialData(null);
     setListingStep(2); setNavDirection('push'); setView('listing');
   };
 
   const selectCondition = (c) => {
     setCondition(c);
-    setListingData((prev) => ({ ...prev, price: suggestPrice(c) }));
+    setListingData((prev) => { const p = suggestPrice(c); return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion' }; });
     // Show category-specific questions for used/poor; skip for new/likeNew
     setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
   };

@@ -1741,6 +1741,7 @@ export function ListingFlowView() {
                 // null → leave the field empty so the user enters a price,
                 // rather than prefilling a meaningless 0.
                 price: suggested === null ? '' : suggested,
+                priceOrigin: suggested === null ? prev.priceOrigin : 'suggestion',
               }));
               setListingStep(2);
             }}>
@@ -1831,7 +1832,7 @@ export function ListingFlowView() {
                     // "0", contradicting the never-show-a-bare-zero rule the
                     // rest of this flow follows (AppContext suggestPrice).
                     const n = parseInt(e.target.value, 10);
-                    setListingData({ ...listingData, price: Number.isFinite(n) && n >= 0 ? n : '' });
+                    setListingData({ ...listingData, price: Number.isFinite(n) && n >= 0 ? n : '', priceOrigin: 'seller' });
                   }} />
               </div>
             </Card>

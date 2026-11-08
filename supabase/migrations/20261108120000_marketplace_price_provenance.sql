@@ -235,11 +235,16 @@ DECLARE
   v_prices   jsonb;
   v_suggest  numeric;
   v_matched  boolean := false;
+  -- THE SELLER'S OWN WORD, WHERE IT CAN ONLY MAKE THINGS STRICTER. The listing form says whether the price is the
+  -- suggestion it pre-filled ('getworth_valuation') or one the seller typed ('seller_entered'). The first is kept
+  -- even when the numbers do not match (a suggestion an older formula adjusted); the second never overrides a match:
+  -- independence is not taken on a client's say-so.
+  v_claimed  text := NEW.price_source;
 BEGIN
-  -- Whatever the client sent, the server decides.
   NEW.price_source    := 'seller_entered';
   NEW.suggested_price := NULL;
   IF NEW.valuation_id IS NULL THEN
+    IF v_claimed = 'getworth_valuation' THEN NEW.price_source := 'getworth_valuation'; END IF;
     RETURN NEW;
   END IF;
 
@@ -247,6 +252,7 @@ BEGIN
     INTO v_low, v_mid, v_high, v_prices
   FROM valuations WHERE id = NEW.valuation_id;
   IF NOT FOUND THEN
+    IF v_claimed = 'getworth_valuation' THEN NEW.price_source := 'getworth_valuation'; END IF;
     RETURN NEW;
   END IF;
 
@@ -268,7 +274,7 @@ BEGIN
     v_suggest := v_mid;
   END IF;
 
-  IF v_matched IS TRUE THEN NEW.price_source := 'getworth_valuation'; END IF;
+  IF v_matched IS TRUE OR v_claimed = 'getworth_valuation' THEN NEW.price_source := 'getworth_valuation'; END IF;
   NEW.suggested_price := CASE WHEN v_suggest > 0 THEN round(v_suggest)::integer ELSE NULL END;
   RETURN NEW;
 END;
@@ -397,11 +403,16 @@ BEGIN
     WHERE l.id = NEW.listing_id AND l.price_source = 'seller_entered';
 
     -- What the linked valuation said against what was paid: recorded for accuracy measurement either way.
+    -- valuations_freeze_authoritative_update reverts these columns for a non-admin caller (the buyer, here) unless the
+    -- write is marked trusted — the same flag mechanism recompute_profile_total_sales uses for profiles. Before this,
+    -- the update only ever landed when the buyer was an admin (the six test sales).
+    PERFORM set_config('app.valuation_trusted_write', '1', true);
     UPDATE valuations
     SET
       actual_sold_price = NEW.final_price,
       price_accuracy = CASE WHEN price_mid > 0 THEN NEW.final_price::REAL / price_mid ELSE NULL END
     WHERE listing_id = NEW.listing_id;
+    PERFORM set_config('app.valuation_trusted_write', '', true);
 
     INSERT INTO jobs_queue (job_type, payload, priority)
     SELECT 'recalc_prices', jsonb_build_object('product_id', l.product_id), 3

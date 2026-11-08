@@ -70,6 +70,17 @@ describe('MP-0 the baseline is Production as it is today', () => {
   });
 });
 
+describe('MP-0b Production today: a genuine buyer\'s sale never reached its valuation', () => {
+  test('MP-0b under the old trigger the valuations guard silently reverts actual_sold_price for a non-admin buyer', async () => {
+    const db = await fresh({ migrate: false });
+    const id = await as(db, SELLER, async (tx) => (await tx.query(`INSERT INTO listings (seller_id, title, category, condition, price, status, valuation_id) VALUES ($1, 'old flow', 'Other', 'used', 255, 'active', $2) RETURNING id`, [SELLER, VAL_CORE])).rows[0].id);
+    await db.query(`UPDATE valuations SET listing_id = $1 WHERE id = $2`, [id, VAL_CORE]);
+    const o = await orderReady(db, id, 255);
+    await as(db, BUYER, (tx) => tx.query(`SELECT transition_order($1, 'completed', '{}'::jsonb)`, [o]));
+    assert.equal((await one(db, `SELECT actual_sold_price FROM valuations WHERE id = $1`, [VAL_CORE])).actual_sold_price, null);
+  });
+});
+
 describe('MP-1 history is preserved, nothing is invented', () => {
   test('MP-1a rows from before the migration keep NULL final price and NULL provenance; nobody becomes a test account', async () => {
     const db = await fresh({ migrate: false });
@@ -105,6 +116,20 @@ describe('MP-2 where a listing price came from is decided by the server', () => 
   test('MP-2b a client claiming independence for GetWorth\'s own number is overruled', async () => {
     const db = await fresh();
     assert.deepEqual(await one(db, `SELECT price_source, suggested_price FROM listings WHERE id = $1`, [await listing(db, { title: 'spoof', price: 290, valuation: VAL_CORE, claim: true })]), { price_source: 'getworth_valuation', suggested_price: 290 });
+  });
+});
+
+describe('MP-2c the seller\'s stated intent can only make the classification stricter', () => {
+  test('MP-2c "I kept the suggestion" holds even when the number no longer matches; "I typed it" never overrides a match', async () => {
+    const db = await fresh();
+    const insert = (title, price, valuation, claim) => as(db, SELLER, async (tx) => (await tx.query(
+      `INSERT INTO listings (seller_id, title, category, condition, price, status, valuation_id, price_source) VALUES ($1, $2, 'Other', 'used', $3, 'active', $4, $5) RETURNING id`, [SELLER, title, price, valuation, claim])).rows[0].id);
+    const src = async (id) => (await one(db, `SELECT price_source FROM listings WHERE id = $1`, [id])).price_source;
+    assert.equal(await src(await insert('kept, adjusted', 333, VAL_CORE, 'getworth_valuation')), 'getworth_valuation');
+    assert.equal(await src(await insert('kept, no valuation', 50, null, 'getworth_valuation')), 'getworth_valuation');
+    assert.equal(await src(await insert('typed, matches', 290, VAL_CORE, 'seller_entered')), 'getworth_valuation');
+    assert.equal(await src(await insert('typed, own', 333, VAL_CORE, 'seller_entered')), 'seller_entered');
+    assert.equal(await src(await insert('nonsense', 10, null, 'trust_me')), 'seller_entered', 'an unknown claim is normalised by the trigger, never stored');
   });
 });
 
@@ -263,4 +288,11 @@ describe('MP-8 the client sends what the buyer typed, and nothing it did not', (
     const admin = read('src/views/AdminPanel.jsx');
     assert.match(admin, /\{testIds && <div className="mb-2"><TestAccountToggle/);
   });
+});
+
+test('MP-8c the listing form states its pricing intent, only once the database records it', () => {
+  const ctx = read('src/contexts/AppContext.jsx');
+  assert.match(ctx, /await listingProvenanceSupported\(supabase\) && \{ price_source: listingData\.priceOrigin === 'suggestion' \? 'getworth_valuation' : 'seller_entered' \}/);
+  assert.match(ctx, /priceOrigin: draft\.price === '' \? 'seller' : 'suggestion'/);
+  assert.match(read('src/views/SellViews.jsx'), /priceOrigin: 'seller' \}\);/);
 });
