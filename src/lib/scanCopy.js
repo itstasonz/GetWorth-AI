@@ -61,6 +61,7 @@ export const SCAN_COPY = {
     sellFor: (price) => `Sell for ${price}`,
     sellAbout: (price) => `Sell for about ${price}`,
     sellOwnPrice: 'Sell at your own price',
+    startListingNow: 'Start the listing now — the price is added if one is found',
     wrongItem: 'Wrong item?',
     whyPrice: 'Why this price?',
     whatFound: 'What I found',
@@ -138,6 +139,8 @@ export const SCAN_COPY = {
         ? '1 Israeli listing was old or for a sealed unit, so it does not show what a used one sells for today.'
         : `${n} Israeli listings were old or for sealed units, so they do not show what a used one sells for today.`),
       different_model: (n) => (n === 1 ? '1 result was another model of the same brand: a different product, so it was not used.' : `${n} results were other models of the same brand: different products, so they were not used.`),
+      price_guide_context: (n) => (n === 1 ? "1 price was a website's own estimate, not a listing or a sale, so it is context only." : `${n} prices were websites' own estimates, not listings or sales, so they are context only.`),
+      not_a_specific_listing: (n) => (n === 1 ? "1 price came from a site's front page, not from one listing or sale, so it was not used." : `${n} prices came from sites' front pages, not from one listing or sale, so they were not used.`),
     },
     // One short reason beside a source that was not used.
     why: {
@@ -154,6 +157,8 @@ export const SCAN_COPY = {
       israeli_listing_old_or_sealed: 'old, or a sealed unit',
       local_evidence_sufficient: 'not needed: the Israeli listings were enough',
       specialised_market_context: 'context only: this market needs a method GetWorth does not have yet',
+      price_guide_context: "a website's own estimate, not a listing or a sale",
+      not_a_specific_listing: "a site's front page, not one listing",
     },
     groupUsed: 'Used for the price',
     groupContext: 'Context only, not used for the price',
@@ -217,6 +222,7 @@ export const SCAN_COPY = {
     sellFor: (price) => `למכור ב־${ltr(price)}`,
     sellAbout: (price) => `למכור בכ־${ltr(price)}`,
     sellOwnPrice: 'למכור במחיר שלי',
+    startListingNow: 'להתחיל את המודעה עכשיו — המחיר יתווסף אם יימצא',
     wrongItem: 'פריט שגוי?',
     whyPrice: 'למה המחיר הזה?',
     whatFound: 'מה מצאתי',
@@ -290,6 +296,8 @@ export const SCAN_COPY = {
         ? 'מודעה אחת מישראל הייתה ישנה או למוצר חדש באריזה, ולכן אינה מראה במה נמכר היום מוצר משומש.'
         : `${n} מודעות מישראל היו ישנות או למוצרים חדשים באריזה, ולכן אינן מראות במה נמכר היום מוצר משומש.`),
       different_model: (n) => (n === 1 ? 'תוצאה אחת הייתה דגם אחר של אותו מותג: מוצר אחר, ולכן לא נכללה.' : `${n} תוצאות היו דגמים אחרים של אותו מותג: מוצרים אחרים, ולכן לא נכללו.`),
+      price_guide_context: (n) => (n === 1 ? 'מחיר אחד היה הערכה של אתר, לא מודעה ולא מכירה, ולכן הוא הקשר בלבד.' : `${n} מחירים היו הערכות של אתרים, לא מודעות ולא מכירות, ולכן הם הקשר בלבד.`),
+      not_a_specific_listing: (n) => (n === 1 ? 'מחיר אחד הגיע מעמוד הבית של אתר, לא ממודעה או ממכירה מסוימת, ולכן לא נכלל.' : `${n} מחירים הגיעו מעמודי בית של אתרים, לא ממודעה או ממכירה מסוימת, ולכן לא נכללו.`),
     },
     why: {
       retail_price_of_similar_item: 'מחיר חנות לפריט דומה, לא לפריט הזה',
@@ -305,6 +313,8 @@ export const SCAN_COPY = {
       israeli_listing_old_or_sealed: 'ישנה, או מוצר חדש באריזה',
       local_evidence_sufficient: 'לא נדרש: המודעות מישראל הספיקו',
       specialised_market_context: 'הקשר בלבד: לשוק הזה דרושה שיטה שעדיין אין ל־GetWorth',
+      price_guide_context: 'הערכה של אתר, לא מודעה ולא מכירה',
+      not_a_specific_listing: 'עמוד הבית של אתר, לא מודעה מסוימת',
     },
     groupUsed: 'שימשו לחישוב המחיר',
     groupContext: 'הקשר בלבד, לא שימשו למחיר',

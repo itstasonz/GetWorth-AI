@@ -7,8 +7,10 @@
 //
 // DORMANT UNTIL APPROVED. It answers 401 to anything but the platform's cron
 // (Authorization: Bearer CRON_SECRET, compared in constant time; no secret
-// configured means every request is refused), and with PREWARM_MAX_PRODUCTS
-// unset or 0 it does nothing and spends nothing. The founder sets the cap.
+// configured means every request is refused), and unless BOTH PREWARM_MAX_PRODUCTS
+// and PREWARM_DAILY_USD_CAP are set it does nothing and spends nothing. A run
+// stops before any research that could take it past the dollar cap, measured
+// from each call's own usage. The founder sets both.
 //
 // Reads: recent core-scan valuations (identities only) through the server's own
 // database role. Writes: the research records the scan itself writes, and one
@@ -18,7 +20,7 @@ import { getServiceClient } from './_lib/scan/quota.js';
 import { runPrice } from './_lib/scan/service.js';
 import { resolveScanMode, resolveMarketModel, SCAN_KEY_ENV, SCAN_MODE } from './_lib/scan/config.js';
 import { logScanEvent } from './_lib/scan/persist.js';
-import { resolvePrewarmMax, demandFrom, planPrewarm, runPrewarm, DEMAND_WINDOW_DAYS } from './_lib/scan/prewarm.js';
+import { resolvePrewarmMax, resolvePrewarmUsd, demandFrom, planPrewarm, runPrewarm, DEMAND_WINDOW_DAYS } from './_lib/scan/prewarm.js';
 
 // Must stay a literal: Vercel reads it statically.
 export const config = { maxDuration: 300 };
@@ -42,7 +44,9 @@ export function createPrewarmHandler({ env = process.env, supa = () => getServic
     const given = String(req.headers?.authorization ?? '').replace(/^Bearer\s+/i, '');
     if (secret.length < 16 || !(await sameSecret(given, secret))) return reply(res, 401, { error: 'unauthorized' });
     const max = resolvePrewarmMax(env);
-    if (max === 0) return reply(res, 200, { status: 'disabled' });
+    const usdCap = resolvePrewarmUsd(env);
+    // Both a product limit and a dollar cap must be set: either missing, nothing runs and nothing is spent.
+    if (max === 0 || usdCap === 0) return reply(res, 200, { status: 'disabled' });
     if (resolveScanMode(env) !== SCAN_MODE.ENABLED) return reply(res, 200, { status: 'scan_unavailable' });
     const db = supa();
     if (!db) return reply(res, 200, { status: 'no_database' });
@@ -50,8 +54,8 @@ export function createPrewarmHandler({ env = process.env, supa = () => getServic
     const { data, error } = await db.from('valuations').select('created_at, ai_raw_response').gte('created_at', since).order('created_at', { ascending: false }).limit(1000);
     if (error) return reply(res, 200, { status: 'demand_unreadable' });
     const plan = planPrewarm(demandFrom(data, { now: now() }), { max });
-    const counts = await runPrewarm(plan, { price, model: resolveMarketModel(env), apiKey: env[SCAN_KEY_ENV], safetyIdentifier: 'gw-prewarm' });
-    const summary = { status: 'ran', max, estimated_usd: plan.estimated_usd, ...counts };
+    const counts = await runPrewarm(plan, { price, usdCap, model: resolveMarketModel(env), apiKey: env[SCAN_KEY_ENV], safetyIdentifier: 'gw-prewarm' });
+    const summary = { status: 'ran', max, usd_cap: usdCap, estimated_usd: plan.estimated_usd, ...counts };
     try { await logEvent(crypto.randomUUID(), 'core_scan_prewarm', summary); } catch { /* the summary is best effort */ }
     console.log(`[Prewarm] ${JSON.stringify(summary)}`);
     return reply(res, 200, summary);

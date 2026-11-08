@@ -8,7 +8,7 @@ import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
-import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, warmScan } from '../lib/coreScan';
+import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, warmScan, STAGE as SCAN_STAGE } from '../lib/coreScan';
 import { HISTORY_COLUMNS } from '../lib/valuationHistory';
 import { listingProvenanceSupported } from '../lib/marketplaceProvenance';
 
@@ -4495,10 +4495,26 @@ export function AppProvider({ children }) {
   // The scan already knows what the item is, its condition and its price, so
   // the listing opens on its review step with the title, the description, the
   // price and the photographs filled in. Everything stays editable there.
+  // A LISTING STARTED BEFORE THE PRICE ARRIVED (ScanView, while the market is still being researched): the scan keeps
+  // going, and when its price comes the form takes it — only while the seller has not entered a price of their own.
+  // A price the seller chose is never replaced; a scan that ends without a price leaves the form as it is.
+  const awaitingScanPriceRef = useRef(null);
+  useEffect(() => scanStore.subscribe(() => {
+    const scan = scanStore.getSnapshot();
+    if (!awaitingScanPriceRef.current || scan.scanUuid !== awaitingScanPriceRef.current) return;
+    if (scan.stage === SCAN_STAGE.PRICING || scan.stage === SCAN_STAGE.IDENTIFYING || scan.stage === SCAN_STAGE.PREPARING) return;
+    awaitingScanPriceRef.current = null;
+    if (scan.stage !== SCAN_STAGE.PRICED) return;
+    const draft = buildListingDraft(scan);
+    setResult((prev) => (prev?.coreScan ? { ...prev, ...draft.result } : prev));
+    setListingData((prev) => (prev && prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion' } : prev));
+  }), []);
+
   const sellFromScan = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     const scan = scanStore.getSnapshot();
     if (!scan.active || !scan.identity) return;
+    awaitingScanPriceRef.current = scan.stage === SCAN_STAGE.PRICING ? scan.scanUuid : null;
     const draft = buildListingDraft(scan);
     setResult(draft.result);
     setImages(scan.images);

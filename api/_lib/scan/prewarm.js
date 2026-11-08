@@ -23,6 +23,26 @@ import { researchKey } from './service.js';
 import { strategyFor, STRATEGY } from './strategy.js';
 
 export const PREWARM_MAX_ENV = 'PREWARM_MAX_PRODUCTS';
+/** The most a run may spend, in US dollars, measured from each call's own usage. 0 (unset) means the job does nothing. */
+export const PREWARM_USD_ENV = 'PREWARM_DAILY_USD_CAP';
+export const PREWARM_USD_HARD_MAX = 2;
+/**
+ * Published prices (developers.openai.com/api/docs/pricing, read 2026-11-08): gpt-6-luna $0.10 / $0.50 per million
+ * input / output tokens; web search $10 per 1,000 calls, search content billed as input tokens. The 2026-11-08 controlled
+ * test measured $0.012-0.024 per fresh research (mean $0.021 over 10 products).
+ */
+export const PRICES = Object.freeze({ input: 0.10 / 1e6, output: 0.50 / 1e6, search_call: 0.01 });
+/** What one price-step call cost, from its own usage. A call with no usage reported is charged the worst case. */
+export const costOf = (call) => (call?.usage
+  ? (call.usage.input_tokens ?? 0) * PRICES.input + (call.usage.output_tokens ?? 0) * PRICES.output + (call.tool_calls ?? 0) * PRICES.search_call
+  : (call?.ms ? WORST_RESEARCH_USD : 0));
+/** The most one research has been seen to cost, with headroom: the run stops before a call that could cross the cap. */
+export const WORST_RESEARCH_USD = 0.08;
+/** The run's dollar cap: 0 unless the deployment sets one, never above the hard maximum. */
+export function resolvePrewarmUsd(env = process.env) {
+  const n = Number.parseFloat(String(env?.[PREWARM_USD_ENV] ?? ''));
+  return Number.isFinite(n) && n > 0 ? Math.min(n, PREWARM_USD_HARD_MAX) : 0;
+}
 export const PREWARM_HARD_MAX = 25;
 export const DEMAND_WINDOW_DAYS = 30;
 /**
@@ -73,18 +93,20 @@ export function planPrewarm(demand, { max }) {
  * is still fresh and searched again otherwise — inline, never in the background. Sequential, inside `budgetMs`.
  * Resolves to counts only: no identity, no account, no page text.
  */
-export async function runPrewarm(plan, { price, budgetMs = 240_000, now = Date.now, ...priceArgs }) {
+export async function runPrewarm(plan, { price, budgetMs = 240_000, usdCap = 0, now = Date.now, ...priceArgs }) {
   const t0 = now();
-  const out = { planned: plan.products.length, reused: 0, researched: 0, priced: 0, failed: 0, skipped: 0 };
+  const out = { planned: plan.products.length, reused: 0, researched: 0, priced: 0, failed: 0, skipped: 0, spent_usd: 0 };
   for (const p of plan.products) {
-    if (now() - t0 > budgetMs) { out.skipped += 1; continue; }
+    // THE SPENDING CAP: no research starts that could take the run past it.
+    if (now() - t0 > budgetMs || out.spent_usd + WORST_RESEARCH_USD > usdCap) { out.skipped += 1; continue; }
     try {
       const r = await price({ identity: p.identity, answer: null, scanUuid: crypto.randomUUID(), freshMs: REFRESH_AFTER_MS, swr: false, ...priceArgs });
+      out.spent_usd = Math.round((out.spent_usd + costOf(r?.call)) * 10000) / 10000;
       if (r?.status === 'failed') out.failed += 1;
       else if (r?.reused) out.reused += 1;
       else out.researched += 1;
       if (r?.status === 'priced') out.priced += 1;
-    } catch { out.failed += 1; }
+    } catch { out.failed += 1; out.spent_usd = Math.round((out.spent_usd + WORST_RESEARCH_USD) * 10000) / 10000; }
   }
   return out;
 }

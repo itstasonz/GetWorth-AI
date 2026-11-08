@@ -123,7 +123,17 @@ export const SET_ASIDE = Object.freeze({
   SIMILAR_ABROAD: 'similar_item_abroad',
   /** A similar item that stood, when too few stood or they disagreed: shown as context, no number from it. */
   SIMILAR_CONTEXT: 'similar_item_context',
+  /**
+   * A SITE'S PUBLISHED ESTIMATE IS NOT A LISTING OR A SALE (2026-11-08 controlled test: fliptip.ai, aionrulez.net,
+   * flippedradar.com, cameraworth.com reported as "price guides"). Its method cannot be checked and several are generated
+   * by a model: shown as context, never priced from.
+   */
+  PRICE_GUIDE_CONTEXT: 'price_guide_context',
+  /** A reference whose address is a site's front page names no listing and no sale: its provenance cannot be audited. */
+  NOT_SPECIFIC: 'not_a_specific_listing',
 });
+/** Is this address only a site's front page (no path), so no one listing or sale can be pointed at? */
+export const isFrontPage = (url) => /^https?:\/\/[^/?#]+\/?([?#].*)?$/i.test(String(url ?? '').trim());
 /** How many Israeli comparables, current and for a used unit, a range from similar items needs. */
 export const COMPARABLE_MIN = 2;
 /**
@@ -249,7 +259,7 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     points.push({
       evidence: e, value: local / CONDITION_FACTOR[condition], condition, stated, freshness, asking,
       weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page * factors.stock, factors,
-      dropped: aboveNew ? SET_ASIDE.ABOVE_NEW : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null),
+      dropped: isFrontPage(e.url) ? SET_ASIDE.NOT_SPECIFIC : (e.kind === 'price_guide' ? SET_ASIDE.PRICE_GUIDE_CONTEXT : (aboveNew ? SET_ASIDE.ABOVE_NEW : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null))),
     });
   }
 

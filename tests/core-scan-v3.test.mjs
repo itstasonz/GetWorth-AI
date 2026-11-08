@@ -166,3 +166,33 @@ describe('V3-5 where a request\'s time goes', () => {
     assert.ok(a.instance_age_ms >= 0);
   });
 });
+
+// ── V3-6 (2026-11-08 controlled test, 10 products): what a price may stand on ─────────────────────────────────────────
+import { buildValuation, SET_ASIDE, isFrontPage } from '../api/_lib/scan/valuation.js';
+describe('V3-6 a site\'s estimate and a site\'s front page are never priced from', () => {
+  const ev = (o) => ({ title: '', currency: 'ILS', match: 'exact', market: 'IL', condition: 'good', page: 'listing', binding: 'strong', stock: 'unknown', seen: '2026-11-08', listed: '2026-10-20', ...o, price_ils: o.price_ils ?? o.price });
+  // The Switch OLED as the test found it: one current Israeli ad, a shop's new price, an "eBay sold" aggregator's front
+  // page and an AI price estimator — the last two counted as sales before this fix.
+  const pool = [
+    ev({ url: 'https://m.homeless.co.il/yad2/viewad%2C1116926.aspx', domain: 'm.homeless.co.il', kind: 'used_listing', price: 1000, listed: '2026-09-28' }),
+    ev({ url: 'https://ksp.co.il/mob/item/171374', domain: 'ksp.co.il', kind: 'new_retail', price: 1199, condition: 'new_sealed', page: 'shop_product' }),
+    ev({ url: 'https://ebaysoldlistings.com/', domain: 'ebaysoldlistings.com', kind: 'sold', market: 'INTL', price: 910, binding: 'verified_row', listed: '2026-11-06' }),
+    ev({ url: 'https://fliptip.ai/price/nintendo-switch-oled', domain: 'fliptip.ai', kind: 'price_guide', market: 'INTL', price: 578, page: 'price_guide', listed: null }),
+  ];
+  test('V3-6a the Israeli ad prices; the estimate is context and the front page is set aside, each saying why', () => {
+    const v = buildValuation({ evidence: pool, today: '2026-11-08' });
+    assert.equal(v.status, 'priced');
+    const why = Object.fromEntries(v.evidence.map((e) => [e.domain, e.set_aside ?? (e.used ? 'used' : null)]));
+    assert.equal(why['m.homeless.co.il'], 'used');
+    assert.equal(why['fliptip.ai'], SET_ASIDE.PRICE_GUIDE_CONTEXT);
+    assert.equal(why['ebaysoldlistings.com'], SET_ASIDE.NOT_SPECIFIC);
+    assert.equal(v.evidence.filter((e) => e.used).length, 1);
+  });
+  test('V3-6b estimates alone never open the gate: no Israeli listing, no price', () => {
+    const v = buildValuation({ evidence: [pool[3], { ...pool[3], url: 'https://aionrulez.net/price/x', domain: 'aionrulez.net', market: 'IL' }], today: '2026-11-08' });
+    assert.notEqual(v.status, 'priced');
+  });
+  test('V3-6c a front page is a bare host, with or without a slash or query; any path is a page', () => {
+    assert.deepEqual(['https://ebaysoldlistings.com/', 'https://x.com', 'https://x.com/?q=1', 'https://x.com/a/1', 'https://www.homeless.co.il/yad2/viewad%2C1.aspx'].map(isFrontPage), [true, true, true, false, false]);
+  });
+});

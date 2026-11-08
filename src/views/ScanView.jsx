@@ -209,6 +209,8 @@ export default function ScanView() {
         {named && !looking && <Identity identity={identity} copy={copy} lang={lang} done={s.stage !== STAGE.ERROR} />}
 
         {s.stage === STAGE.PRICING && <Working>{copy.pricing}</Working>}
+        {/* The listing can start now; the price joins the form when the research brings one (AppContext sellFromScan). */}
+        {s.stage === STAGE.PRICING && <Btn fullWidth size="lg" onClick={sellFromScan} data-testid="scan-start-listing">{copy.startListingNow}</Btn>}
 
         {s.stage === STAGE.PRICED && band && (
           <div className="space-y-4">
