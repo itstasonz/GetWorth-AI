@@ -17,21 +17,27 @@
 //       Never free text to a model.
 //
 // Every request passes the same gate, in the order that makes a refused request
-// cost nothing:  method → session → body (bounded) → configuration → rollout
-// list → quota.
+// cost nothing:  method → session → body (bounded) → configuration → quota.
 //
-// THE ROLLOUT LIST. The core scan is open only to the accounts on the existing
-// SCAN_ENGINE_V2_USER_IDS list, and in Production an empty or missing list
-// admits nobody. An account that is not on it is answered exactly as a
-// deployment with the scan switched off is — 503 `unavailable`, no reason — and
-// the app already turns that answer into the scan it had before.
+// OPEN TO EVERY SIGNED-IN ACCOUNT (founder decision, 2026-11-08). The earlier
+// founder-only rollout list (SCAN_ENGINE_V2_USER_IDS) is no longer consulted
+// here. What still stands between a request and a paid call: a verified
+// session, a bounded body, the deployment's own switch (CORE_SCAN_ENABLED), and
+// the atomic quota (per-address and per-account bursts, a daily allowance) that
+// refuses when it cannot be checked. A 503 now means only that this deployment
+// has the scan switched off, and its reason is recorded.
+//
+// { action: 'report', scan_uuid, token, report: { identity_shown_ms, price_shown_ms, outcome } }
+//     The phone's own clock: how long the person waited. Token-bound, numbers
+//     only, no provider call, no quota.
+//
+// Every request leaves one telemetry row (_lib/scan/telemetry.js).
 //
 // The OpenAI key never leaves the server, and nothing a browser sends reaches a
 // prompt except through the fenced, length-bounded fields the steps name.
 // ══════════════════════════════════════════════════════════════════════════════
 import { verifyJWT } from './analyze.js';
 import { cors, json, readImage, nodeHandler, UUID_RE } from './_lib/v2/http.js';
-import { isV2Permitted } from './_lib/v2/config.js';
 import {
   resolveScanMode, resolveIdentityModel, resolveMarketModel, SCAN_MODE, SCAN_KEY_ENV,
   MAX_BODY_BYTES, MAX_IMAGES, MAX_IMAGE_BYTES, MAX_USER_TEXT, MAX_REVISIONS, MAX_FOLLOWUPS,
@@ -41,6 +47,7 @@ import { recordAnswer, questionAfterResearch } from './_lib/scan/identify.js';
 import { signScanToken, verifyScanToken } from './_lib/scan/token.js';
 import { chargeScan, refundScan } from './_lib/scan/quota.js';
 import { recordValuation, logScanEvent } from './_lib/scan/persist.js';
+import { recordRequest } from './_lib/scan/telemetry.js';
 
 // Must stay a literal: Vercel reads it statically.
 export const config = { maxDuration: 60 };
@@ -109,24 +116,25 @@ export function createScanHandler({
     if (!scanUuid) return json({ error: 'bad_request', detail: 'scan_uuid must be a UUID' }, 400, headers);
     const lang = LANGS.includes(body?.lang) ? body.lang : 'he';
     const action = body?.action;
-    if (action !== 'identify' && action !== 'price') return json({ error: 'bad_request', detail: 'unknown action' }, 400, headers);
+    if (action !== 'identify' && action !== 'price' && action !== 'report') return json({ error: 'bad_request', detail: 'unknown action' }, 400, headers);
 
     const mode = resolveScanMode(process.env);
     if (mode !== SCAN_MODE.ENABLED) {
-      console.warn(`[Scan] unavailable mode=${mode}`);
-      return json({ scan_uuid: scanUuid, status: 'unavailable', error: 'scan_unavailable' }, 503, headers);
-    }
-    // Not on the rollout list: the same answer, so the app falls back to the scan this account already has.
-    if (!isV2Permitted(user.id, process.env)) {
-      return json({ scan_uuid: scanUuid, status: 'unavailable', error: 'scan_unavailable' }, 503, headers);
+      console.warn(`[Scan] unavailable mode=${mode} scan=${scanUuid.slice(0, 8)}`);
+      await recordRequest(logEvent, scanUuid, { action, http: 503, outcome: 'unavailable', reason: mode, userId: user.id, totalMs: 0 });
+      return json({ scan_uuid: scanUuid, status: 'unavailable', error: 'scan_unavailable', reason: mode }, 503, headers);
     }
 
     const t0 = Date.now();
     const base = { scan_uuid: scanUuid };
     const safetyIdentifier = `gw-${scanUuid}`;
     const apiKey = process.env[SCAN_KEY_ENV];
-    const done = (payload, status, call) => {
+    const done = async (payload, status, call, extra = {}) => {
       const total = Date.now() - t0;
+      await recordRequest(logEvent, scanUuid, {
+        action, http: status, outcome: payload.status ?? payload.error ?? 'unknown', reason: payload.failure ?? payload.detail ?? null,
+        userId: user.id, totalMs: total, call, extra,
+      });
       console.log(`[Scan] action=${action} scan=${scanUuid.slice(0, 8)} http=${status} status=${payload.status ?? payload.error} total_ms=${total}`
         + (call ? ` model=${call.model} provider_ms=${call.ms} in=${call.usage?.input_tokens ?? '-'} out=${call.usage?.output_tokens ?? '-'} tools=${call.tool_calls ?? '-'}` : ''));
       return json({ ...base, ...payload, timings: { total_ms: total, provider_ms: call?.ms ?? null, first_output_ms: call?.first_output_ms ?? null, first_search_ms: call?.first_search_ms ?? null } }, status, headers);
@@ -138,6 +146,15 @@ export function createScanHandler({
       const verified = await verifyScanToken(body.token, { userId: user.id, scanUuid });
       if (!verified.ok) return done({ error: 'invalid_token', detail: verified.error }, 400);
       prior = verified.state;
+    }
+
+    // ── REPORT — what the phone measured ────────────────────────────────────
+    if (action === 'report') {
+      if (!prior) return done({ error: 'invalid_token', detail: 'token_missing' }, 400);
+      const r = body?.report && typeof body.report === 'object' ? body.report : {};
+      const ms = (v) => (Number.isFinite(v) && v >= 0 ? Math.min(600_000, Math.round(v)) : null);
+      const outcome = typeof r.outcome === 'string' && /^[a-z_]{1,24}$/.test(r.outcome) ? r.outcome : null;
+      return done({ status: 'reported' }, 200, null, { client: { identity_shown_ms: ms(r.identity_shown_ms), price_shown_ms: ms(r.price_shown_ms), outcome } });
     }
 
     // ── PRICE ────────────────────────────────────────────────────────────────
@@ -195,7 +212,16 @@ export function createScanHandler({
         }),
       ]);
       // With an answer recorded the token was re-signed: the client carries the newest one.
-      return done({ status: result.status, valuation: result.valuation, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call);
+      const v = result.valuation;
+      return done({ status: result.status, valuation: v, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call, {
+        item: String(identity.display_name ?? '').slice(0, 120) || null, category: identity.category ?? null,
+        priced: result.status === 'priced', withdrawn: v?.withdrawn ?? null, price_confidence: v?.price_confidence ?? null,
+        approximate: v?.approximate === true, basis: v?.basis ?? null, reused: result.reused === true,
+        searches: Array.isArray(v?.searched?.queries) ? v.searched.queries.length : null, evidence: Array.isArray(v?.evidence) ? v.evidence.length : 0,
+        evidence_used: Array.isArray(v?.evidence) ? v.evidence.filter((e) => e.used).length : 0, resale_refs: v?.counts?.resale ?? null,
+        hosts: [...new Set((v?.evidence ?? []).map((e) => String(e.domain ?? '').slice(0, 60)).filter(Boolean))].slice(0, 12),
+        client_elapsed_before_price_ms: clientMs,
+      });
     }
 
     // ── IDENTIFY ─────────────────────────────────────────────────────────────
@@ -207,6 +233,7 @@ export function createScanHandler({
 
     const quota = await charge({ ip: clientIp(req), userId: user.id });
     if (!quota.allowed) {
+      await recordRequest(logEvent, scanUuid, { action, http: 429, outcome: 'rate_limited', reason: quota.limitType, userId: user.id, totalMs: Date.now() - t0 });
       return json({
         ...base, error: 'rate_limited', code: 'RATE_LIMITED', limitType: quota.limitType,
         retryAfterSeconds: quota.retryAfter, retryable: quota.limitType !== 'user_daily',
@@ -226,7 +253,13 @@ export function createScanHandler({
       userId: user.id, scanUuid, identity: result.identity, started: prior?.iat ?? null,
       counters: { revisions: prior ? (prior.revisions ?? 0) + 1 : 0, followups: result.followups, identify_ms: result.call?.ms ?? null },
     });
-    return done({ status: result.status, identity: result.identity, default_condition: result.default_condition, token }, 200, result.call);
+    return done({ status: result.status, identity: result.identity, default_condition: result.default_condition, token }, 200, result.call, {
+      item: String(result.identity?.display_name ?? '').slice(0, 120) || null, category: result.identity?.category ?? null,
+      identity_confidence: result.identity?.identity_confidence ?? null, identity_precision: result.identity?.identity_precision ?? null,
+      question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? String(result.identity.followup.attribute ?? result.identity.followup.kind).slice(0, 40) : null,
+      incomplete: !!result.identity?.incomplete, images: read.images.length, image_bytes: read.images.reduce((n, b) => n + Math.round(b.length * 0.75), 0),
+      revision: prior ? (prior.revisions ?? 0) + 1 : 0,
+    });
   };
 }
 

@@ -2203,6 +2203,8 @@ export function AppProvider({ children }) {
         const analyzeHeaders = {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${_accessToken}`,
+          // This engine runs only after /api/scan answered 503: the server logs that it served a fallback.
+          'X-GW-Fallback': 'core_scan_unavailable',
         };
 
         const res = await fetch('/api/analyze', {

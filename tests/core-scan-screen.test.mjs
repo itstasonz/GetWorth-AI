@@ -92,6 +92,7 @@ function server(script) {
   const queue = { identify: [...(script.identify ?? [])], price: [...(script.price ?? [])] };
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
+    if (body.action === 'report') return new Response(JSON.stringify({ status: 'reported' }), { status: 200 });
     requests.push(body);
     const next = queue[body.action].shift();
     if (next?.hold) await next.hold;

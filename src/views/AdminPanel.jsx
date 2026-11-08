@@ -2,8 +2,9 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   Shield, CheckCircle, XCircle, Clock, Users, ShoppingBag, Flag, Package,
   Star, ArrowLeft, RefreshCw, Loader2, Eye, Trash2, AlertTriangle,
-  ChevronDown, ChevronUp, MessageCircle, DollarSign, BarChart3, Image
+  ChevronDown, ChevronUp, MessageCircle, DollarSign, BarChart3, Image, Activity
 } from 'lucide-react';
+import ScanMonitor from './ScanMonitor';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { supabase } from '../lib/supabase';
@@ -18,6 +19,7 @@ const TABS = [
   { id: 'orders', label: { en: 'Orders', he: 'הזמנות' }, icon: Package },
   { id: 'users', label: { en: 'Users', he: 'משתמשים' }, icon: Users },
   { id: 'reviews', label: { en: 'Reviews', he: 'ביקורות' }, icon: Star },
+  { id: 'scans', label: { en: 'Scans', he: 'סריקות' }, icon: Activity },
 ];
 
 export default function AdminPanel() {
@@ -464,6 +466,9 @@ export default function AdminPanel() {
           )}
         </div>
       )}
+
+      {/* ═══ SCANS TAB — per-scan telemetry (loads its own data) ═══ */}
+      {tab === 'scans' && <ScanMonitor lang={lang} />}
 
       {/* ═══ REVIEWS TAB (moderation) ═══ */}
       {tab === 'reviews' && !loading && !loadError && (

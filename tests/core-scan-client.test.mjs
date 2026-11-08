@@ -28,13 +28,17 @@ const CHOICE = { kind: 'choice', affects: 'price', question: 'What storage size 
 const PHOTO = { kind: 'photo', affects: 'identity', question: 'Take one photo of the underside label', options: [] };
 
 let requests;
+let reports;
 let realFetch;
 /** A fake /api/scan. `script` maps an action to the responses it gives, in order. */
 function server(script) {
   requests = [];
+  reports = [];
   const queue = { identify: [...(script.identify ?? [])], price: [...(script.price ?? [])] };
   globalThis.fetch = async (url, init) => {
     const body = JSON.parse(init.body);
+    // The phone's timing report is telemetry, answered and kept apart from the scan's own requests.
+    if (body.action === 'report') { reports.push(body); return new Response(JSON.stringify({ status: 'reported' }), { status: 200 }); }
     requests.push({ url, body, auth: init.headers.Authorization });
     const next = queue[body.action].shift() ?? { status: 500, payload: { error: 'unscripted' } };
     if (next.hold) await next.hold;
@@ -73,6 +77,13 @@ describe('CC-1 photograph in, answer out', () => {
     assert.equal(typeof requests[1].body.client_elapsed_ms, 'number');
     assert.equal(snap().valuationId, 'val-1');
     assert.ok(snap().timings.identity_shown_ms <= snap().timings.price_shown_ms);
+    // The phone's own clock goes back once, token-bound, numbers only.
+    await new Promise((r) => setTimeout(r, 5));
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].token, 'tok-1');
+    assert.equal(reports[0].report.outcome, 'priced');
+    assert.equal(reports[0].report.price_shown_ms, snap().timings.price_shown_ms);
+    assert.equal(reports[0].report.identity_shown_ms, snap().timings.identity_shown_ms);
     assert.equal(snap().condition, 'good');
   });
   test('CC-1b the condition is chosen after the answer and re-prices without a request', async () => {

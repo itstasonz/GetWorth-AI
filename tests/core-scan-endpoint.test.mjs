@@ -420,9 +420,11 @@ describe('CE-4 the two actions', () => {
     assert.equal(log.priceArgs.answer, null);
     assert.equal(log.priceArgs.scanUuid, UUID, 'the research is stored under this scan');
     assert.equal(log.priceArgs.lang, undefined, 'market research has no language');
-    const event = log.events.at(-1);
-    assert.equal(event.type, 'core_scan_priced');
+    const event = log.events.filter((e) => e.type === 'core_scan_priced').at(-1);
     assert.deepEqual([event.payload.identify_ms, event.payload.market_ms, event.payload.client_elapsed_before_price_ms], [1200, 5000, 4321]);
+    const request = log.events.filter((e) => e.type === 'core_scan_request').at(-1);
+    assert.deepEqual([request.payload.action, request.payload.http, request.payload.outcome, request.payload.priced], ['price', 200, 'priced', true]);
+    assert.equal(request.payload.client_elapsed_before_price_ms, 4321);
   });
   test('CE-4d an answer is an option the scan itself offered, or "unsure" — never free text', async () => {
     const rawIdentity = { ...RAW_IDENTITY, followup: { kind: 'choice', affects: 'price', question: 'What storage size is it?', options: ['128 GB', '256 GB'] } };
@@ -469,58 +471,87 @@ describe('CE-4 the two actions', () => {
   });
 });
 
-describe('CE-7 the rollout list: the core scan is for the accounts on the existing list', () => {
-  /** Run `fn` with the list and the deployment kind set, then put the environment back. */
-  async function withRollout({ list, production = true }, fn) {
-    const before = { ids: process.env.SCAN_ENGINE_V2_USER_IDS, env: process.env.VERCEL_ENV };
-    if (list === undefined) delete process.env.SCAN_ENGINE_V2_USER_IDS; else process.env.SCAN_ENGINE_V2_USER_IDS = list;
-    if (production) process.env.VERCEL_ENV = 'production'; else delete process.env.VERCEL_ENV;
-    try { return await fn(); } finally {
-      if (before.ids === undefined) delete process.env.SCAN_ENGINE_V2_USER_IDS; else process.env.SCAN_ENGINE_V2_USER_IDS = before.ids;
-      if (before.env === undefined) delete process.env.VERCEL_ENV; else process.env.VERCEL_ENV = before.env;
-    }
+describe('CE-7 open to every signed-in account (founder decision 2026-11-08): no rollout list', () => {
+  /** Run `fn` with a list, the deployment kind and the switch set, then put the environment back. */
+  async function withEnv({ list, production = true, enabled }, fn) {
+    const keys = ['SCAN_ENGINE_V2_USER_IDS', 'VERCEL_ENV', 'CORE_SCAN_ENABLED'];
+    const before = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    const set = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
+    set('SCAN_ENGINE_V2_USER_IDS', list);
+    set('VERCEL_ENV', production ? 'production' : undefined);
+    set('CORE_SCAN_ENABLED', enabled);
+    try { return await fn(); } finally { for (const k of keys) set(k, before[k]); }
   }
-  test('CE-7a an account on the list gets the core scan', async () => {
-    await withRollout({ list: 'someone-else, user-1' }, async () => {
-      const { call, log } = harness();
-      const r = await call(identifyBody());
-      assert.deepEqual([r.status, r.payload.status], [200, 'identified']);
-      assert.deepEqual([log.charge, log.identify], [1, 1]);
-    });
-  });
-  test('CE-7b an account that is not on it is answered "unavailable", with no reason, nothing charged and nothing called', async () => {
-    await withRollout({ list: 'user-1' }, async () => {
-      const { call, log } = harness();
-      const { token } = (await call(identifyBody())).payload;
-      for (const body of [identifyBody(), { action: 'price', scan_uuid: UUID, token }]) {
-        const r = await call(body, { auth: 'Bearer other' });
-        assert.equal(r.status, 503, 'the status the app already turns into the scan this account had before');
-        assert.deepEqual(r.payload, { scan_uuid: UUID, status: 'unavailable', error: 'scan_unavailable' }, 'exactly the answer of a deployment with the scan switched off');
-      }
-      assert.deepEqual([log.charge, log.identify, log.price], [1, 1, 0], 'only the listed account\'s own scan ran');
-    });
-  });
-  test('CE-7c in Production an empty or missing list admits nobody, the founder included', async () => {
-    for (const list of [undefined, '', ' , ']) {
-      await withRollout({ list }, async () => {
+  test('CE-7a in Production any signed-in account gets the core scan, whatever the old list says', async () => {
+    for (const list of [undefined, '', 'someone-else']) {
+      await withEnv({ list }, async () => {
         const { call, log } = harness();
-        const r = await call(identifyBody());
-        assert.deepEqual([r.status, r.payload.status], [503, 'unavailable'], JSON.stringify(list));
-        assert.deepEqual([log.charge, log.identify], [0, 0]);
+        const r = await call(identifyBody(), { auth: 'Bearer other' });
+        assert.deepEqual([r.status, r.payload.status], [200, 'identified'], JSON.stringify(list));
+        assert.deepEqual([log.charge, log.identify], [1, 1], 'the quota is still charged before the paid call');
       });
     }
   });
-  test('CE-7d the gate reads the existing list and nothing a request sends', async () => {
-    await withRollout({ list: 'user-1' }, async () => {
+  test('CE-7b the session and the quota still stand in front of every paid call', async () => {
+    await withEnv({}, async () => {
       const { call, log } = harness();
-      const r = await call(identifyBody({ user_id: 'user-1', allow: true, SCAN_ENGINE_V2_USER_IDS: 'user-2' }), { auth: 'Bearer other' });
-      assert.equal(r.status, 503);
-      assert.equal(log.identify, 0);
+      assert.equal((await call(identifyBody(), { auth: 'Bearer nobody' })).status, 401);
+      assert.deepEqual([log.charge, log.identify], [0, 0]);
+      const limited = harness({ quota: { allowed: false, charged: false, limitType: 'user_daily', retryAfter: 100 } });
+      const r = await limited.call(identifyBody());
+      assert.equal(r.status, 429);
+      assert.equal(limited.log.identify, 0, 'no provider call past a refused quota');
+      const ev = limited.log.events.find((e) => e.type === 'core_scan_request');
+      assert.deepEqual([ev.payload.outcome, ev.payload.reason], ['rate_limited', 'user_daily'], 'a refusal is recorded');
     });
+  });
+  test('CE-7c a deployment with the scan switched off answers 503 with its reason, recorded, and calls nothing', async () => {
+    await withEnv({ enabled: 'false' }, async () => {
+      const { call, log } = harness();
+      const r = await call(identifyBody());
+      assert.deepEqual([r.status, r.payload.status, r.payload.reason], [503, 'unavailable', 'disabled_flag']);
+      assert.deepEqual([log.charge, log.identify], [0, 0]);
+      const ev = log.events.find((e) => e.type === 'core_scan_request');
+      assert.deepEqual([ev.payload.outcome, ev.payload.reason, ev.payload.http], ['unavailable', 'disabled_flag', 503]);
+    });
+  });
+  test('CE-7d no account list is consulted by the core scan', () => {
     const src = readFileSync(join(ROOT, 'api/scan.js'), 'utf8');
-    assert.match(src, /import \{ isV2Permitted \} from '\.\/_lib\/v2\/config\.js';/, 'the existing allowlist check, not a new one');
-    assert.match(src, /if \(!isV2Permitted\(user\.id, process\.env\)\)/);
+    assert.doesNotMatch(src, /isV2Permitted\(/);
     assert.doesNotMatch(src, /CORE_SCAN_USER_IDS/, 'no second list');
+  });
+});
+
+describe('CE-8 every request leaves one privacy-safe telemetry row', () => {
+  test('CE-8a identify: durations, model, deployment, a hashed account; never the id, the photograph or the token', async () => {
+    const before = process.env.VERCEL_GIT_COMMIT_SHA;
+    process.env.VERCEL_GIT_COMMIT_SHA = 'abcdef1234567890';
+    try {
+      const { call, log } = harness();
+      const r = await call(identifyBody());
+      const ev = log.events.find((e) => e.type === 'core_scan_request');
+      assert.equal(ev.scan, UUID);
+      assert.deepEqual([ev.payload.action, ev.payload.http, ev.payload.outcome, ev.payload.engine], ['identify', 200, 'identified', 'core_scan']);
+      assert.equal(ev.payload.deployment.sha, 'abcdef123456');
+      assert.match(ev.payload.account, /^[0-9a-f]{16}$/);
+      assert.equal(ev.payload.provider_ms, 1200);
+      assert.equal(ev.payload.images, 1);
+      const raw = JSON.stringify(ev.payload);
+      assert.ok(!raw.includes('user-1'), 'no account id');
+      assert.ok(!raw.includes(r.payload.token), 'no token');
+    } finally { if (before === undefined) delete process.env.VERCEL_GIT_COMMIT_SHA; else process.env.VERCEL_GIT_COMMIT_SHA = before; }
+  });
+  test('CE-8b report: the phone timings, token-bound, bounded numbers, no paid call', async () => {
+    const { call, log } = harness();
+    const { token } = (await call(identifyBody())).payload;
+    assert.equal((await call({ action: 'report', scan_uuid: UUID, report: { price_shown_ms: 9000 } })).status, 400, 'no token, no report');
+    const r = await call({ action: 'report', scan_uuid: UUID, token, report: { identity_shown_ms: 4100, price_shown_ms: 9999999, outcome: 'priced', extra: 'x' } });
+    assert.deepEqual([r.status, r.payload.status], [200, 'reported']);
+    const last = () => log.events.filter((e) => e.type === 'core_scan_request').at(-1);
+    assert.deepEqual(last().payload.client, { identity_shown_ms: 4100, price_shown_ms: 600000, outcome: 'priced' });
+    await call({ action: 'report', scan_uuid: UUID, token, report: { price_shown_ms: 'x', outcome: 'DROP TABLE' } });
+    assert.deepEqual(last().payload.client, { identity_shown_ms: null, price_shown_ms: null, outcome: null });
+    assert.deepEqual([log.charge, log.identify, log.price], [1, 1, 0], 'a report costs nothing');
   });
 });
 

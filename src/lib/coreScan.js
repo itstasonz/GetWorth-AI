@@ -199,6 +199,12 @@ async function identify({ correction = null } = {}) {
   return 'ok';
 }
 
+/** Tell the server how long this scan took on the phone. Best effort, fire and forget. */
+function report(outcome) {
+  const { identity_shown_ms, price_shown_ms } = state.timings;
+  post({ action: 'report', token: state.token, report: { identity_shown_ms, price_shown_ms, outcome } }, 5_000).catch(() => {});
+}
+
 // ── STEP 2 — PRICE ──────────────────────────────────────────────────────────
 async function price({ answer = null } = {}) {
   set({ stage: STAGE.PRICING, error: null, ...(answer === null ? {} : { answered: answer }) });
@@ -222,6 +228,9 @@ async function price({ answer = null } = {}) {
     timings: { ...state.timings, price_shown_ms: elapsed() },
   });
   console.log(`[Scan] photo → identity ${state.timings.identity_shown_ms}ms · photo → price ${state.timings.price_shown_ms}ms (server ${p.timings?.total_ms ?? '?'}ms${p.reused ? ', market research reused' : ''})`);
+  // The phone's own clock goes back to the server's telemetry: how long the person actually waited. Never awaited by the
+  // screen, never retried, never an error on screen.
+  report(p.status === 'priced' ? 'priced' : 'no_price');
 }
 
 // ── ACTIONS ─────────────────────────────────────────────────────────────────

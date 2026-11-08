@@ -416,6 +416,10 @@ function withTimeout(promise, ms, label) {
 // ═══════════════════════════════════════════════════════
 // PHASE 3: COST PROTECTION CONSTANTS
 // ═══════════════════════════════════════════════════════
+// A provider that refuses for a reason only a person can fix (billing off, key revoked) is not asked again on every
+// scan: the first such refusal takes Vision off this instance's path for an hour.
+const VISION_COOLDOWN_MS = 60 * 60 * 1000;
+let _visionBlockedUntil = 0;
 const VISION_DAILY_LIMIT = 1500;             // Hard cap per day across all users
 const VISION_RATE_PER_MIN = 5;               // Per-IP scan rate limit
 const VISION_CACHE_TTL_HOURS = 24;           // Re-use Vision result for same image
@@ -1667,6 +1671,10 @@ async function fallbackVision(imageBase64, supa) {
     console.log('[Vision] GOOGLE_VISION_API_KEY not set — skipping fallback');
     return null;
   }
+  if (Date.now() < _visionBlockedUntil) {
+    console.log('[Vision] skipped — provider refused earlier (billing/permission); cooling down');
+    return null;
+  }
 
   // Layer 1: image hash cache
   const hash = await imageHash(imageBase64);
@@ -1708,6 +1716,7 @@ async function fallbackVision(imageBase64, supa) {
     if (!res.ok) {
       const errBody = await res.text().catch(() => '');
       console.warn(`[Vision] API ${res.status}:`, errBody.slice(0, 200));
+      if (res.status === 401 || res.status === 403) _visionBlockedUntil = Date.now() + VISION_COOLDOWN_MS;
       return null;
     }
 
@@ -4304,6 +4313,9 @@ async function handleRequest(req) {
       }, 503, cors);
     }
     blog(`[Timing] ingestion complete in ${ingestMs}ms — AI budget rem=${rem()}ms`);
+    // The app reaches this engine only when /api/scan answered 503; it says so, and the reason is logged, never silent.
+    const fallbackFrom = String(req.headers.get('x-gw-fallback') || '').replace(/[^a-z_]/g, '').slice(0, 40);
+    if (fallbackFrom) console.warn(`[Fallback] legacy engine serving a scan reason=${fallbackFrom}`);
 
     // ── PHASE 3: RATE LIMITING — fail closed on DB error ──
     const supa = getSupabase();
