@@ -53,6 +53,8 @@ import { recordRequest, instanceInfo } from './_lib/scan/telemetry.js';
 export const config = { maxDuration: 60 };
 
 const LANGS = ['he', 'en'];
+/** Provider failures that trying again now cannot fix: the account is out of credit, the key is refused, none is set. */
+export const LASTING_FAILURE = /^(credit_exhausted|auth|not_configured)$/;
 
 const clientIp = (req) => req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || 'unknown';
 
@@ -198,7 +200,7 @@ export function createScanHandler({
         base.token = token;
       }
       const result = await price({ identity, answer, scanUuid, model: resolveMarketModel(process.env), apiKey, safetyIdentifier });
-      if (result.status === SCAN_STATUS.FAILED) return done({ status: result.status, failure: result.failure, retryable: true }, 200, result.call);
+      if (result.status === SCAN_STATUS.FAILED) return done({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call);
       // ONE MORE PHOTOGRAPH MAY CHANGE THE NEXT SEARCH (identify.js questionAfterResearch): when a technical item with no
       // model code found no second-hand reference, the model label is offered beside the result, in a re-signed token.
       const more = questionAfterResearch(identity, result.valuation, { lang, followupsLeft: MAX_FOLLOWUPS - (prior.followups ?? 0) });
@@ -270,8 +272,11 @@ export function createScanHandler({
       model: resolveIdentityModel(process.env), apiKey, safetyIdentifier,
     });
     if (result.status === SCAN_STATUS.FAILED) {
-      if (quota.charged && !result.billed) await refund({ userId: user.id });
-      return done({ status: result.status, failure: result.failure, retryable: true }, 200, result.call);
+      // A failure the provider did not bill gives the daily allowance back. An account or configuration problem (out of
+      // credit, a rejected key) does not go away by trying again now: the client is told so, and the record says why.
+      const refunded = !!quota.charged && !result.billed;
+      if (refunded) await refund({ userId: user.id });
+      return done({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call, { quota_ms: quotaMs, refunded });
     }
     const tSign = Date.now();
     const token = await signScanToken({

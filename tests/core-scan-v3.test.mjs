@@ -13,7 +13,7 @@ import { warmQuota } from '../api/_lib/scan/quota.js';
 import { instanceInfo } from '../api/_lib/scan/telemetry.js';
 import { warmScan, resetWarm, WARM_EVERY_MS } from '../src/lib/coreScan.js';
 import * as CFG from '../api/_lib/scan/config.js';
-import { RAW_IDENTITY } from './helpers/core-scan-fakes.mjs';
+import { RAW_IDENTITY, IMG } from './helpers/core-scan-fakes.mjs';
 
 const UUID = '11111111-2222-3333-4444-555555555555';
 const PHONE = (over = {}) => normalizeIdentity({
@@ -194,5 +194,44 @@ describe('V3-6 a site\'s estimate and a site\'s front page are never priced from
   });
   test('V3-6c a front page is a bare host, with or without a slash or query; any path is a page', () => {
     assert.deepEqual(['https://ebaysoldlistings.com/', 'https://x.com', 'https://x.com/?q=1', 'https://x.com/a/1', 'https://www.homeless.co.il/yad2/viewad%2C1.aspx'].map(isFrontPage), [true, true, true, false, false]);
+  });
+});
+
+// ── V3-7 (2026-11-08 Production failure, scan d687c201: the OpenAI account out of credit) ──────────────────────────────
+import { NOT_BILLED } from '../api/_lib/scan/service.js';
+import { outageOf } from '../src/lib/coreScan.js';
+describe('V3-7 an outage on our side: the allowance given back, a message that says so, retry only where it can help', () => {
+  const run = async (failure, billed) => {
+    const log = { refund: 0, events: [] };
+    const handler = createScanHandler({
+      verify: async () => ({ id: 'user-1' }),
+      charge: async () => ({ allowed: true, charged: true }),
+      refund: async () => { log.refund += 1; },
+      identify: async () => ({ status: 'failed', failure, billed, identity: null, followups: 0, call: { stage: 'identify', model: 'm', ms: 700, usage: null } }),
+      logEvent: async (s, type, payload) => { log.events.push({ type, payload }); },
+    });
+    const saved = { ...process.env };
+    Object.assign(process.env, { OPENAI_API_KEY: 'k', SCAN_STATE_SECRET: 'x'.repeat(40) });
+    try {
+      const res = await handler(new Request('https://getworth.test/api/scan', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer good' }, body: JSON.stringify({ action: 'identify', scan_uuid: UUID, lang: 'he', images: [IMG] }) }));
+      return { body: await res.json(), log, row: log.events.find((e) => e.type === 'core_scan_request')?.payload };
+    } finally { for (const k of ['OPENAI_API_KEY', 'SCAN_STATE_SECRET']) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; } }
+  };
+  test('V3-7a out of credit: the daily allowance is given back, the client is told not to retry now, the record says why', async () => {
+    const { body, log, row } = await run('credit_exhausted', false);
+    assert.deepEqual([body.status, body.failure, body.retryable, log.refund], ['failed', 'credit_exhausted', false, 1]);
+    assert.deepEqual([row.reason, row.refunded, typeof row.quota_ms], ['credit_exhausted', true, 'number']);
+  });
+  test('V3-7b a billed failure (a timeout) keeps the charge and may be retried', async () => {
+    const { body, log, row } = await run('timeout', true);
+    assert.deepEqual([body.retryable, log.refund, row.refunded], [true, 0, false]);
+  });
+  test('V3-7c the app calls exactly the unbilled failures an outage "not counted", and offers a retry only where it can help', () => {
+    for (const code of ['credit_exhausted', 'auth', 'not_configured', 'network', 'rate_limited', 'upstream_5xx', 'http_418', 'timeout', 'parse', 'incomplete', 'refusal', 'unknown', '']) {
+      assert.equal(outageOf(code) !== null, NOT_BILLED.test(code), code);
+    }
+    assert.deepEqual(outageOf('credit_exhausted'), { key: 'outage', retryable: false });
+    assert.deepEqual(outageOf('upstream_5xx'), { key: 'outage', retryable: true });
+    assert.equal(outageOf('timeout'), null);
   });
 });

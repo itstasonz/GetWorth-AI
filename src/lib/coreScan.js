@@ -101,7 +101,22 @@ const MESSAGES = {
   expired: ['This scan expired. Please scan the item again.', 'פג תוקף הסריקה. סרקו את הפריט שוב.'],
   other: ['Something went wrong. Please try again.', 'משהו השתבש. נסו שוב.'],
   unavailable: ['Scanning is temporarily unavailable. Please try again in a few minutes.', 'הסריקה אינה זמינה כרגע. נסו שוב בעוד כמה דקות.'],
+  // The service behind the scan is down on our side (2026-11-08: the AI provider account ran out of credit). Nothing about
+  // the photo or the person: say so, and say the attempt was not counted — true for exactly these codes (outageOf).
+  outage: ['Scanning is unavailable right now because of a problem on our side. This attempt was not counted toward your daily scans. Please try again later.', 'הסריקה אינה זמינה כרגע בגלל תקלה אצלנו. הניסיון הזה לא נספר במכסת הסריקות היומית. נסו שוב מאוחר יותר.'],
 };
+
+/**
+ * A provider failure the server did not bill (api/_lib/scan/service.js NOT_BILLED) is an outage on our side: the
+ * daily allowance was given back. Of those, an account or configuration problem does not go away by trying again now.
+ * Resolves to { key, retryable } or null for a failure that is not an outage (a timeout, an unreadable answer).
+ */
+const OUTAGE = /^(network|auth|rate_limited|credit_exhausted|upstream_5xx|not_configured|http_\d{3})$/;
+const LASTING = /^(credit_exhausted|auth|not_configured)$/;
+export function outageOf(code) {
+  const c = String(code ?? '');
+  return OUTAGE.test(c) ? { key: 'outage', retryable: !LASTING.test(c) } : null;
+}
 const say = (lang, key) => MESSAGES[key][lang === 'he' ? 1 : 0];
 
 function fail(step, key, { code = key, retryable = true } = {}) {
@@ -187,7 +202,7 @@ async function identify({ correction = null } = {}) {
   if (r.status === 503) { fail('identify', 'unavailable', { code: 'scan_unavailable' }); return 'unavailable'; }
   if (refused('identify', r)) return 'refused';
   const p = r.payload ?? {};
-  if (p.status === 'failed') { fail('identify', 'other', { code: p.failure ?? 'failed' }); return 'failed'; }
+  if (p.status === 'failed') { const o = outageOf(p.failure); fail('identify', o?.key ?? 'other', { code: p.failure ?? 'failed', retryable: o ? o.retryable : true }); return 'failed'; }
   set({
     identity: p.identity, token: p.token, valuation: null, valuationId: null, answered: null,
     condition: CONDITIONS.includes(p.default_condition) ? p.default_condition : 'good',
@@ -248,7 +263,7 @@ async function price({ answer = null } = {}) {
     set({ identity: p.identity, token: p.token ?? state.token, answered: null, stage: STAGE.NEEDS_DETAIL });
     return;
   }
-  if (p.status === 'failed' || !p.valuation) { fail('price', 'other', { code: p.failure ?? 'failed' }); return; }
+  if (p.status === 'failed' || !p.valuation) { const o = outageOf(p.failure); fail('price', o?.key ?? 'other', { code: p.failure ?? 'failed', retryable: o ? o.retryable : true }); return; }
   set({
     stage: p.status === 'priced' ? STAGE.PRICED : STAGE.INSUFFICIENT,
     valuation: p.valuation,
