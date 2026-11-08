@@ -11,6 +11,8 @@ import { setNavDirection } from '../lib/urlSync';
 import { Card, Btn, Badge, FadeIn, SlideUp, InputField, EmptyState, haptic } from '../components/ui';
 import { formatPrice, timeAgo } from '../lib/utils';
 import { notifIconFor, resolveNotificationTarget } from '../lib/notifications';
+import FinalPriceField from '../components/FinalPriceField';
+import { completionMeta, parseFinalPrice } from '../lib/marketplaceProvenance';
 
 // ═══════════════════════════════════════════════════════
 // ORDER STATUS CONFIG
@@ -323,6 +325,8 @@ export function OrderDetailView() {
   const [showCancel, setShowCancel] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false);
+  // The buyer's final price, typed at completion (optional; empty records nothing).
+  const [finalPriceInput, setFinalPriceInput] = useState('');
   const [showDeclineConfirm, setShowDeclineConfirm] = useState(false);
   const [reviewRating, setReviewRating] = useState(0);
   const [reviewComment, setReviewComment] = useState('');
@@ -391,9 +395,9 @@ export function OrderDetailView() {
   const currentStepIndex = steps.indexOf(order.status);
   const isTerminal = ['completed', 'cancelled', 'disputed', 'declined'].includes(order.status);
 
-  const handleAction = async (s) => {
+  const handleAction = async (s, meta = {}) => {
     setUpdating(true);
-    try { await updateOrderStatus(order.id, s); }
+    try { await updateOrderStatus(order.id, s, meta); }
     catch (e) { console.error('[OrderDetail] handleAction error:', e); }
     finally { setUpdating(false); }
   };
@@ -750,9 +754,10 @@ export function OrderDetailView() {
                 <h3 className="text-lg font-bold">{lang === 'he' ? 'לאשר סיום עסקה?' : 'Complete this transaction?'}</h3>
                 <p className="text-sm text-slate-400">{lang === 'he' ? 'פעולה זו סופית ואינה ניתנת לביטול. אשר רק לאחר שקיבלת את הפריט ובדקת אותו.' : 'This is final and cannot be undone. Only confirm after you have received and inspected the item.'}</p>
               </div>
+              <FinalPriceField orderId={order.id} askingPrice={order.price} value={finalPriceInput} onChange={setFinalPriceInput} lang={lang} />
               <div className="flex gap-3">
                 <button onClick={() => setShowCompleteConfirm(false)} className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium">{lang === 'he' ? 'חזור' : 'Go Back'}</button>
-                <Btn primary className="flex-1 py-3" onClick={() => { setShowCompleteConfirm(false); handleAction('completed'); }} disabled={updating}>
+                <Btn primary className="flex-1 py-3" onClick={() => { setShowCompleteConfirm(false); handleAction('completed', completionMeta(finalPriceInput)); }} disabled={updating || !!parseFinalPrice(finalPriceInput).error}>
                   {lang === 'he' ? 'אשר וסיים' : 'Confirm & Complete'}
                 </Btn>
               </div>

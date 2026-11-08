@@ -5,6 +5,8 @@ import {
   ChevronDown, ChevronUp, MessageCircle, DollarSign, BarChart3, Image, Activity
 } from 'lucide-react';
 import ScanMonitor from './ScanMonitor';
+import TestAccountToggle from '../components/TestAccountToggle';
+import { loadTestAccountIds } from '../lib/marketplaceProvenance';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { supabase } from '../lib/supabase';
@@ -24,6 +26,9 @@ const TABS = [
 
 export default function AdminPanel() {
   const { lang, setView, profile, showToastMsg } = useApp();
+  // Accounts marked as internal/test (null until the database has the function: the toggle then stays hidden).
+  const [testIds, setTestIds] = useState(null);
+  const onTestChange = (id, isTest) => setTestIds((prev) => { const next = new Set(prev ?? []); if (isTest) next.add(id); else next.delete(id); return next; });
   const [tab, setTab] = useState('overview');
   const [loading, setLoading] = useState(false);
   // ADMIN-001: every loader used to swallow failures (several destructured
@@ -196,6 +201,7 @@ export default function AdminPanel() {
       const { data, error } = await supabase.rpc('admin_list_users');
       if (error) throw error; // was silently discarded — empty panel with no cause
       setAllUsers(data || []);
+      setTestIds(await loadTestAccountIds(supabase));
     } catch (e) {
       console.error('[Admin] Users error:', e?.code, e?.message, e?.details);
       setLoadError('users');
@@ -462,7 +468,7 @@ export default function AdminPanel() {
               <p className="text-slate-500 text-sm">{allUsers.length === 0 ? t('No users loaded', 'לא נטענו משתמשים') : t('No match', 'אין התאמה')}</p>
             </div>
           ) : (
-            filteredUsers.map((u) => <AdminUserCard key={u.id} u={u} lang={lang} />)
+            filteredUsers.map((u) => <AdminUserCard key={u.id} u={u} lang={lang} testIds={testIds} onTestChange={onTestChange} />)
           )}
         </div>
       )}
@@ -496,7 +502,7 @@ export default function AdminPanel() {
 // Expanded: live counts fetched on demand through the admin-bypass RLS
 // policies (listings all-status, orders) and the public reviews policy —
 // nothing here invents data the schema doesn't hold.
-function AdminUserCard({ u, lang }) {
+function AdminUserCard({ u, lang, testIds = null, onTestChange }) {
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState(null); // null=not loaded | 'error' | {…}
   const t = (en, he) => lang === 'he' ? he : en;
@@ -566,6 +572,7 @@ function AdminUserCard({ u, lang }) {
 
         {expanded && (
           <div className="mt-3 pt-3 border-t border-white/5">
+            {testIds && <div className="mb-2"><TestAccountToggle userId={u.id} isTest={testIds.has(u.id)} onChange={onTestChange} lang={lang} /></div>}
             {detail === null ? (
               <div className="text-center py-3"><Loader2 className="w-4 h-4 animate-spin text-slate-500 mx-auto" /></div>
             ) : detail === 'error' ? (
