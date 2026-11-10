@@ -138,7 +138,8 @@ describe('CU-2 which question, when — and when to stop', () => {
     const dated = recordAnswer(car, 2019, { lang: 'en', followupsLeft: 2 }).identity;
     assert.equal(dated.followup.kind, 'none', 'mileage and accidents move a price this engine does not make: never asked');
     const mouse = scan(ITEMS.mouse);
-    assert.deepEqual([mouse.followup.kind, mouse.followup.required], ['yes_no', undefined], 'a medium question waits beside the price');
+    // 2026-11-10 (scan b4254487): whether it works is the listing's own condition choice, priced for every condition: never asked.
+    assert.deepEqual([mouse.followup.kind, mouse.followup.required], ['none', undefined], 'a working-order question is not asked');
     const low = scan(raw({ clarifications: [Q('color', 'choice', 'Which colour?', { options: ['Black', 'White'], impact: 'low' })] }));
     assert.equal(low.followup.kind, 'none');
     const eligibility = scan(raw({ clarifications: [Q('authenticity', 'yes_no', 'Is it genuine?', { options: ['Yes', 'No'], affects: 'eligibility' })] }));
@@ -156,7 +157,7 @@ describe('CU-2 which question, when — and when to stop', () => {
     assert.deepEqual(laptop.attributes.find((a) => a.name === 'generation'), { name: 'generation', value: 'M2 (2022)', basis: 'confirmed', matters: 'high' });
     assert.deepEqual([laptop.followup.question, laptop.followup.required], ['How much storage?', true], 'storage joins the search: still before it');
     laptop = recordAnswer(laptop, 0, { lang: 'en', followupsLeft: 1 }).identity;
-    assert.deepEqual([laptop.followup.question, laptop.followup.required, laptop.size_or_capacity], ['Does everything work?', undefined, '256 GB'], 'medium: beside the price');
+    assert.deepEqual([laptop.followup.question, laptop.followup.required, laptop.size_or_capacity], [null, undefined, '256 GB'], 'whether it works is the listing condition choice: not asked (2026-11-10)');
     assert.equal(selectQuestion({ ...laptop, confirmed: [...laptop.confirmed, { attribute: 'works', value: 'Yes', question: 'Does everything work?' }] }, { lang: 'en', followupsLeft: 1 }), null, 'everything asked: nothing left');
     // The owner changes their mind: the same attribute is confirmed once, with the latest value.
     const again = recordAnswer({ ...laptop, followup: { kind: 'choice', question: 'Which MacBook Air is it?', options: ['M1 (2020)', 'M2 (2022)', 'M3 (2024)'], unit: null, attribute: 'generation' } }, 2, { lang: 'en', followupsLeft: 1 }).identity;
@@ -204,9 +205,10 @@ describe('CU-3 the sixteen, through the same door', () => {
   // kind of thing → [market class, precision, strategy, first question kind, required, incomplete]
   // Required only where the answer changes the search (identity, or an attribute that joins the queries) and a number
   // will be made: a car, a watch and a card are specialised markets with no number, so nothing stands before their
-  // search; a drill's "what comes with it" and a camera's "does it work" describe the unit, so they wait beside the price.
+  // search; a drill's "what comes with it" describes the unit, so it waits beside the price. Whether a mouse, a lamp or a
+  // camera works is never asked (2026-11-10): the listing has its own condition choice and every condition is priced.
   const EXPECT = {
-    mouse: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'yes_no', false, undefined],
+    mouse: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'none', false, undefined],
     phone: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'choice', true, undefined],
     laptop: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'choice', true, undefined],
     blender: ['consumer_electronics', 'exact_model', STRATEGY.EXACT, 'photo', true, INCOMPLETE.BRAND_ONLY],
@@ -218,8 +220,8 @@ describe('CU-3 the sixteen, through the same door', () => {
     card: ['collectible', 'exact_model', STRATEGY.SPECIALISED, 'choice', false, undefined],
     bicycle: ['other', 'exact_model', STRATEGY.EXACT, 'choice', false, undefined],
     car: ['vehicle', 'exact_model', STRATEGY.SPECIALISED, 'number', false, undefined],
-    lamp: ['household', 'descriptive', STRATEGY.COMPARABLE, 'yes_no', false, undefined],
-    vintage: ['handmade_vintage', 'exact_model', STRATEGY.COMPARABLE, 'yes_no', false, undefined],
+    lamp: ['household', 'descriptive', STRATEGY.COMPARABLE, 'none', false, undefined],
+    vintage: ['handmade_vintage', 'exact_model', STRATEGY.COMPARABLE, 'none', false, undefined],
     handmade: ['handmade_vintage', 'descriptive', STRATEGY.COMPARABLE, 'number', false, undefined],
     unknown: ['other', 'descriptive', STRATEGY.COMPARABLE, 'photo', true, undefined],
   };
@@ -369,7 +371,7 @@ describe('CU-5 the endpoint, round by round', () => {
     assert.deepEqual([third.status, third.payload.status, log.price, log.records], [200, 'priced', 1, 1]);
     assert.deepEqual(log.priceArgs.identity.confirmed.map((c) => c.value), ['M2 (2022)', '256 GB']);
     assert.deepEqual(log.priceArgs.answer, { question: 'How much storage?', text: '256 GB' });
-    assert.deepEqual([third.payload.identity.followup.question, third.payload.identity.followup.required], ['Does everything work?', undefined], 'the medium question is offered beside the result');
+    assert.deepEqual([third.payload.identity.followup.question, third.payload.identity.followup.required], [null, undefined], 'no working-order question beside the result (2026-11-10)');
     assert.ok(third.payload.token, 'the client carries the newest token');
     // A stale token cannot answer a question that was already answered differently: the server re-selects from ITS state.
     const replay = await call({ action: 'price', scan_uuid: UUID, lang: 'en', token: first.payload.token, answer: 2 });

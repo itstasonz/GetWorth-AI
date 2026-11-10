@@ -213,12 +213,20 @@ export function normalizeIdentity(raw, { ownerStated = false, followupsLeft = 1 
 const NO_QUESTION = Object.freeze({ kind: 'none', affects: 'none', question: null, options: [] });
 const attributeName = (v) => { const s = text(v, 40); return s ? s.toLowerCase().replace(/[^\p{L}\p{N} _-]/gu, '').trim().slice(0, 40) || null : null; };
 const YES_NO = /^(yes|no|כן|לא)$/i;
+// A QUESTION ABOUT THE UNIT'S CONDITION IS NOT ASKED (scan b4254487, 2026-11-10: "working order" cost the owner 9.7 s and
+// changed no price). The listing flow has its own condition choice and the valuation prices every condition, so an
+// answer here would only repeat it. Matched on the attribute and the question, in English and Hebrew. A question about
+// WHAT the item is or what comes with it (an edition, storage, an included receiver) is not touched.
+export const CONDITION_QUESTION = /\b(condition|working|works?|functional|function(s|ing)?|faults?|faulty|defects?|defective|damaged?|scratch(es|ed)?|wear|worn|broken|cosmetic|powers? on|turns? on)\b|מצב|תקין|תקינות|עובד|פועל|נדלק|פגם|פגמים|פגום|שריטות|שבור|תקלה|תקלות|בלאי/iu;
+export const isConditionQuestion = (c) => CONDITION_QUESTION.test(`${c?.attribute ?? ''} ${c?.question ?? ''}`);
+
 /** One candidate clarification as the server keeps it, or null when it is not a question that can be answered. */
 function clarification(c) {
   if (!c || typeof c !== 'object') return null;
   const kind = oneOf(c.kind, ['choice', 'yes_no', 'number', 'photo'], null);
   const question = text(c.question, 200);
   if (!kind || !question) return null;
+  if (isConditionQuestion({ attribute: c.attribute, question })) return null;
   let options = list(c.options, MAX_OPTIONS + 1, 40).filter((o) => !NOT_AN_ANSWER.test(o)).slice(0, MAX_OPTIONS);
   if (kind === 'choice' && options.length < 2) return null;
   if (kind === 'yes_no') { if (options.length !== 2 || !options.every((o) => YES_NO.test(o))) return null; }
