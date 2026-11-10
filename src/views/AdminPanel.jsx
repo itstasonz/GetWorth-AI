@@ -10,6 +10,7 @@ import { loadTestAccountIds } from '../lib/marketplaceProvenance';
 import { useApp } from '../contexts/AppContext';
 import { Card, Btn, Badge, FadeIn } from '../components/ui';
 import { supabase } from '../lib/supabase';
+import { withCardListing } from '../lib/listingImages';
 import { formatPrice, timeAgo } from '../lib/utils';
 import { fetchAllReviews, fetchReviewsFor } from '../lib/reviews';
 
@@ -137,11 +138,11 @@ export default function AdminPanel() {
     try {
       const { data, error } = await supabase
         .from('reports')
-        .select('*, reporter:profiles!reports_reporter_id_fkey(full_name), listing:listings(id, title, title_hebrew, images, price, seller_id, status)')
+        .select('*, reporter:profiles!reports_reporter_id_fkey(full_name), listing:listings(id, title, title_hebrew, thumbnail, image_count, price, seller_id, status)')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
-      setReports(data || []);
+      setReports((data || []).map(withCardListing));
     } catch (e) {
       console.error('[Admin] Reports error:', e);
       setReports([]);
@@ -181,11 +182,11 @@ export default function AdminPanel() {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('*, listing:listings(id, title, title_hebrew, images), buyer:profiles!orders_buyer_id_fkey(full_name), seller:profiles!orders_seller_id_fkey(full_name)')
+        .select('*, listing:listings(id, title, title_hebrew, thumbnail, image_count), buyer:profiles!orders_buyer_id_fkey(full_name), seller:profiles!orders_seller_id_fkey(full_name)')
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) throw error;
-      setAllOrders(data || []);
+      setAllOrders((data || []).map(withCardListing));
     } catch (e) {
       console.error('[Admin] Orders error:', e);
       setLoadError('orders');

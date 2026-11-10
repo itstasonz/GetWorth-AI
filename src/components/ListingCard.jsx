@@ -71,7 +71,8 @@ LazyImage.displayName = 'LazyImage';
  * are actionable and none of them make a claim to a third party.
  */
 const ListingCard = React.memo(({ item, index = 0, lang, t, rtl, savedIds, heartAnim, toggleSave, viewItem }) => {
-  const imageCount = item.images?.length || 0;
+  // Lists carry one thumbnail; image_count is how many photographs the listing really has (listingImages.js).
+  const imageCount = Number.isInteger(item.image_count) ? item.image_count : (item.images?.length || 0);
   const isSaved = savedIds?.has(item.id) ?? false;
   const title = (lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title) || '';
 

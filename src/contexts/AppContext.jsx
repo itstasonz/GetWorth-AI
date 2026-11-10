@@ -11,6 +11,9 @@ import { fetchReviewsFor } from '../lib/reviews';
 import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, warmScan, STAGE as SCAN_STAGE } from '../lib/coreScan';
 import { HISTORY_COLUMNS } from '../lib/valuationHistory';
 import { listingProvenanceSupported } from '../lib/marketplaceProvenance';
+import { LISTING_CARD_COLUMNS, SELLER_EMBED, LISTING_PREVIEW_COLUMNS, asCards, withCardListing, orderWithCardListing } from '../lib/listingImages';
+import { holdBackgroundSync, deferWhileBusy, resetBackgroundSync, scanHoldsSync } from '../lib/backgroundSync';
+import { nextAuthUser, profileRefetchNeeded } from '../lib/authUser';
 
 const AppContext = createContext(null);
 const DEV = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -472,6 +475,7 @@ export function AppProvider({ children }) {
   // Core state
   const [lang, setLang] = useState('he');
   const [user, setUser] = useState(null);
+  const authUserRef = useRef(null); // the user object last handed to setUser (authUser.js keeps it stable)
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('home');
@@ -721,7 +725,7 @@ export function AppProvider({ children }) {
           supabase.auth.getSession(),
           supabase
             .from('listings')
-            .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
+            .select(`${LISTING_CARD_COLUMNS}, ${SELLER_EMBED}`)
             .eq('status', 'active')
             .order('created_at', { ascending: false })
             .limit(PAGE_SIZE),
@@ -753,16 +757,19 @@ export function AppProvider({ children }) {
 
         if (mounted && sessionResult.data?.session?.user) {
           currentUserIdRef.current = sessionResult.data.session.user.id;
-          setUser(sessionResult.data.session.user);
+          const kept = nextAuthUser(authUserRef.current, sessionResult.data.session.user);
+          authUserRef.current = kept;
+          setUser(kept);
           supabase.rpc('get_own_profile').single()
             .then(({ data }) => { if (mounted && data) setProfile(data); })
             .catch(() => {});
         }
 
         if (mounted && listingsResult.data) {
-          setListings(listingsResult.data);
-          setHasMore(listingsResult.data.length === PAGE_SIZE);
-          cacheSet('listings', listingsResult.data);
+          const cards = asCards(listingsResult.data);
+          setListings(cards);
+          setHasMore(cards.length === PAGE_SIZE);
+          cacheSet('listings', cards);
         }
       } catch (e) { console.log('Init refresh error:', e); }
     };
@@ -776,6 +783,7 @@ export function AppProvider({ children }) {
       if (!mounted) return;
       if (event === 'PASSWORD_RECOVERY') {
         currentUserIdRef.current = session.user.id;
+        authUserRef.current = session.user;
         setUser(session.user);
         setPasswordRecovery(true);
         setAuthMode('recovery');
@@ -784,11 +792,18 @@ export function AppProvider({ children }) {
       }
       if (session?.user) {
         currentUserIdRef.current = session.user.id;
-        setUser(session.user);
-        supabase.rpc('get_own_profile').single()
-          .then(({ data }) => { if (mounted && data) setProfile(data); })
-          .catch(err => { if (DEV) console.error('[Auth] Profile fetch failed:', err); });
-      } else { currentUserIdRef.current = null; setUser(null); setProfile(null); }
+        // Perf (scan b4254487): TOKEN_REFRESHED / session recovery hand over a NEW object for the SAME, unchanged
+        // account. Keeping the old one stops every [user]-keyed loader from re-running (authUser.js).
+        const prevUser = authUserRef.current;
+        const kept = nextAuthUser(prevUser, session.user);
+        authUserRef.current = kept;
+        setUser(kept);
+        if (profileRefetchNeeded(event, prevUser, session.user)) {
+          supabase.rpc('get_own_profile').single()
+            .then(({ data }) => { if (mounted && data) setProfile(data); })
+            .catch(err => { if (DEV) console.error('[Auth] Profile fetch failed:', err); });
+        }
+      } else { currentUserIdRef.current = null; authUserRef.current = null; setUser(null); setProfile(null); }
     });
 
     return () => { mounted = false; subscription.unsubscribe(); };
@@ -841,6 +856,7 @@ export function AppProvider({ children }) {
     ordersLastLoadRef.current = 0; conversationsLastLoadRef.current = 0; profileLastLoadRef.current = 0;
     currentScanUuidRef.current = null; capturedImageRef.current = null;
     lastAttemptRef.current = null; // SCAN-2: never replay a signed-out user's images
+    resetBackgroundSync(); // a re-sync deferred during a scan must never run for the next account
     scanStore.forgetAvailability(); // nor leave their scan, photograph or signed token behind, nor what the server told THEM
     // MKT-3: a REAL logout/expiry/switch must drop the buy intent so it can
     // never resume in another account's session. Guarded by outgoingUserId:
@@ -917,7 +933,9 @@ export function AppProvider({ children }) {
       // link urlSync just restored.
       clearUserState({ navigate: !!outgoing, outgoingUserId: outgoing });
     }
-  }, [user]);
+  // Keyed on the account id (scan b4254487): a token refresh must not reload listings, saved items, chats and orders.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   // Auto-dismiss errors
   useEffect(() => {
@@ -974,13 +992,13 @@ export function AppProvider({ children }) {
                   getCachedProfile(newMsg.sender_id),
                   supabase
                     .from('conversations')
-                    .select('listing:listings(id, title, title_hebrew, images)')
+                    .select(`listing:listings(${LISTING_PREVIEW_COLUMNS})`)
                     .eq('id', newMsg.conversation_id)
                     .single()
                     .then(r => r.data),
                 ]);
                 const senderName = senderProfile?.full_name || (lang === 'he' ? 'משתמש' : 'Someone');
-                const listing = convData?.listing;
+                const listing = withCardListing(convData)?.listing;
                 const listingTitle = (lang === 'he' && listing?.title_hebrew)
                   ? listing.title_hebrew : (listing?.title || '');
                 setMsgNotification({
@@ -1055,7 +1073,7 @@ export function AppProvider({ children }) {
     // without this, messages missed during the outage update the inbox preview
     // but never appear in the thread the user is looking at.
     () => {
-      loadConversations(true);
+      deferWhileBusy('conversations', () => loadConversations(true));
       const open = activeChatRef.current;
       if (open?.id && !open.isDemo) loadMessages(open.id);
     },
@@ -1130,7 +1148,7 @@ export function AppProvider({ children }) {
             showToastMsg(notif.title || (lang === 'he' ? 'התראה חדשה' : 'New notification'));
             playSound('tap');
             if (notif.type?.startsWith('ORDER_')) {
-              loadOrders(true);
+              deferWhileBusy('orders', () => loadOrders(true));
             }
           }
         )
@@ -1153,12 +1171,12 @@ export function AppProvider({ children }) {
             const newOrder = payload.new;
             if (newOrder.seller_id === user.id || newOrder.buyer_id === user.id) {
               if (DEV) console.log('[Realtime] New order detected, refreshing orders');
-              loadOrders(true);
+              deferWhileBusy('orders', () => loadOrders(true));
             }
           }
         ),
     // Re-sync notifications + orders after a reconnect (missed while offline).
-    () => { loadNotifications(); loadOrders(true); },
+    () => { deferWhileBusy('notifications', () => loadNotifications()); deferWhileBusy('orders', () => loadOrders(true)); },
   );
 
   // Tap notification banner → open that conversation
@@ -1177,13 +1195,13 @@ export function AppProvider({ children }) {
     }
     const { data } = await supabase
       .from('conversations')
-      .select(`*, listing:listings(id, title, title_hebrew, price, images), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url)`)
+      .select(`*, listing:listings(${LISTING_PREVIEW_COLUMNS}), buyer:profiles!conversations_buyer_id_fkey(id, full_name, avatar_url), seller:profiles!conversations_seller_id_fkey(id, full_name, avatar_url)`)
       .eq('id', notification.conversationId)
       .single();
     if (currentUserIdRef.current !== ownerId) return;
     if (data) {
       const otherUser = data.buyer_id === user.id ? data.seller : data.buyer;
-      setActiveChat({ ...data, otherUser });
+      setActiveChat({ ...withCardListing(data), otherUser });
       loadMessages(data.id);
       setNavDirection('push'); setView('chat');
       setTab('messages');
@@ -1206,7 +1224,7 @@ export function AppProvider({ children }) {
     const offset = page * PAGE_SIZE;
     let query = supabase
       .from('listings')
-      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
+      .select(`${LISTING_CARD_COLUMNS}, ${SELLER_EMBED}`)
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -1223,7 +1241,7 @@ export function AppProvider({ children }) {
     if (thisRequestId !== loadRequestIdRef.current) return;
     if (data) {
       // Normalize category on read — trim whitespace to match tab IDs exactly
-      const normalized = data.map(item => ({
+      const normalized = asCards(data).map(item => ({
         ...item,
         category: item.category ? item.category.trim() : 'Other'
       }));
@@ -1242,7 +1260,7 @@ export function AppProvider({ children }) {
     const offset = nextPage * PAGE_SIZE;
     let query = supabase
       .from('listings')
-      .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
+      .select(`${LISTING_CARD_COLUMNS}, ${SELLER_EMBED}`)
       .eq('status', 'active')
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -1257,7 +1275,7 @@ export function AppProvider({ children }) {
     const { data } = await query;
     if (thisRequestId !== loadRequestIdRef.current) { setLoadingMore(false); return; }
     if (data) {
-      const normalized = data.map(item => ({
+      const normalized = asCards(data).map(item => ({
         ...item,
         category: item.category ? item.category.trim() : 'Other'
       }));
@@ -1289,16 +1307,17 @@ export function AppProvider({ children }) {
 
     // Phase 2: network refresh
     const [myResult, savedResult] = await Promise.allSettled([
-      supabase.from('listings').select('*').eq('seller_id', ownerId).neq('status', 'deleted').order('created_at', { ascending: false }),
-      supabase.from('saved_items').select('*, listing:listings(*, seller:profiles(id, full_name, badge))').eq('user_id', ownerId)
+      supabase.from('listings').select(LISTING_CARD_COLUMNS).eq('seller_id', ownerId).neq('status', 'deleted').order('created_at', { ascending: false }),
+      supabase.from('saved_items').select(`*, listing:listings(${LISTING_CARD_COLUMNS}, seller:profiles(id, full_name, badge))`).eq('user_id', ownerId)
     ]);
     if (!owned()) return;
     if (myResult.status === 'fulfilled' && myResult.value.data) {
-      setMyListings(myResult.value.data);
-      cacheSet(`mylistings-${ownerId}`, myResult.value.data);
+      const mine = asCards(myResult.value.data);
+      setMyListings(mine);
+      cacheSet(`mylistings-${ownerId}`, mine);
     }
     if (savedResult.status === 'fulfilled' && savedResult.value.data) {
-      const savedData = savedResult.value.data;
+      const savedData = savedResult.value.data.map(withCardListing);
       setSavedItems(savedData.map(s => s.listing).filter(Boolean));
       setSavedIds(new Set(savedData.map(s => s.listing_id)));
       cacheSet(`saved-${ownerId}`, savedData);
@@ -1320,14 +1339,14 @@ export function AppProvider({ children }) {
     const [{ data: profileData, error: profileErr }, { data: listingsData, error: listingsErr }] = await Promise.all([
       supabase.from('profiles').select('id, full_name, avatar_url, is_verified, rating, review_count, badge, total_sales, reputation_points, response_rate, created_at').eq('id', sellerId).single(),
       supabase.from('listings')
-        .select('*, seller:profiles(id, full_name, avatar_url, badge, is_verified, rating, review_count, total_sales, created_at)')
+        .select(`${LISTING_CARD_COLUMNS}, ${SELLER_EMBED}`)
         .eq('seller_id', sellerId).eq('status', 'active')
         .order('created_at', { ascending: false })
     ]);
     if (profileErr) console.error('[Seller] Profile fetch failed:', profileErr);
     if (listingsErr) console.error('[Seller] Listings fetch failed:', listingsErr);
     if (profileData) setSellerProfile(profileData);
-    if (listingsData) setSellerListings(listingsData);
+    if (listingsData) setSellerListings(asCards(listingsData));
     setLoadingSeller(false);
   };
 
@@ -1412,7 +1431,7 @@ export function AppProvider({ children }) {
     const { data } = await supabase
       .from('conversations')
       .select(`id, buyer_id, seller_id, updated_at,
-        listing:listings(id, title, title_hebrew, price, images),
+        listing:listings(${LISTING_PREVIEW_COLUMNS}),
         buyer:profiles!buyer_id(id, full_name, avatar_url),
         seller:profiles!seller_id(id, full_name, avatar_url),
         messages(id, content, created_at, sender_id, is_read, is_offer, offer_amount)`)
@@ -1422,7 +1441,7 @@ export function AppProvider({ children }) {
       .limit(1, { referencedTable: 'messages' });
     if (isStale()) return; // a newer request owns state, cache, and the skeleton
     if (data) {
-      applyConversations(data);
+      applyConversations(data.map(withCardListing));
       conversationsLastLoadRef.current = Date.now();
       if (DEV) console.log(`[Chat] Network done: ${data.length} convs in ${(performance.now() - t0).toFixed(0)}ms`);
     }
@@ -3725,6 +3744,20 @@ export function AppProvider({ children }) {
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [releaseCamera, addPhotoMode]);
 
+  // Perf (scan b4254487): while the camera is open or a scan step is in flight, realtime/order/chat re-syncs wait and
+  // run once afterwards (backgroundSync.js) — they competed with the quota check for the same small database.
+  const scanHoldRef = useRef(null);
+  useEffect(() => {
+    const update = () => {
+      const busy = scanHoldsSync(view, scanStore.getSnapshot().stage);
+      if (busy && !scanHoldRef.current) scanHoldRef.current = holdBackgroundSync();
+      else if (!busy && scanHoldRef.current) { const release = scanHoldRef.current; scanHoldRef.current = null; release(); }
+    };
+    update();
+    return scanStore.subscribe(update);
+  }, [view]);
+  useEffect(() => () => { scanHoldRef.current?.(); scanHoldRef.current = null; }, []);
+
   // Safety: release camera on provider unmount
   useEffect(() => {
     return () => {
@@ -4046,7 +4079,7 @@ export function AppProvider({ children }) {
       if (err) throw err;
       if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004 ownership
 
-      const newOrders = data || [];
+      const newOrders = (data || []).map(orderWithCardListing);
       if (DEV) console.log(`[Orders] Loaded ${newOrders.length} orders`);
       setOrders(newOrders);
       ordersLastLoadRef.current = Date.now();
@@ -4075,7 +4108,7 @@ export function AppProvider({ children }) {
       if (DEV) console.log(`[Orders] fetchById took ${Math.round(performance.now() - t0)}ms`);
       if (error) throw error;
       // SETOF jsonb → array of 0–1 rows; return the first element or null
-      return data?.[0] ?? null;
+      return orderWithCardListing(data?.[0] ?? null);
     } catch (e) {
       console.warn(`[Orders] fetchById error — code:${e?.code} msg:${e?.message}`);
       return null;

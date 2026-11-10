@@ -4,6 +4,8 @@ import { useApp } from '../contexts/AppContext';
 import { Card, StretchedTarget, Btn, Badge, FadeIn, SlideUp, haptic } from '../components/ui';
 import ListingCard from '../components/ListingCard';
 import ImageGallery from '../components/ImageGallery';
+import { supabase } from '../lib/supabase';
+import { needsFullImages, loadListingImages } from '../lib/listingImages';
 import { formatPrice, timeAgo, getConditionLabel, getConditionColorAlpha, getSellerBadgeStyle, getSellerBadgeLabel, computeSellerTrust, STAT_COLORS } from '../lib/utils';
 
 export function BrowseView() {
@@ -273,6 +275,20 @@ export function DetailView() {
   const [showReport, setShowReport] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reporting, setReporting] = useState(false);
+
+  // Lists carry a thumbnail only (listingImages.js): the photographs are read when the listing is opened. Until they
+  // arrive the gallery shows the thumbnail; if they cannot be read it keeps showing it.
+  const selectedId = selected?.id;
+  const partial = needsFullImages(selected);
+  useEffect(() => {
+    if (!partial || !selectedId) return undefined;
+    let live = true;
+    loadListingImages(supabase, selectedId).then((images) => {
+      if (!live || !images) return;
+      setSelected((prev) => (prev?.id === selectedId ? { ...prev, images, image_count: images.length, _imagesPartial: false } : prev));
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [selectedId, partial, setSelected]);
 
   if (!selected) return null;
 

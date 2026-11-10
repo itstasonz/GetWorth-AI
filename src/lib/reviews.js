@@ -24,6 +24,7 @@
 //      shows "Listing unavailable" / "User unavailable" instead.
 // ═══════════════════════════════════════════════════════
 
+import { LISTING_PREVIEW_COLUMNS, asCard } from './listingImages.js';
 import { supabase } from './supabase.js';
 
 // Optional enrichment: attach reviewer / reviewed / listing objects.
@@ -40,7 +41,7 @@ export async function enrichReviewRows(rows, client = supabase) {
       ? client.from('profiles').select('id, full_name, avatar_url').in('id', profileIds)
       : Promise.resolve({ data: [] }),
     listingIds.length
-      ? client.from('listings').select('id, title, title_hebrew, images').in('id', listingIds)
+      ? client.from('listings').select(LISTING_PREVIEW_COLUMNS).in('id', listingIds)
       : Promise.resolve({ data: [] }),
   ]).catch(() => [{ data: [] }, { data: [] }]);
 
@@ -48,7 +49,7 @@ export async function enrichReviewRows(rows, client = supabase) {
   if (listRes.error) console.warn('[Reviews] listing enrichment failed:', listRes.error.message);
 
   const profMap = new Map((profRes.data || []).map((p) => [p.id, p]));
-  const listMap = new Map((listRes.data || []).map((l) => [l.id, l]));
+  const listMap = new Map((listRes.data || []).map((l) => [l.id, asCard(l)]));
   return rows.map((r) => ({
     ...r,
     reviewer: profMap.get(r.reviewer_id) ?? null,
