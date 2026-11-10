@@ -304,6 +304,20 @@ body {
  * in a touch-first PWA, where hover either never fires or — worse — fires and
  * STICKS after a tap, leaving controls in a permanent phantom hover state.
  * ────────────────────────────────────────────────────────────────────────── */
+/* A bottom sheet's scrolling content (ScanSheets WhyPriceSheet). The cap is the screen that is actually visible: on an
+   iPhone 100vh is the height with Safari's toolbars hidden, 100dvh the height now. The sheet's own chrome (handle,
+   title, padding, home-indicator inset) is ~13rem. Older engines without dvh keep 62vh. Scrolling stays inside the sheet
+   (no page scroll behind it), and the rows keep a small gap from its edges. */
+.sheet-scroll {
+  max-height: 62vh;
+  max-height: min(62vh, calc(100dvh - 13rem - env(safe-area-inset-top)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-inline: 0.25rem;
+  margin-inline: -0.25rem;
+}
+
 .state-layer { position: relative; }
 
 .state-layer::after {

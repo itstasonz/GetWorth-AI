@@ -13,7 +13,7 @@
 import { test, describe, before, after, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { IMG, RAW_IDENTITY, PRICES, SOURCES } from './helpers/core-scan-fakes.mjs';
@@ -517,6 +517,71 @@ describe('CV-5 a price never claims more than its evidence', () => {
     assert.match(text(), /Price confidence: Low/);
     assert.doesNotMatch(text(), /Recommended listing price|not confirmed|similar models/);
     assert.ok(button('Sell for about ₪290'));
+  });
+});
+
+// The founder's iPhone scan 16666e44 (2026-11-10, Logitech G Pro X Superlight, no price): the four references the sheet
+// showed, as the server's valuation listed them. On a Hebrew screen the English Reddit title came out reordered
+// ("Modded Logitech G Pro X [H] [USA-FL] …") and the list was capped at 62vh, under Safari's toolbar on small phones.
+const SCAN_16666E44 = {
+  status: 'insufficient_evidence', prices: null, price_confidence: null, retail_new_ils: null, no_price_reason: 'no_verified_israeli_second_hand_reference',
+  counts: { resale: 0, il_used_exact: 0, il_used_close: 0, intl_used_exact: 0, intl_used_close: 0, set_aside: 3, unbound: 1 },
+  evidence_gap: { abroad_found: 0, israeli_private_found: 1, new_price_il: null, price_level_measured: false },
+  searched: { date: '2026-11-10', queries: 9, pages: 73 },
+  evidence: [
+    { url: 'https://www.logitechg.com/en-us/shop/p/pro-x-superlight', domain: 'logitechg.com', title: 'Logitech G Pro X Superlight Wireless Gaming Mouse', price: 149.99, currency: 'USD', price_ils: 476, kind: 'new_retail', match: 'exact', market: 'INTL', freshness: 'unknown', used: false, set_aside: null },
+    { url: 'https://pickabuy.ai/price_history/83148206', domain: 'pickabuy.ai', title: 'עכבר גיימינג אלחוטי Logitech G Pro X Superlight - צבע שחור', price: 349, currency: 'ILS', price_ils: 349, kind: 'price_guide', match: 'exact', market: 'IL', freshness: 'current', used: false, set_aside: 'price_guide_context' },
+    { url: 'https://www.reddit.com/r/hardwareswap/comments/1d8zy5c', domain: 'reddit.com', title: '[USA-FL] [H] Modded Logitech G Pro X Superlight [W] Paypal', price: 70, currency: 'USD', price_ils: 222, kind: 'sold', match: 'exact', market: 'INTL', freshness: 'archived', used: false, set_aside: 'abroad_without_israeli_reference' },
+    { url: 'https://www.reddit.com/r/hardwareswap/comments/1dmv98i', domain: 'reddit.com', title: '[USA-GA] [H] Logitech G Pro X Superlight (BNIB) [W] PayPal', price: 85, currency: 'USD', price_ils: 270, kind: 'sold', match: 'exact', market: 'INTL', freshness: 'archived', used: false, set_aside: 'abroad_without_israeli_reference' },
+  ],
+};
+
+describe('CV-11 the evidence sheet on an iPhone (scan 16666e44, 2026-11-10)', () => {
+  const sheetOf = async (lang) => {
+    await settle(await open({ identify: [identified()], price: [pricedAnswer(SCAN_16666E44)] }, { lang }));
+    await click(button(lang === 'he' ? 'מה מצאתי' : 'What I found'));
+    return container.querySelector('[role="dialog"]');
+  };
+  const titleOf = (a) => a.querySelector('span > span');
+  test('CV-11a Hebrew screen: an English title is ONE left-to-right isolate, brackets and all, in the order it was written', async () => {
+    const dialog = await sheetOf('he');
+    const rows = [...dialog.querySelectorAll('li a')];
+    assert.equal(rows.length, 4, 'the four references the phone showed');
+    for (const title of ['[USA-FL] [H] Modded Logitech G Pro X Superlight [W] Paypal', '[USA-GA] [H] Logitech G Pro X Superlight (BNIB) [W] PayPal', 'Logitech G Pro X Superlight Wireless Gaming Mouse']) {
+      const row = rows.find((a) => a.textContent.includes(title));
+      assert.ok(row, title);
+      const isolates = [...titleOf(row).children];
+      assert.deepEqual(isolates.map((b) => [b.tagName, b.getAttribute('dir'), b.textContent]), [['BDI', 'ltr', title]], 'one isolate, nothing outside it to reorder');
+    }
+  });
+  test('CV-11b a Hebrew title stays right-to-left with the model name whole inside it — on either screen', async () => {
+    for (const lang of ['he', 'en']) {
+      const dialog = await sheetOf(lang);
+      const row = [...dialog.querySelectorAll('li a')].find((a) => a.textContent.includes('צבע שחור'));
+      const outer = titleOf(row).firstElementChild;
+      assert.deepEqual([outer.tagName, outer.getAttribute('dir')], ['BDI', 'rtl'], lang);
+      assert.deepEqual([...outer.querySelectorAll('bdi[dir="ltr"]')].map((b) => b.textContent), ['Logitech G Pro X Superlight'], lang);
+      assert.equal(outer.textContent, 'עכבר גיימינג אלחוטי Logitech G Pro X Superlight - צבע שחור');
+      if (root) { await act(async () => { root.unmount(); }); root = null; container.remove(); container = null; await act(async () => { scan.scanStore.reset(); }); }
+    }
+  });
+  test('CV-11c every price is shown whole, as written, isolated left to right, with its shekel conversion', async () => {
+    const dialog = await sheetOf('he');
+    const prices = [...dialog.querySelectorAll('li a > span:last-child bdi')].map((b) => [b.getAttribute('dir'), b.textContent]);
+    assert.deepEqual(prices.filter(([, t]) => /USD|^₪/.test(t)).map(([d, t]) => `${d}:${t}`), ['ltr:149.99 USD', 'ltr:₪349', 'ltr:70 USD', 'ltr:85 USD']);
+  });
+  test('CV-11d the list scrolls inside the sheet, capped at the VISIBLE screen, never the page behind it', async () => {
+    const dialog = await sheetOf('he');
+    const scroller = dialog.querySelector('[data-testid="why-price-scroll"]');
+    assert.ok(scroller.classList.contains('sheet-scroll'));
+    assert.equal(scroller.getAttribute('style'), null, 'no inline 62vh cap');
+    const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
+    const rule = /\.sheet-scroll\s*\{([^}]*)\}/.exec(css)?.[1] ?? '';
+    assert.match(rule, /max-height:\s*62vh;/, 'the fallback for engines without dvh');
+    assert.match(rule, /max-height:\s*min\(62vh,\s*calc\(100dvh - 13rem - env\(safe-area-inset-top\)\)\)/, 'the visible height, minus the sheet chrome');
+    assert.match(rule, /overflow-y:\s*auto/);
+    assert.match(rule, /overscroll-behavior:\s*contain/);
+    assert.match(rule, /padding-inline:\s*0\.25rem/);
   });
 });
 

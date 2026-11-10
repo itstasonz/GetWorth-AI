@@ -18,8 +18,10 @@ import { Btn, Chip, Sheet, TextArea } from './ui';
 import { formatPrice } from '../lib/utils';
 import { MAX_CORRECTION_CHARS } from '../lib/coreScan';
 
-// A run of Latin text: a brand, a model name, a size. Kept whole, in its own left-to-right order.
-const LATIN_RUN = /[A-Za-z0-9][A-Za-z0-9 .,'’"+&/()\-]*[A-Za-z0-9)]|[A-Za-z0-9]/g;
+// A run of Latin text: a brand, a model name, a size, a marketplace tag like "[H]". Kept whole, in its own order.
+const LATIN_RUN = /[A-Za-z0-9[(][A-Za-z0-9 .,:#'’"+&/()[\]\-]*[A-Za-z0-9)\]]|[A-Za-z0-9]/g;
+// Hebrew or Arabic: a title with any of it is a right-to-left title; a title without it is a left-to-right one.
+const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 
 /**
  * Text that mixes Hebrew with a brand or model name.
@@ -39,6 +41,19 @@ export function Bidi({ children }) {
   }
   if (last < text.length) parts.push(text.slice(last));
   return <>{parts}</>;
+}
+
+/**
+ * A title written by someone else — a listing, a shop page — shown on a screen of either direction. Unlike a sentence
+ * of the app's own, it keeps ITS OWN direction, isolated from the screen's: an English title ("[USA-FL] [H] Modded
+ * Logitech G Pro X Superlight [W] Paypal") reads left to right, whole, on a Hebrew screen (2026-11-10, scan 16666e44:
+ * its pieces were isolated one by one and the brackets between them reordered); a Hebrew title reads right to left on
+ * an English screen, with each Latin run inside it kept whole.
+ */
+export function ForeignTitle({ children }) {
+  const text = String(children ?? '');
+  if (!RTL_CHAR.test(text)) return <bdi dir="ltr">{text}</bdi>;
+  return <bdi dir="rtl"><Bidi>{text}</Bidi></bdi>;
 }
 
 export function WrongItemSheet({ open, onClose, onSubmit, identity, copy, rtl }) {
@@ -101,7 +116,7 @@ function Source({ e, copy }) {
         className="flex items-start justify-between gap-3 py-3 state-layer rounded-control"
       >
         <span className="min-w-0 flex-1 space-y-0.5">
-          <span className="block text-body-sm text-text-primary line-clamp-2 break-words"><Bidi>{e.title || e.domain}</Bidi></span>
+          <span className="block text-body-sm text-text-primary line-clamp-2 break-words"><ForeignTitle>{e.title || e.domain}</ForeignTitle></span>
           <span className="block text-meta text-text-muted">{facts}</span>
           {why && <span className="block text-meta text-text-secondary">{why}</span>}
           {sale ? (
@@ -194,7 +209,9 @@ export function WhyPriceSheet({ open, onClose, valuation, copy, priced }) {
   const nothing = groups.used.length + groups.context.length + groups.rejected.length === 0;
   return (
     <Sheet open={open} onClose={onClose} title={priced ? copy.whyTitle : copy.whatFound}>
-      <div className="space-y-4 overflow-y-auto" style={{ maxHeight: '62vh' }}>
+      {/* The list scrolls inside the sheet and never past the screen (index.css .sheet-scroll: the VISIBLE height on an
+          iPhone, toolbars and safe areas included — 62vh alone ran under Safari's toolbar on small phones). */}
+      <div className="space-y-4 sheet-scroll" data-testid="why-price-scroll">
         {/* THE ANSWER, SHORT. */}
         <div className="space-y-1 text-body text-text-primary">
           <p className="font-semibold">{copy.found(priced ? privateUsed : 0)}</p>
