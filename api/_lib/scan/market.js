@@ -122,6 +122,12 @@ const MATCHING = {
 // one: the model reads what the search returns.
 export const MAX_QUERIES = Object.freeze({ local: 8, expand: 6 });
 const CLASSIFIEDS_SITES = 'site:homeless.co.il OR site:ad.co.il OR site:yad2.co.il';
+// The Israeli second-hand boards a search reads with a price beside the item (zuzz.co.il: seen with priced ads in the
+// funnel of scan b4254487, 2026-11-10).
+const USED_BOARDS = 'site:homeless.co.il OR site:zuzz.co.il OR site:ad.co.il';
+// Where a SOLD price abroad is published per item: the completed listings and the price guides. Context only — an
+// abroad price never prices an Israeli item by itself (valuation.js).
+const SOLD_SITES = 'site:ebay.com OR site:pricecharting.com OR site:swappa.com';
 const SHOP_SITES = 'zap.co.il OR ksp.co.il OR ivory.co.il OR bug.co.il';
 const clean = (v, max = 80) => promptSafe(v, max);
 // The confirmed attributes that name what an item IS, and so belong in a search for it: strategy.js SEARCHABLE_ATTRIBUTES,
@@ -190,8 +196,11 @@ export function buildSearchQueries({ identity, answer = null, stage = 'local' } 
     // source a search can price from today (Yad2 answers automated access with a bot check; Facebook disallows it).
     // Abroad is asked only for what can bring an Israeli price to level later: sold prices and the new price there.
     out.push(`${hebrew ?? name} יד שנייה site:homeless.co.il`);
-    out.push(`${name} used sold price`);
-    if (codes[0]) out.push(`${codes[0]} used`);
+    // SOLD PRICES WHERE THEY ARE PUBLISHED (2026-11-10). The open "used sold price" query of scan b4254487 returned
+    // twelve Reddit threads and review articles — pages with no listing to read a price from; ~85% of its 29,703
+    // input tokens were search results.
+    out.push(`${name} sold price ${SOLD_SITES}`);
+    if (codes[0]) out.push(`${codes[0]} sold ${SOLD_SITES}`);
     if (terms.shops) out.push(`${name} new price`);
     for (const t of terms.expand) out.push(`${name} ${t}`);
     out.push(`${hebrew ?? aliases[0] ?? name} משומש למכירה`);
@@ -205,7 +214,9 @@ export function buildSearchQueries({ identity, answer = null, stage = 'local' } 
     for (const t of terms.local) out.push(`${hebrew ?? name} ${t}`);
     out.push(`${name} למכירה ${CLASSIFIEDS_SITES}`);
     if (!terms.hebrewFirst && hebrew) out.push(`${hebrew} יד שנייה`);
-    out.push(`${name} used second hand Israel`);
+    // The Israeli boards again, in the words of a used ad, instead of an open English query: "<name> used second hand
+    // Israel" reached Reddit threads, gaming news and an estate agent's site (scan b4254487) — never an Israeli ad.
+    out.push(`${hebrew ?? name} משומש ${USED_BOARDS}`);
     for (const alt of alternatives) out.push(`${alt} יד שנייה למכירה`);
     for (const alias of aliases) out.push(`${alias} יד שנייה`);
     if (terms.shops) out.push(`${codes[0] ?? name} מחיר ${SHOP_SITES}`);
@@ -224,11 +235,13 @@ const queryBlock = (queries) => fence('QUERIES', queries.map((q, k) => `${k + 1}
 const SEARCH = {
   local: (queries) => `SEARCH — ISRAEL FIRST. Make ONE search call that carries EXACTLY these queries at once (the tool accepts several). Run each line as one query, as written; do not reword, translate or drop one:
 ${queryBlock(queries)}
+Skip results that are not a listing or a price page: forum threads (Reddit and the like), news, reviews and how-to articles carry no price you may report.
 They look for: Israeli second-hand listings for THIS product, in Hebrew and in English ("יד שנייה", "משומש", "למכירה", "second hand", "used") on Israeli classifieds whose listings show a price to a search: homeless.co.il (its יד2 board), ad.co.il, Yad2's second-hand market, Israeli forums and dealers' used sections; and the product's CURRENT NEW price in Israel (zap.co.il, ksp.co.il, ivory.co.il, bug.co.il or the shop that sells this kind of item).
 Do not search abroad in this call. Read prices from the search results; do not open pages.`,
   expand: (queries) => `SEARCH — LOOK FURTHER. The first search found little Israeli second-hand evidence for this item. Make ONE search call that carries EXACTLY these queries at once. Run each line as one query, as written:
 ${queryBlock(queries)}
 They look, in this order, for: the ISRAELI second-hand market once more in different words — a Homeless ad shows its price in its title, read it from there; then used and SOLD prices abroad for this exact item (sold or completed listings, a price guide); and the price abroad for a NEW unit of this exact item, in the same currency. Prices abroad are context: they never make an Israeli price by themselves, and only bring one to Israeli price level once Israeli evidence exists.
+Skip results that are not a listing, a sold record or a price page: forum threads, news, reviews and how-to articles carry no price you may report.
 Read prices from the search results; do not open pages.`,
 };
 
@@ -245,6 +258,7 @@ ${itemBlock(identity, answer)}
 ${(SEARCH[stage] ?? SEARCH.local)(queries)}
 - You must use web search. Report only prices you actually found on a page the search returned. Never invent a listing, a sold price, a date or a page, and never assume what a marketplace you could not read would show.
 - THIS PRODUCT, not its brand: a result for another model of the same brand is sibling_model, never exact. When exact_model_established is "no", the models listed under could_also_be are what the item may be; any other model of the family is sibling_model.
+- A WORD THAT NAMES ANOTHER EDITION IS ANOTHER PRODUCT: when a listing's title adds an edition or tier word the item's name does not have — Edge, Pro, Elite, Max, Plus, Ultra, Lite, Slim, Mini — it is sibling_model ("DualSense Edge" is not "DualSense"; "Xbox Elite controller" is not "Xbox controller"), unless a model under could_also_be carries that word.
 
 EVIDENCE — every usable price you found, up to ${MAX_EVIDENCE}: second-hand prices first, then new prices, then the closest results that do not qualify
 - EACH ITEM IS ONE LISTING. Its url, title, price, condition and date are all read from the SAME result, card or row. Never take a product's name from one place and a price from another. On a page that lists several products, report a price only for the row that names it; when you cannot tell which price belongs to which product, leave it out. Every price is checked against the page's own text, and one that does not sit beside its product is discarded.

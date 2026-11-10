@@ -75,7 +75,9 @@ describe('CD-1 the queries are the server\'s, built from the identity', () => {
     assert.equal(q[0], '910-005272 יד שנייה OR למכירה OR משומש', 'a model number names one product and nothing else');
     assert.ok(q.some((s) => /^Logitech G Pro Wireless יד שנייה למכירה$/.test(s)));
     assert.ok(q.some((s) => /^Logitech G Pro Wireless למכירה site:homeless\.co\.il OR site:ad\.co\.il OR site:yad2\.co\.il$/.test(s)));
-    assert.ok(q.some((s) => /^Logitech G Pro Wireless used second hand Israel$/.test(s)));
+    // 2026-11-10 (scan b4254487): the Israeli used boards again in Hebrew, not an open English query (it reached Reddit).
+    assert.ok(q.some((s) => /^עכבר גיימינג אלחוטי Logitech G Pro Wireless משומש site:homeless.co.il OR site:zuzz.co.il OR site:ad.co.il$/.test(s)));
+    assert.ok(!q.some((s) => /used second hand Israel/.test(s)));
     assert.ok(q.some((s) => /^עכבר גיימינג אלחוטי Logitech G Pro Wireless יד שנייה$/.test(s)), 'the Hebrew name, which here already carries the model');
     assert.equal(q.at(-1), '910-005272 מחיר zap.co.il OR ksp.co.il OR ivory.co.il OR bug.co.il', 'the new price, by model number, last');
     assert.ok(q.length <= MAX_QUERIES.local);
@@ -87,8 +89,8 @@ describe('CD-1 the queries are the server\'s, built from the identity', () => {
     const q = buildSearchQueries({ identity: MOUSE, stage: 'expand' });
     assert.deepEqual(q, [
       'עכבר גיימינג אלחוטי Logitech G Pro Wireless יד שנייה site:homeless.co.il',
-      'Logitech G Pro Wireless used sold price',
-      '910-005272 used',
+      'Logitech G Pro Wireless sold price site:ebay.com OR site:pricecharting.com OR site:swappa.com',
+      '910-005272 sold site:ebay.com OR site:pricecharting.com OR site:swappa.com',
       'Logitech G Pro Wireless new price',
       'עכבר גיימינג אלחוטי Logitech G Pro Wireless משומש למכירה',
     ]);

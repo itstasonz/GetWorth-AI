@@ -77,6 +77,9 @@ const SEPARATOR = /\.{3,}|…|[\r\n]+|#{2,}|\s\|\s|•|\s[–—]\s/gu;
 const VARIANT_WORDS = new Set([
   'pro', 'max', 'plus', 'mini', 'ultra', 'lite', 'air', 'se', 'fe', 'xl', 'xs', 'xr', 'neo', 'slim', 'oled', 'ti', 'super', 'superlight',
   'x', 'digital', 'ii', 'iii', 'iv', 'gen', 'generation', 'mk', 'פרו', 'מקס', 'פלוס', 'מיני', 'אולטרה', 'דור',
+  // A controller's pro edition (scan b4254487, 2026-11-10: 'DualSense Edge' listings beside a standard DualSense). Only
+  // ever demotes an exact claim to a comparable; it admits nothing.
+  'edge', 'elite', 'אדג',
   // A fragrance's concentrations and flankers: "Rouge Smoking Extrait" is not "Rouge Smoking".
   'intense', 'extrait', 'elixir', 'absolu', 'absolue', 'edt', 'edp', 'אינטנס',
 ]);
