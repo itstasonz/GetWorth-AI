@@ -4,7 +4,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  demandFrom, planPrewarm, runPrewarm, resolvePrewarmMax, resolvePrewarmUsd, costOf, checkCredit, spentToday, isPaused, alertsFor, dayStart,
+  demandFrom, planPrewarm, runPrewarm, resolvePrewarmMax, resolvePrewarmUsd, costOf, checkCredit, spentToday, isPaused, alertsFor, dayStart, trialState, PREWARM_TRIAL, PREWARM_TRIAL_USD_HARD_MAX,
   PREWARM_HARD_MAX, PREWARM_USD_HARD_MAX, WORST_RESEARCH_USD, EST_USD_PER_RESEARCH, REFRESH_AFTER_MS, ALERT, RUN_EVENT, CONTROL_EVENT, ALERT_EVENT,
 } from '../api/_lib/scan/prewarm.js';
 import { createPrewarmHandler, sameSecret } from '../api/prewarm.js';
@@ -109,21 +109,25 @@ function fakeDb({ events = {}, valuations = [], admin = false } = {}) {
     from: (t) => {
       const filters = {};
       const q = {
-        select: () => q, gte: () => q, order: () => q, in: () => q,
+        select: () => q, order: () => q, in: () => q,
+        gte: (k, v) => { filters[`${k}>=`] = v; return q; },
         eq: (k, v) => { filters[k] = v; return q; },
-        limit: async () => (t === 'valuations' ? { data: valuations, error: null } : { data: events[filters.event_type] ?? [], error: null }),
+        limit: async () => (t === 'valuations' ? { data: valuations, error: null }
+          : { data: (events[filters.event_type] ?? []).filter((e) => !filters['created_at>='] || e.created_at >= filters['created_at>=']), error: null }),
         maybeSingle: async () => ({ data: t === 'profiles' ? { is_admin: admin } : null, error: null }),
       };
       return q;
     },
   });
 }
+// The suites' clock (NOW) sits inside this window; PW-6 tests the real trial dates.
+const TEST_TRIAL = { start: '2026-11-01T00:00:00.000Z', end: '2026-12-01T00:00:00.000Z', usd: 3 };
 const res = () => ({ headers: {}, setHeader(k, v) { this.headers[k] = v; }, end(b) { this.body = JSON.parse(b); } });
 async function call({ env = ENV, method = 'GET', auth = `Bearer ${SECRET}`, body, ...deps } = {}) {
   const r = res();
   const logged = [];
   const req = { method, headers: { authorization: auth }, body };
-  await createPrewarmHandler({ env, now: () => NOW, logEvent: async (s, type, payload) => { logged.push({ type, payload }); }, credit: async () => ({ ok: true, credit_exhausted: false, status: 200, cost_usd: 0.00001 }), ...deps })(req, r);
+  await createPrewarmHandler({ env, now: () => NOW, logEvent: async (s, type, payload) => { logged.push({ type, payload }); }, credit: async () => ({ ok: true, credit_exhausted: false, status: 200, cost_usd: 0.00001 }), trial: TEST_TRIAL, ...deps })(req, r);
   return { ...r, logged };
 }
 
@@ -181,5 +185,57 @@ describe('PW-5 the off switch', () => {
     assert.deepEqual([r.body.status, r.logged[0].payload.enabled], ['resumed', true]);
     const bad = await call({ method: 'POST', auth: 'Bearer user', body: { action: 'spend' }, ...admin(true) });
     assert.equal(bad.statusCode, 400);
+  });
+});
+
+describe('PW-6 the 10-day trial: fixed dates, $3 in all, never restarted by a deployment', () => {
+  const at = (iso) => Date.parse(iso);
+  const run = (iso, usd) => ({ created_at: iso, payload: { spent_usd: usd } });
+  test('PW-6a the real trial is 10 days from 2026-11-11 and at most $3, in code', () => {
+    assert.deepEqual([PREWARM_TRIAL.start, PREWARM_TRIAL.end, PREWARM_TRIAL.usd, PREWARM_TRIAL_USD_HARD_MAX], ['2026-11-11T00:00:00.000Z', '2026-11-21T00:00:00.000Z', 3, 3]);
+    assert.equal((Date.parse(PREWARM_TRIAL.end) - Date.parse(PREWARM_TRIAL.start)) / 864e5, 10);
+    assert.ok(Object.isFrozen(PREWARM_TRIAL));
+  });
+  test('PW-6b before the start and from the end on, closed; inside, open with what is left', () => {
+    assert.equal(trialState([], { now: at('2026-11-10T03:00:00Z') }).reason, 'trial_not_started');
+    assert.equal(trialState([], { now: at('2026-11-11T03:00:00Z') }).open, true);
+    assert.equal(trialState([], { now: at('2026-11-20T03:00:00Z') }).open, true);
+    assert.equal(trialState([], { now: at('2026-11-21T00:00:00Z') }).reason, 'trial_ended');
+    assert.equal(trialState([], { now: at('2027-03-01T03:00:00Z') }).reason, 'trial_ended');
+  });
+  test('PW-6c the trial ledger is every run since the start (a redeploy cannot zero it); $3 spent closes it', () => {
+    const runs = [run('2026-11-10T03:00:00Z', 9), ...Array.from({ length: 9 }, (_, i) => run(`2026-11-${11 + i}T03:00:00Z`, 0.3))];
+    const s = trialState(runs, { now: at('2026-11-20T03:00:00Z') });
+    assert.deepEqual([s.open, Math.round(s.spent_usd * 100), Math.round(s.left_usd * 100)], [true, 270, 30], 'spend before the start is not counted');
+    const full = trialState([...runs, run('2026-11-19T05:00:00Z', 0.25)], { now: at('2026-11-20T03:00:00Z') });
+    assert.equal(full.reason, 'trial_budget_spent');
+  });
+  test('PW-6d the cron outside the trial: nothing read for demand, no credit call, no research, an alert after it ends', async () => {
+    const deps = { supa: fakeDb({ valuations: [row(mouse, 2)] }), credit: () => assert.fail('no call'), price: () => assert.fail('no research') };
+    const ended = await call({ ...deps, trial: { ...TEST_TRIAL, end: '2026-11-09T00:00:00.000Z' } });
+    assert.equal(ended.body.status, 'trial_ended');
+    assert.ok(ended.logged.some((e) => e.type === ALERT_EVENT && e.payload.kind === ALERT.TRIAL_OVER));
+    const early = await call({ ...deps, trial: { ...TEST_TRIAL, start: '2026-11-10T00:00:00.000Z' } });
+    assert.equal(early.body.status, 'trial_not_started');
+  });
+  test('PW-6e a run inside the trial is bounded by what the trial has left, even when the day has more', async () => {
+    // $2.90 spent on earlier days of the trial: today has its full $0.30, the trial only $0.10 — one research (worst case $0.08 reserved), then stop.
+    const spent = { [RUN_EVENT]: [run('2026-11-08T03:00:00Z', 2.90)] };
+    const seen = [];
+    const r = await call({ supa: fakeDb({ events: spent, valuations: [row(mouse, 2), row(blender, 3)] }), price: async () => { seen.push(1); return { status: 'priced', reused: false, call: { ms: 1, ...call24k } }; } });
+    assert.deepEqual([r.body.status, seen.length, r.body.stopped], ['ran', 1, 'cap']);
+    assert.ok(r.body.trial_spent_usd <= 3);
+    const closed = await call({ supa: fakeDb({ events: { [RUN_EVENT]: [run('2026-11-08T03:00:00Z', 2.95)] }, valuations: [row(mouse, 2)] }), credit: () => assert.fail('no call'), price: () => assert.fail('no research') });
+    assert.equal(closed.body.status, 'trial_budget_spent');
+  });
+  test('PW-6f the admin health check: one few-token call with the deployment key, result recorded, key never returned', async () => {
+    const admin = { verify: async (h) => (h === 'Bearer user' ? { id: 'u1' } : null), supa: fakeDb({ admin: true }) };
+    let used = null;
+    const r = await call({ method: 'POST', auth: 'Bearer user', body: { action: 'health' }, ...admin, env: { ...ENV, OPENAI_API_KEY: 'sk-secret-value' }, credit: async ({ apiKey }) => { used = apiKey; return { ok: true, credit_exhausted: false, status: 200, cost_usd: 0.00001 }; } });
+    assert.deepEqual([r.statusCode, r.body.ok, r.body.key_configured, used], [200, true, true, 'sk-secret-value']);
+    assert.ok(!JSON.stringify(r.body).includes('sk-secret') && !JSON.stringify(r.logged).includes('sk-secret'));
+    assert.equal(r.logged[0].type, 'core_scan_health');
+    const no = await call({ method: 'POST', auth: 'Bearer user', body: { action: 'health' }, verify: admin.verify, supa: fakeDb({ admin: false }), credit: () => assert.fail('no call') });
+    assert.equal(no.statusCode, 403);
   });
 });

@@ -272,9 +272,11 @@ export function createScanHandler({
       model: resolveIdentityModel(process.env), apiKey, safetyIdentifier,
     });
     if (result.status === SCAN_STATUS.FAILED) {
-      // A failure the provider did not bill gives the daily allowance back. An account or configuration problem (out of
-      // credit, a rejected key) does not go away by trying again now: the client is told so, and the record says why.
-      const refunded = !!quota.charged && !result.billed;
+      // A failed scan never uses up the person's daily allowance (founder rule, 2026-11-10): it is given back whether or not
+      // the provider billed the call. The per-minute limits are not given back, so a run of failures is still throttled.
+      // An account or configuration problem (out of credit, a rejected key) does not go away by trying again now: the
+      // client is told so, and the record says why.
+      const refunded = !!quota.charged;
       if (refunded) await refund({ userId: user.id });
       return done({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call, { quota_ms: quotaMs, refunded });
     }

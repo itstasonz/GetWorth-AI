@@ -6,7 +6,7 @@
 //       the store in about a second (_lib/scan/prewarm.js says what it does
 //       and what it does not). Authorization: Bearer CRON_SECRET, compared in
 //       constant time; no secret configured means every request is refused.
-// POST  { action: 'pause' | 'resume' } — an ADMIN's session (profiles.is_admin,
+// POST  { action: 'pause' | 'resume' | 'health' } — an ADMIN's session (profiles.is_admin,
 //       read by the server's own role). Records one control event; the job
 //       reads it before every product, so a pause stops a run in progress
 //       within one research. Nothing else is read or written.
@@ -24,8 +24,10 @@ import { logScanEvent } from './_lib/scan/persist.js';
 import { accountRef } from './_lib/scan/telemetry.js';
 import {
   resolvePrewarmMax, resolvePrewarmUsd, demandFrom, planPrewarm, runPrewarm, DEMAND_WINDOW_DAYS, WORST_RESEARCH_USD,
-  RUN_EVENT, CONTROL_EVENT, ALERT_EVENT, ALERT, dayStart, spentToday, isPaused, alertsFor, checkCredit,
+  RUN_EVENT, CONTROL_EVENT, ALERT_EVENT, ALERT, dayStart, spentToday, isPaused, alertsFor, checkCredit, trialState, PREWARM_TRIAL,
 } from './_lib/scan/prewarm.js';
+
+const HEALTH_EVENT = 'core_scan_health';
 
 // Must stay a literal: Vercel reads it statically.
 export const config = { maxDuration: 300 };
@@ -53,7 +55,7 @@ async function readBody(req) {
 /** The handler over injectable dependencies, for the suites. */
 export function createPrewarmHandler({
   env = process.env, supa = () => getServiceClient(), price = runPrice, logEvent = logScanEvent, now = Date.now,
-  verify = verifyJWT, credit = checkCredit,
+  verify = verifyJWT, credit = checkCredit, trial = PREWARM_TRIAL,
 } = {}) {
   const event = async (type, payload) => { try { await logEvent(crypto.randomUUID(), type, payload); } catch { /* best effort */ } };
   const alert = async (a) => { console.error(`[Prewarm][ALERT] ${JSON.stringify(a)}`); await event(ALERT_EVENT, { source: 'prewarm', ...a }); };
@@ -74,6 +76,17 @@ export function createPrewarmHandler({
     if (error || profile?.is_admin !== true) return reply(res, 403, { error: 'forbidden' });
     const body = await readBody(req);
     const action = body?.action;
+    // THE HEALTH CHECK: one request of a few tokens (~$0.00001) with THIS deployment's OpenAI key, through the shared client
+    // every scan uses. Says whether the key reaches credit; never returns or logs the key. Recorded as one event.
+    if (action === 'health') {
+      const apiKey = env[SCAN_KEY_ENV];
+      const model = resolveMarketModel(env);
+      const c = apiKey ? await credit({ apiKey, model }) : { ok: false, credit_exhausted: false, status: null, cost_usd: 0 };
+      const result = { key_configured: !!apiKey, ok: c.ok, credit_exhausted: c.credit_exhausted, provider_status: c.status, model, cost_usd: c.cost_usd, scan_mode: resolveScanMode(env), at: new Date(now()).toISOString() };
+      await event(HEALTH_EVENT, { ...result, by: await accountRef(user.id) });
+      console.log(`[Prewarm] health ${JSON.stringify(result)}`);
+      return reply(res, 200, result);
+    }
     if (action !== 'pause' && action !== 'resume') return reply(res, 400, { error: 'bad_request' });
     const payload = { enabled: action === 'resume', by: await accountRef(user.id), at: new Date(now()).toISOString() };
     try { await logEvent(crypto.randomUUID(), CONTROL_EVENT, payload); } catch { return reply(res, 503, { error: 'not_recorded' }); }
@@ -97,13 +110,19 @@ export function createPrewarmHandler({
     const finish = async (summary) => { await event(RUN_EVENT, summary); console.log(`[Prewarm] ${JSON.stringify(summary)}`); return reply(res, 200, summary); };
 
     // The off switch and the day's ledger. Unreadable is a stop, never a run on a guess.
-    let controls; let runs;
-    try { [controls, runs] = await Promise.all([rows(db, CONTROL_EVENT, '1970-01-01T00:00:00Z'), rows(db, RUN_EVENT, today)]); } catch {
+    let controls; let runs; let trialRuns;
+    try { [controls, runs, trialRuns] = await Promise.all([rows(db, CONTROL_EVENT, '1970-01-01T00:00:00Z'), rows(db, RUN_EVENT, today), rows(db, RUN_EVENT, trial.start)]); } catch {
       return reply(res, 200, { status: 'ledger_unreadable' });
+    }
+    // THE TRIAL: outside its dates, or with its $3 spent, nothing runs and nothing is spent — whatever was deployed when.
+    const tr = trialState(trialRuns, { now: now(), trial });
+    if (!tr.open) {
+      if (tr.reason !== 'trial_not_started') await alert({ kind: ALERT.TRIAL_OVER, reason: tr.reason, trial_spent_usd: tr.spent_usd });
+      return finish({ status: tr.reason, spent_usd: 0, trial_spent_usd: tr.spent_usd, trial_cap_usd: trial.usd, trial_end: trial.end });
     }
     if (isPaused(controls)) return finish({ status: 'paused', spent_usd: 0, cap_usd: usdCap });
     const before = spentToday(runs);
-    const left = Math.round((usdCap - before) * 10000) / 10000;
+    const left = Math.round(Math.min(usdCap - before, tr.left_usd) * 10000) / 10000;
     if (left < WORST_RESEARCH_USD) { await alert({ kind: ALERT.CAP, spent_today_usd: before, cap_usd: usdCap }); return finish({ status: 'cap_reached', spent_usd: 0, spent_today_usd: before, cap_usd: usdCap }); }
 
     // Credit first: the approval is for a run only while OpenAI has credit.
@@ -127,7 +146,10 @@ export function createPrewarmHandler({
     const paused = async () => isPaused(await rows(db, CONTROL_EVENT, '1970-01-01T00:00:00Z'));
     const counts = await runPrewarm(plan, { price, usdCap: left - c.cost_usd, paused, model, apiKey, safetyIdentifier: 'gw-prewarm' });
     const spentTodayUsd = Math.round((before + c.cost_usd + counts.spent_usd) * 10000) / 10000;
-    const summary = { status: 'ran', max, cap_usd: usdCap, estimated_usd: plan.estimated_usd, preflight_usd: c.cost_usd, ...counts, spent_today_usd: spentTodayUsd };
+    const summary = {
+      status: 'ran', max, cap_usd: usdCap, estimated_usd: plan.estimated_usd, preflight_usd: c.cost_usd, ...counts, spent_today_usd: spentTodayUsd,
+      trial_spent_usd: Math.round((tr.spent_usd + c.cost_usd + counts.spent_usd) * 10000) / 10000, trial_cap_usd: trial.usd,
+    };
     const alerts = alertsFor(summary, { usdCap });
     for (const a of alerts) await alert(a);
     // A day over its cap should be impossible (each research is reserved at its worst case first). If it happens anyway,

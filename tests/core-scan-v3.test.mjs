@@ -222,9 +222,9 @@ describe('V3-7 an outage on our side: the allowance given back, a message that s
     assert.deepEqual([body.status, body.failure, body.retryable, log.refund], ['failed', 'credit_exhausted', false, 1]);
     assert.deepEqual([row.reason, row.refunded, typeof row.quota_ms], ['credit_exhausted', true, 'number']);
   });
-  test('V3-7b a billed failure (a timeout) keeps the charge and may be retried', async () => {
+  test('V3-7b a billed failure (a timeout) is given back too, and may be retried', async () => {
     const { body, log, row } = await run('timeout', true);
-    assert.deepEqual([body.retryable, log.refund, row.refunded], [true, 0, false]);
+    assert.deepEqual([body.retryable, log.refund, row.refunded], [true, 1, true]);
   });
   test('V3-7c the app calls exactly the unbilled failures an outage "not counted", and offers a retry only where it can help', () => {
     for (const code of ['credit_exhausted', 'auth', 'not_configured', 'network', 'rate_limited', 'upstream_5xx', 'http_418', 'timeout', 'parse', 'incomplete', 'refusal', 'unknown', '']) {

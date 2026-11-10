@@ -21,6 +21,7 @@ const ALERT_TEXT = {
   prewarm_failures: ['Half or more of a run\'s research failed', 'מחצית או יותר מהמחקר בהרצה נכשל'],
   prewarm_spend_over_cap: ['Spend went over the cap — pre-research paused itself', 'ההוצאה עברה את התקרה — המחקר המוקדם הושהה אוטומטית'],
   prewarm_demand_unreadable: ['Could not read scan demand', 'לא ניתן היה לקרוא את הביקוש לסריקות'],
+  prewarm_trial_over: ['The 10-day pre-research trial is over (ended or $3 spent) — nothing more runs', 'תקופת הניסיון של 10 ימים הסתיימה (תם הזמן או נוצלו $3) — לא ירוץ עוד מחקר מוקדם'],
 };
 
 export default function PrewarmPanel({ lang }) {
@@ -57,8 +58,29 @@ export default function PrewarmPanel({ lang }) {
     } catch (err) { setError(err?.message || 'failed'); } finally { setBusy(false); }
   };
 
+  // One few-token OpenAI request with Production's own key (api/prewarm.js 'health'): is the key reaching credit?
+  const [health, setHealth] = useState(null);
+  const checkHealth = async () => {
+    setBusy(true); setError(null);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch('/api/prewarm', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token ?? ''}` },
+        body: JSON.stringify({ action: 'health' }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setHealth(await res.json());
+    } catch (err) { setError(err?.message || 'failed'); } finally { setBusy(false); }
+  };
+
   return (
     <Card className="p-3 space-y-2" data-testid="prewarm-panel">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs" dir="ltr" data-testid="openai-health">
+          OpenAI: {health ? (health.ok ? t('OK — key has credit', 'תקין — יש קרדיט') : health.credit_exhausted ? t('OUT OF CREDIT', 'נגמר הקרדיט') : `${t('error', 'שגיאה')} ${health.provider_status ?? ''}`) : t('not checked', 'לא נבדק')}
+        </p>
+        <button onClick={checkHealth} disabled={busy} className="px-2.5 py-1 rounded-control text-xs bg-white/5 text-slate-200">{t('Check OpenAI', 'בדיקת OpenAI')}</button>
+      </div>
       {creditFailures > 0 && (
         <div className="flex items-center gap-2 text-xs text-red-300" data-testid="credit-alert">
           <AlertTriangle className="w-4 h-4" />

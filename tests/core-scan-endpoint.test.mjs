@@ -395,7 +395,7 @@ describe('CE-4 the two actions', () => {
     assert.equal(log.identifyArgs.images.length, 1);
     assert.doesNotMatch(log.identifyArgs.images[0], /^data:/, 'the handler passes bare base64');
   });
-  test('CE-4b a failed identification gives the quota back only when the provider did not bill', async () => {
+  test('CE-4b a failed identification always gives the daily allowance back, billed or not', async () => {
     const failed = (billed) => ({ status: 'failed', failure: billed ? 'timeout' : 'upstream_5xx', identity: null, followups: 0, billed, call: { stage: 'identify', model: 'm', ms: 9, usage: null } });
     const a = harness({ identifyResult: failed(false) });
     const ra = await a.call(identifyBody());
@@ -403,7 +403,7 @@ describe('CE-4 the two actions', () => {
     assert.equal(ra.payload.token, undefined);
     const b = harness({ identifyResult: failed(true) });
     await b.call(identifyBody());
-    assert.equal(b.log.refund, 0, 'a call that was billed is not refunded');
+    assert.equal(b.log.refund, 1, 'a failure never uses up a scan, even when the provider billed the call');
   });
   test('CE-4c price needs this account\'s token for this scan, and is never charged to the quota', async () => {
     const { call, log } = harness();

@@ -54,6 +54,22 @@ export function resolvePrewarmUsd(env = process.env) {
   return Number.isFinite(n) && n > 0 ? Math.min(n, PREWARM_USD_HARD_MAX) : 0;
 }
 export const PREWARM_HARD_MAX = 10;
+/**
+ * THE TRIAL (founder approval: 10 days, at most $3 in all). Fixed dates in code, so no deployment, restart or setting can
+ * restart it: the job runs only inside [start, end), and the trial's spend is the ledger of every run since `start`
+ * (scan_events core_scan_prewarm), never a counter that a redeploy could zero. OpenAI credit returned 2026-11-10, after
+ * that day's 03:00 UTC run; the first run that can spend is 2026-11-11 03:00 UTC, the last 2026-11-20 03:00 UTC.
+ */
+export const PREWARM_TRIAL = Object.freeze({ start: '2026-11-11T00:00:00.000Z', end: '2026-11-21T00:00:00.000Z', usd: 3.00 });
+/** Where the trial stands at `now`, given every run recorded since it started: { open, reason, spent_usd, left_usd }. */
+export function trialState(runs, { now = Date.now(), trial = PREWARM_TRIAL } = {}) {
+  const spent = spentToday((Array.isArray(runs) ? runs : []).filter((r) => String(r?.created_at ?? '') >= trial.start));
+  const left = Math.round(Math.max(0, Math.min(trial.usd, PREWARM_TRIAL_USD_HARD_MAX) - spent) * 10000) / 10000;
+  const at = new Date(now).toISOString();
+  const reason = at < trial.start ? 'trial_not_started' : at >= trial.end ? 'trial_ended' : left < WORST_RESEARCH_USD ? 'trial_budget_spent' : null;
+  return { open: reason === null, reason, spent_usd: spent, left_usd: left };
+}
+export const PREWARM_TRIAL_USD_HARD_MAX = 3.00;
 export const DEMAND_WINDOW_DAYS = 30;
 /**
  * The measured cost of one fresh research, in US dollars: the 2026-10-11 live probe of one market stage cost $0.014
@@ -132,7 +148,7 @@ export const CONTROL_EVENT = 'core_scan_prewarm_control';
 export const ALERT_EVENT = 'core_scan_alert';
 export const ALERT = Object.freeze({
   CREDIT: 'openai_credit_exhausted', CAP: 'prewarm_daily_cap_reached', FAILURES: 'prewarm_failures',
-  OVER_CAP: 'prewarm_spend_over_cap', DEMAND: 'prewarm_demand_unreadable',
+  OVER_CAP: 'prewarm_spend_over_cap', DEMAND: 'prewarm_demand_unreadable', TRIAL_OVER: 'prewarm_trial_over',
 });
 /** The start of today, UTC: the day a daily cap is counted in. */
 export const dayStart = (now = Date.now()) => new Date(Math.floor(now / 86_400_000) * 86_400_000).toISOString();
