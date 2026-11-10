@@ -5,7 +5,7 @@
 #   powershell -NoProfile -File scripts/listing-thumbnails.ps1 -In rows.json -Out thumbs.json [-MaxSide 480] [-Quality 72]
 #
 # In:  JSON array of { "id": "<uuid>", "img": "data:image/...;base64,..." } (the first photograph of each listing).
-# Out: JSON array of { "id": "<uuid>", "thumb": "data:image/jpeg;base64,...", "w": n, "h": n, "bytes": n }, or
+# Out: JSON array of { "id": "<uuid>", "thumb": "data:image/jpeg;base64,...", "w": n, "h": n, "src_w": n, "src_h": n, "bytes": n }, or
 #      { "id": ..., "error": "..." } for a photograph that cannot be decoded. The source photographs are not changed.
 # The orientation recorded by the camera (EXIF 0x0112) is applied, so a thumbnail stands the way the photo displays.
 # ══════════════════════════════════════════════════════════════════════════════
@@ -37,6 +37,7 @@ $result = foreach ($row in $rows) {
         8 { $src.RotateFlip([System.Drawing.RotateFlipType]::Rotate270FlipNone) }
       }
     }
+    $srcW = $src.Width; $srcH = $src.Height   # after the EXIF rotation: the photo as it displays
     $scale = [Math]::Min(1.0, $MaxSide / [Math]::Max($src.Width, $src.Height))
     $w = [Math]::Max(1, [int][Math]::Round($src.Width * $scale))
     $h = [Math]::Max(1, [int][Math]::Round($src.Height * $scale))
@@ -51,7 +52,7 @@ $result = foreach ($row in $rows) {
     $dst.Save($outMs, $codec, $params)
     $b64 = [Convert]::ToBase64String($outMs.ToArray())
     $g.Dispose(); $dst.Dispose(); $src.Dispose(); $ms.Dispose(); $outMs.Dispose()
-    [pscustomobject]@{ id = $row.id; thumb = "data:image/jpeg;base64,$b64"; w = $w; h = $h; bytes = $b64.Length }
+    [pscustomobject]@{ id = $row.id; thumb = "data:image/jpeg;base64,$b64"; w = $w; h = $h; src_w = $srcW; src_h = $srcH; bytes = $b64.Length }
   } catch {
     [pscustomobject]@{ id = $row.id; error = $_.Exception.Message }
   }
