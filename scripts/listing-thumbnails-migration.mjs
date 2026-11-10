@@ -9,6 +9,8 @@
 //                        writes apply.sql and the committed manifest (ids, hashes, sizes — no image data)
 //   preview   LOCAL      the target project, the checksums, and apply.sql with every image shortened
 //   rehearse  ROLLED BACK  apply.sql + its checks + the rollback + its checks, inside one transaction that is rolled back
+//   rehearse-local  LOCAL  the same apply.sql and rollback on real Postgres (PGlite) loaded with the backup: Production's
+//                        45 listings and its own order functions; every listings column is compared with the backup after
 //   apply     WRITES     after re-checking every checksum, runs apply.sql on the linked project (one transaction)
 //   verify    READ-ONLY  the post-apply checks: columns, trigger, functions, thumbnails, originals unchanged
 //   rollback  WRITES     the committed rollback (promote the previous deployment FIRST — see that file)
@@ -167,6 +169,43 @@ const steps = {
     console.log(JSON.stringify(rows));
   },
 
+  async 'rehearse-local'() {
+    gate();
+    const { PGlite } = await import('@electric-sql/pglite');
+    const backup = JSON.parse(fs.readFileSync(path.join(WORK, 'backup.json'), 'utf8'));
+    const rowsJson = fs.readFileSync(path.join(WORK, 'listings.json'), 'utf8');
+    if (sha256(rowsJson) !== backup.sha256['listings.json']) die('listings.json does not match its backup record');
+    const fns = JSON.parse(fs.readFileSync(path.join(WORK, 'order-functions.json'), 'utf8'));
+    const db = new PGlite();
+    await db.exec(fs.readFileSync(at('tests/fixtures/db/marketplace-baseline.sql'), 'utf8'));
+    // The two columns Production gained after the baseline capture (20261108120000), so every row loads whole.
+    await db.exec('ALTER TABLE public.listings ADD COLUMN price_source text, ADD COLUMN suggested_price integer;');
+    for (const fn of fns) await db.exec(`${fn.def};`);
+    await db.exec('GRANT EXECUTE ON FUNCTION public.get_user_orders() TO anon, authenticated; GRANT EXECUTE ON FUNCTION public.get_order_by_id(uuid) TO anon, authenticated;');
+    // The copy holds listings only: their foreign keys (sellers, valuations, products) have no parents here, and none of
+    // them is touched by this migration.
+    await db.exec("DO $$ DECLARE c text; BEGIN FOR c IN SELECT conname FROM pg_constraint WHERE conrelid = 'public.listings'::regclass AND contype = 'f' LOOP EXECUTE format('ALTER TABLE public.listings DROP CONSTRAINT %I', c); END LOOP; END $$;");
+    await db.query('INSERT INTO public.listings SELECT * FROM json_populate_recordset(NULL::public.listings, $1::json)', [rowsJson]);
+    const snapshot = async () => (await db.query(`SELECT id, md5(row_to_json(l)::text) AS h FROM (SELECT ${COLUMNS_BEFORE} FROM public.listings) l ORDER BY id`)).rows;
+    const before = await snapshot();
+    if (before.length !== backup.listings) die('the copy did not load every listing');
+    const forward = fs.readFileSync(APPLY, 'utf8');
+    await db.exec(forward);
+    const [after] = (await db.query("SELECT count(*)::int AS n, count(thumbnail)::int AS t, (SELECT count(*)::int FROM public.listings WHERE cardinality(images) > 0 AND thumbnail IS NULL) AS missing FROM public.listings")).rows;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    if (!same(await snapshot(), before)) die('rehearse-local: a listing column other than the new two changed');
+    const rollback = fs.readFileSync(at(ROLLBACK), 'utf8');
+    await db.exec(rollback);
+    await db.exec(`BEGIN; ${ROLLBACK_CHECKS} COMMIT;`);
+    if (!same(await snapshot(), before)) die('rehearse-local: the rollback did not restore every listing exactly');
+    const restored = (await db.query("SELECT pg_get_functiondef('public.get_user_orders()'::regprocedure) AS d")).rows[0].d.trim();
+    if (restored !== fns.find((f) => f.sig === 'get_user_orders()').def.trim()) die('rehearse-local: get_user_orders is not byte-for-byte the Production definition');
+    // And it can be applied again after a rollback.
+    await db.exec(forward);
+    console.log(JSON.stringify({ listings: after.n, with_thumbnail: after.t, missing: after.missing, forward_checks: 'passed', listings_unchanged: true, rollback_restores_functions_exactly: true, rollback_restores_listings_exactly: true, reapply_after_rollback: 'passed' }));
+    console.log('REHEARSED (local copy of Production)');
+  },
+
   apply() {
     const m = gate();
     console.log(`applying ${MIGRATION} + ${m.thumbnails.count} thumbnails to "${link.name ?? '?'}" (${REF.slice(0, 4)}…) — one transaction`);
@@ -199,6 +238,9 @@ const steps = {
   },
 };
 
+// Every listings column before the migration (the backup's), so a comparison never sees the new two.
+const COLUMNS_BEFORE = 'id, seller_id, title, title_hebrew, description, category, condition, price, original_price, images, location, status, views, saves, is_featured, is_boosted, boost_expires_at, condition_details, contact_method, contact_phone, created_at, updated_at, expires_at, quality_score, sold_to, sold_at, attributes, product_id, valuation_id, subcategory, ai_confidence, actual_sold_price, serial_submitted, serial_verified, serial_masked, serial_type, price_source, suggested_price';
+
 /** Everything that must still be true before apply.sql may be shown, rehearsed or run. */
 function gate() {
   if (!fs.existsSync(APPLY)) die('apply.sql is missing: run prepare');
@@ -219,4 +261,4 @@ function gate() {
 
 const step = process.argv[2];
 if (!steps[step]) die(`usage: node scripts/listing-thumbnails-migration.mjs ${Object.keys(steps).join('|')}`);
-steps[step]();
+await steps[step]();
