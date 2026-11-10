@@ -259,6 +259,22 @@ export const PROVIDER_MUTANTS = [
     replace: "  '@supabase/supabase-js': 'unsupported',",
   },
   {
+    id: "PM-DISPOSITION-DIAGNOSTICS-CHANNEL-RELABELLED",
+    mechanism: M('SPECIFIER_DISPOSITION.node:diagnostics_channel', 'entry'),
+    invariant: "node:diagnostics_channel (api/_lib/scan/net-timing.js) is a decided entry: observing fetch, not reaching a host.",
+    kills: ["PC-3d"],
+    find: "  'node:diagnostics_channel': 'no-network',",
+    replace: "  'node:diagnostics_channel': 'unsupported',",
+  },
+  {
+    id: "PM-DISPOSITION-ASYNC-HOOKS-RELABELLED",
+    mechanism: M('SPECIFIER_DISPOSITION.node:async_hooks', 'entry'),
+    invariant: "node:async_hooks (api/_lib/scan/net-timing.js) is a decided entry: carrying a trace id, not reaching a host.",
+    kills: ["PC-3d"],
+    find: "  'node:async_hooks': 'no-network',",
+    replace: "  'node:async_hooks': 'unsupported',",
+  },
+  {
     id: "PM-NETWORK-ENTRYPOINTS-EMPTIED",
     mechanism: M('NETWORK_ENTRYPOINTS'),
     invariant: "The declared entrypoint list is what the call-site scan actually follows.",

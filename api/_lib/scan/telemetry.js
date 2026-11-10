@@ -26,10 +26,17 @@ export const ENGINE = 'core_scan';
 // it, and how many requests it has served before. Module scope is instance scope.
 const BOOTED_AT = Date.now();
 let served = 0;
-/** This instance's age and request count, taken when a request arrives. */
+let lastSeenAt = null;
+/**
+ * This instance's age, request count and how long it sat idle since the previous request arrived (null on its first),
+ * taken when a request arrives. A long idle gap on an old instance is a suspended-then-resumed instance, which a cold
+ * start is not (2026-11-10: the 4.12 s quota check came on a 22-minute-old instance).
+ */
 export function instanceInfo(now = Date.now()) {
   served += 1;
-  return { instance_age_ms: now - BOOTED_AT, instance_requests: served };
+  const idle = lastSeenAt === null ? null : now - lastSeenAt;
+  lastSeenAt = now;
+  return { instance_age_ms: now - BOOTED_AT, instance_requests: served, instance_idle_ms: idle };
 }
 
 /** A stable, non-reversible account reference. Same id → same reference. */

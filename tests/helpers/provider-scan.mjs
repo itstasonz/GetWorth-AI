@@ -274,6 +274,10 @@ export const SPECIFIER_DISPOSITION = Object.freeze({
   // implementation that nothing asserts, so it is written down rather than
   // relied upon silently.
   '@supabase/supabase-js': 'fetch-based',
+  // api/_lib/scan/net-timing.js (2026-11-10): observing fetch's own events and carrying a trace through awaits. Neither opens
+  // a connection; the requests they observe are the Supabase client's, made through globalThis.fetch.
+  'node:diagnostics_channel': 'no-network',
+  'node:async_hooks': 'no-network',
 });
 
 /** Bare (non-relative, non-builtin-prefixed) specifier? */

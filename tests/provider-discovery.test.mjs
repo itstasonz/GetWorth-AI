@@ -103,6 +103,11 @@ const DYNAMIC_REGISTRY = [
     why: 'fetchWithRetry(url) — the retry wrapper. Its callers pass the literals scanned above',
     coveredBy: 'static: every fetchWithRetry CALLER has a literal target, asserted below',
   },
+  {
+    file: 'api/_lib/scan/net-timing.js', shape: 'non-literal-target',
+    why: 'tracedFetch(input) — the fetch of the server Supabase client (quota.js createClient global.fetch); input is the URL that client builds, from process.env.SUPABASE_URL: our own infrastructure, not a provider',
+    coveredBy: 'runtime: requests go through globalThis.fetch unchanged except one x-gw-trace header (tests/core-scan-quota-timing.test.mjs QT-1e)',
+  },
 ];
 
 const SURFACE = discoverRuntimeSurface(REPO);

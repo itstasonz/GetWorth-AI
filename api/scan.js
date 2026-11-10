@@ -153,8 +153,9 @@ export function createScanHandler({
     // database read is this account's own allowance row. At most once a minute per account on an instance.
     if (action === 'warm') {
       const tWarm = Date.now();
-      const warmed = await warm({ userId: user.id });
-      return done({ status: warmed ? 'warm' : 'skipped' }, 200, null, { warm_ms: Date.now() - tWarm });
+      let warmTiming = null;
+      const warmed = await warm({ userId: user.id, onTiming: (t) => { warmTiming = t; } });
+      return done({ status: warmed ? 'warm' : 'skipped' }, 200, null, { warm_ms: Date.now() - tWarm, warm_timing: warmTiming });
     }
 
     // A token, when one is presented, must be this account's and this scan's.
@@ -259,7 +260,7 @@ export function createScanHandler({
     const quota = await charge({ ip: clientIp(req), userId: user.id });
     const quotaMs = Date.now() - tQuota;
     if (!quota.allowed) {
-      await recordRequest(logEvent, scanUuid, { action, http: 429, outcome: 'rate_limited', reason: quota.limitType, userId: user.id, totalMs: Date.now() - t0, extra: { ...instance, auth_ms: authMs, body_ms: bodyMs, quota_ms: quotaMs } });
+      await recordRequest(logEvent, scanUuid, { action, http: 429, outcome: 'rate_limited', reason: quota.limitType, userId: user.id, totalMs: Date.now() - t0, extra: { ...instance, auth_ms: authMs, body_ms: bodyMs, quota_ms: quotaMs, quota_timing: quota.timing ?? null } });
       return json({
         ...base, error: 'rate_limited', code: 'RATE_LIMITED', limitType: quota.limitType,
         retryAfterSeconds: quota.retryAfter, retryable: quota.limitType !== 'user_daily',
@@ -278,7 +279,7 @@ export function createScanHandler({
       // client is told so, and the record says why.
       const refunded = !!quota.charged;
       if (refunded) await refund({ userId: user.id });
-      return done({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call, { quota_ms: quotaMs, refunded });
+      return done({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call, { quota_ms: quotaMs, quota_timing: quota.timing ?? null, refunded });
     }
     const tSign = Date.now();
     const token = await signScanToken({
@@ -292,7 +293,7 @@ export function createScanHandler({
       question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? String(result.identity.followup.attribute ?? result.identity.followup.kind).slice(0, 40) : null,
       incomplete: !!result.identity?.incomplete, images: read.images.length, image_bytes: read.images.reduce((n, b) => n + Math.round(b.length * 0.75), 0),
       revision: prior ? (prior.revisions ?? 0) + 1 : 0,
-      quota_ms: quotaMs, sign_ms: Date.now() - tSign,
+      quota_ms: quotaMs, quota_timing: quota.timing ?? null, sign_ms: Date.now() - tSign,
     });
   };
 }
