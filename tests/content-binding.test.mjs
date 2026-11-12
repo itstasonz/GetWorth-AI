@@ -117,6 +117,16 @@ describe('CB-2 the price must appear with its currency', () => {
     }
   });
 
+  test('CB-2c2 a shekel spelling inside a Hebrew word is not a currency (Homeless ad, 2026-11-12)', () => {
+    // "שחור" is "black"; "ש"חור" is how the ad wrote it. Neither is ₪5.
+    for (const t of ['שלט פליסטישן סוני 5 שחור 270 ש"ח', 'שלט פליסטישן סוני 5 ש"חור 270 ש"ח', 'שלט 5 ש״חור 270 ₪']) {
+      assert.deepEqual(pricedNumbers(t).map((p) => p.value), [270], t);
+    }
+    // Still a currency as a word of its own, and beside punctuation.
+    assert.deepEqual(pricedNumbers('מחיר: 270 שח, נייד').map((p) => p.value), [270]);
+    assert.deepEqual(pricedNumbers('(270 ש"ח)').map((p) => p.value), [270]);
+  });
+
   test('CB-2d the currency in the text must be the currency claimed', () => {
     assert.equal(supports('Falcon X200', 500, 'Acme Falcon X200 $500').bound, false);
     assert.equal(supports('Falcon X200', 500, 'Acme Falcon X200 $500', { currency: 'USD' }).bound, true);

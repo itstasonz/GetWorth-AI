@@ -128,6 +128,7 @@ export const SCAN_COPY = {
       specialised_market_context: (n) => (n === 1 ? '1 result was verified and is shown as context: this market needs a method GetWorth does not have yet, so no price was made from it.' : `${n} results were verified and are shown as context: this market needs a method GetWorth does not have yet, so no price was made from them.`),
       not_comparable: (n) => (n === 1 ? '1 result was a different product or variant, an accessory or a part, so it was not used.' : `${n} results were a different product or variant, an accessory or a part, so they were not used.`),
       above_new_price: (n) => (n === 1 ? '1 price was higher than the item\'s new price, so it is not a second-hand price and was not used.' : `${n} prices were higher than the item's new price, so they are not second-hand prices and were not used.`),
+      sealed_far_below_new_price: (n) => (n === 1 ? '1 ad offered a sealed unit for less than half its new price. A genuine new unit does not sell that cheaply, so it was not used.' : `${n} ads offered sealed units for less than half the new price. Genuine new units do not sell that cheaply, so they were not used.`),
       outlier: (n) => (n === 1 ? '1 price was far out of line with the other listings, so it was not used.' : `${n} prices were far out of line with the other listings, so they were not used.`),
       retail_refurbished_without_private_resale: (n) => (n === 1
         ? '1 refurbished offer from a shop was found. Without a private second-hand listing to support it, it was not used as a used price.'
@@ -148,6 +149,7 @@ export const SCAN_COPY = {
       similar_item_abroad: 'a similar item abroad',
       similar_item_context: 'a similar item: context only, not enough to price from',
       above_new_price: 'above the new price',
+      sealed_far_below_new_price: 'a sealed unit at less than half its new price',
       outlier: 'far from the other listings',
       different_model: 'another model, not this product',
       not_comparable: 'a different product, accessory or part',
@@ -285,6 +287,7 @@ export const SCAN_COPY = {
       specialised_market_context: (n) => (n === 1 ? 'תוצאה אחת אומתה ומוצגת כהקשר: לשוק הזה דרושה שיטה שעדיין אין ל־GetWorth, ולכן לא נקבע ממנה מחיר.' : `${n} תוצאות אומתו ומוצגות כהקשר: לשוק הזה דרושה שיטה שעדיין אין ל־GetWorth, ולכן לא נקבע מהן מחיר.`),
       not_comparable: (n) => (n === 1 ? 'תוצאה אחת הייתה מוצר או דגם אחר, אביזר או חלק, ולכן לא נכללה.' : `${n} תוצאות היו מוצר או דגם אחר, אביזר או חלק, ולכן לא נכללו.`),
       above_new_price: (n) => (n === 1 ? 'מחיר אחד היה גבוה ממחיר המוצר החדש, ולכן אינו מחיר יד שנייה ולא נכלל.' : `${n} מחירים היו גבוהים ממחיר המוצר החדש, ולכן אינם מחירי יד שנייה ולא נכללו.`),
+      sealed_far_below_new_price: (n) => (n === 1 ? 'מודעה אחת הציעה מוצר חדש באריזה בפחות מחצי ממחירו החדש. מוצר מקורי חדש לא נמכר בזול כזה, ולכן היא לא נכללה.' : `${n} מודעות הציעו מוצרים חדשים באריזה בפחות מחצי מהמחיר החדש. מוצרים מקוריים חדשים לא נמכרים בזול כזה, ולכן הן לא נכללו.`),
       outlier: (n) => (n === 1 ? 'מחיר אחד היה רחוק מאוד משאר המודעות, ולכן לא נכלל.' : `${n} מחירים היו רחוקים מאוד משאר המודעות, ולכן לא נכללו.`),
       retail_refurbished_without_private_resale: (n) => (n === 1
         ? 'נמצאה הצעה אחת למוצר מחודש מחנות. בלי מודעת יד שנייה פרטית שתתמוך בה, היא לא שימשה כמחיר משומש.'
@@ -304,6 +307,7 @@ export const SCAN_COPY = {
       similar_item_abroad: 'פריט דומה בחו״ל',
       similar_item_context: 'פריט דומה: הקשר בלבד, לא מספיק לקביעת מחיר',
       above_new_price: 'מעל מחיר המוצר החדש',
+      sealed_far_below_new_price: 'חדש באריזה בפחות מחצי ממחירו החדש',
       outlier: 'רחוק משאר המודעות',
       different_model: 'דגם אחר, לא המוצר הזה',
       not_comparable: 'מוצר אחר, אביזר או חלק',

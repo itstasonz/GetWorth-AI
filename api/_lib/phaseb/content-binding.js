@@ -85,11 +85,13 @@ export function pricedNumbers(text) {
     const after = lower.slice(end, end + MARKER_REACH + 3);
     let currency = null;
     for (const [mark, code] of MARKERS) {
-      const word = /^[a-z]+$/.test(mark);
+      // A marker spelled in letters is a currency only as a word of its own, in either alphabet: "5 שחור" is
+      // "5 black", not ₪5 (Production scan 2026-11-12: a Homeless ad's "ש"חור" read as a second price beside its ₪270).
+      const word = /\p{L}/u.test(mark);
       const a = after.replace(/^\s{0,2}/, '');
       const b = before.replace(/\s{0,2}$/, '');
-      const hitAfter = a.startsWith(mark) && (!word || !/^[a-z]/.test(a.slice(mark.length)));
-      const hitBefore = b.endsWith(mark) && (!word || !/[a-z]$/.test(b.slice(0, -mark.length)));
+      const hitAfter = a.startsWith(mark) && (!word || !/^\p{L}/u.test(a.slice(mark.length)));
+      const hitBefore = b.endsWith(mark) && (!word || !/\p{L}$/u.test(b.slice(0, -mark.length)));
       if (hitAfter || hitBefore) { currency = code; break; }
     }
     if (currency) out.push({ value, currency, start, end });

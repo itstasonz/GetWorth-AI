@@ -213,6 +213,18 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     assert.deepEqual(v.evidence.filter((e) => e.set_aside === 'above_new_price').map((e) => e.price), [900]);
     assert.equal(v.prices.good.list, 200);
   });
+  test('CS-3f2 a private "sealed" unit at less than half the new price is set aside; a used one, or one at half or more, is not', () => {
+    // Homeless 2026-11-12: "AirPods Pro 2, new in the box, never opened — ₪300" beside a ₪1,100 new price.
+    const anchor = item({ price: 1100, kind: 'new_retail', condition: 'new_sealed' });
+    const v = value([item({ price: 300, condition: 'new_sealed' }), item({ price: 600 }), anchor]);
+    assert.deepEqual(v.evidence.filter((e) => e.set_aside === 'sealed_far_below_new_price').map((e) => e.price), [300]);
+    const used = value([item({ price: 300 }), item({ price: 600 }), anchor]);
+    assert.equal(used.evidence.filter((e) => e.set_aside === 'sealed_far_below_new_price').length, 0, 'a used unit may be cheap');
+    const half = value([item({ price: 560, condition: 'new_sealed' }), item({ price: 600 }), anchor]);
+    assert.equal(half.evidence.filter((e) => e.set_aside === 'sealed_far_below_new_price').length, 0);
+    const noAnchor = value([item({ price: 300, condition: 'new_sealed' }), item({ price: 600 })]);
+    assert.equal(noAnchor.evidence.filter((e) => e.set_aside === 'sealed_far_below_new_price').length, 0, 'without a known new price nothing is judged');
+  });
   test('CS-3g with a distribution to be an outlier from, an outlier is set aside; with two or three points nothing is', () => {
     const many = value([300, 310, 320, 330, 3000].map((price) => item({ price, kind: 'sold' })));
     assert.deepEqual(many.evidence.filter((e) => e.set_aside === 'outlier').map((e) => e.price), [3000]);

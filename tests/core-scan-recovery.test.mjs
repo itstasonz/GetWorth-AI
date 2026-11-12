@@ -276,9 +276,15 @@ describe('RW-4 a phone listing that is old or above the new price', () => {
   test('RW-4b the scan\'s own record says why: reasons and hosts as counts, nothing else', () => {
     const v = buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2024-05-01' }), ref(SOURCES.INTL_USED, 900, { market: 'INTL', currency: 'USD', price: 250 })], searched: { date: TODAY, queries: 4, planned: 8, pages: 28, stages: ['local'] } });
     const d = diagnosticsOf(v);
-    assert.deepEqual(d, { searched: { date: TODAY, queries: 4, planned: 8, pages: 28, stages: ['local'] }, evidence: 2, reasons: { [SET_ASIDE.NOT_CURRENT]: 1, [SET_ASIDE.ABROAD_ONLY]: 1 }, hosts: { 'www.secondhand.example.co.il': 1, 'www.used.example.com': 1 }, unverified: 0, unbound: 0 });
+    assert.deepEqual(d, { searched: { date: TODAY, queries: 4, planned: 8, pages: 28, stages: ['local'] }, evidence: 2, reasons: { [SET_ASIDE.NOT_CURRENT]: 1, [SET_ASIDE.ABROAD_ONLY]: 1 }, hosts: { 'www.secondhand.example.co.il': 1, 'www.used.example.com': 1 }, unverified: 0, unbound: 0, israeli_private: { [SET_ASIDE.NOT_CURRENT]: 1 }, no_price_cause: 'israeli_listings_old_or_sealed' });
     assert.equal(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2025-05-01' })] }).evidence[0].freshness, 'older');
-    assert.deepEqual(diagnosticsOf(null), { searched: null, evidence: 0, reasons: {}, hosts: {}, unverified: null, unbound: null });
+    assert.deepEqual(diagnosticsOf(null), { searched: null, evidence: 0, reasons: {}, hosts: {}, unverified: null, unbound: null, israeli_private: {}, no_price_cause: null });
+    // Nothing Israeli reached: the market data is missing, not refused.
+    assert.equal(diagnosticsOf(buildValuation({ today: TODAY, evidence: [ref(SOURCES.INTL_USED, 900, { market: 'INTL', currency: 'USD', price: 250 })] })).no_price_cause, 'no_israeli_listing_reached');
+    // Reached and not tied to the item: the binding's own reason is kept.
+    const loose = diagnosticsOf(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { binding: 'weak', binding_reason: 'product_not_named_beside_the_price' })] }));
+    assert.deepEqual([loose.no_price_cause, loose.israeli_private], ['israeli_listings_not_tied_to_item', { 'unbound:product_not_named_beside_the_price': 1 }]);
+    assert.equal(diagnosticsOf(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200)] })).no_price_cause, null, 'priced: no cause');
   });
 });
 

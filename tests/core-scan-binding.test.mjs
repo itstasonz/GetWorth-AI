@@ -367,3 +367,61 @@ describe('CB-8 one name in two alphabets, and never two products in one', () => 
     assert.equal(row('אייפודס פרו ₪500', AIRPODS, 500).level, BOUND.WEAK, 'a consonant gone is another word');
   });
 });
+
+describe('CB-9 a word that begins with a shekel spelling is not a second price (Production, 2026-11-12)', () => {
+  // homeless.co.il/yad2/viewad,1063159: a used PS5 controller, ₪270. The ad writes "black" as ש"חור; the parser read its
+  // first letters as ש"ח and the "5" before it as a second price, and the one Israeli used listing the search had reached
+  // for a DualSense was refused as "product_sits_between_two_prices" — the scan ended with no price.
+  const DUALSENSE = identity({ brand: 'Sony', product_family: 'PlayStation 5', model: 'DualSense Wireless Controller', display_name: 'Sony DualSense', canonical_name: 'sony dualsense wireless controller', item_type: 'game controller', size_or_capacity: null });
+  const TITLE = 'שלט פליסטישן סוני 5 ש"חור למכירה בבאר שבע 270 ש"ח';
+  test('CB-9a the listing binds its own price as a comparable', () => {
+    const b = bindPrice(claim({ price: 270, title: TITLE, match: 'close_comparable' }), listing(TITLE), DUALSENSE);
+    assert.equal(b.level, BOUND.STRONG);
+    assert.equal(b.reason, BIND_REASON.ONE_LISTING);
+  });
+  test('CB-9b a real second price in the row still refuses it', () => {
+    const t = 'שלט פליסטישן סוני 5 שחור 150 ש"ח למכירה בבאר שבע 270 ש"ח';
+    assert.notEqual(bindPrice(claim({ price: 270, title: 'שלט פליסטישן סוני 5 שחור', match: 'close_comparable' }), listing(t), DUALSENSE).level, BOUND.STRONG);
+  });
+});
+
+describe('CB-10 a board rendered as a table: one row is one ad (Homeless, 2026-11-12)', () => {
+  // The search returned Homeless's board as a table, one ad per line, its cells between pipes. Cut at every pipe, an ad's
+  // name and its price were two listings: nine current AirPods Pro 2 ads were found and none could be read.
+  const AIRPODS2 = identity({ brand: 'Apple', product_family: 'AirPods', model: 'AirPods Pro (2nd generation)', display_name: 'Apple AirPods Pro 2', canonical_name: 'apple airpods pro 2', item_type: 'wireless earbuds', size_or_capacity: null });
+  const BOARD = [
+    'אוזניות למכירה - סלולרי יד שניה | לוח יד שניה הומלס',
+    '[Input]  | Image: סלולרי אוזניות 24   | סלולרי - אוזניות  | איירפודס דור 2 של Apple עם מארז טעינה  | אשדוד, אשקלון והסביבה  | 250 ₪  | 11/11/2026  | ... [Input]  | Image: סלולרי אוזניות 31   | סלולרי - אוזניות  | AirPods Pro 2 - איירפודס פרו 2  | חיפה והקריות  | 300 ₪  | 06/11/2026  |',
+  ].join('\n');
+  const board = { type: 'search_or_category', title: 'אוזניות למכירה', text: BOARD };
+  test('CB-10a the ad\'s own row binds its price, and "2nd generation" is read as "2"', () => {
+    const b = bindPrice(claim({ price: 300, title: 'AirPods Pro 2 - איירפודס פרו 2' }), board, AIRPODS2);
+    assert.deepEqual(b, { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.ONE_LISTING, match: 'exact' });
+  });
+  test('CB-10b the neighbouring ad\'s price is still not this item\'s', () => {
+    assert.notEqual(bindPrice(claim({ price: 250, title: 'AirPods Pro 2' }), board, AIRPODS2).level, BOUND.VERIFIED_ROW);
+  });
+  test('CB-10c a table row that carries two prices still binds neither', () => {
+    const two = { type: 'search_or_category', title: 'x', text: '[Input]  | AirPods Pro 2  | 300 ₪  | 450 ₪  | 06/11/2026  |' };
+    assert.notEqual(bindPrice(claim({ price: 300, title: 'AirPods Pro 2' }), two, AIRPODS2).level, BOUND.VERIFIED_ROW);
+  });
+  test('CB-10d pipes outside a table row still separate listings', () => {
+    const run = { type: 'search_or_category', title: 'x', text: 'עכברים | Logitech G Pro Wireless | Razer Viper ₪300' };
+    assert.notEqual(bindPrice(claim({ price: 300 }), run, MOUSE).level, BOUND.VERIFIED_ROW);
+  });
+  test('CB-10e the generation run admits no other generation', () => {
+    const third = { type: 'search_or_category', title: 'x', text: '[Input]  | סלולרי  | AirPods Pro 3  | חיפה  | 900 ₪  | 06/11/2026  |' };
+    assert.equal(isBound({ binding: bindPrice(claim({ price: 900, title: 'AirPods Pro 3' }), third, AIRPODS2).level }), false);
+  });
+});
+
+describe('CB-11 the Hebrew name is a name only when it carries the model', () => {
+  test('CB-11a a Hebrew name with the model in it is one more run; one without it is not', () => {
+    const withModel = identity({ brand: 'Apple', product_family: 'AirPods', model: 'AirPods Pro 2', display_name: 'x', canonical_name: 'x', search: { hebrew_name: 'איירפודס פרו 2', aliases: [], model_numbers: [] } });
+    assert.ok(namesOf(withModel).some((r) => r.join(' ') === 'איירפודס פרו 2'));
+    const generic = identity({ brand: 'IKEA', product_family: 'POÄNG', model: 'POÄNG armchair', display_name: 'x', canonical_name: 'x', identity_precision: 'exact_model', search: { hebrew_name: 'כורסה', aliases: [], model_numbers: [] } });
+    assert.ok(!namesOf(generic).some((r) => r.join(' ') === 'כורסה'));
+    const otherNumber = identity({ brand: 'Apple', product_family: 'iPad', model: 'iPad 9', display_name: 'x', canonical_name: 'x', search: { hebrew_name: 'אייפד 10', aliases: [], model_numbers: [] } });
+    assert.ok(!namesOf(otherNumber).some((r) => r.join(' ') === 'אייפד 10'), 'a Hebrew name without the model\'s number is not this model');
+  });
+});

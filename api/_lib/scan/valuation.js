@@ -96,6 +96,14 @@ export const WEIGHT = Object.freeze({
 });
 /** A used unit asking more than the shop's price for a new one is not a second-hand reference. */
 const ABOVE_NEW = 1.05;
+/**
+ * A SEALED unit offered privately for less than half of the shop's price for a new one is not taken at its word: a
+ * genuine new unit does not change hands at half price, and on Israeli boards such an ad is a replica, a scam or a
+ * mislabelled unit ("AirPods Pro 2, new in the box, never opened — ₪300" beside a ₪1,100 new price, Homeless,
+ * 2026-11-12). A stated assumption like ABOVE_NEW; it applies only to asking prices that say "sealed", only in Israel,
+ * and only where the new price is known.
+ */
+const SEALED_FLOOR = 0.5;
 /** Israeli price level relative to abroad, when the same item's new price is known in both: kept within sane bounds. */
 const SCALE_BOUNDS = [0.8, 2];
 /** Where the weight of the evidence spans more than this (P90 / P10), the evidence disagrees. */
@@ -109,7 +117,7 @@ export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
 export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 });
 /** Why a reference that qualifies took no part in the price. */
 export const SET_ASIDE = Object.freeze({
-  ABOVE_NEW: 'above_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product',
+  ABOVE_NEW: 'above_new_price', SEALED_FAR_BELOW_NEW: 'sealed_far_below_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product',
   REFURBISHED_ALONE: 'retail_refurbished_without_private_resale',
   /** Context when the gate is closed: a listing abroad with no Israeli listing to compare it with; an Israeli listing that is old or for a sealed unit. */
   ABROAD_ONLY: 'abroad_without_israeli_reference', NOT_CURRENT: 'israeli_listing_old_or_sealed',
@@ -256,10 +264,11 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     // A used unit priced above a new one is a different thing: a bundle, a mislabelled new unit, a mistake.
     // A sealed unit a private seller asks more for than the shop does is not a second-hand price either.
     const aboveNew = anchorIl && (abroad ? e.price_ils * (scale ?? 1) : e.price_ils) > anchorIl * ABOVE_NEW;
+    const sealedFarBelow = !!anchorIl && !abroad && asking && e.condition === 'new_sealed' && e.price_ils < anchorIl * SEALED_FLOOR;
     points.push({
       evidence: e, value: local / CONDITION_FACTOR[condition], condition, stated, freshness, asking,
       weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page * factors.stock, factors,
-      dropped: isFrontPage(e.url) ? SET_ASIDE.NOT_SPECIFIC : (e.kind === 'price_guide' ? SET_ASIDE.PRICE_GUIDE_CONTEXT : (aboveNew ? SET_ASIDE.ABOVE_NEW : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null))),
+      dropped: isFrontPage(e.url) ? SET_ASIDE.NOT_SPECIFIC : (e.kind === 'price_guide' ? SET_ASIDE.PRICE_GUIDE_CONTEXT : (aboveNew ? SET_ASIDE.ABOVE_NEW : (sealedFarBelow ? SET_ASIDE.SEALED_FAR_BELOW_NEW : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null)))),
     });
   }
 

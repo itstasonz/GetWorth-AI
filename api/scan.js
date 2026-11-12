@@ -88,7 +88,45 @@ export function diagnosticsOf(valuation) {
     const h = String(e.domain ?? 'unknown').slice(0, 60);
     hosts[h] = (hosts[h] ?? 0) + 1;
   }
-  return { searched: valuation?.searched ?? null, evidence: evidence.length, reasons, hosts, unverified: valuation?.counts?.unverified ?? null, unbound: valuation?.counts?.unbound ?? null };
+  // EVERY ISRAELI PRIVATE LISTING THE SEARCH REACHED, and what became of it: used, or the one reason it was not (the
+  // binding's own reason when its text did not tie the price to the item). With `no_price_cause` this says, for each scan
+  // with no price, whether the market was missing, the item's ads were found and not read, or they were read and refused.
+  const israeli = {};
+  for (const e of evidence) {
+    if (e.market !== 'IL' || !ISRAELI_PRIVATE.has(e.kind)) continue;
+    const why = e.used ? 'used' : (e.set_aside === 'price_not_tied_to_product' ? `unbound:${e.binding_reason ?? 'unknown'}` : (e.set_aside ?? 'other'));
+    israeli[why] = (israeli[why] ?? 0) + 1;
+  }
+  return {
+    searched: valuation?.searched ?? null, evidence: evidence.length, reasons, hosts, unverified: valuation?.counts?.unverified ?? null, unbound: valuation?.counts?.unbound ?? null,
+    israeli_private: israeli, no_price_cause: noPriceCause(valuation, israeli),
+  };
+}
+
+const ISRAELI_PRIVATE = new Set(['used_listing', 'sold']);
+const CAUSE_OF = [
+  ['israeli_listings_not_tied_to_item', (w) => w.startsWith('unbound:')],
+  ['israeli_listings_other_model_or_bundle', (w) => w === 'different_model' || w === 'not_comparable'],
+  ['israeli_listings_old_or_sealed', (w) => w === 'israeli_listing_old_or_sealed'],
+  ['israeli_listings_price_rejected', (w) => w === 'above_new_price' || w === 'sealed_far_below_new_price' || w === 'outlier'],
+];
+/**
+ * Why a scan has no price, in one word a dashboard can count: the identity named no product; no Israeli private listing
+ * was reached at all (the data is missing, or the search did not reach it); or the Israeli listings that were reached
+ * were all refused — for most of them, for which reason. null when the scan was priced.
+ */
+export function noPriceCause(valuation, israeli = {}) {
+  if (!valuation || valuation.status === 'priced') return null;
+  if (valuation.withdrawn === 'identity_incomplete') return 'identity_incomplete';
+  if (valuation.withdrawn === 'no_calibrated_valuation_method_for_this_market') return 'specialised_market';
+  const total = Object.values(israeli).reduce((a, b) => a + b, 0);
+  if (total === 0) return 'no_israeli_listing_reached';
+  let best = null;
+  for (const [cause, test] of CAUSE_OF) {
+    const n = Object.entries(israeli).filter(([w]) => test(w)).reduce((a, [, c]) => a + c, 0);
+    if (n > 0 && (!best || n > best.n)) best = { cause, n };
+  }
+  return best?.cause ?? (valuation.withdrawn ?? 'other');
 }
 
 /** The handler over injectable dependencies, so the suites drive the real gate without a network. */

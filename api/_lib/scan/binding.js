@@ -120,6 +120,21 @@ export function namesOf(identity) {
   const model = strip(i.model ?? i.product_family ?? i.canonical_name);
   const variant = strip(i.variant).filter((t) => !model.includes(t));
   const runs = [[...model, ...variant], ...(i.search?.aliases ?? []).map(strip)];
+  // A GENERATION IS WRITTEN AS ITS NUMBER in a seller's ad: "AirPods Pro (2nd generation)" is listed as "AirPods Pro 2",
+  // "iPad (9th generation)" as "iPad 9" (Homeless, 2026-11-12). The same words with the ordinal as a plain number, in
+  // the same order: nothing is dropped and no other generation can match.
+  const generation = (run) => run.flatMap((t, k) => (/^\d+(st|nd|rd|th)$/.test(t) && /^(generation|gen)$/.test(run[k + 1] ?? '') ? [t.replace(/\D+$/, '')] : (/^(generation|gen)$/.test(t) && /^\d+(st|nd|rd|th)$/.test(run[k - 1] ?? '') ? [] : [t])));
+  for (const run of [...runs]) { const g = generation(run); if (g.join(' ') !== run.join(' ')) runs.push(g); }
+  // THE HEBREW NAME, WHEN IT CARRIES THE MODEL. A seller here writes "קורקינט חשמלי שיאומי פרו 2", not "Mi Electric
+  // Scooter Pro 2" (Homeless, 2026-11-12: the ad's own page, ₪600, refused for want of the English name). The Hebrew
+  // name counts as one more run of words — in full and in order — only when it holds every number of the model and at
+  // least one of the model's words (the same word, or the same word in the other alphabet): "כורסה" alone never does.
+  const hebrewName = tokens(i.search?.hebrew_name);
+  const modelWords = generation(model);
+  const carriesModel = hebrewName.length > 0 && modelWords.length > 0
+    && modelWords.filter((t) => /\d/.test(t)).every((d) => hebrewName.includes(d))
+    && modelWords.some((t) => !/^\d+$/.test(t) && hebrewName.some((h) => h === t || transliterates(h, t, { minLength: 3 })));
+  if (carriesModel) runs.push(hebrewName);
   for (const n of [i.model_number, ...(i.search?.model_numbers ?? [])]) runs.push(tokens(n));
   // A THING IDENTIFIED BY DESCRIPTION (a sofa, a handmade bowl) has no model name a row must carry: the row must name
   // what KIND of thing it is — in English (its type) or in Hebrew (what a seller here calls it) — beside its price.
@@ -262,8 +277,19 @@ export function bindPrice(claim, page, identity, answer = null) {
   };
 
   const all = words(text);
+  // A TABLE ROW IS ONE LISTING. Homeless renders its board as a table, one ad per line, its cells between pipes:
+  // "[Input] | Image: … | סלולרי - אוזניות | AirPods Pro 2 | חיפה והקריות | 300 ₪ | 06/11/2026 |" (2026-11-12). Cut at
+  // every pipe, the ad's name and its price were two listings and every ad on the board went unread. In a line that
+  // starts as a table row does, the pipes are cells, not listings; a new "[Input]" starts the next ad, and ONE ROW, ONE
+  // PRICE below still refuses a line that carries two prices.
+  const tableRows = [];
+  for (const m of text.matchAll(/[^\n]+/g)) {
+    if (/^\s*(\[input\]|\|)/.test(m[0]) && (m[0].match(/\s\|\s/g) ?? []).length >= 3) tableRows.push([m.index, m.index + m[0].length]);
+  }
+  const inTable = (at) => tableRows.some(([a, b]) => at >= a && at < b);
   // WHERE ONE LISTING ENDS: at a separator, and at a price that closes its clause ("A ₪300, B …").
-  const cuts = [...text.matchAll(SEPARATOR)].map((m) => [m.index, m.index + m[0].length]);
+  const cuts = [...text.matchAll(SEPARATOR)].filter((m) => !(/^\s\|\s$/.test(m[0]) && inTable(m.index))).map((m) => [m.index, m.index + m[0].length]);
+  for (const m of text.matchAll(/\[input\]/g)) if (inTable(m.index) && m.index > 0) cuts.push([m.index, m.index]);
   for (const p of priced) {
     const m = PRICE_CLOSES.exec(text.slice(p.end, p.end + 12));
     if (m) cuts.push([p.end + m[0].length - 1, p.end + m[0].length]);
