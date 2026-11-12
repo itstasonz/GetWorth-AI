@@ -416,7 +416,7 @@ describe('CV-3 honest when it cannot price', () => {
     assert.match(said, /New in Israel: ₪400 \(out of stock\)/);
     assert.match(said, /Shops disagree on the new price: from ₪400 to ₪660\./);
     assert.match(said, /1 price was higher than the item's new price, so it is not a second-hand price and was not used\./);
-    assert.match(said, /1 refurbished offer from a shop was found\. Without a private second-hand listing to support it, it was not used as a used price\./);
+    assert.match(said, /1 used or refurbished offer from a shop was found\. Without a private second-hand listing to support it, it was not used as a used price\./);
     assert.match(said, /1 listing from abroad was found\. Without an Israeli second-hand listing to compare it with, it is context only/);
     assert.doesNotMatch(said, /Confidence|set aside/);
     // Every verified price is shown, each labelled for what it is, each a link — in its group: context first (the
@@ -428,8 +428,8 @@ describe('CV-3 honest when it cannot price', () => {
     assert.match(said, /Not this product, or not usable · 1/);
     const links = [...dialog.querySelectorAll('a')];
     assert.deepEqual(links.map((a) => a.getAttribute('href')), [live.evidence[1], live.evidence[2], live.evidence[3], live.evidence[4], live.evidence[0]].map((e) => e.url));
-    assert.match(links[0].textContent, /Refurbished · exact · Israel/);
-    assert.match(links[0].textContent, /a shop's refurbished unit, no private listing beside it/, 'each unused source says in one line why');
+    assert.match(links[0].textContent, /Shop \(used\/refurbished\) · exact · Israel/);
+    assert.match(links[0].textContent, /a shop's used or refurbished unit, no private listing beside it/, 'each unused source says in one line why');
     assert.match(links[1].textContent, /Used · exact · abroad/);
     assert.match(links[1].textContent, /62 USD/);
     assert.match(links[1].textContent, /abroad, no Israeli listing to compare with/);
@@ -650,8 +650,8 @@ describe('CV-4 the two sheets', () => {
     const said = container.querySelector('[role="dialog"]').textContent;
     assert.match(said, /3 second-hand listings found/);
     assert.match(said, /Israel: 2 · Abroad: 1/);
-    assert.match(said, /Also used, with a smaller weight: 1 refurbished offer from a shop, as supporting evidence\./);
-    assert.match([...container.querySelectorAll('[role="dialog"] a')].find((a) => a.getAttribute('href').includes('ivory')).textContent, /Refurbished · exact · Israel/);
+    assert.match(said, /Also used, with a smaller weight: 1 used or refurbished offer from a shop, as supporting evidence\./);
+    assert.match([...container.querySelectorAll('[role="dialog"] a')].find((a) => a.getAttribute('href').includes('ivory')).textContent, /Shop \(used\/refurbished\) · exact · Israel/);
   });
   test('CV-4c when foreign prices were scaled to Israeli price level, the sheet says by how much', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, intl_adjusted: true, intl_scale: 1.22 })] }));
@@ -716,6 +716,13 @@ describe('CV-10 the approved result: one worth, then what to ask and a quick sal
     assert.match(worth.textContent, /שווי משוער₪260/);
     assert.equal(worth.querySelector('bdi').getAttribute('dir'), 'ltr');
     assert.equal(container.querySelector('[data-testid="scan-secondary-prices"]').textContent, 'מחיר מומלץ לפרסום₪290מכירה מהירה₪240');
+  });
+  test('CV-10a2 a LOW-confidence price is never shown as a precise one: "≈", "about", and its range named approximate (2026-11-12)', async () => {
+    await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, price_confidence: 'low' })] }));
+    const worth = container.querySelector('[data-testid="scan-worth"]').textContent;
+    assert.match(worth, /≈ ₪260/);
+    assert.doesNotMatch(worth, /Expected selling range/);
+    assert.match(container.querySelector('[data-testid="scan-secondary-prices"]').textContent, /≈ ₪290.*≈ ₪240/);
   });
   test('CV-10c ISRAEL FIRST: the screen has no estimate-from-abroad state at all', async () => {
     const src = (await import('node:fs')).readFileSync(new URL('../src/views/ScanView.jsx', import.meta.url), 'utf8');

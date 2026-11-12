@@ -26,8 +26,13 @@
 //   DRIVES      three listings that stand, not old ones), the price is worked
 //               out from Israel ALONE. Prices abroad are then context: shown,
 //               not used. Abroad joins the arithmetic only when Israel is thin.
-//   NORMALIZE   every reference is brought to shekels, Israeli price level,
-//               "good" condition and a selling price.
+//   NORMALIZE   every reference is brought to shekels, Israeli price level
+//               and a selling price. Its condition is NOT converted by a
+//               ladder: a used unit's ad counts at its own price, whatever used
+//               condition it states, and an ad for a sealed new unit or one in
+//               poor condition is not the used market and is set aside
+//               (2026-11-12: the ladder made a ₪1,050 "fair" iPhone worth more
+//               than a ₪1,100 "like new" one).
 //   AGGREGATE   outliers go where that is defensible; the centre is the
 //               weighted median; the range is where the weight of the evidence
 //               actually lies, so evidence that disagrees gives a wide range.
@@ -42,7 +47,7 @@
 import { CONDITION_LADDER } from '../valuation-guard.js';
 import { CONDITIONS } from './config.js';
 import { freshnessOf } from './evidence.js';
-import { isBound } from './binding.js';
+import { isBound, BIND_REASON } from './binding.js';
 import { STRATEGY } from './strategy.js';
 import { MAD_THRESHOLD, MAD_MIN_SAMPLE, median, clamp, round2, roundNice, weightedQuantile, dispersionOf, aggregate } from './aggregate.js';
 
@@ -117,7 +122,13 @@ export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
 export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 });
 /** Why a reference that qualifies took no part in the price. */
 export const SET_ASIDE = Object.freeze({
-  ABOVE_NEW: 'above_new_price', SEALED_FAR_BELOW_NEW: 'sealed_far_below_new_price', OUTLIER: 'outlier', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product',
+  ABOVE_NEW: 'above_new_price', SEALED_FAR_BELOW_NEW: 'sealed_far_below_new_price', OUTLIER: 'outlier',
+  /** Another size or capacity than the item's (binding.js OTHER_SIZE): another variant, shown, never priced from. */
+  OTHER_SIZE: 'different_size_or_capacity',
+  /** Priced above an Israeli private ad for a LARGER capacity of the same model: not credible for this one. */
+  ABOVE_LARGER_SIZE: 'above_larger_capacity_price',
+  /** An ad for a sealed new unit, or one in poor condition / for parts: not what a normal used unit sells for. */
+  NOT_USED_CONDITION: 'sealed_or_poor_condition', LOCAL_SUFFICIENT: 'local_evidence_sufficient', UNBOUND: 'price_not_tied_to_product',
   REFURBISHED_ALONE: 'retail_refurbished_without_private_resale',
   /** Context when the gate is closed: a listing abroad with no Israeli listing to compare it with; an Israeli listing that is old or for a sealed unit. */
   ABROAD_ONLY: 'abroad_without_israeli_reference', NOT_CURRENT: 'israeli_listing_old_or_sealed',
@@ -225,8 +236,8 @@ function newPrice(evidence, market) {
 // ── WEIGH AND NORMALIZE ─────────────────────────────────────────────────────
 /**
  * Each second-hand reference as a selling price in shekels, at Israeli price
- * level, in "good" condition — with its weight, the reasons for that weight,
- * and why it was set aside when it was.
+ * level, at the price its own ad asked (no condition ladder) — with its weight,
+ * the reasons for that weight, and why it was set aside when it was.
  */
 export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null } = {}) {
   // SIMILAR ITEMS HAVE NO NEW PRICE. A shop's price for a similar sofa is not this sofa's new price: it is neither a
@@ -265,11 +276,30 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     // A sealed unit a private seller asks more for than the shop does is not a second-hand price either.
     const aboveNew = anchorIl && (abroad ? e.price_ils * (scale ?? 1) : e.price_ils) > anchorIl * ABOVE_NEW;
     const sealedFarBelow = !!anchorIl && !abroad && asking && e.condition === 'new_sealed' && e.price_ils < anchorIl * SEALED_FLOOR;
+    // The used market is a used unit in a usable state. A sealed new unit and a broken one are other markets: no
+    // invented ladder turns either into a used price (they are shown, and the condition picker on the screen says when
+    // it adjusts).
+    const notUsed = e.condition === 'new_sealed' || e.condition === 'poor';
+    const dropped = isFrontPage(e.url) ? SET_ASIDE.NOT_SPECIFIC
+      : e.kind === 'price_guide' ? SET_ASIDE.PRICE_GUIDE_CONTEXT
+        : e.binding_reason === BIND_REASON.OTHER_SIZE ? SET_ASIDE.OTHER_SIZE
+          : aboveNew ? SET_ASIDE.ABOVE_NEW
+            : sealedFarBelow ? SET_ASIDE.SEALED_FAR_BELOW_NEW
+              : notUsed ? SET_ASIDE.NOT_USED_CONDITION
+                : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null);
     points.push({
-      evidence: e, value: local / CONDITION_FACTOR[condition], condition, stated, freshness, asking,
-      weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page * factors.stock, factors,
-      dropped: isFrontPage(e.url) ? SET_ASIDE.NOT_SPECIFIC : (e.kind === 'price_guide' ? SET_ASIDE.PRICE_GUIDE_CONTEXT : (aboveNew ? SET_ASIDE.ABOVE_NEW : (sealedFarBelow ? SET_ASIDE.SEALED_FAR_BELOW_NEW : (similar && abroad ? SET_ASIDE.SIMILAR_ABROAD : null)))),
+      evidence: e, value: local, condition, stated, freshness, asking,
+      weight: factors.where * factors.match * factors.freshness * factors.kind * factors.page * factors.stock, factors, dropped,
     });
+  }
+
+  // A LARGER VERSION BOUNDS A SMALLER ONE. An Israeli private ad for this model with MORE capacity is not this item's
+  // price, but the item does not sell for more than it: a 128 GB Galaxy S23 is not worth ₪1,800 when 256 GB ones ask ₪870
+  // and ₪1,200 (Homeless 2026-11-12). The cheapest such ad is the ceiling; a reference above it is set aside.
+  const larger = points.filter((p) => p.dropped === SET_ASIDE.OTHER_SIZE && p.evidence.size_relation === 'larger' && p.evidence.market === 'IL' && PRIVATE_RESALE.has(p.evidence.kind));
+  if (larger.length) {
+    const ceiling = Math.min(...larger.map((p) => p.value));
+    for (const p of points) if (!p.dropped && p.value > ceiling) p.dropped = SET_ASIDE.ABOVE_LARGER_SIZE;
   }
 
   // A SHOP'S REFURBISHED OFFER SUPPORTS PRIVATE RESALE AND NEVER REPLACES IT: with no ISRAELI private reference

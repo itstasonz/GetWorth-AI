@@ -251,8 +251,8 @@ describe('CD-3 the three scans of 2026-10-11, replayed', () => {
     const bind = (title, text, over = {}) => bindPrice({ price: 400, currency: 'ILS', title, match: 'exact', shipping: null, ...over }, { type: 'listing', title, text: `${title}\n${text}` }, PERFUME);
     assert.deepEqual(bind('Tom Ford Tobacco Vanille 100ml', 'בושם יד שנייה ₪400'), { level: BOUND.WEAK, reason: BIND_REASON.PRODUCT_ABSENT, match: 'exact' });
     assert.deepEqual(bind('BDK Rouge Smoking 100ml', 'בושם יד שנייה ₪400'), { level: BOUND.STRONG, reason: BIND_REASON.ONE_LISTING, match: 'exact' });
-    assert.deepEqual(bind('BDK Rouge Smoking Extrait 100ml', '₪400'), { level: BOUND.STRONG, reason: BIND_REASON.VARIANT, match: 'close_comparable' }, 'the extrait is a flanker: a comparable, not the item');
-    assert.deepEqual(bind('BDK Rouge Smoking 50 מ"ל', 'בושם ₪400'), { level: BOUND.STRONG, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' }, 'another size, read in Hebrew');
+    assert.deepEqual(bind('BDK Rouge Smoking Extrait 100ml', '₪400'), { level: BOUND.STRONG, reason: BIND_REASON.VARIANT, match: 'sibling_model' }, 'the extrait is a flanker: another fragrance, not the item');
+    assert.deepEqual(bind('BDK Rouge Smoking 50 מ"ל', 'בושם ₪400'), { level: BOUND.STRONG, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable', size: 'other' }, 'another size, read in Hebrew');
     assert.deepEqual(bind('BDK Rouge Smoking 100 מל', 'בושם ₪400').reason, BIND_REASON.ONE_LISTING);
   });
 });

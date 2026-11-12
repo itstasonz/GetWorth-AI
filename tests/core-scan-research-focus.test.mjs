@@ -73,17 +73,19 @@ describe('RF-3 binding: an "exact" claim on an Edge row is a comparable, never t
   const claim = (title, price) => ({ price, currency: 'ILS', title, match: 'exact', shipping: null });
   const page = (title) => ({ type: 'listing', title, text: title });
 
-  test('RF-3a "DualSense Edge" beside a standard DualSense → close_comparable, reason row_names_a_variant', () => {
+  test('RF-3a "DualSense Edge" beside a standard DualSense → ANOTHER MODEL (sibling_model), whatever the claim (Production 2026-11-12: one ₪600 Edge ad priced a standard DualSense)', () => {
     const t = 'Sony DualSense Edge למכירה ₪600';
     const r = bindPrice(claim(t, 600), page(t), DUALSENSE);
-    assert.equal(r.match, 'close_comparable');
+    assert.equal(r.match, 'sibling_model');
     assert.equal(r.reason, BIND_REASON.VARIANT);
+    const claimedClose = bindPrice({ ...claim(t, 600), match: 'close_comparable' }, page(t), DUALSENSE);
+    assert.equal(claimedClose.match, 'sibling_model', 'called a close comparable by the research, it is still another model');
   });
 
-  test('RF-3b an Xbox Elite controller beside an Xbox controller → close_comparable', () => {
+  test('RF-3b an Xbox Elite controller beside an Xbox controller → another model', () => {
     const xbox = identity({ brand: 'Microsoft', product_family: 'Xbox Wireless Controller', model: 'Xbox Wireless Controller', display_name: 'Microsoft Xbox Wireless Controller', canonical_name: 'microsoft xbox wireless controller', search: { hebrew_name: null, aliases: [], model_numbers: [] } });
     const t = 'Xbox Wireless Controller Elite Series 2 ₪450';
-    assert.equal(bindPrice(claim(t, 450), page(t), xbox).match, 'close_comparable');
+    assert.equal(bindPrice(claim(t, 450), page(t), xbox).match, 'sibling_model');
   });
 
   test('RF-3c the standard controller itself stays exact; an item that IS an Edge matches an Edge row exactly', () => {
@@ -115,5 +117,17 @@ describe('RF-4 the evidence rules are unchanged: scan b4254487\'s own references
     const edgeAsSibling = EVIDENCE.map((e) => (/edge/i.test(e.title) ? { ...e, match: 'sibling_model' } : e));
     const v = buildValuation({ evidence: edgeAsSibling, today: '2026-11-10', familyLevel: true });
     assert.equal(v.status, 'insufficient_evidence');
+  });
+});
+
+describe('RF-3S a description or a frame size after the name is not another model (2026-11-12)', () => {
+  const claim = (title, price) => ({ price, currency: 'ILS', title, match: 'exact', shipping: null });
+  const page = (title) => ({ type: 'listing', title, text: title });
+  test('RF-3Sa "Canon 5D Mark III Digital" and a bike "XS" stay comparables; "Pro" after the name is another model', () => {
+    const camera = identity({ brand: 'Canon', product_family: 'EOS', model: 'EOS 5D Mark III', display_name: 'Canon EOS 5D Mark III', canonical_name: 'canon eos 5d mark iii', item_type: 'DSLR camera body', search: { hebrew_name: null, aliases: [], model_numbers: [] } });
+    const t = 'Canon Eos 5D Mark III Digital למכירה ₪2,000';
+    assert.notEqual(bindPrice(claim(t, 2000), page(t), camera).match, 'sibling_model');
+    const pro = 'Sony DualSense Pro ₪600';
+    assert.equal(bindPrice(claim(pro, 600), page(pro), DUALSENSE).match, 'sibling_model');
   });
 });

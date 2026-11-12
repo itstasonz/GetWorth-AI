@@ -155,7 +155,10 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
  * An answer that changes no query still changes no key (strategy.js marketKey, market.js searchNames).
  */
 // 3: the Israel-first wider stage (2026-11-08).
-export const RESEARCH_VERSION = 3;
+// 4: pages read by the 2026-11-12 rules — a variant after the name is another model, another capacity is another
+//    variant, a shop's product page is professional resale. Research read by the older rules (a DualSense priced from a
+//    DualSense Edge ad) is not reused.
+export const RESEARCH_VERSION = 4;
 function fnv1a(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }

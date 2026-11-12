@@ -101,11 +101,16 @@ export function pageTypeOf(url, claimed) {
 // search of 2026-10-11 had the model call exactly such an ad `other`, which
 // would have kept it out of the valuation for the wrong reason).
 const CLASSIFIEDS = /(^|\.)(yad2\.co\.il|homeless\.co\.il|ad\.co\.il|facebook\.com)$/i;
-
-/** The kind of price, with one listing on a classifieds board read as private resale whatever the model called it. */
+/**
+ * The kind of price: one listing on a classifieds board is private resale whatever the model called it. A "used" price
+ * on a SHOP'S PRODUCT PAGE is a business selling a used unit — a repair lab, a phone or camera shop (furydevice.co.il,
+ * cplace.co.il, camerashop.co.il, live 2026-11-12) — with its margin and warranty: professional resale (`refurbished`),
+ * which supports a private price and never leads one (valuation.js PRIVATE_RESALE). A private ad is a listing page.
+ */
 export function kindOf(url, page, claimed) {
   const kind = EVIDENCE_KINDS.includes(claimed) ? claimed : 'other';
   if (page === 'listing' && CLASSIFIEDS.test(hostOf(url) ?? '') && (kind === 'other' || kind === 'new_retail')) return 'used_listing';
+  if (kind === 'used_listing' && page === 'shop_product') return 'refurbished';
   return kind;
 }
 
@@ -321,6 +326,8 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
       page,
       binding: bound.level,
       binding_reason: bound.reason,
+      // Another size than the item's: 'larger' (its price bounds the item's from above) or 'other'.
+      ...(bound.size ? { size_relation: bound.size } : {}),
       // A shop's stock, and a listing's shipping, as the page states them. Kept with the price they qualify.
       stock: EVIDENCE_STOCK.includes(e?.stock) ? e.stock : 'unknown',
       shipping,

@@ -328,7 +328,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const laptop = scan(raw({ item_type: 'laptop', canonical_name: 'apple macbook air', model: 'MacBook Air', attributes: [A('generation', null, 'unknown', 'high')] }));
     assert.deepEqual([laptop.followup.kind, openVariant(laptop), isApproximate(laptop, null)], ['none', 'generation', true]);
   });
-  test('RW-5d through the real price step: with the storage confirmed a listing for another storage is a comparable, not the item, and the price is exact; with the storage unknown the Israeli evidence still prices it — as approximate — and no number is invented', async () => {
+  test('RW-5d through the real price step: with the storage confirmed a listing for another storage is another variant — shown, never priced from (2026-11-12) — and the price is exact; with the storage unknown the Israeli evidence still prices it — as approximate — and no number is invented', async () => {
     resetMarketCache(); resetFxCache();
     const SAME = 'https://www.secondhand.example.co.il/item/128';
     const OTHER = 'https://market.example.co.il/ads/256';
@@ -337,7 +337,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const confirmed = [{ attribute: 'storage', value: '128 GB', question: 'How much storage does it have?' }];
     const known = await price(completeIdentity(normalizeIdentity(PHONE), { lang: 'en', followupsLeft: 2, confirmed }), { question: 'How much storage does it have?', text: '128 GB' });
     const other = known.valuation.evidence.find((e) => e.url === OTHER);
-    assert.deepEqual([known.status, known.valuation.approximate, other.match, other.binding_reason, other.used], ['priced', false, 'close_comparable', BIND_REASON.OTHER_SIZE, true]);
+    assert.deepEqual([known.status, known.valuation.approximate, other.match, other.binding_reason, other.used, other.set_aside], ['priced', false, 'close_comparable', BIND_REASON.OTHER_SIZE, false, SET_ASIDE.OTHER_SIZE]);
     assert.equal(known.valuation.evidence.find((e) => e.url === SAME).match, 'exact');
     resetMarketCache();
     const unknown = await price(scan(PHONE, { followupsLeft: 0 }));
@@ -393,7 +393,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const same = await price(confirmed.identity, [S128], confirmed.answer);
     assert.deepEqual([same.valuation.approximate, ...bound(same, S128), same.valuation.counts.il_used_exact], [false, 'exact', BIND_REASON.ONE_LISTING, true, 1]);
     const other = await price(confirmed.identity, [S256], confirmed.answer);
-    assert.deepEqual([other.valuation.approximate, ...bound(other, S256), other.valuation.counts.il_used_exact, other.valuation.counts.il_used_close], [false, 'close_comparable', BIND_REASON.OTHER_SIZE, true, 0, 1]);
+    assert.deepEqual([other.valuation.approximate, ...bound(other, S256), other.valuation.counts.il_used_exact, other.valuation.counts.il_used_close, other.status], [false, 'close_comparable', BIND_REASON.OTHER_SIZE, false, 0, 0, 'insufficient_evidence'], 'a 256 GB ad alone does not price a 128 GB phone');
     // The photograph showed the storage: nothing asked, exact. A screen size in the capacity field is not storage: still open, and a 256 GB row still a comparable.
     const shown = phone({ size_or_capacity: '128 GB', attributes: [] });
     assert.deepEqual([shown.followup.kind, openVariant(shown)], ['none', null]);
@@ -426,7 +426,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const answered = recordAnswer(phone({ size_or_capacity: '128 GB', attributes: [A('storage', '128 GB', 'inferred', 'high')] }), 1, { lang: 'en', followupsLeft: 2 });
     assert.deepEqual([answered.identity.size_or_capacity, answered.identity.attributes.find((a) => a.name === 'storage').basis, openVariant(answered.identity), isApproximate(answered.identity, answered.answer)], ['128 GB', 'confirmed', null, false]);
     const closed = await price(answered.identity, [S128, S256], answered.answer);
-    assert.deepEqual([closed.valuation.approximate, ...bound(closed, S128), ...bound(closed, S256), closed.valuation.counts.il_used_exact], [false, 'exact', BIND_REASON.ONE_LISTING, true, 'close_comparable', BIND_REASON.OTHER_SIZE, true, 1]);
+    assert.deepEqual([closed.valuation.approximate, ...bound(closed, S128), ...bound(closed, S256), closed.valuation.counts.il_used_exact], [false, 'exact', BIND_REASON.ONE_LISTING, true, 'close_comparable', BIND_REASON.OTHER_SIZE, false, 1]);
     // "Not sure" to that question: still open, the figure still not the item's.
     const unsure = recordAnswer(phone({ size_or_capacity: '128 GB', attributes: [A('storage', '128 GB', 'inferred', 'high')] }), 'unsure', { lang: 'en', followupsLeft: 2 });
     const u = await price(unsure.identity, [S128], unsure.answer);
@@ -434,7 +434,7 @@ describe('RW-5 a variant nobody asked about', () => {
     // Observed in the photograph: closed, exact, nothing asked.
     const seen = phone({ size_or_capacity: '128 GB', visible_text: ['128GB'], attributes: [A('storage', '128 GB', 'observed', 'high')] }, { followupsLeft: 0 });
     const s = await price(seen, [S128, S256]);
-    assert.deepEqual([openVariant(seen), s.valuation.approximate, ...bound(s, S128), ...bound(s, S256)], [null, false, 'exact', BIND_REASON.ONE_LISTING, true, 'close_comparable', BIND_REASON.OTHER_SIZE, true]);
+    assert.deepEqual([openVariant(seen), s.valuation.approximate, ...bound(s, S128), ...bound(s, S256)], [null, false, 'exact', BIND_REASON.ONE_LISTING, true, 'close_comparable', BIND_REASON.OTHER_SIZE, false]);
     // A camera with the same contradiction is not sold by storage: nothing asked, nothing approximate.
     const camera = scan(raw({ ...PHONE, item_type: 'camera', size_or_capacity: '128 GB', attributes: [A('storage', '128 GB', 'inferred', 'high')] }));
     assert.deepEqual([camera.followup.kind, openVariant(camera), isApproximate(camera, null)], ['none', null, false]);

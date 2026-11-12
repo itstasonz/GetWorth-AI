@@ -137,9 +137,9 @@ describe('CS-2F when only the family is known, the models it may be are its comp
   test('CS-2Fe three Israeli listings for SEALED units — what that scan really found — open no gate: sealed is not the used market', () => {
     const v = value(AIRPODS('new_sealed'), { familyLevel: true, approximate: true });
     assert.deepEqual([v.status, v.withdrawn, v.prices, v.counts.resale, v.counts.il_qualifying], ['insufficient_evidence', WITHDRAWN.NO_LOCAL_EVIDENCE, null, 0, 0]);
-    assert.ok(v.evidence.every((e) => e.set_aside === 'israeli_listing_old_or_sealed'));
+    assert.ok(v.evidence.every((e) => e.set_aside === 'sealed_or_poor_condition'));
     const withUsed = value([...AIRPODS('new_sealed'), item({ price: 400, match: 'close_comparable', condition: 'good' })], { familyLevel: true, approximate: true });
-    assert.deepEqual([withUsed.status, withUsed.counts.resale, withUsed.prices.new_sealed.basis], ['priced', 4, 'listings'], 'one used listing opens it, and the sealed ones then take part as sealed');
+    assert.deepEqual([withUsed.status, withUsed.counts.resale, withUsed.evidence.filter((e) => e.condition === 'new_sealed').every((e) => !e.used && e.set_aside === 'sealed_or_poor_condition')], ['priced', 1, true], 'one used listing opens it; the sealed ones are shown and price nothing (2026-11-12)');
   });
   test('CS-2Fc at family level an accessory, a part, a box and a bundle still never count', () => {
     const junk = ['accessory', 'part', 'box_only', 'bundle', 'irrelevant'].map((match) => item({ price: 100, match }));
@@ -188,9 +188,11 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     assert.equal(sold.value, 500);
     assert.ok(sold.weight > asking.weight, 'what something sold for outweighs what someone asked');
   });
-  test('CS-3d a listing in another condition is brought to its "good" equivalent before it counts', () => {
+  test('CS-3d a listing\'s stated used condition is shown, not converted: no ladder turns one ad into another (2026-11-12)', () => {
     const likeNew = normalizeReferences([item({ price: 600, kind: 'sold', condition: 'like_new' })]).points[0];
-    assert.equal(Math.round(likeNew.value), Math.round(600 / CONDITION_FACTOR.like_new));
+    assert.deepEqual([likeNew.value, likeNew.condition, likeNew.dropped], [600, 'like_new', null]);
+    const fair = normalizeReferences([item({ price: 600, kind: 'sold', condition: 'fair' })]).points[0];
+    assert.equal(fair.value, 600, 'fair is the same market at its own price');
     const unknown = normalizeReferences([item({ price: 600, kind: 'sold', condition: 'unknown' })]).points[0];
     assert.equal(unknown.value, 600, 'a listing that does not state its condition is a normal used listing');
   });
@@ -224,6 +226,17 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     assert.equal(half.evidence.filter((e) => e.set_aside === 'sealed_far_below_new_price').length, 0);
     const noAnchor = value([item({ price: 300, condition: 'new_sealed' }), item({ price: 600 })]);
     assert.equal(noAnchor.evidence.filter((e) => e.set_aside === 'sealed_far_below_new_price').length, 0, 'without a known new price nothing is judged');
+  });
+  test('CS-3f3 another capacity never prices the item; a LARGER one\'s ask is its ceiling (Galaxy S23, 2026-11-12)', () => {
+    const s256 = (price) => item({ price, match: 'close_comparable', binding_reason: 'row_states_another_size', size_relation: 'larger' });
+    const v = value([item({ price: 2000, match: 'close_comparable' }), s256(870), s256(1200)]);
+    assert.deepEqual(v.evidence.map((e) => [e.price, e.used, e.set_aside]).sort((a, b) => a[0] - b[0]),
+      [[870, false, 'different_size_or_capacity'], [1200, false, 'different_size_or_capacity'], [2000, false, 'above_larger_capacity_price']]);
+    assert.equal(v.status, 'insufficient_evidence', 'a 128 GB unit is not worth more than what 256 GB ones ask');
+    const below = value([item({ price: 700, match: 'close_comparable' }), s256(870)]);
+    assert.deepEqual([below.status, below.evidence.find((e) => e.price === 700).used], ['priced', true], 'under the ceiling it stands');
+    const smaller = value([item({ price: 2000 }), item({ price: 500, match: 'close_comparable', binding_reason: 'row_states_another_size', size_relation: 'other' })]);
+    assert.equal(smaller.status, 'priced', 'a smaller capacity says nothing about the ceiling');
   });
   test('CS-3g with a distribution to be an outlier from, an outlier is set aside; with two or three points nothing is', () => {
     const many = value([300, 310, 320, 330, 3000].map((price) => item({ price, kind: 'sold' })));

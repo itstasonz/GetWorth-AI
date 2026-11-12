@@ -181,7 +181,9 @@ export default function ScanView() {
   // A range, not one number, whenever one number would claim too much: the exact model is still an open
   // question that moves the price, or the prices found disagree with each other.
   const approximate = s.valuation?.approximate === true;
-  const rough = approximate || s.valuation?.dispersed === true;
+  // A LOW-CONFIDENCE price is never shown as a precise one: one seller's ad, or ads read off list pages, is "about"
+  // (2026-11-12: a single ₪300 Homeless ad was shown as "₪270, recommended ₪300" with the certainty of ten).
+  const rough = approximate || s.valuation?.dispersed === true || s.valuation?.price_confidence === 'low';
   const counts = s.valuation?.counts ?? {};
   const israeli = (counts.il_used_exact ?? 0) + (counts.il_used_close ?? 0);
   // The item's own photograph leads; a label photographed for the scan is supporting evidence and is said to be.
@@ -250,7 +252,7 @@ export default function ScanView() {
               {checkedAgo(s.valuation, copy) && <p className="text-body-sm text-text-muted" data-testid="scan-checked-ago">{checkedAgo(s.valuation, copy)}</p>}
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-refreshing">{copy.refreshingPrices}</p>}
             </div>
-            {/* Every reference is brought to Good condition; any other choice is the ladder applied to that. */}
+            {/* The price is the used market as its ads ask (no ladder); another condition chosen here is the ladder applied to it, and says so. */}
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} adjusted={s.condition !== 'good'} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list))}</Btn>
           </div>

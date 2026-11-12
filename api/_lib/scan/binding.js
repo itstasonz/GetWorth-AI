@@ -77,12 +77,15 @@ const SEPARATOR = /\.{3,}|…|[\r\n]+|#{2,}|\s\|\s|•|\s[–—]\s/gu;
 const VARIANT_WORDS = new Set([
   'pro', 'max', 'plus', 'mini', 'ultra', 'lite', 'air', 'se', 'fe', 'xl', 'xs', 'xr', 'neo', 'slim', 'oled', 'ti', 'super', 'superlight',
   'x', 'digital', 'ii', 'iii', 'iv', 'gen', 'generation', 'mk', 'פרו', 'מקס', 'פלוס', 'מיני', 'אולטרה', 'דור',
-  // A controller's pro edition (scan b4254487, 2026-11-10: 'DualSense Edge' listings beside a standard DualSense). Only
-  // ever demotes an exact claim to a comparable; it admits nothing.
+  // A controller's pro edition (scan b4254487, 2026-11-10: 'DualSense Edge' listings beside a standard DualSense). Since
+  // 2026-11-12 a variant word after the item's name makes the row ANOTHER MODEL (bindPrice otherModel), never a comparable.
   'edge', 'elite', 'אדג',
   // A fragrance's concentrations and flankers: "Rouge Smoking Extrait" is not "Rouge Smoking".
   'intense', 'extrait', 'elixir', 'absolu', 'absolue', 'edt', 'edp', 'אינטנס',
 ]);
+// Variant words that are also plain descriptions or sizes: "Canon 5D Mark III Digital" is the camera itself, a bike "XS"
+// is its frame size (2026-11-12). After the item's name they make a row a comparable, as before — never another model.
+const SOFT_VARIANTS = new Set(['digital', 'x', 'xs', 'xl', 'xr']);
 // A price that ends its clause: "…₪300, …", "…300 ש"ח. …". What follows is another listing.
 const PRICE_CLOSES = /^\s{0,2}(?:₪|ש"ח|ש״ח|שח|ils|nis|\$|usd|€|eur|£|gbp)?\s{0,2}[,;.](?=\s|$)/;
 const PRICE_LABELS = ['מחיר', 'במחיר', 'רק', 'price', 'only', 'for', 'ils', 'nis', 'usd', 'eur', 'gbp', 'שח', 'ש', 'ח'];
@@ -249,8 +252,40 @@ export function bindPrice(claim, page, identity, answer = null) {
    * A variant word after the name, or another size, means the listing is this product in another
    * version: it counts, as a comparable, and says so.
    */
+  const unitOf = (s) => s.replace(/^[\d.]+/, '');
+  // ANOTHER SIZE IS ANOTHER VARIANT, whatever the listing was called. A 256 GB phone does not price a 128 GB one
+  // (Homeless 2026-11-12: a Galaxy S23 128 GB valued from two 256 GB ads, a MacBook Air 256 GB from a 512 GB one). A page
+  // for ONE listing states its size anywhere on the page ("Galaxy s23 … ₪1,200" whose text says "256gb"); on a page of
+  // many, only the listing's own row speaks for it.
+  // Returns null when the sizes do not clash, else whether the listing's size is LARGER than the item's, or not: a larger
+  // capacity's price bounds the item's from above (valuation.js), a smaller one's says nothing about it.
+  const otherSize = (stretch) => {
+    const theirs = sizesIn(single ? text : stretch);
+    let clash = null;
+    for (const m of mine) {
+      const u = theirs.filter((s) => unitOf(s) === unitOf(m));
+      if (u.length === 0 || u.includes(m)) continue;
+      const larger = u.every((s) => parseFloat(s) > parseFloat(m));
+      clash = clash === null ? larger : clash && larger;
+    }
+    return clash === null ? null : { size: clash ? 'larger' : 'other' };
+  };
+  const sized = (s) => ({ level, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable', size: s.size });
+  // ANOTHER MODEL, WHATEVER THE LISTING WAS CALLED. A variant word or a generation right after the item's name names a
+  // different product: "DualSense edge" is not a DualSense (Production 2026-11-12: a standard DualSense was priced at ~₪540
+  // from one ₪600 Edge ad the research had called a close comparable, beside a ₪257–292 new price). It is shown, as another
+  // model, and never priced from — unless the identity itself says the item may be that model (could_also_be).
+  // The words of the models the item may be — "2nd generation" also as "2", the way an ad writes it.
+  const possible = new Set((identity?.alternatives ?? []).flatMap((a) => tokens(a?.name)).flatMap((t) => (/^\d+(st|nd|rd|th)$/.test(t) ? [t, t.replace(/\D+$/, '')] : [t])));
+  const isPriceWord = (w) => priced.some((p) => w.at >= p.start && w.at < p.end);
+  const otherModel = (who) => {
+    if (!who?.next) return false;
+    const generation = /^[2-9]$/.test(who.next.t) && !isPriceWord(who.next) && !(who.then && UNIT_WORD.test(who.then.t));
+    return ((VARIANT_WORDS.has(who.next.t) && !SOFT_VARIANTS.has(who.next.t)) || generation) && !possible.has(who.next.t);
+  };
   const verdict = (row, who, stretch) => {
-    if (!exact) return { level, reason: BIND_REASON.ONE_LISTING, match: claim.match };
+    if (otherModel(who)) return { level, reason: BIND_REASON.VARIANT, match: 'sibling_model' };
+    if (!exact) { const s = otherSize(stretch); return s ? sized(s) : { level, reason: BIND_REASON.ONE_LISTING, match: claim.match }; }
     const sibling = row.some((w) => {
       const c = CODE.exec(w.t);
       if (!c || own.has(w.t)) return false;
@@ -261,14 +296,12 @@ export function bindPrice(claim, page, identity, answer = null) {
     let before = who.index == null ? null : who.index - 1;
     while (before != null && before >= 0 && brand.has(row[before].t)) before -= 1;
     if (before != null && before >= 0 && FOR_WORDS.has(row[before].t)) return { refused: BIND_REASON.FOR_THE_PRODUCT };
-    // A digit right after the name is a generation ("AirPods Pro 2") — unless it is the price's own first digit ("Galaxy S24 ₪3,000").
-    const isPrice = (w) => priced.some((p) => w.at >= p.start && w.at < p.end);
-    const generation = who.next && /^[2-9]$/.test(who.next.t) && !isPrice(who.next) && !(who.then && UNIT_WORD.test(who.then.t));
-    if (who.next && (VARIANT_WORDS.has(who.next.t) || generation)) return { level, reason: BIND_REASON.VARIANT, match: 'close_comparable' };
+    // A variant word or a generation after the name ("AirPods Pro 2") was decided above (otherModel); one the identity
+    // lists as possible stays a comparable.
+    if (who.next && (VARIANT_WORDS.has(who.next.t) || (/^[2-9]$/.test(who.next.t) && !isPriceWord(who.next) && !(who.then && UNIT_WORD.test(who.then.t))))) return { level, reason: BIND_REASON.VARIANT, match: 'close_comparable' };
     const theirs = sizesIn(stretch);
-    const unitOf = (s) => s.replace(/^[\d.]+/, '');
-    const clash = mine.some((m) => { const u = theirs.filter((s) => unitOf(s) === unitOf(m)); return u.length > 0 && !u.includes(m); });
-    if (clash) return { level, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' };
+    const s = otherSize(stretch);
+    if (s) return sized(s);
     // THE ITEM'S OWN STORAGE IS NOT KNOWN (identify.js openVariant): a row that states one is a listing for ONE of the
     // variants the item may be, not for the item. A comparable, and said to be — never exact evidence by default. The
     // item's other sizes (a screen's inches) do not settle its storage, and its own GB figure was set aside above.

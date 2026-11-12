@@ -144,19 +144,19 @@ describe('CB-3 the exact item, and not something near it', () => {
     assert.equal(level({ price: 300 }, list('Logitech G Pro X Superlight Wireless ₪300')), BOUND.WEAK, 'another product that shares its words');
     assert.equal(level({ price: 300 }, list('מק"ט 910-005470 ₪300'), identity({ model: 'G502 HERO', model_number: '910-005470', visible_text: ['910-005470'] })), BOUND.VERIFIED_ROW, 'its model number names it');
   });
-  test('CB-3b [9] a variant or another size in the row cannot silently stay "exact": it counts as a comparable and says why', () => {
+  test('CB-3b [9] a variant or another size in the row cannot silently stay "exact": another size is shown as such, and a variant is another model (2026-11-12)', () => {
     const row = (text) => bind({ price: 2000, title: 'iPhone 13' }, list(text), PHONE);
     assert.deepEqual(row('Apple iPhone 13 128GB ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.ONE_LISTING, match: 'exact' });
-    assert.deepEqual(row('Apple iPhone 13 256GB ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' });
-    assert.deepEqual(row('Apple iPhone 13 Pro 128GB ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'close_comparable' });
-    assert.deepEqual(row('Apple iPhone 13 mini ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'close_comparable' });
+    assert.deepEqual(row('Apple iPhone 13 256GB ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable', size: 'larger' });
+    assert.deepEqual(row('Apple iPhone 13 Pro 128GB ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'sibling_model' });
+    assert.deepEqual(row('Apple iPhone 13 mini ₪2,000'), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'sibling_model' });
     assert.equal(row('Apple iPhone 14 128GB ₪2,000').level, BOUND.WEAK, 'another generation is not this item at all');
     // The size the OWNER gave counts as the item's size.
     const noSize = identity({ brand: 'Apple', model: 'iPhone 13', canonical_name: 'apple iphone 13', size_or_capacity: null });
     assert.equal(bindPrice(claim({ price: 2000, title: 'iPhone 13' }), list('Apple iPhone 13 128GB ₪2,000'), noSize, { question: 'Storage?', text: '256 GB' }).match, 'close_comparable');
     assert.equal(bindPrice(claim({ price: 2000, title: 'iPhone 13' }), list('Apple iPhone 13 128GB ₪2,000'), noSize, null).match, 'exact', 'with no size known there is nothing to contradict');
     // A later generation of a product named by words.
-    assert.equal(bind({ price: 700, title: 'AirPods Pro' }, list('Apple AirPods Pro 2 ₪700'), identity({ brand: 'Apple', model: 'AirPods Pro', canonical_name: 'apple airpods pro' })).match, 'close_comparable');
+    assert.equal(bind({ price: 700, title: 'AirPods Pro' }, list('Apple AirPods Pro 2 ₪700'), identity({ brand: 'Apple', model: 'AirPods Pro', canonical_name: 'apple airpods pro' })).match, 'sibling_model', 'AirPods Pro 2 is another model than AirPods Pro');
   });
   test('CB-3c what verifyEvidence records: the row\'s word over the model\'s, and the claim kept beside it', () => {
     const url = 'https://market.example.co.il/c/phones';
@@ -345,18 +345,18 @@ describe('CB-8 one name in two alphabets, and never two products in one', () => 
   test('CB-8a the same product written in Hebrew binds as exact, its capacity read in Hebrew units; another capacity is a comparable', () => {
     assert.deepEqual(row('אייפון 13 פרו 256 גיגה ₪3,000', PRO), exact);
     assert.deepEqual(row('Apple iPhone 13 Pro 256GB ₪3,000', PRO), exact);
-    assert.deepEqual(row('אייפון 13 פרו 128 גיגה ₪3,000', PRO), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable' });
+    assert.deepEqual(row('אייפון 13 פרו 128 גיגה ₪3,000', PRO), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.OTHER_SIZE, match: 'close_comparable', size: 'other' });
     assert.deepEqual(row('גלקסי S24 ₪3,000', S24), exact);
     assert.deepEqual(row('איירפודס פרו ₪500', AIRPODS, 500), exact, 'a name of words alone, with no number in it');
   });
   test('CB-8b variants and generations stay apart in either alphabet', () => {
-    assert.deepEqual(row('אייפון 13 פרו מקס 256 גיגה ₪3,000', PRO), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'close_comparable' }, '13 Pro Max is not 13 Pro');
+    assert.deepEqual(row('אייפון 13 פרו מקס 256 גיגה ₪3,000', PRO), { level: BOUND.VERIFIED_ROW, reason: BIND_REASON.VARIANT, match: 'sibling_model' }, '13 Pro Max is not 13 Pro');
     assert.equal(row('אייפון 13 256 גיגה ₪3,000', PRO).level, BOUND.WEAK, '13 is not 13 Pro');
     assert.deepEqual(row('אייפון 13 פרו 128 גיגה ₪2,000', PHONE, 2000).reason, BIND_REASON.VARIANT, '13 Pro is not 13');
     assert.equal(row('אייפון 14 פרו 256 גיגה ₪3,000', PRO).level, BOUND.WEAK, 'another generation is another product');
     assert.deepEqual(row('גלקסי S24 אולטרה ₪3,000', S24).reason, BIND_REASON.VARIANT, 'S24 Ultra is not S24');
     assert.equal(row('גלקסי S23 ₪3,000', S24).level, BOUND.WEAK);
-    assert.equal(row('איירפודס פרו 2 ₪500', AIRPODS, 500).match, 'close_comparable', 'the second generation is a comparable');
+    assert.equal(row('איירפודס פרו 2 ₪500', AIRPODS, 500).match, 'sibling_model', 'the second generation is another model');
     assert.equal(row('איירפודס 3 ₪500', AIRPODS, 500).level, BOUND.WEAK, 'AirPods 3 are not AirPods Pro');
     assert.equal(level({ price: 300 }, list('לוגיטק G703 ₪300')), BOUND.WEAK, 'a model code is compared exactly: G703 is not G Pro Wireless');
   });
@@ -423,5 +423,22 @@ describe('CB-11 the Hebrew name is a name only when it carries the model', () =>
     assert.ok(!namesOf(generic).some((r) => r.join(' ') === 'כורסה'));
     const otherNumber = identity({ brand: 'Apple', product_family: 'iPad', model: 'iPad 9', display_name: 'x', canonical_name: 'x', search: { hebrew_name: 'אייפד 10', aliases: [], model_numbers: [] } });
     assert.ok(!namesOf(otherNumber).some((r) => r.join(' ') === 'אייפד 10'), 'a Hebrew name without the model\'s number is not this model');
+  });
+});
+
+describe('CB-12 another size is another variant, whatever the listing was called (2026-11-12)', () => {
+  const S23 = identity({ brand: 'Samsung', product_family: 'Galaxy S', model: 'Galaxy S23', display_name: 'Samsung Galaxy S23 128GB', canonical_name: 'samsung galaxy s23', item_type: 'smartphone', size_or_capacity: '128 GB' });
+  test('CB-12a a one-ad page that says "256gb" anywhere is another capacity, even when its title does not', () => {
+    // homeless.co.il/yad2/viewad,1113234: title "Galaxy s23 … 1,200 ש"ח", text "גלקסי s23 256gb מכשיר המצב מצוין".
+    const page = listing('Galaxy s23 למכירה בנתניה 1,200 ש"ח', 'גלקסי s23 256gb מכשיר המצב מצוין, שמור מאוד');
+    for (const match of ['exact', 'close_comparable']) {
+      const b = bindPrice(claim({ price: 1200, title: 'Galaxy s23 למכירה בנתניה', match }), page, S23);
+      assert.deepEqual([b.reason, b.match], [BIND_REASON.OTHER_SIZE, 'close_comparable'], match);
+    }
+  });
+  test('CB-12b the same capacity, or none stated, is not another size', () => {
+    assert.equal(bindPrice(claim({ price: 1200, title: 'Galaxy s23', match: 'exact' }), listing('Galaxy s23 128GB 1,200 ש"ח'), S23).reason, BIND_REASON.ONE_LISTING);
+    assert.equal(bindPrice(claim({ price: 1200, title: 'Galaxy s23', match: 'exact' }), listing('Galaxy s23 1,200 ש"ח'), S23).reason, BIND_REASON.ONE_LISTING);
+    assert.equal(bindPrice(claim({ price: 1200, title: 'Galaxy s23', match: 'exact' }), listing('Galaxy s23 128GB, 8GB RAM 1,200 ש"ח'), S23).reason, BIND_REASON.ONE_LISTING, 'its RAM beside its storage');
   });
 });
