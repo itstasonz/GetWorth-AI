@@ -205,7 +205,9 @@ async function identify({ correction = null } = {}) {
   if (p.status === 'failed') { const o = outageOf(p.failure); fail('identify', o?.key ?? 'other', { code: p.failure ?? 'failed', retryable: o ? o.retryable : true }); return 'failed'; }
   set({
     identity: p.identity, token: p.token, valuation: null, valuationId: null, answered: null,
-    condition: CONDITIONS.includes(p.default_condition) ? p.default_condition : 'good',
+    // NOT SPECIFIED until the owner says (2026-11-12): a photograph does not show whether a unit works, and "good" is
+    // never assumed. The price then is the used market as advertised, and the screen says so.
+    condition: CONDITIONS.includes(p.default_condition) ? p.default_condition : null,
     timings: { ...state.timings, identity_shown_ms: state.timings.identity_shown_ms ?? elapsed() },
   });
   if (p.status === 'no_item') { set({ stage: STAGE.NO_ITEM }); deps.onIdentified?.(); return 'no_item'; }
@@ -418,15 +420,19 @@ export function setScanCondition(condition) {
 }
 
 // ── WHAT THE SCREEN AND THE LISTING READ ────────────────────────────────────
-/** The price band for a condition, or the nearest condition that has one. */
+/**
+ * The price band for a condition: the used market as advertised when no condition is chosen; the chosen condition's own
+ * band otherwise — and null when there is none (no Israeli ads for units in that condition). Another condition's price is
+ * never shown in its place: that was a guess wearing a number (2026-11-12).
+ */
 export function bandFor(valuation, condition) {
   const prices = valuation?.status === 'priced' ? valuation.prices : null;
   if (!prices) return null;
-  if (prices[condition]) return prices[condition];
-  const at = CONDITIONS.indexOf(condition);
-  const nearest = [...CONDITIONS].sort((a, b) => Math.abs(CONDITIONS.indexOf(a) - at) - Math.abs(CONDITIONS.indexOf(b) - at)).find((c) => prices[c]);
-  return nearest ? prices[nearest] : null;
+  if (!condition) return prices.good ?? null;
+  return prices[condition] ?? null;
 }
+/** The used-market band, whatever condition is chosen. */
+export const marketBandOf = (valuation) => (valuation?.status === 'priced' ? valuation.prices?.good ?? null : null);
 
 /** The listing's title: the item's own name, as specific as the photograph allowed. */
 function fallbackTitle(identity) {
@@ -462,7 +468,8 @@ export function buildListingDraft(s = state) {
     title: fallbackTitle(i),
     desc: i.listing_description || '',
     price: band ? band.list : '',
-    condition: LISTING_CONDITION[s.condition] ?? 'used',
+    // No condition chosen on the scan: the listing asks for one — it is never assumed "used".
+    condition: s.condition ? (LISTING_CONDITION[s.condition] ?? null) : null,
     // The shape the listing and its analytics already read off a scan result.
     result: {
       name: fallbackTitle(i),

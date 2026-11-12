@@ -16,10 +16,11 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   roundNice, pageKey, verifyEvidence, mergeEvidence, normalizeReferences, weightedQuantile, aggregate, priceConfidence,
-  buildValuation, marketKey, WITHDRAWN, BASIS, SET_ASIDE, CONDITION_FACTOR, NEGOTIATION,
+  buildValuation, marketKey, WITHDRAWN, BASIS, SET_ASIDE, NEGOTIATION,
 } from '../api/_lib/scan/valuation.js';
 import { normalizeIdentity, buildIdentityPrompt, IDENTITY_SCHEMA, occursInText } from '../api/_lib/scan/identify.js';
 import { buildMarketPrompt, MARKET_SCHEMA } from '../api/_lib/scan/market.js';
@@ -131,8 +132,8 @@ describe('CS-2F when only the family is known, the models it may be are its comp
     assert.deepEqual([v.counts.resale, v.counts.il_used_close, v.counts.il_used_exact, v.counts.not_comparable], [3, 3, 0, 0]);
     assert.equal(JSON.stringify(v.prices), JSON.stringify(value(AIRPODS(), { familyLevel: true, approximate: true }).prices), 'deterministic');
     assert.deepEqual({ list: v.prices.good.list, low: v.prices.good.low, high: v.prices.good.high }, { list: 570, low: 270, high: 570 });
-    assert.equal(v.prices.new_sealed.basis, 'adjusted');
-    assert.equal(v.prices.good.basis, 'adjusted', 'a condition that was not stated vouches for nothing');
+    assert.equal(v.prices.new_sealed, null, 'no sealed ads: no sealed price');
+    assert.equal(v.prices.good.basis, 'market', 'the used market as advertised');
   });
   test('CS-2Fe three Israeli listings for SEALED units — what that scan really found — open no gate: sealed is not the used market', () => {
     const v = value(AIRPODS('new_sealed'), { familyLevel: true, approximate: true });
@@ -297,49 +298,45 @@ describe('CS-4 thin evidence is priced, and says it is thin', () => {
   });
 });
 
-describe('CS-5 condition prices are an explicit ladder, and say when they are an adjustment', () => {
-  test('CS-5a the ladder is the app\'s own, re-based on "good", with "fair" halfway to "poor"', () => {
-    const f = (d) => (1 - d) / (1 - CONDITION_LADDER.used);
-    assert.equal(CONDITION_FACTOR.good, 1);
-    assert.equal(CONDITION_FACTOR.new_sealed, f(CONDITION_LADDER.newSealed));
-    assert.equal(CONDITION_FACTOR.like_new, f(CONDITION_LADDER.likeNew));
-    assert.equal(CONDITION_FACTOR.poor, f(CONDITION_LADDER.poor));
-    assert.equal(CONDITION_FACTOR.fair, f((CONDITION_LADDER.used + CONDITION_LADDER.poor) / 2));
-    assert.deepEqual(Object.keys(CONDITION_FACTOR), [...CONDITIONS]);
+describe('CS-5 condition prices come from ads for units in that condition — no ladder (2026-11-12)', () => {
+  test('CS-5a the engine has no condition ladder at all', () => {
+    const src = readFileSync(new URL('../api/_lib/scan/valuation.js', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /import \{ CONDITION_LADDER \}/);
+    assert.doesNotMatch(src, /export const CONDITION_FACTOR/);
   });
-  test('CS-5b every condition has a band, natural, ordered, and never rising as condition falls', () => {
+  test('CS-5b the used market is always there; like new and fair fall back to it, said so; sealed and faulty have no number without their own ads', () => {
     const p = value(pool()).prices;
-    assert.deepEqual(Object.keys(p), [...CONDITIONS]);
-    let prev = null;
-    for (const c of CONDITIONS) {
-      const b = p[c];
-      assert.ok(b.low <= b.high && b.high <= b.list, `${c}: ${JSON.stringify(b)}`);
-      for (const n of [b.low, b.high, b.list]) assert.equal(n, roundNice(n), `${c} ${n} is a natural price`);
-      if (prev) assert.ok(b.list <= prev.list && b.high <= prev.high && b.low <= prev.low, `${c} is not above the condition before it`);
-      prev = b;
+    assert.equal(p.good.basis, 'market');
+    for (const c of ['like_new', 'fair']) assert.deepEqual([p[c].basis, p[c].worth, p[c].references], ['market', p.good.worth, 0], c);
+    assert.deepEqual([p.new_sealed, p.poor], [null, null], 'no faulty or sealed ads: no number, never a percentage of the working price');
+    for (const b of Object.values(p).filter(Boolean)) {
+      assert.ok(b.quick <= b.worth && b.worth <= b.list && b.low <= b.high, JSON.stringify(b));
+      for (const n of [b.low, b.high, b.list]) assert.equal(n, roundNice(n), `${n} is a natural price`);
     }
   });
-  test('CS-5c a condition is "listings" only when a reference that stands STATED that condition; otherwise "adjusted"', () => {
-    const p = value(pool()).prices;
-    assert.equal(p.good.basis, 'listings');
-    for (const c of ['new_sealed', 'like_new', 'fair', 'poor']) assert.equal(p[c].basis, 'adjusted', c);
-    const withLikeNew = value([...pool(), item({ price: 330, condition: 'like_new' })]).prices;
-    assert.equal(withLikeNew.like_new.basis, 'listings');
-    const setAside = value([item({ price: 200 }), item({ price: 900, condition: 'like_new' }), item({ price: 599, kind: 'new_retail' })]).prices;
-    assert.equal(setAside.like_new.basis, 'adjusted', 'a reference that was set aside vouches for nothing');
-    // The real evidence of a live scan: a shop's refurbished unit that did not state its condition, beside a private listing that did not either.
-    const assumed = value([item({ price: 149, kind: 'refurbished', condition: 'unknown', page: 'shop_product', stock: 'in_stock' }), item({ price: 140, condition: 'unknown' })]).prices;
-    assert.equal(assumed.like_new.basis, 'adjusted', 'a condition that was assumed vouches for nothing');
-    assert.equal(assumed.good.basis, 'adjusted');
-    const unknownUsed = value([item({ price: 149, condition: 'unknown' })]).prices;
-    assert.equal(unknownUsed.good.basis, 'adjusted', 'nor does a used listing that did not say');
+  test('CS-5c a condition is "listings" only from two or more standing ads that state it, and only when they do not contradict the market order', () => {
+    const likeNew = (price) => item({ price, condition: 'like_new' });
+    const two = value([...pool(), likeNew(330), likeNew(340)]).prices;
+    assert.deepEqual([two.like_new.basis, two.like_new.references], ['listings', 2]);
+    assert.ok(two.like_new.worth >= two.good.worth);
+    assert.equal(value([...pool(), likeNew(330)]).prices.like_new.basis, 'market', 'one ad is one seller\'s opinion');
+    const cheaper = value([...pool(), likeNew(150), likeNew(160)]).prices;
+    assert.equal(cheaper.like_new.basis, 'market', 'like-new ads cheaper than the market say the labels are noise: not used to lower a better condition');
   });
-  test('CS-5d a new sealed unit is never priced above the shop\'s price for a new one', () => {
-    const v = value([item({ price: 480 }), item({ price: 490 }), item({ price: 520, kind: 'new_retail', condition: 'new_sealed' })]);
-    assert.ok(v.prices.new_sealed.list <= 520, JSON.stringify(v.prices.new_sealed));
-    assert.ok(v.prices.new_sealed.high <= v.prices.new_sealed.list);
+  test('CS-5d a sealed unit is priced only from sealed ads, never above the shop\'s new price', () => {
+    const sealed = (price) => item({ price, condition: 'new_sealed' });
+    const v = value([item({ price: 300 }), item({ price: 310 }), sealed(430), sealed(440), item({ price: 450, kind: 'new_retail', condition: 'new_sealed' })]);
+    assert.equal(v.prices.new_sealed.basis, 'listings');
+    assert.ok(v.prices.new_sealed.list <= 450, JSON.stringify(v.prices.new_sealed));
+    assert.equal(value([item({ price: 300 }), sealed(430)]).prices.new_sealed, null, 'one sealed ad: no number');
   });
-  test('CS-5e no fake precision', () => {
+  test('CS-5e a faulty unit is priced only from ads for faulty units; a better condition is never cheaper than a worse one', () => {
+    const faulty = (price) => item({ price, condition: 'poor' });
+    const v = value([item({ price: 300 }), item({ price: 320 }), faulty(120), faulty(140), item({ price: 360, condition: 'like_new' }), item({ price: 380, condition: 'like_new' })]);
+    assert.deepEqual([v.prices.poor.basis, v.prices.poor.references], ['listings', 2]);
+    assert.ok(v.prices.like_new.worth >= v.prices.good.worth && v.prices.good.worth >= v.prices.fair.worth && v.prices.fair.worth >= v.prices.poor.worth, JSON.stringify(v.prices));
+  });
+  test('CS-5f no fake precision', () => {
     assert.deepEqual([47, 290, 847, 1234, 5678, 23456].map(roundNice), [45, 290, 850, 1250, 5700, 23500]);
     assert.equal(roundNice(0), null);
     assert.equal(roundNice(Number.NaN), null);

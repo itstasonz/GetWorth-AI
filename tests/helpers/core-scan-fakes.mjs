@@ -87,10 +87,10 @@ export function pageTexts(answer, given = {}) {
 export const GOOD_BAND = Object.freeze({ list: 260, low: 190, high: 260 });
 
 // worth and quick as the server sends them since the three-price result (valuation.js conditionPrices).
-const band = (list, low, high, basis = 'adjusted') => ({ list, low, high, worth: Math.round((low + high) / 20) * 10, quick: low, basis });
-/** A priced valuation's bands as the client receives them. */
+const band = (list, low, high, basis = 'listings', references = 2) => ({ list, low, high, worth: Math.round((low + high) / 20) * 10, quick: low, basis, references });
+/** A priced valuation's bands as the client receives them (2026-11-12: each condition from its own ads, or the market, or none). */
 export const PRICES = Object.freeze({
-  new_sealed: band(420, 360, 400), like_new: band(340, 290, 320), good: band(290, 240, 270, 'listings'), fair: band(230, 180, 210), poor: band(150, 100, 130),
+  new_sealed: band(420, 360, 400), like_new: band(340, 290, 320), good: band(290, 240, 270, 'market', 3), fair: band(290, 240, 270, 'market', 0), poor: band(150, 100, 130),
 });
 
 /** The search tool's own record: one completed search that reached these pages. */

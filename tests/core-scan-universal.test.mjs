@@ -316,7 +316,7 @@ describe('CU-4 research and valuation follow the kind of item', () => {
     const withShop = similar([ref(SOURCES.IL_USED_1, 900), ref(SOURCES.IL_USED_2, 1100), ref('https://ads.example.co.il/3', 1500), shop]);
     assert.deepEqual([withShop.status, withShop.retail_new_ils, withShop.counts.retail_il, withShop.counts.resale, withShop.evidence.find((e) => e.kind === 'new_retail').set_aside], ['priced', null, 0, 3, SET_ASIDE.SIMILAR_RETAIL]);
     assert.ok(withShop.evidence.every((e) => e.set_aside !== SET_ASIDE.ABOVE_NEW), 'a used sofa dearer than a similar new one is not "above new"');
-    assert.ok(withShop.prices.new_sealed.list > 1000, 'and no similar item\'s shop price caps the sealed band');
+    assert.equal(withShop.prices.new_sealed, null, 'no sealed ads: no sealed band, and no similar shop price makes one');
     // The same evidence for an EXACT item uses the anchor and sets the dearer listing aside: the rule is the strategy's, not the data's.
     const exact = buildValuation({ evidence: [ref(SOURCES.IL_USED_1, 900, { match: 'exact' }), ref(SOURCES.IL_USED_2, 1100, { match: 'exact' }), ref('https://ads.example.co.il/3', 1500, { match: 'exact' }), { ...shop, match: 'exact' }], today: TODAY });
     assert.deepEqual([exact.retail_new_ils, exact.evidence.find((e) => e.price === 1500).set_aside, exact.evidence.find((e) => e.price === 900).set_aside], [1000, SET_ASIDE.ABOVE_NEW, null]);

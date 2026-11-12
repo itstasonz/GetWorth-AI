@@ -285,14 +285,16 @@ describe('LM-2 the weighing: general rules, on items of no category', () => {
     const sold = weigh([il(500, { kind: 'sold' })]).points[0];
     assert.deepEqual([asking.value, sold.value], [500 * NEGOTIATION, 500], 'the negotiation allowance is taken off asking prices only');
   });
-  test('LM-2l [11] condition prices are the same ladder every time, from the same evidence', () => {
+  test('LM-2l [11] condition prices are the same every time, from the same evidence — and no ladder makes one (2026-11-12)', () => {
     const e = [il(300, { listed: CURRENT }), il(310, { listed: CURRENT }), il(320, { listed: CURRENT })];
     const p = value(e).prices;
-    // Good: centre 279, range 228.78-304.11, asking 310. Each condition is that, times its factor, rounded.
-    assert.deepEqual(Object.fromEntries(Object.entries(p).map(([c, b]) => [c, band(b)])), {
-      new_sealed: { list: 440, low: 330, high: 430 }, like_new: { list: 380, low: 280, high: 370 }, good: { list: 310, low: 230, high: 300 },
-      fair: { list: 220, low: 160, high: 220 }, poor: { list: 130, low: 100, high: 130 },
+    // Good: centre 279, range 228.78-304.11, asking 310. Like new and fair have no ads of their own: the market, said so.
+    // Sealed and faulty have none either: no number.
+    assert.deepEqual(Object.fromEntries(Object.entries(p).map(([c, b]) => [c, b ? band(b) : null])), {
+      good: { list: 310, low: 230, high: 300 }, like_new: { list: 310, low: 230, high: 300 }, fair: { list: 310, low: 230, high: 300 },
+      new_sealed: null, poor: null,
     });
+    assert.deepEqual([p.like_new.basis, p.fair.basis], ['market', 'market']);
     assert.equal(JSON.stringify(value([...e].reverse()).prices), JSON.stringify(p));
   });
   test('LM-2m [13] when the exact model is known and only OTHER models were found, there is no price: another model is another product (the Ninja scan, 2026-10-11)', () => {

@@ -59,7 +59,7 @@ describe('CE-1 step 1 is ONE vision call that cannot search', () => {
     assert.equal(body.text.format.strict, true);
     assert.equal(body.stream, true);
     assert.equal(r.identity.display_name, 'Logitech G Pro X Superlight');
-    assert.equal(r.default_condition, 'good');
+    assert.equal(r.default_condition, null, 'no condition is assumed: the owner chooses (2026-11-12)');
     assert.equal(r.billed, true);
   });
   test('CE-1b a question counts against the scan\'s allowance, and a used-up allowance asks nothing', async () => {
@@ -317,7 +317,7 @@ function harness(over = {}) {
     verify: async (h) => (h === 'Bearer good' ? USER : (h === 'Bearer other' ? { id: 'user-2' } : (h === 'Bearer old' ? { id: 'user-1', _expired: true } : null))),
     charge: async () => { log.charge += 1; return over.quota ?? { allowed: true, charged: true, limitType: null, retryAfter: 0 }; },
     refund: async () => { log.refund += 1; },
-    identify: async (args) => { log.identify += 1; log.identifyArgs = args; return over.identifyResult ?? { status: 'identified', identity, followups: 0, default_condition: 'good', billed: true, call: { stage: 'identify', model: 'm', ms: 1200, usage: null } }; },
+    identify: async (args) => { log.identify += 1; log.identifyArgs = args; return over.identifyResult ?? { status: 'identified', identity, followups: 0, default_condition: null, billed: true, call: { stage: 'identify', model: 'm', ms: 1200, usage: null } }; },
     price: async (args) => { log.price += 1; log.priceArgs = args; return over.priceResult ?? { status: 'priced', valuation: { status: 'priced', prices: {}, counts: { resale: 2 }, price_confidence: 'high', approximate: false }, reused: false, call: { stage: 'market', model: 'm', ms: 5000, usage: null, tool_calls: 2 } }; },
     record: async () => { log.record += 1; return 'val-1'; },
     logEvent: async (scan, type, payload) => { log.events.push({ scan, type, payload }); },
@@ -388,7 +388,7 @@ describe('CE-4 the two actions', () => {
     assert.equal(r.status, 200);
     assert.equal(r.payload.status, 'identified');
     assert.equal(r.payload.identity.display_name, 'Logitech G Pro X Superlight');
-    assert.equal(r.payload.default_condition, 'good');
+    assert.equal(r.payload.default_condition, null);
     assert.match(r.payload.token, /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
     assert.equal(typeof r.payload.timings.total_ms, 'number');
     assert.deepEqual([log.charge, log.identify, log.price], [1, 1, 0]);

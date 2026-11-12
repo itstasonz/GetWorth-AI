@@ -92,7 +92,8 @@ describe('CC-1 the live search of 2026-10-11, replayed', () => {
     assert.deepEqual([v.status, v.price_confidence, v.counts.il_qualifying], ['priced', 'low', 1], 'one private listing: low, whatever supports it');
     assert.deepEqual([homeless.used, homeless.set_aside], [false, SET_ASIDE.NOT_USED_CONDITION], 'the sealed ad is shown, and prices nothing');
     assert.deepEqual([ivory.used, ivory.set_aside, ivory.weight], [true, null, Math.round(WEIGHT.kind.refurbished * WEIGHT.page.shop_product * WEIGHT.freshness.unknown * WEIGHT.stock.out_of_stock * 100) / 100]);
-    assert.ok(v.prices.good.list < 350 && v.prices.new_sealed.list <= 400, JSON.stringify(v.prices));
+    assert.ok(v.prices.good.list < 350, JSON.stringify(v.prices));
+    assert.equal(v.prices.new_sealed, null, 'one sealed ad gives no sealed price (conditionPrices)');
   });
 });
 
@@ -218,7 +219,7 @@ describe('CC-4 the new-price anchor: context, not proof', () => {
     assert.deepEqual(anchor([item({ price: 430, condition: 'new_sealed' })]), [null, null, null]);
     const v = value([item({ price: 200 }), item({ price: 430, condition: 'new_sealed' }), shop(399), shop(659)]);
     assert.equal(v.evidence.find((e) => e.price === 430).set_aside, SET_ASIDE.ABOVE_NEW, 'measured against the cheaper shop, not the dearer one');
-    assert.ok(v.prices.new_sealed.list <= 400);
+    assert.equal(v.prices.new_sealed, null, 'no sealed ad stands under the new price: no sealed number');
   });
 });
 

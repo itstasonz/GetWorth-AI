@@ -334,9 +334,10 @@ describe('CC-5 Sell gets a listing that is already filled in', () => {
     assert.equal(buildListingDraft({ identity: identityOf({ listing_description: null }), valuation: null, condition: 'good' }).desc, '');
     assert.equal(d.result.marketValue, null);
   });
-  test('CC-5d a condition the search gave no band for takes the nearest one that has', () => {
+  test('CC-5d a condition the search gave no band for has none — never the price of another condition (2026-11-12); no condition chosen is the used market', () => {
     const v = { status: 'priced', prices: { ...PRICES, new_sealed: null } };
-    assert.equal(bandFor(v, 'new_sealed').list, 340);
+    assert.equal(bandFor(v, 'new_sealed'), null);
+    assert.equal(bandFor(v, null), PRICES.good);
     assert.equal(bandFor({ status: 'insufficient_evidence', prices: PRICES }, 'good'), null);
   });
 });

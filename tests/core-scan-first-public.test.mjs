@@ -3,7 +3,7 @@
 // These pin what changed and what must not.
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildValuation, marketKey, ESTIMATE_BASIS, WITHDRAWN, CONDITION_FACTOR } from '../api/_lib/scan/valuation.js';
+import { buildValuation, marketKey, ESTIMATE_BASIS, WITHDRAWN } from '../api/_lib/scan/valuation.js';
 import { buildSearchQueries } from '../api/_lib/scan/market.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
 import { buildValuationRow } from '../api/_lib/scan/persist.js';
@@ -74,16 +74,16 @@ describe('FP-2 the evidence the scan had, and what each shape of it gives', () =
   });
 });
 
-describe('FP-3 condition moves all three prices together, by the stated ladder, with no new search', () => {
-  test('FP-3a every condition has worth, quick and list, in order; worse condition is never worth more', () => {
+describe('FP-3 each condition has its own three prices from ads for that condition, or none — never a ladder (2026-11-12)', () => {
+  test('FP-3a every band there is has worth, quick and list, in order; worse condition is never worth more; no ads, no number', () => {
     const v = value([il(250), il(270), il(260)]);
     let last = Infinity;
-    for (const c of ['new_sealed', 'like_new', 'good', 'fair', 'poor']) {
+    for (const c of ['like_new', 'good', 'fair']) {
       const b = v.prices[c];
       assert.ok(b.quick <= b.worth && b.worth <= b.list, `${c} ${JSON.stringify(b)}`);
-      if (c !== 'new_sealed') { assert.ok(b.worth <= last, c); last = b.worth; }
+      assert.ok(b.worth <= last, c); last = b.worth;
     }
-    assert.ok(CONDITION_FACTOR.fair < 1 && CONDITION_FACTOR.like_new > 1);
+    assert.deepEqual([v.prices.new_sealed, v.prices.poor], [null, null], 'no sealed or faulty ads: no number for them');
   });
 });
 

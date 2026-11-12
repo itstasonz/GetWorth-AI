@@ -4560,7 +4560,14 @@ export function AppProvider({ children }) {
 
   const selectCondition = (c) => {
     setCondition(c);
-    setListingData((prev) => { const p = suggestPrice(c); return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion' }; });
+    // THE SELLER'S OWN PRICE STAYS THEIRS (2026-11-12): choosing a condition never overwrites a price the seller typed.
+    // GetWorth's suggestion fills an empty box, or replaces its own earlier suggestion — and a condition GetWorth has no
+    // evidence for empties its own suggestion rather than leave a number that is not for this condition.
+    setListingData((prev) => {
+      if (prev.priceOrigin === 'seller' && prev.price !== '' && prev.price != null) return prev;
+      const p = suggestPrice(c);
+      return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion' };
+    });
     // Show category-specific questions for used/poor; skip for new/likeNew
     setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
   };

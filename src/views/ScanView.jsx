@@ -25,7 +25,7 @@ import { useApp } from '../contexts/AppContext';
 import { Btn, Chip, InputField } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 import {
-  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
+  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, marketBandOf, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
 } from '../lib/coreScan';
 import { scanCopy, localColor } from '../lib/scanCopy';
 import { WrongItemSheet, WhyPriceSheet, Bidi } from '../components/ScanSheets';
@@ -129,8 +129,21 @@ function Question({ question: f, copy, lang, onPhoto, onUpload, required = false
  * left the last choice alone on a second line. Each is a full-height tap target
  * with a short label; the full name is its accessible name.
  */
-function ConditionPicker({ condition, identity, copy, adjusted = false }) {
+// WHAT "FAULTY" MEANS FOR THIS KIND OF ITEM: the one functional question that can change a price, asked in its own words
+// beside the choice — never a questionnaire, never an extra request, never answered for the owner (2026-11-12).
+const HINT = [
+  ['controller', /(controller|gamepad|joystick|בקר|ג'ויסטיק)/i],
+  ['device', /(phone|smartphone|tablet|ipad|laptop|notebook|macbook|computer|watch|טלפון|סמארטפון|טאבלט|מחשב|שעון)/i],
+  ['appliance', /(refrigerator|fridge|washer|washing|dryer|dishwasher|oven|microwave|vacuum|air ?fryer|fryer|coffee|espresso|kettle|blender|mixer|heater|air ?condition|printer|console|television|tv|monitor|speaker|headphone|earbud|camera|scooter|מקרר|מכונת כביסה|מייבש|מדיח|תנור|מיקרוגל|שואב|סיר טיגון|קומקום|בלנדר|מזגן|מדפסת|קונסולה|טלוויזיה|מסך|רמקול|אוזניות|מצלמה|קורקינט)/i],
+  ['furniture', /(sofa|couch|chair|armchair|table|desk|bed|wardrobe|cabinet|shelf|shelving|dresser|ספה|כורסה|כיסא|שולחן|מיטה|ארון|מדף|כוורת|שידה)/i],
+];
+export function conditionHintOf(identity) {
+  const text = [identity?.item_type, identity?.category, identity?.product_family].filter(Boolean).join(' ');
+  return HINT.find(([, re]) => re.test(text))?.[0] ?? null;
+}
+function ConditionPicker({ condition, identity, copy, note = null }) {
   const seen = CONDITIONS.includes(identity.visible_condition) ? copy.conditions[identity.visible_condition] : null;
+  const hint = conditionHintOf(identity);
   return (
     <div className="space-y-2">
       <p className="text-label text-text-muted" id="scan-condition-label">{copy.conditionLabel}</p>
@@ -147,8 +160,9 @@ function ConditionPicker({ condition, identity, copy, adjusted = false }) {
           </button>
         ))}
       </div>
+      {hint && copy.conditionHint?.[hint] && <p className="text-body-sm text-text-secondary" data-testid="scan-condition-hint">{copy.conditionHint[hint]}</p>}
       {seen && <p className="text-body-sm text-text-muted">{copy.appears(seen)}</p>}
-      {adjusted && <p className="text-body-sm text-text-muted">{copy.conditionAdjusted}</p>}
+      {note && <p className="text-body-sm text-text-muted" data-testid="scan-condition-note">{note}</p>}
     </div>
   );
 }
@@ -174,7 +188,16 @@ export default function ScanView() {
   const named = identity && identity.display_name && s.stage !== STAGE.NO_ITEM;
   // IDLE is the instant between the shutter and the scan starting: already "analyzing" to the person.
   const looking = s.stage === STAGE.IDLE || s.stage === STAGE.PREPARING || s.stage === STAGE.IDENTIFYING;
-  const band = bandFor(s.valuation, s.condition);
+  // The chosen condition's own band, or — when there are no ads for units in that condition — none, and the used market
+  // is shown beside an explanation instead (never another condition's price in its place).
+  const conditionBand = bandFor(s.valuation, s.condition);
+  const market = marketBandOf(s.valuation);
+  const band = conditionBand ?? market;
+  const noConditionBand = !!market && !!s.condition && !conditionBand;
+  const conditionNote = !market ? null : !s.condition ? copy.conditionUnset
+    : noConditionBand ? copy.conditionNone(copy.conditions[s.condition])
+      : s.condition === 'good' ? null
+        : conditionBand.basis === 'listings' ? copy.conditionListings(conditionBand.references) : copy.conditionMarket;
   const settled = s.stage === STAGE.PRICED || s.stage === STAGE.INSUFFICIENT;
   const needsDetail = s.stage === STAGE.NEEDS_DETAIL;
   const question = openQuestion(s);
@@ -252,9 +275,9 @@ export default function ScanView() {
               {checkedAgo(s.valuation, copy) && <p className="text-body-sm text-text-muted" data-testid="scan-checked-ago">{checkedAgo(s.valuation, copy)}</p>}
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-refreshing">{copy.refreshingPrices}</p>}
             </div>
-            {/* The price is the used market as its ads ask (no ladder); another condition chosen here is the ladder applied to it, and says so. */}
-            <ConditionPicker condition={s.condition} identity={identity} copy={copy} adjusted={s.condition !== 'good'} />
-            <Btn primary fullWidth size="lg" onClick={sellFromScan}>{rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list))}</Btn>
+            {/* The price for the chosen condition comes from ads for units in that condition, or the screen says there are none (valuation.js conditionPrices). */}
+            <ConditionPicker condition={s.condition} identity={identity} copy={copy} note={conditionNote} />
+            <Btn primary fullWidth size="lg" onClick={sellFromScan}>{noConditionBand ? copy.sellOwnPrice : (rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list)))}</Btn>
           </div>
         )}
 

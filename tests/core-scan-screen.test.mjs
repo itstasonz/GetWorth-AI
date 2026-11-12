@@ -100,7 +100,7 @@ function server(script) {
   };
 }
 // `server` is what the server adds after normalising: a required question, what the identity still lacks.
-const identified = (over = {}, server = {}) => ({ payload: { status: 'identified', identity: { ...normalizeIdentity({ ...RAW_IDENTITY, ...over }), ...server }, default_condition: 'good', token: 'tok' } });
+const identified = (over = {}, server = {}) => ({ payload: { status: 'identified', identity: { ...normalizeIdentity({ ...RAW_IDENTITY, ...over }), ...server }, default_condition: null, token: 'tok' } });
 const pricedAnswer = (valuation = VALUATION) => ({ payload: { status: valuation.status === 'priced' ? 'priced' : 'insufficient_evidence', valuation, valuation_id: 'val-1' } });
 
 async function open(script, { lang = 'en' } = {}) {
@@ -142,23 +142,33 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
     assert.match(text(), /Price confidence: Medium/);
     assert.doesNotMatch(text(), /Checking today's market prices/);
   });
-  test('CV-1b the condition is five choices on the result, and choosing one re-prices without a request', async () => {
+  test('CV-1b the condition is five choices, none assumed; choosing one re-prices from ads for that condition, without a request (2026-11-12)', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
-    const chips = ['New', 'Like new', 'Good', 'Fair', 'Poor'].map(button);
+    const chips = ['New', 'Like new', 'Good', 'Fair', 'Faulty'].map(button);
     assert.ok(chips.every(Boolean));
-    assert.deepEqual(chips.map((b) => b.getAttribute('aria-label')), ['New / Sealed', 'Like new', 'Good', 'Fair', 'Poor'], 'the short label is for the eye; the full name is the control\'s name');
-    assert.equal(button('Good').getAttribute('aria-pressed'), 'true');
-    assert.match(text(), /Visible condition appears Good\./);
-    assert.doesNotMatch(text(), /adjusted for the condition/, 'Good is what every listing is brought to');
+    assert.deepEqual(chips.map((b) => b.getAttribute('aria-label')), ['New / Sealed', 'Like new', 'Good', 'Fair', 'Faulty / poor'], 'the short label is for the eye; the full name is the control\'s name');
+    assert.ok(chips.every((b) => b.getAttribute('aria-pressed') === 'false'), 'no condition is chosen for the owner');
+    assert.match(text(), /Visible condition appears Good\./, 'the photograph\'s impression is a hint, not a choice');
+    assert.match(text(), /Condition not chosen: this is the Israeli used market as advertised\./);
+    assert.match(text(), /Recommended listing price₪290/);
+    assert.doesNotMatch(text(), /adjusted for the condition you chose/, 'no ladder is applied anywhere');
     const before = requests.length;
     await click(button('Like new'));
     assert.match(text(), /Recommended listing price₪340/);
-    assert.match(text(), /The price was adjusted for the condition you chose\./);
-    assert.doesNotMatch(text(), /not taken from listings|adjustment from the listings/, 'said simply');
+    assert.match(text(), /Based on 2 listings for units in this condition\./);
     assert.ok(button('Sell for ₪340'));
-    await click(button('Poor'));
+    await click(button('Fair'));
+    assert.match(text(), /not adjusted for the condition/, 'no fair ads: the market price, and it says so');
+    assert.match(text(), /Recommended listing price₪290/);
+    await click(button('Faulty'));
     assert.match(text(), /Expected selling range: ⁦₪100–130⁩/);
-    assert.equal(requests.length, before);
+    assert.equal(requests.length, before, 'a condition is a recalculation, never another search');
+  });
+  test('CV-1b2 a condition with no ads of its own shows no number for it, and Sell offers the owner\'s own price', async () => {
+    await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, prices: { ...VALUATION.prices, poor: null } })] }));
+    await click(button('Faulty'));
+    assert.match(text(), /No Israeli listings for a unit in "Faulty \/ poor" condition were found\. GetWorth does not guess a discount/);
+    assert.ok(button('Sell at your own price'));
   });
   test('CV-1c Sell hands the scan to the listing', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
@@ -184,8 +194,8 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
       assert.doesNotMatch(group.className, /flex-wrap/);
       assert.ok(chips.every((b) => /\bmin-h-tap\b/.test(b.className)), 'each is a full-height tap target');
       // A fifth of a 320px phone, less the gutters and gaps, is about 52px: room for two short words, not a phrase.
-      for (const b of chips) assert.ok(b.textContent.length <= 8 && b.textContent.split(' ').every((w) => w.length <= 5), `"${b.textContent}" fits a fifth of a phone`);
-      assert.equal(chips.filter((b) => b.getAttribute('aria-pressed') === 'true').length, 1);
+      for (const b of chips) assert.ok(b.textContent.length <= 8 && b.textContent.split(' ').every((w) => w.length <= 6), `"${b.textContent}" fits a fifth of a phone`);
+      assert.equal(chips.filter((b) => b.getAttribute('aria-pressed') === 'true').length, 0, 'none is chosen for the owner');
       await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
       await act(async () => { scan.scanStore.reset(); });
     }
@@ -736,5 +746,27 @@ describe('CV-10 the approved result: one worth, then what to ask and a quick sal
     assert.match(text(), /You can list it at your own price; the new price in Israel is the ceiling buyers compare with/);
     assert.equal(container.querySelector('[data-testid="scan-worth"]'), null);
     assert.doesNotMatch(text(), /Quick sale|Estimated worth/);
+  });
+});
+
+describe('CV-12 the functional question, in the item\'s own words, beside the condition — never a questionnaire (2026-11-12)', () => {
+  const hintFor = async (over) => {
+    await settle(await open({ identify: [identified(over)], price: [pricedAnswer()] }));
+    return container.querySelector('[data-testid="scan-condition-hint"]')?.textContent ?? null;
+  };
+  test('CV-12a a controller asks about stick drift; an appliance whether it works; a phone about its screen; furniture about damage', async () => {
+    assert.match(await hintFor({ item_type: 'wireless game controller' }), /Stick drift/);
+  });
+  test('CV-12b an appliance', async () => { assert.match(await hintFor({ item_type: 'refrigerator', category: 'Home' }), /Does not work properly/); });
+  test('CV-12c a phone', async () => { assert.match(await hintFor({ item_type: 'smartphone' }), /Cracked screen/); });
+  test('CV-12d furniture', async () => { assert.match(await hintFor({ item_type: 'sofa', category: 'Furniture' }), /Structural damage/); });
+  test('CV-12e a fragrance gets no functional hint (it has its own question: how much is left)', async () => { assert.equal(await hintFor({ item_type: 'eau de parfum', category: 'Beauty' }), null); });
+});
+
+describe('CV-13 the seller\'s own price stays theirs (2026-11-12)', () => {
+  test('CV-13a choosing a listing condition never overwrites a price the seller typed', () => {
+    const ctx = readFileSync(new URL('../src/contexts/AppContext.jsx', import.meta.url), 'utf8');
+    const select = ctx.slice(ctx.indexOf('const selectCondition'), ctx.indexOf('const selectCondition') + 900);
+    assert.match(select, /if \(prev\.priceOrigin === 'seller' && prev\.price !== '' && prev\.price != null\) return prev;/);
   });
 });

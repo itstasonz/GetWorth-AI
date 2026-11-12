@@ -44,7 +44,7 @@
 // Every number below is a stated assumption, not a discovered fact. They are
 // few, conservative and in one place so they can be read and argued with.
 // ══════════════════════════════════════════════════════════════════════════════
-import { CONDITION_LADDER } from '../valuation-guard.js';
+
 import { CONDITIONS } from './config.js';
 import { freshnessOf } from './evidence.js';
 import { isBound, BIND_REASON } from './binding.js';
@@ -76,13 +76,9 @@ export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family'
 export { STRATEGY, strategyFor, marketKey } from './strategy.js';
 
 // ── THE STATED ASSUMPTIONS ──────────────────────────────────────────────────
-/**
- * What each condition sells for relative to "good": the app's own condition
- * ladder (valuation-guard.js: the discount from new for sealed / like new /
- * used / poor), re-based on "good", with "fair" halfway between used and poor.
- */
-const LADDER = { new_sealed: CONDITION_LADDER.newSealed, like_new: CONDITION_LADDER.likeNew, good: CONDITION_LADDER.used, fair: (CONDITION_LADDER.used + CONDITION_LADDER.poor) / 2, poor: CONDITION_LADDER.poor };
-export const CONDITION_FACTOR = Object.freeze(Object.fromEntries(CONDITIONS.map((c) => [c, (1 - LADDER[c]) / (1 - LADDER.good)])));
+// There is NO condition ladder here (2026-11-12): a condition's price comes from ads for units in that condition, or the
+// screen says it has none (conditionPrices). The legacy listing flow's ladder (valuation-guard.js CONDITION_LADDER) serves
+// only the retired /api/analyze results and is not read by the core scan.
 /**
  * An asking price is not a selling price. Listings are asking prices, and this
  * is the allowance for the usual negotiation: a conservative round figure, not
@@ -351,29 +347,58 @@ export function priceConfidence({ kept, scale, approximate = false, basis = BASI
 
 // ── PRICE ───────────────────────────────────────────────────────────────────
 /**
- * Every condition's band from the "good" one, by the ladder.
- *
- * `basis` says where a condition's price comes from: 'listings' when at least
- * one reference that stands STATED that condition itself, 'adjusted' when it is
- * the ladder applied to the others. A new-sealed unit is never priced above the
- * shop's price for a new one.
+ * How many ads that STATE a condition a price for that condition needs. One ad is one seller's opinion of one unit; a
+ * condition's own price needs at least two. A stated assumption, like NEGOTIATION.
  */
-export function conditionPrices(good, kept, anchorIl) {
-  const stated = new Set(kept.filter((p) => p.stated).map((p) => p.condition));
-  const out = {};
-  for (const c of CONDITIONS) {
-    const f = CONDITION_FACTOR[c];
-    let low = good.low * f; let high = good.high * f; let centre = good.centre * f; let list = Math.max(good.centre / NEGOTIATION, good.high) * f;
-    if (c === 'new_sealed' && anchorIl && list > anchorIl) { const k = anchorIl / list; low *= k; high *= k; centre *= k; list = anchorIl; }
-    const band = { list: roundNice(list), low: roundNice(low), high: roundNice(high), worth: roundNice(centre) };
-    band.high = Math.max(band.high, band.low);
-    band.list = Math.max(band.list, band.high);
-    // THREE PRICES, ONE EVIDENCE. worth = the weighted median selling price of the references (asking prices less the
-    // negotiation allowance); quick = the low end of where that weight lies (weighted 25th percentile, bounded by how much
-    // evidence there is: aggregate.js); list = what to ask so a normal negotiation lands near worth. No fixed percentages.
-    band.worth = Math.min(Math.max(band.worth, band.low), band.high);
-    band.quick = band.low;
-    out[c] = { ...band, basis: stated.has(c) ? 'listings' : 'adjusted' };
+export const CONDITION_MIN_REFS = 2;
+
+/** One band from an aggregate: worth, list, quick, and the range — rounded, ordered, and never above `cap`. */
+function bandOf(agg, cap = null) {
+  let { low, high, centre } = agg;
+  let list = Math.max(centre / NEGOTIATION, high);
+  if (cap && list > cap) { const k = cap / list; low *= k; high *= k; centre *= k; list = cap; }
+  const band = { list: roundNice(list), low: roundNice(low), high: roundNice(high), worth: roundNice(centre) };
+  band.high = Math.max(band.high, band.low);
+  band.list = Math.max(band.list, band.high);
+  // THREE PRICES, ONE EVIDENCE. worth = the weighted median selling price of the references (asking prices less the
+  // negotiation allowance); quick = the low end of where that weight lies (weighted 25th percentile, bounded by how much
+  // evidence there is: aggregate.js); list = what to ask so a normal negotiation lands near worth.
+  band.worth = Math.min(Math.max(band.worth, band.low), band.high);
+  band.quick = band.low;
+  return band;
+}
+
+/**
+ * THE PRICE FOR EACH CONDITION — FROM ADS FOR UNITS IN THAT CONDITION, OR NOT AT ALL (2026-11-12). No ladder: the fixed
+ * percentages of the old listing flow (like new −15%, used −30%, poor −70% from new) were never measured, and they made a
+ * worse unit cost more than a better one.
+ *
+ *   good        the Israeli used market as its ads ask, whatever used condition they state: basis 'market'.
+ *   like_new    from at least CONDITION_MIN_REFS standing ads that say "like new" — when their price does not contradict
+ *   fair        the market's order (a like-new price below the market's, a fair one above it, says the labels are
+ *               noise): basis 'listings'. Otherwise the market price itself, basis 'market' — NOT adjusted, and the
+ *               screen says so.
+ *   new_sealed  from at least CONDITION_MIN_REFS current Israeli private ads for a sealed unit (set aside from the used
+ *   poor        market, kept here), never above the shop's new price; a faulty or broken unit only from ads for faulty
+ *               units. Without them: null — no number. A broken unit's price is not a percentage of a working one's.
+ *
+ * Each band says how many ads it rests on (`references`).
+ */
+export function conditionPrices(good, kept, points, anchorIl) {
+  const market = bandOf(good);
+  const out = { good: { ...market, basis: 'market', references: kept.length } };
+  for (const c of ['like_new', 'fair']) {
+    const own = kept.filter((p) => p.stated && p.condition === c);
+    const agg = own.length >= CONDITION_MIN_REFS ? aggregate(own) : null;
+    const consistent = !!agg && (c === 'like_new' ? agg.centre >= good.centre : agg.centre <= good.centre);
+    out[c] = consistent ? { ...bandOf(agg), basis: 'listings', references: own.length } : { ...market, basis: 'market', references: 0 };
+  }
+  for (const c of ['new_sealed', 'poor']) {
+    const own = points.filter((p) => p.dropped === SET_ASIDE.NOT_USED_CONDITION && p.condition === c && p.evidence.market === 'IL'
+      && PRIVATE_RESALE.has(p.evidence.kind) && p.freshness !== 'older' && p.freshness !== 'archived');
+    const agg = own.length >= CONDITION_MIN_REFS ? aggregate(own) : null;
+    const consistent = !!agg && (c === 'new_sealed' ? agg.centre >= good.centre : agg.centre <= good.centre);
+    out[c] = consistent ? { ...bandOf(agg, c === 'new_sealed' ? anchorIl : null), basis: 'listings', references: own.length } : null;
   }
   return out;
 }
@@ -521,7 +546,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   return {
     ...base,
     status: 'priced',
-    prices: conditionPrices(good, kept, anchorIl),
+    prices: conditionPrices(good, kept, points, anchorIl),
     price_confidence: priceConfidence({ kept, scale, approximate: rough, basis }),
     withdrawn: null,
     no_price_reason: null,

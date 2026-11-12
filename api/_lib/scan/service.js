@@ -39,7 +39,7 @@ import { loadMarketplaceSales, salesEvidenceFor } from './marketplace.js';
 import { afterResponse } from './telemetry.js';
 import { resolveMarketFreshMs, resolveMarketSwr } from './config.js';
 import {
-  CONDITIONS, DEFAULT_CONDITION, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
+  CONDITIONS, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
   resolveMarketParallel,
 } from './config.js';
 
@@ -57,7 +57,9 @@ export const SCAN_STATUS = Object.freeze({
 export const NOT_BILLED = /^(network|auth|rate_limited|credit_exhausted|upstream_5xx|not_configured|no_images|http_\d{3})$/;
 
 /** The condition the screen starts on: what the photograph shows, else the middle of the ladder. */
-export const startingCondition = (identity) => (CONDITIONS.includes(identity?.visible_condition) ? identity.visible_condition : DEFAULT_CONDITION);
+// The condition the screen starts with: NONE (2026-11-12). The photograph's impression (identity.visible_condition) is shown
+// as a hint and never chosen for the owner: a photo does not show whether a unit works, and "good" is never assumed.
+export const startingCondition = () => null;
 
 /**
  * Step 1. `prior` is the scan so far when this is a correction or an added

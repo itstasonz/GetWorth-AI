@@ -9,7 +9,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { buildValuation, CONDITION_FACTOR } from '../api/_lib/scan/valuation.js';
+import { buildValuation } from '../api/_lib/scan/valuation.js';
 import { buildValuationRow, reproduceValuation, MAX_STORED_EVIDENCE } from '../api/_lib/scan/persist.js';
 import { MARKET_SCHEMA } from '../api/_lib/scan/market.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
@@ -68,10 +68,13 @@ describe('IN-1 every priced valuation rests on an Israeli second-hand reference,
         assert.equal(e.binding, 'strong', `${why}: a price the page did not tie to the product never prices`);
       }
       if (used.every((e) => e.kind === 'refurbished' || e.market !== 'IL')) assert.fail(`${why}: refurbished or foreign alone priced`);
-      // Three prices in order, every condition; worse condition never worth more.
+      // Three prices in order for every condition that HAS a band (a condition with no ads of its own may have none: no
+      // ladder invents it, 2026-11-12); the used market always has one; worse condition never worth more.
+      assert.ok(v.prices.good, `${why}: the used market always has a band`);
       let last = Infinity;
       for (const c of ['like_new', 'good', 'fair', 'poor']) {
         const b = v.prices[c];
+        if (!b) continue;
         assert.ok(b.quick <= b.worth && b.worth <= b.list && b.low <= b.high, `${why} ${c} ${JSON.stringify(b)}`);
         assert.ok(b.worth <= last, `${why}: ${c} worth more than a better condition`);
         last = b.worth;
@@ -117,13 +120,16 @@ describe('IN-3 the listing keeps the engine\'s prices', () => {
   ], today: TODAY });
   test('IN-3a each listing condition suggests that condition\'s listing price from the same valuation', () => {
     const lp = listingPricesOf(v);
-    assert.deepEqual(lp, { newSealed: v.prices.new_sealed.list, likeNew: v.prices.like_new.list, used: v.prices.good.list, poor: v.prices.poor.list });
+    assert.deepEqual(lp, { newSealed: v.prices.new_sealed?.list ?? null, likeNew: v.prices.like_new.list, used: v.prices.good.list, poor: v.prices.poor?.list ?? null });
+    assert.deepEqual([lp.newSealed, lp.poor], [null, null], 'no sealed or faulty ads: the listing suggests nothing for them — the seller sets the price');
     const draft = buildListingDraft({ identity: normalizeIdentity(RAW_IDENTITY), valuation: v, condition: 'good', valuationId: 'val-1', images: [] });
     assert.equal(draft.price, v.prices.good.list);
     assert.equal(draft.result.marketValue.mid, v.prices.good.worth, 'mid is the engine\'s worth');
-    for (const c of ['newSealed', 'likeNew', 'used', 'poor']) assert.equal(listingPriceFor(draft.result, c), lp[c]);
+    for (const c of ['newSealed', 'likeNew', 'used', 'poor']) assert.equal(listingPriceFor(draft.result, c), lp[c] ?? '');
     assert.equal(listingPriceFor({ coreScan: true, listingPrices: null }, 'used'), '', 'no valuation, no suggestion');
-    assert.ok(CONDITION_FACTOR.poor < 1);
+    // No condition chosen on the scan: the listing asks for one rather than assume "used", and starts from the used market.
+    const unset = buildListingDraft({ identity: normalizeIdentity(RAW_IDENTITY), valuation: v, condition: null, valuationId: 'val-1', images: [] });
+    assert.deepEqual([unset.condition, unset.price], [null, v.prices.good.list]);
   });
   test('IN-3b the listing form never applies the percentage ladder to a core scan', () => {
     const ctx = read('src/contexts/AppContext.jsx');
