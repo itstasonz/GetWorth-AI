@@ -102,7 +102,10 @@ const CODE = /^([a-z]+)(\d+)([a-z]*)$/;                    // g703, tb301, a7iii
 const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר|גיגה|ג'יגה|ג׳יגה|ג"יגה|טרה|מ"ל|מ״ל|מל|"|״)(?![\p{L}\p{N}])/giu;
 const HEBREW_UNITS = { אינץ: 'inch', '"': 'inch', '״': 'inch', גיגה: 'gb', "ג'יגה": 'gb', 'ג׳יגה': 'gb', 'ג"יגה': 'gb', טרה: 'tb', 'מ"ל': 'ml', 'מ״ל': 'ml', מל: 'ml' };
 // A shop's second price: without VAT (Eilat). It labels the price that follows it, or else the one just before.
-const NO_VAT = /(אילת|eilat|ללא מע"?מ|לפני מע"?מ|without vat|ex\.? ?vat)/gi;
+const NO_VAT = /(אילת|eilat|ללא מע"?מ|לפני מע"?מ|without vat|ex\.? ?vat|תשלומים|לחודש|בחודש|per month|a month|\/mo\b)/gi;
+// (2026-11-13) A monthly instalment ("36 תשלומים של ₪29", "₪29 לחודש") labels the number beside it exactly as an Eilat price
+// does. Loyalty points ("299 נקודות") label only the number touching them: POINTS, with a window of a few characters.
+const POINTS = /(נקודות|points)/gi;
 
 // Bidi control characters are dropped: Zap writes "659\u200F₪" with a right-to-left mark between the number and its sign (seen live 2026-10-11).
 const norm = (v) => String(v ?? '').normalize('NFKC').replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, '').replace(/''|׳׳/g, '"').toLowerCase();
@@ -212,12 +215,16 @@ function pricesIn(text) {
 /** The prices a "without VAT" label on the page belongs to. */
 function withoutVat(text, priced) {
   const marked = new Set();
-  for (const m of text.matchAll(NO_VAT)) {
-    const end = m.index + m[0].length;
-    const after = priced.filter((p) => p.start >= end && p.start - end <= 24).sort((a, b) => a.start - b.start)[0];
-    const before = priced.filter((p) => p.end <= m.index && m.index - p.end <= 12).sort((a, b) => b.end - a.end)[0];
-    if (after ?? before) marked.add((after ?? before).start);
-  }
+  const mark = (re, afterWithin, beforeWithin) => {
+    for (const m of text.matchAll(re)) {
+      const end = m.index + m[0].length;
+      const after = priced.filter((p) => p.start >= end && p.start - end <= afterWithin).sort((a, b) => a.start - b.start)[0];
+      const before = priced.filter((p) => p.end <= m.index && m.index - p.end <= beforeWithin).sort((a, b) => b.end - a.end)[0];
+      if (after ?? before) marked.add((after ?? before).start);
+    }
+  };
+  mark(NO_VAT, 24, 12);
+  mark(POINTS, 4, 2);
   return marked;
 }
 

@@ -618,7 +618,11 @@ describe('CE-6 structure', () => {
     const files = [...walk(join(ROOT, 'api')), ...walk(join(ROOT, 'src')), ...walk(join(ROOT, 'scripts')), join(ROOT, 'package.json'), join(ROOT, 'vercel.json'), join(ROOT, 'vite.config.js')];
     for (const file of files) {
       assert.doesNotMatch(file.replace(ROOT, ''), /scan[-_]?lab/i, `${file} is a Scan Lab file`);
-      assert.doesNotMatch(read(file), /scan[-_ ]?lab(?!el)|SCAN_LAB|scanLab/i, `${file} still mentions Scan Lab`);
+      // A file another test created and removed while this one walked the tree (the suite runs files in parallel) is gone,
+      // not Scan Lab: only a vanished file is skipped (intermittent failure, 2026-11-13).
+      let body;
+      try { body = read(file); } catch (err) { if (err?.code === 'ENOENT') continue; throw err; }
+      assert.doesNotMatch(body, /scan[-_ ]?lab(?!el)|SCAN_LAB|scanLab/i, `${file} still mentions Scan Lab`);
     }
     assert.equal(walk(join(ROOT, 'tests')).some((f) => /scan[-_]lab/i.test(f)), false);
   });

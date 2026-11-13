@@ -433,3 +433,22 @@ describe('MI-21 the Hebrew seller name with a number names the product', () => {
     assert.equal(hebrewNamesProduct(id('שלט פלייסטיישן 5')), true);
   });
 });
+
+describe('MI-22 a new price is never a stray number (DualSense "new ₪30", 2026-11-13)', () => {
+  const shop = (price, extra = {}) => ({ url: `https://www.shop${price}.co.il/p`, domain: `shop${price}.co.il`, title: 'Sony DualSense', price, currency: 'ILS', price_ils: price, kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null, binding: 'strong', stock: 'in_stock', seen: today, ...extra });
+  test('MI-22a ₪29 beside a ₪279 shop is not the new price; beside a $30 used guide neither', async () => {
+    const { buildValuation } = await import('../api/_lib/scan/valuation.js');
+    assert.equal(buildValuation({ evidence: [shop(29), shop(279)], today }).retail_new_ils, 280);
+    const guide = { url: 'https://www.pricecharting.com/game/x', domain: 'pricecharting.com', title: 'DualSense', price: 30, currency: 'USD', price_ils: 96, kind: 'price_guide', match: 'exact', market: 'INTL', condition: 'unknown', page: 'price_guide', binding: 'weak', seen: today };
+    assert.equal(buildValuation({ evidence: [shop(29), guide], today }).retail_new_ils, null);
+    assert.equal(buildValuation({ evidence: [shop(279)], today }).retail_new_ils, 280, 'a real new price stands');
+  });
+  test('MI-22b loyalty points and monthly instalments are not the price', async () => {
+    const { bindPrice } = await import('../api/_lib/scan/binding.js');
+    const id = normalizeIdentity({ ...RAW_IDENTITY, brand: 'Sony', product_family: 'DualSense', model: 'DualSense', canonical_name: 'sony dualsense', display_name: 'Sony DualSense' });
+    const page = (text) => ({ type: 'shop_product', title: 'בקר Sony DualSense Midnight Black', text });
+    assert.notEqual(bindPrice({ price: 29, currency: 'ILS', title: 'Sony DualSense', match: 'exact' }, page('בקר Sony DualSense Midnight Black 36 תשלומים של ₪29'), id).level, 'strong');
+    assert.notEqual(bindPrice({ price: 299, currency: 'ILS', title: 'Sony DualSense', match: 'exact' }, page('בקר Sony DualSense Midnight Black ₪275 מימוש: 299 נקודות'), id).level, 'strong');
+    assert.equal(bindPrice({ price: 275, currency: 'ILS', title: 'Sony DualSense', match: 'exact' }, page('בקר Sony DualSense Midnight Black ₪275 מימוש: 299 נקודות'), id).level, 'strong');
+  });
+});

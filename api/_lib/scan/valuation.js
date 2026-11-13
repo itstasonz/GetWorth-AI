@@ -217,8 +217,27 @@ const isNewPrice = (e, market) => anchorLike(e, market) && isBound(e);
  * lift the line a used price is measured against. The range is returned so
  * the answer can say the shops disagreed. Retail is context, not used value.
  */
+/**
+ * A NEW PRICE CANNOT BE HALF OF WHAT USED UNITS FETCH (2026-11-13: a DualSense's "new price in Israel" showed ₪30 — the shop
+ * page sells it for ₪275; the ₪29 was another number on the page). A new price below half of the median used, sold or
+ * price-guide reference for the same product, or below half of the median of the other shops' new prices, is not this
+ * product's new price. A stated sanity bound, not a market measurement.
+ */
+const NEW_BELOW_USED = 0.5;
+function plausibleNew(candidates, evidence) {
+  // Only references of THIS product: a comparable (another edition, another capacity) says nothing about its new price.
+  const used = evidence.filter((e) => ['used_listing', 'sold', 'price_guide'].includes(e.kind) && e.match === 'exact' && e.price_ils > 0).map((e) => e.price_ils);
+  const usedFloor = used.length ? median(used) * NEW_BELOW_USED : 0;
+  return candidates.filter((e) => {
+    if (e.price_ils < usedFloor) return false;
+    const others = candidates.filter((o) => o !== e).map((o) => o.price_ils);
+    return !(others.length && e.price_ils < median(others) * NEW_BELOW_USED);
+  });
+}
 function newPrice(evidence, market) {
-  const all = evidence.filter((e) => isNewPrice(e, market));
+  const candidates = evidence.filter((e) => isNewPrice(e, market));
+  // The Israeli new price is what the screen shows and what bounds used asks: it must be plausible. Abroad is context.
+  const all = market === 'IL' ? plausibleNew(candidates, evidence) : candidates;
   const exact = all.filter((e) => e.match === 'exact');
   const use = exact.length ? exact : all;
   if (!use.length) return null;

@@ -169,7 +169,8 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
 // 6: Hebrew seller aliases, Hebrew words matched by their consonants, the brand passed over inside a name (founder's
 //    DualSense scan dcb5196d, 2026-11-13: no ad was tied, and its no-price research would have been reused for a day).
 // 7: a Hebrew seller name with a number names the product (strategy.js hebrewNamesProduct): searched as written, tied.
-export const RESEARCH_VERSION = 7;
+// 8: loyalty points / monthly instalments are never a price; an Israeli new price must be plausible (DualSense "new ₪30").
+export const RESEARCH_VERSION = 8;
 function fnv1a(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
