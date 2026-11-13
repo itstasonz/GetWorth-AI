@@ -21,6 +21,7 @@ import { getServiceClient } from './_lib/scan/quota.js';
 import { runPrice } from './_lib/scan/service.js';
 import { resolveScanMode, resolveMarketModel, SCAN_KEY_ENV, SCAN_MODE } from './_lib/scan/config.js';
 import { logScanEvent } from './_lib/scan/persist.js';
+import { purgeExpired } from './_lib/market/index-store.js';
 import { accountRef } from './_lib/scan/telemetry.js';
 import {
   resolvePrewarmMax, resolvePrewarmUsd, demandFrom, planPrewarm, runPrewarm, DEMAND_WINDOW_DAYS, WORST_RESEARCH_USD,
@@ -54,7 +55,7 @@ async function readBody(req) {
 
 /** The handler over injectable dependencies, for the suites. */
 export function createPrewarmHandler({
-  env = process.env, supa = () => getServiceClient(), price = runPrice, logEvent = logScanEvent, now = Date.now,
+  env = process.env, supa = () => getServiceClient(), price = runPrice, logEvent = logScanEvent, now = Date.now, purge = purgeExpired,
   verify = verifyJWT, credit = checkCredit, trial = PREWARM_TRIAL,
 } = {}) {
   const event = async (type, payload) => { try { await logEvent(crypto.randomUUID(), type, payload); } catch { /* best effort */ } };
@@ -99,6 +100,9 @@ export function createPrewarmHandler({
     const secret = String(env.CRON_SECRET ?? '');
     const given = String(req.headers?.authorization ?? '').replace(/^Bearer\s+/i, '');
     if (secret.length < 16 || !(await sameSecret(given, secret))) return reply(res, 401, { error: 'unauthorized' });
+    // MARKET INDEX RETENTION: every run, whatever the research below does — no OpenAI call, one bounded delete.
+    const purged = await Promise.resolve().then(() => purge({ supa: supa() })).catch(() => null);
+    if (purged) console.log(`[Prewarm] market index purged ${purged}`);
     const max = resolvePrewarmMax(env);
     const usdCap = resolvePrewarmUsd(env);
     // Both a product limit and a dollar cap must be set: either missing, nothing runs and nothing is spent.

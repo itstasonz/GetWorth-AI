@@ -37,7 +37,10 @@ import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import { loadMarketplaceSales, salesEvidenceFor } from './marketplace.js';
 import { afterResponse } from './telemetry.js';
-import { resolveMarketFreshMs, resolveMarketSwr } from './config.js';
+import { resolveMarketFreshMs, resolveMarketSwr, resolveMarketIndex } from './config.js';
+import { defaultIndex, nullIndex } from '../market/index-store.js';
+import { sourceOf, mayUseInScan } from '../market/sources.js';
+import { refreshMsFor } from '../market/refresh-policy.js';
 import {
   CONDITIONS, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
   resolveMarketParallel,
@@ -179,6 +182,8 @@ export async function runPrice({
   freshMs = resolveMarketFreshMs(), swr = resolveMarketSwr(),
   // Where a stale-while-revalidate refresh runs: after the response (telemetry.js afterResponse, Vercel's waitUntil).
   background = afterResponse,
+  // THE MARKET INDEX (../market/index-store.js): verified observations of this PRODUCT from earlier research.
+  index = resolveMarketIndex() ? defaultIndex : nullIndex,
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -209,17 +214,32 @@ export async function runPrice({
   // The exchange rates are only needed once a search has answered: they are fetched alongside it, never before it
   // (a cold instance waited up to FX_TIMEOUT_MS here first). getFxTable never throws.
   const fxPending = getFxTable({ fetchImpl });
-  const earlier = await recall(key, store, t0);
+  const [cached, indexed] = await Promise.all([
+    recall(key, store, t0),
+    Promise.resolve().then(() => index.load(identity, answer, { now: t0, rulesVersion: RESEARCH_VERSION })).catch(() => ({ rows: [], ms: 0, error: 'failed' })),
+  ]);
+  const fromIndex = indexRecord(indexed?.rows, marketDate(t0));
+  const indexInfo = (used) => ({ rows: indexed?.rows?.length ?? 0, ms: indexed?.ms ?? 0, error: indexed?.error ?? null, used });
   // Fresh research for this item: reuse it. No search, the same evidence, the same price.
-  if (earlier && t0 - earlier.at <= freshMs) return priced(earlier, { reused: true, call: { ...noCall, ms: now() - t0 } });
+  if (cached && t0 - cached.at <= freshMs) return priced(cached, { reused: true, index: indexInfo('none'), call: { ...noCall, ms: now() - t0 } });
+  // THE FAST PATH: the product's indexed evidence is current for its kind (refresh-policy.js) and prices it from Israeli
+  // evidence alone — no search. Anything less and it only joins the pool of the search below.
+  if (fromIndex && t0 - fromIndex.at <= refreshMsFor(identity)
+    && localStrength(fromIndex.evidence, { familyLevel, strategy, today: marketDate(t0) }) >= LOCAL_STRENGTH.drives) {
+    const r = await priced(fromIndex, { reused: true, indexed: true, index: indexInfo('priced'), call: { ...noCall, ms: now() - t0 } });
+    if (r.status === SCAN_STATUS.PRICED) return r;
+  }
+  const earlier = combine(cached, fromIndex);
+  const via = fromIndex ? 'pool' : 'none';
   // STALE WHILE REVALIDATE: older research for this product answers now, said to be refreshing; one background search
   // per product per instance renews it for the next request (the app asks once more: coreScan.js).
-  if (earlier && swr) {
+  // Only RESEARCH may answer while it is renewed: indexed evidence that did not price the item above never stands in for a search.
+  if (cached && swr) {
     if (!refreshing.has(key)) {
       refreshing.add(key);
       background(research().catch(() => null).finally(() => refreshing.delete(key)));
     }
-    return priced(earlier, { reused: true, stale: true, refreshing: true, call: { ...noCall, ms: now() - t0 } });
+    return priced(earlier, { reused: true, stale: true, refreshing: true, index: indexInfo(via), call: { ...noCall, ms: now() - t0 } });
   }
   return research();
 
@@ -240,13 +260,18 @@ export async function runPrice({
   const funnel = [];
   let searched = false;
   let firstSearchMs = null;
+  let refusedSources = 0;
   let usedModel = model;
   /** One stage's provider request. Throws what the provider threw. */
   const request = (stage, signal = null) => researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0, signal });
   /** A stage's answer, verified: its evidence joins what is in hand. */
   const accept = async (stage, { raw, provenance, meta }) => {
     const fx = await fxPending;
-    const verified = verifyEvidence(raw?.evidence, provenance, fx, today, { identity, answer });
+    const checked = verifyEvidence(raw?.evidence, provenance, fx, today, { identity, answer });
+    // SOURCE PERMISSIONS (../market/sources.js): a price from an operator that forbids collection is not used, even
+    // when a search showed it.
+    const verified = { ...checked, evidence: checked.evidence.filter((e) => mayUseInScan(sourceOf(e.url))) };
+    refusedSources += checked.evidence.length - verified.evidence.length;
     found = mergeEvidence(found, verified.evidence);
     unverified += verified.unverified;
     queries += provenance.queries?.length ?? 0;
@@ -291,7 +316,7 @@ export async function runPrice({
     const failure = classifyOpenAIFailure(err?.message);
     console.warn(`[Scan] market failed stage=local code=${failure}`);
     // The search failed, but evidence gathered for this item in the last days is still evidence.
-    if (earlier) return priced(earlier, { reused: true, stale: true, call: call() });
+    if (earlier) return priced(earlier, { reused: true, stale: true, index: indexInfo(via), call: call() });
     return { status: SCAN_STATUS.FAILED, failure, valuation: null, reused: false, call: call() };
   }
   if (widens(found)) {
@@ -314,16 +339,45 @@ export async function runPrice({
     unverified,
     search_performed: searched,
     // `planned` is how many queries the server built; `queries` how many the tool's own record says it ran.
-    searched: { date: today, queries, planned, pages, stages: [...stages], funnel },
+    searched: { date: today, queries, planned, pages, stages: [...stages], funnel, ...(refusedSources ? { source_not_authorized: refusedSources } : {}) },
     fx_date: fx?.rate_date ?? null,
   };
   // Only research that really searched is worth keeping.
+  let indexedNow = null;
   if (searched) {
     remember(key, record);
-    try { await store.save(key, record, scanUuid); } catch { /* the answer does not depend on the write */ }
+    // The research joins the shared store, and what it verified joins the product's index (permission-gated there).
+    const [, saved] = await Promise.all([
+      Promise.resolve().then(() => store.save(key, record, scanUuid)).catch(() => null),
+      Promise.resolve().then(() => index.save(identity, answer, found, { seenAt: t0, rulesVersion: RESEARCH_VERSION })).catch(() => null),
+    ]);
+    indexedNow = saved?.stored ?? null;
   }
-  return priced(record, { reused: false, call: call() });
+  return priced(record, { reused: false, index: { ...indexInfo(via), stored: indexedNow }, call: call() });
   }
+}
+
+/** Indexed rows as a research record: newest sighting first, its age the newest sighting's. Null when there are none. */
+export function indexRecord(rows, today) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  const sorted = [...rows].sort((a, b) => Date.parse(b.last_seen_at) - Date.parse(a.last_seen_at));
+  const at = Date.parse(sorted[0].last_seen_at);
+  if (!Number.isFinite(at)) return null;
+  return {
+    at,
+    evidence: mergeEvidence(sorted.map((r) => requalify(r.reference)), [], 30),
+    unverified: 0,
+    search_performed: true,
+    searched: { date: today, queries: 0, planned: 0, pages: 0, stages: ['index'], indexed: rows.length },
+    fx_date: null,
+  };
+}
+
+/** The research in hand and the indexed evidence as one pool: the research's own evidence first, the newer age. */
+function combine(cached, fromIndex) {
+  if (!fromIndex) return cached;
+  if (!cached) return fromIndex;
+  return { ...cached, at: Math.max(cached.at, fromIndex.at), evidence: mergeEvidence(cached.evidence, fromIndex.evidence, 30) };
 }
 
 /** Products whose research this instance is renewing in the background. */

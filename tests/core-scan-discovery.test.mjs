@@ -74,7 +74,7 @@ describe('CD-1 the queries are the server\'s, built from the identity', () => {
     const q = buildSearchQueries({ identity: MOUSE });
     assert.equal(q[0], '910-005272 יד שנייה OR למכירה OR משומש', 'a model number names one product and nothing else');
     assert.ok(q.some((s) => /^Logitech G Pro Wireless יד שנייה למכירה$/.test(s)));
-    assert.ok(q.some((s) => /^Logitech G Pro Wireless למכירה site:homeless\.co\.il OR site:ad\.co\.il OR site:yad2\.co\.il$/.test(s)));
+    assert.ok(q.some((s) => /^Logitech G Pro Wireless למכירה site:homeless\.co\.il OR site:ad\.co\.il$/.test(s)));
     // 2026-11-10 (scan b4254487): the Israeli used boards again in Hebrew, not an open English query (it reached Reddit).
     assert.ok(q.some((s) => /^עכבר גיימינג אלחוטי Logitech G Pro Wireless משומש site:homeless.co.il OR site:zuzz.co.il OR site:ad.co.il$/.test(s)));
     assert.ok(!q.some((s) => /used second hand Israel/.test(s)));

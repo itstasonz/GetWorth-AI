@@ -31,6 +31,7 @@ import { researchKey } from './service.js';
 import { strategyFor, STRATEGY } from './strategy.js';
 import { streamResponse } from '../v2/openai-stream.js';
 import { classifyOpenAIFailure } from '../openai-recognition.js';
+import { refreshMsFor } from '../market/refresh-policy.js';
 
 export const PREWARM_MAX_ENV = 'PREWARM_MAX_PRODUCTS';
 /** The most a run may spend, in US dollars, measured from each call's own usage. 0 (unset) means the job does nothing. */
@@ -78,6 +79,9 @@ export const DEMAND_WINDOW_DAYS = 30;
 export const EST_USD_PER_RESEARCH = 0.03;
 /** Research younger than this is left alone: the scan itself reuses it for a day (config.js MARKET_FRESH_MS). */
 export const REFRESH_AFTER_MS = 20 * 3_600_000;
+
+/** When a demanded product's research is renewed: four hours before its kind's refresh interval lapses, never sooner than REFRESH_AFTER_MS. */
+export const refreshAfterFor = (identity) => Math.max(REFRESH_AFTER_MS, refreshMsFor(identity) - 4 * 3_600_000);
 
 /** How many products a run may research: 0 (off) unless the deployment says otherwise, never above the hard maximum. */
 export function resolvePrewarmMax(env = process.env) {
@@ -131,7 +135,8 @@ export async function runPrewarm(plan, { price, budgetMs = 240_000, usdCap = 0, 
     try { stop = await paused(); } catch { stop = true; }
     if (stop) { out.stopped = 'paused'; out.skipped += 1; continue; }
     try {
-      const r = await price({ identity: p.identity, answer: null, scanUuid: crypto.randomUUID(), freshMs: REFRESH_AFTER_MS, swr: false, ...priceArgs });
+      // Research is renewed on the item's own refresh interval (market/refresh-policy.js), a little before it lapses.
+      const r = await price({ identity: p.identity, answer: null, scanUuid: crypto.randomUUID(), freshMs: refreshAfterFor(p.identity), swr: false, ...priceArgs });
       out.spent_usd = Math.round((out.spent_usd + costOf(r?.call)) * 10000) / 10000;
       if (r?.status === 'failed') out.failed += 1;
       else if (r?.reused) out.reused += 1;

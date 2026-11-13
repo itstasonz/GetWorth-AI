@@ -121,7 +121,9 @@ const MATCHING = {
 // indexed as category pages. Nothing here fetches a marketplace or signs in to
 // one: the model reads what the search returns.
 export const MAX_QUERIES = Object.freeze({ local: 8, expand: 6 });
-const CLASSIFIEDS_SITES = 'site:homeless.co.il OR site:ad.co.il OR site:yad2.co.il';
+// Yad2 is not searched (2026-11-13): its operator forbids automated collection (../market/sources.js NOT_AUTHORIZED), so a
+// price it showed could not be used.
+const CLASSIFIEDS_SITES = 'site:homeless.co.il OR site:ad.co.il';
 // The Israeli second-hand boards a search reads with a price beside the item (zuzz.co.il: seen with priced ads in the
 // funnel of scan b4254487, 2026-11-10).
 const USED_BOARDS = 'site:homeless.co.il OR site:zuzz.co.il OR site:ad.co.il';
@@ -236,7 +238,7 @@ const SEARCH = {
   local: (queries) => `SEARCH — ISRAEL FIRST. Make ONE search call that carries EXACTLY these queries at once (the tool accepts several). Run each line as one query, as written; do not reword, translate or drop one:
 ${queryBlock(queries)}
 Skip results that are not a listing or a price page: forum threads (Reddit and the like), news, reviews and how-to articles carry no price you may report.
-They look for: Israeli second-hand listings for THIS product, in Hebrew and in English ("יד שנייה", "משומש", "למכירה", "second hand", "used") on Israeli classifieds whose listings show a price to a search: homeless.co.il (its יד2 board), ad.co.il, Yad2's second-hand market, Israeli forums and dealers' used sections; and the product's CURRENT NEW price in Israel (zap.co.il, ksp.co.il, ivory.co.il, bug.co.il or the shop that sells this kind of item).
+They look for: Israeli second-hand listings for THIS product, in Hebrew and in English ("יד שנייה", "משומש", "למכירה", "second hand", "used") on Israeli classifieds whose listings show a price to a search: homeless.co.il (its יד2 board), ad.co.il, Israeli forums and dealers' used sections; and the product's CURRENT NEW price in Israel (zap.co.il, ksp.co.il, ivory.co.il, bug.co.il or the shop that sells this kind of item).
 Do not search abroad in this call. Read prices from the search results; do not open pages.`,
   expand: (queries) => `SEARCH — LOOK FURTHER. The first search found little Israeli second-hand evidence for this item. Make ONE search call that carries EXACTLY these queries at once. Run each line as one query, as written:
 ${queryBlock(queries)}

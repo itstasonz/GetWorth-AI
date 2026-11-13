@@ -140,3 +140,11 @@ export const MARKET = Object.freeze({ country: 'IL', timezone: 'Asia/Jerusalem',
 /** The condition ladder, best first. The ids are the contract with the client. */
 export const CONDITIONS = Object.freeze(['new_sealed', 'like_new', 'good', 'fair', 'poor']);
 export const DEFAULT_CONDITION = 'good';
+
+/**
+ * THE MARKET INDEX (2026-11-13, api/_lib/market): verified observations stored by PRODUCT, read before any search. When
+ * they are current for the item's refresh class and strong enough to price it on Israeli evidence alone, the scan prices
+ * from them with no search; otherwise they join the new search's pool. Set to exactly 'false' to switch it off.
+ */
+export const SCAN_MARKET_INDEX_ENV = 'CORE_SCAN_MARKET_INDEX';
+export const resolveMarketIndex = (env = process.env) => String(env?.[SCAN_MARKET_INDEX_ENV] ?? '').trim().toLowerCase() !== 'false';

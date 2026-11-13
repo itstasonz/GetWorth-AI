@@ -263,6 +263,8 @@ export function createScanHandler({
           tool_calls: result.call?.tool_calls ?? null, stages: result.call?.stages ?? null, usage: result.call?.usage ?? null, model: result.call?.model ?? null,
           basis: result.valuation?.basis ?? null, strategy: result.valuation?.strategy ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null, unbound: result.valuation?.counts?.unbound ?? null,
           reused: result.reused === true, stale: result.stale === true, approximate: result.valuation?.approximate === true,
+          // The market index (api/_lib/market): rows read, read time, whether it priced, pooled or was unused, rows stored.
+          index: result.index ?? null, indexed: result.indexed === true,
           market_class: identity.market_class ?? null, identity_precision: identity.identity_precision ?? null, confirmed: identity.confirmed?.length ?? 0,
           revisions: prior.revisions ?? 0, answered: !!answer, client_elapsed_before_price_ms: clientMs,
         }),
