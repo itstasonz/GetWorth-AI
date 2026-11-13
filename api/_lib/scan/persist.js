@@ -114,7 +114,9 @@ export function buildValuationRow({ id, userId, scanUuid, identity, valuation, l
     identified_by: identity?.owner_stated ? 'user_correction' : 'visual',
     alternatives: identity?.alternatives ?? [],
     price_low: band ? band.low : null,
-    price_mid: band ? Math.round((band.low + band.high) / 2) : null,
+    // The ESTIMATED WORTH the person saw, not the middle of the range (Production E2E 2026-11-13: the history showed ₪1,085
+    // for a scan whose worth was ₪950). A band from before the three prices falls back to the middle.
+    price_mid: band ? (Number.isFinite(band.worth) && band.worth >= band.low && band.worth <= band.high ? band.worth : Math.round((band.low + band.high) / 2)) : null,
     price_high: band ? band.high : null,
     new_retail: valuation?.retail_new_ils ?? null,
     price_method: band ? PRICE_METHOD : 'manual_required',

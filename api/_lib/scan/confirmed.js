@@ -79,7 +79,10 @@ export function applyConfirmed(identity) {
       const brand = String(identity.brand ?? '').trim();
       const named = brand && !c.value.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${c.value}` : c.value;
       identity.canonical_name = named.toLowerCase().replace(/\s+/g, ' ').trim();
-      if (!String(identity.display_name ?? '').toLowerCase().includes(c.value.toLowerCase())) identity.display_name = named;
+      // A name that still offers a choice ("Apple iPhone 12 או 12 mini", Production E2E 2026-11-13) is replaced too: it
+      // contains the chosen model, but it is not the owner's answer, and it became the listing's title.
+      const shown = String(identity.display_name ?? '');
+      if (!shown.toLowerCase().includes(c.value.toLowerCase()) || /\s(או|or)\s|\s\/\s?|\S\/\S/i.test(shown)) identity.display_name = named;
       identity.alternatives = [];
     }
     if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c, identity)) identity.uncertainty_note = null;

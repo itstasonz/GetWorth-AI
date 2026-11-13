@@ -260,3 +260,27 @@ describe('MI-10 a decade is a model', () => {
     assert.notEqual(bindPrice({ price: 1700, currency: 'ILS', title: 'Squier Classic Vibe 60s', match: 'close_comparable' }, page('חשמלית Squier Classic Vibe 60s למכירה'), strat).match, 'close_comparable');
   });
 });
+
+describe('MI-11 a confirmed model names the item', () => {
+  test('MI-11a "Apple iPhone 12 או 12 mini" becomes "Apple iPhone 12" once the owner chose iPhone 12; a plain name containing it stays', async () => {
+    const { applyConfirmed } = await import('../api/_lib/scan/confirmed.js');
+    const a = { brand: 'Apple', display_name: 'Apple iPhone 12 או 12 mini', attributes: [], alternatives: [{ name: 'iPhone 12 mini' }], confirmed: [{ attribute: 'model', value: 'iPhone 12' }] };
+    applyConfirmed(a);
+    assert.equal(a.display_name, 'Apple iPhone 12');
+    const b = { brand: 'Apple', display_name: 'Apple iPhone 12 (blue)', attributes: [], alternatives: [], confirmed: [{ attribute: 'model', value: 'iPhone 12' }] };
+    applyConfirmed(b);
+    assert.equal(b.display_name, 'Apple iPhone 12 (blue)');
+    const c = { brand: 'Apple', display_name: 'Apple iPhone 12 / 12 mini', attributes: [], alternatives: [], confirmed: [{ attribute: 'model', value: 'iPhone 12 mini' }] };
+    applyConfirmed(c);
+    assert.equal(c.display_name, 'Apple iPhone 12 mini');
+  });
+});
+
+describe('MI-12 the saved valuation keeps the worth the person saw', () => {
+  test('MI-12a price_mid is the estimated worth, not the middle of the range', async () => {
+    const { buildValuationRow } = await import('../api/_lib/scan/persist.js');
+    const valuation = { status: 'priced', prices: { good: { low: 870, high: 1300, worth: 950, list: 1300, quick: 870 } } };
+    const row = buildValuationRow({ id: 'x', userId: 'u', scanUuid: 's', identity: { display_name: 'iPhone 12' }, valuation, lang: 'he' });
+    assert.deepEqual([row.price_low, row.price_mid, row.price_high], [870, 950, 1300]);
+  });
+});
