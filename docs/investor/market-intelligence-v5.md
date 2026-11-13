@@ -3,7 +3,7 @@
 **INTERNAL — not for distribution.** Contains measured performance, source-licensing status and roadmap. Do not share with
 marketplaces, data providers or the public. Prepared 2026-11-13.
 
-## 1. What was built (commit c31c8ad, branch feat/core-scan-001)
+## 1. What was built (commits c31c8ad..620d295, branch feat/core-scan-001; migration 20261113120000 APPLIED 2026-11-13)
 
 | Capability | Where | State |
 |---|---|---|
@@ -11,8 +11,8 @@ marketplaces, data providers or the public. Prepared 2026-11-13.
 | Enforcement: no automated retrieval or long-term history without permission; Yad2/Facebook prices never used, even from a scan's own search | `sources.js`, `service.js`, `structured-data.js` | Code done, tested |
 | Normalised observation schema, with private asking / completed sale / refurbished / new retail / price guide kept separate | `api/_lib/market/observations.js` | Code done, tested |
 | Feedback-loop guard: GetWorth estimates, recommended prices and engine-priced listings can't become evidence | `observations.js` (`isSelfGenerated`) | Code done, tested |
-| Market index: observations by product, appended price history, retention set by permission, deduplication by listing fingerprint | `api/_lib/market/index-store.js`, migration `20261113120000` | Code done; **migration NOT applied to Production** (needs founder approval) |
-| Fast path: indexed evidence that is current for the item's kind and strong enough on Israeli evidence prices with **no search**; otherwise it joins the live research pool | `api/_lib/scan/service.js` | Code done, tested; works only once the migration is applied |
+| Market index: observations by product, appended price history, retention set by permission, deduplication by listing fingerprint | `api/_lib/market/index-store.js`, migration `20261113120000` | Live; migration applied and verified 2026-11-13 |
+| Fast path: indexed evidence that is current for the item's kind and strong enough on Israeli evidence prices with **no search**; otherwise it joins the live research pool | `api/_lib/scan/service.js` | Live, tested |
 | Adaptive refresh policy (proposed defaults: phones/consoles 24 h, appliances 72 h, furniture 7 d), used by the fast path and the scheduled refresh | `api/_lib/market/refresh-policy.js`, `scan/prewarm.js` | Code done, tested |
 | Retention purge on every daily cron run (no OpenAI cost) | `api/prewarm.js` | Code done, tested |
 | JSON-LD Product/Offer extractor (no dependency), callable only for sources that may be retrieved | `api/_lib/market/structured-data.js` | Code done, tested; **no source is currently enabled** |
@@ -39,29 +39,30 @@ evidence for the existing 7-day research window. Durable Israeli price history n
 from at least one Israeli marketplace. Granting one is a single line in `sources.js`, and retention and ingestion follow
 from it. No provider was contacted (draft inquiries are in `docs/partnerships/`, unsent).
 
-## 3. Measured metrics (sample sizes stated; nothing extrapolated)
+## 3. Delivery scorecard (2026-11-13, Production = 620d295)
 
-| Metric | Value | Method / sample |
-|---|---|---|
-| Defensible price coverage, offline | **10 / 20 (50%)** | Fixed 20-item replay of recorded live searches (`scripts/il-coverage-eval.mjs`), re-run on c31c8ad on 2026-11-13. Not a Production rate. |
-| Of those 10, confidence | 2 medium, 8 low | Same replay |
-| Identification latency | p50 7.8 s | Production telemetry 2026-11-08..11-12 (small n; founder and test scans) |
-| Fresh market research latency | p50 12.1 s | Same window |
-| Reused research latency | ~0.8 s | Same window |
-| Research cache hit rate | 39% | Same window, before the product-keyed index |
-| Cost per fresh research | mean $0.021 (range $0.012–0.024) | 10-product controlled test, 2026-11-08 |
-| Identification accuracy | 10/18 exact, 0 confidently wrong | 18 labelled photos, V3 benchmark 2026-11-08 |
-| Valuation accuracy against real sales | **unmeasured** | 0 genuine completed marketplace sales |
-| Full scan in ~6 s | **not met** | Cold scan ≈ identify 7.8 s + research 12.1 s; a reused or indexed product ≈ identify + ~1 s |
+| Metric | Historical baseline | Measured result | Sample and method |
+|---|---|---|---|
+| Defensible price coverage | 10/20 replay | **10/20 live** | Live API run of the fixed 20-item price step (`il-coverage-eval.mjs record`, real OpenAI web search, $0.43). Identities are fixed, so identification is not exercised. The first live pass priced 11; one of those (Squier '50s from a '60s ad) was a sibling model, fixed in 620d295. Replay of the original recordings: 11/20 (scooter fix). |
+| Identification accuracy | not established | 10/18 exact, 0 confidently wrong | 18 labelled photos, 2026-11-08. **Not re-measured** this round. |
+| Wrong-model acceptance | DualSense Edge incident | 1 of 11 live prices (Squier) → fixed; 0 in 10 after the fix | Manual check of every accepted reference in the live run |
+| Fresh research latency | ~12.1 s p50 | **p50 11.9 s, p90 16.3 s** (range 5.3–18.3 s) | Same live run, n=20, from a local machine (not Production) |
+| Full scan latency p50 / p90 | not established | **not measured** | Needs signed-in Production scans (§7) |
+| Cache / index hit rate | ~39% | **not yet measured on the index** | The index went live 2026-11-13; it fills from Production scans and the daily refresh |
+| Cost per research / per priced item | ~$0.04 replay | **$0.021 / $0.043** | Live run: $0.4252 ÷ 20 researches ÷ 10 priced |
+| Evidence freshness | not established | 99 observations, 20 products, 59 Israeli private asks, each kept 7 days | Production `market_observations` after recording the live run's verified evidence |
+| Production E2E success rate | not established | **not measured** | Blocked: needs a signed-in browser session (§7) |
+| Real iPhone verification | not performed | **not performed** | Founder action |
 
 Do NOT claim: 80% coverage, six-second scans, verified transaction-price accuracy or a proprietary Israeli price
 database. None of these is supported by measurement today.
 
 ## 4. Investor demo checklist (real Production, no staging tricks)
 
-1. **Pick candidates from evidence, not hope.** In the replay, the best-evidenced items are the iPhone 13 (≈₪990, medium
-   confidence) and the Nintendo Switch OLED (≈₪900, medium). PS5, Apple Watch 8, iPad 9, MacBook Air M1, Canon 5D III and
-   Dyson V11 priced with LOW confidence. Exclude the AirPods Pro 2 (priced from one ad, probably low).
+1. **Pick candidates from evidence, not hope.** Live 2026-11-13, MEDIUM confidence: iPhone 13 128GB (≈₪990, 2 IL ads),
+   Apple Watch Series 8 45mm (≈₪770, 3 ads), iPad 9th gen 64GB (≈₪860, 3 ads), MacBook Air M1 (≈₪1,650, 3 ads). LOW:
+   PS5 (ads ₪935–3,900, dispersed), Switch OLED (1 ad), Dyson V11, Trek Marlin 5, Xiaomi Pro 2 scooter (1 ad). Exclude
+   the AirPods Pro 2 (two of its three references are generic category-page rows).
 2. **The day before:** scan each candidate once on the iPhone, signed in, in Production. Keep only the ones that price.
    This also warms the research cache and the index (24 h for phones and consoles), so the live demo is fast and runs on
    the same evidence.
@@ -83,6 +84,15 @@ jsdom, the Supabase CLI, the Vercel REST API (git-source deployments), and the C
 screenshots. Playwright and Cheerio were evaluated and **not** added. No source may be fetched automatically, so a
 crawler has nothing permitted to run on, and JSON-LD extraction needs no HTML library. Add Playwright for end-to-end PWA
 tests only if a test plan calls for it.
+
+## 7. Blockers that need the founder
+
+- **Signed-in Production E2E:** I may not type passwords into the live site. Sign in once in the Chrome window the
+  browser tools use (or provide a test-account session); then scan → question → prices → evidence → listing → own
+  price → return can be run and timed on Production.
+- **Durable Israeli price history:** needs a licence or written permission from an Israeli marketplace (no outreach was
+  made, per the founder's instruction).
+- **eBay Browse API keys** (free developer programme) would allow abroad price context through the permitted channel.
 
 ## 6. Remaining limitations
 
