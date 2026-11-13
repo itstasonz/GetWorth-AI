@@ -102,3 +102,42 @@ tests only if a test plan calls for it.
 - The refresh intervals are proposed defaults. Price-history rows (`market_observation_prices`) will let them be tuned
   once enough sightings accumulate.
 - Identification at ~7.8 s p50 sets the floor on scan time. A faster model scored worse on the labelled benchmark.
+
+## 8. Production browser E2E, 2026-11-13 (Production 620d295 → c0e43cf)
+
+Desktop Chrome, signed in as the founder, Production site, photos = independently labelled Wikimedia Commons images
+uploaded through the gallery input. **Not an iPhone test**, and the window did not actually resize to phone width, so
+mobile layout is NOT verified. Answers were given instantly by a script (the labelled model when offered, "not sure"
+otherwise), so the latencies below are machine time with no human thinking time.
+
+| Product (label) | Identification | Questions | Result | Identify / price (s) |
+|---|---|---|---|---|
+| PS5 | correct (disc edition) | 0 | no price | 7.8 / 14.5 |
+| iPhone 12 | 12 vs 12 mini → chose 12 | 2 (model, storage→unsure) | ≈₪950, list ≈₪1,300, quick ≈₪870, low | 8.2 / 16.5 |
+| iPhone 12 (repeat) | same | 2 | same ₪950 (reused research) | 7.7 / **1.3** |
+| Switch OLED | correct | 0 | ≈₪900, list ≈₪1,000, quick ≈₪680, low | 7.2 / 13.1 |
+| Galaxy S21 | S20/S20+/S21 → chose S21 | 2 | ≈₪860, list ≈₪950, quick ≈₪700, low | 9.9 / 12.0 |
+| Canon 5D Mark III | correct (body) | 0 | **≈₪42,500 — WRONG** (₪46,970 outlier ad) → fixed in c0e43cf → now no price | 7.0–8.6 / 8.5–17.4 |
+| Apple Watch Series 4 | family → series question → Series 4 | 1 | no price | 7.9 / 8.3 |
+| AirPods Pro 2 | AirPods Pro, generation question offered (script answered unsure) | 1 | ≈₪450 family-level, low | 8.8 / 14.1 |
+| iPhone 11 Pro | 11 Pro vs 11 Pro Max → chose 11 Pro | 2 | ≈₪2,000, list ≈₪2,200, quick ≈₪1,150, low | 7.7 / 13.1 |
+
+- Identification: 8 of 8 products named correctly or with the correct model offered in one question; 3 of 8 exact with
+  no question; 0 confidently wrong. n=8 photos — small.
+- Price coverage in this browser set (final code): 5 of 8 products priced; 0 wrong-model prices; 1 wrong price
+  (Canon ₪42,500) found and fixed. All prices are LOW confidence.
+- Full machine time per fresh scan (identify + price requests), n=11 scans: **p50 22.0 s, p90 ≈25 s**. Identify p50 7.9 s.
+- Repeat scan of the same product (research reused): price **1.3 s** after the last answer; whole scan ≈9.2 s (n=1).
+- Market index: Production read OK (641 ms, in parallel with the cache read) and writes OK; the fast path did NOT serve
+  any of these scans (no current, strong evidence under those product keys yet).
+- Condition: choosing a condition reprices locally (0 new requests). "Faulty" with no faulty ads now shows the market
+  price as context only (fixed 9748891).
+- Listing: draft opens with the identity, description, the seller's phone/area; the price is empty for a condition
+  without evidence; the seller's own price is kept; Back returns to the result. **Publish was NOT pressed**: the founder
+  does not own these items, and a published test ad would be a fake public listing. Listing completion is unmeasured.
+- Saved results: "My scans" lists every scan; it showed the range midpoint (₪1,085) instead of the worth (₪950) — fixed.
+
+Defects found and fixed today: faulty-condition headline, confirmed model not in name/title, saved worth ≠ shown worth,
+Canon outlier pricing (three iterations). Still open: confirmed Apple Watch series not in its name; no size question for
+a watch; a Production scan re-searches when the model words its identification differently (research key includes the
+query wording); the service-worker "update available" banner did not appear once while a new version was waiting.
