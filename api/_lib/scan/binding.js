@@ -41,7 +41,7 @@
 // Pure functions over text. Nothing is fetched.
 // ══════════════════════════════════════════════════════════════════════════════
 import { pricedNumbers, MAX_DISTANCE } from '../phaseb/content-binding.js';
-import { transliterates } from '../script-normalization.js';
+import { transliterates, skeletonOf, scriptOf, SCRIPT } from '../script-normalization.js';
 import { openVariant } from './identify.js';
 
 // A storage variant still open on the item, and the units a row states storage in.
@@ -169,7 +169,15 @@ export function namesOf(identity) {
  * alone, so it is read across alphabets only beside a word of the run that
  * matched on its own. Nothing here knows meanings: "wireless" is never "אלחוטי".
  */
-const sameWord = (w, t, weak = false) => w === t || transliterates(w, t, { minLength: weak ? 2 : 3 });
+// THE SAME HEBREW WORD SPELLED WITH OR WITHOUT ITS VOWEL LETTERS (2026-11-13, a founder's DualSense scan: "פליסטישן" for
+// "פלייסטיישן"): two Hebrew words of at least four consonants with the same consonants are one word. Shorter ones are not
+// read this way — too many short words share consonants.
+const sameHebrew = (w, t) => {
+  if (scriptOf(w) !== SCRIPT.HEBREW || scriptOf(t) !== SCRIPT.HEBREW) return false;
+  const a = skeletonOf(w); const b = skeletonOf(t);
+  return !!a && !!b && a.length >= 4 && a.length === b.length && a.every((c, k) => c === b[k]);
+};
+const sameWord = (w, t, weak = false) => w === t || sameHebrew(w, t) || transliterates(w, t, { minLength: weak ? 2 : 3 });
 
 /** Every place a run of words occurs in order: where, and the two words that follow it. */
 function runsIn(row, run) {
@@ -237,6 +245,7 @@ export function bindPrice(claim, page, identity, answer = null) {
   const names = namesOf(identity);
   const own = new Set(names.flat());
   const brand = new Set(tokens(identity?.brand));
+  const isBrandWord = (t) => brand.has(t) || [...brand].some((b) => b.length >= 3 && transliterates(t, b, { minLength: 2 }));
   const title = [...new Set(tokens(claim.title).filter((t) => t.length >= 3 && !/^\d+$/.test(t) && !brand.has(t)))].slice(0, 12);
   const exact = claim.match === 'exact';
   // A thing identified by description has no model a comparable could be "of": its comparables must name the KIND of thing.
@@ -251,7 +260,9 @@ export function bindPrice(claim, page, identity, answer = null) {
 
   /** Who a stretch of text names: the item itself, or (for a listing not claimed to be it) the listing by its own title. */
   const whoIn = (row, at) => {
-    const named = nearest(names.flatMap((run) => runsIn(row, run)), at);
+    // The brand, in either alphabet, may sit inside a seller's name for the product ("שלט פליסטישן סוני 5"): it is passed over.
+    const kept = row.map((w, i) => ({ ...w, i })).filter((w) => !isBrandWord(w.t));
+    const named = nearest(names.flatMap((run) => runsIn(kept, run).map((m) => ({ ...m, index: kept[m.index]?.i ?? m.index }))), at);
     if (named) return named;
     const titled = !exact && !descriptive && title.length >= 2 && title.every((t) => row.some((w) => w.t === t));
     return titled ? { at: nearest(row.filter((w) => title.includes(w.t)), at).at, next: null, then: null } : null;

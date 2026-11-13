@@ -166,7 +166,9 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
 // 5: rows must state a confirmed generation (2026-11-13: Apple Watch Series 4 priced from "שעוני אפל ווטש"). The tie of
 //    a row to its product is decided when the research is read from the page and kept with it, so research (and index
 //    observations) read by the older rule are not reused.
-export const RESEARCH_VERSION = 5;
+// 6: Hebrew seller aliases, Hebrew words matched by their consonants, the brand passed over inside a name (founder's
+//    DualSense scan dcb5196d, 2026-11-13: no ad was tied, and its no-price research would have been reused for a day).
+export const RESEARCH_VERSION = 6;
 function fnv1a(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }

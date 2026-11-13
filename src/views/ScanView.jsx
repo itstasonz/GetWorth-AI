@@ -25,8 +25,7 @@ import { useApp } from '../contexts/AppContext';
 import { Btn, Chip, InputField } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 import {
-  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, marketBandOf, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition,
-} from '../lib/coreScan';
+  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, marketBandOf, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition, unitModification } from '../lib/coreScan';
 import { scanCopy, localColor } from '../lib/scanCopy';
 import { WrongItemSheet, WhyPriceSheet, Bidi } from '../components/ScanSheets';
 
@@ -193,7 +192,9 @@ export default function ScanView() {
   const conditionBand = bandFor(s.valuation, s.condition);
   const market = marketBandOf(s.valuation);
   const band = conditionBand ?? market;
-  const noConditionBand = !!market && !!s.condition && !conditionBand;
+  // NOT THIS UNIT'S PRICE: no ads for the chosen condition, or a unit the owner confirmed as modified (custom shell).
+  const modified = unitModification(identity);
+  const noConditionBand = (!!market && !!s.condition && !conditionBand) || (!!market && !!modified);
   const conditionNote = !market ? null : !s.condition ? copy.conditionUnset
     : noConditionBand ? copy.conditionNone(copy.conditions[s.condition])
       : s.condition === 'good' ? null
@@ -245,7 +246,7 @@ export default function ScanView() {
               <div className="text-center space-y-1" data-testid="scan-worth">
                 {/* NO PRICE FOR THE CHOSEN CONDITION (2026-11-13, Production E2E: "faulty" kept ₪950 as the dominant worth): the
                     market price stays visible as context, labelled as NOT this unit's, and never as its estimated worth. */}
-                <p className="text-label text-text-muted" data-testid="scan-worth-label">{noConditionBand ? copy.marketOtherCondition(copy.conditions[s.condition]) : rough ? copy.worthApprox : copy.worth}</p>
+                <p className="text-label text-text-muted" data-testid="scan-worth-label">{modified ? copy.marketStandardUnit(modified.value) : noConditionBand ? copy.marketOtherCondition(copy.conditions[s.condition]) : rough ? copy.worthApprox : copy.worth}</p>
                 {band.worth && <p className={noConditionBand ? 'text-title text-text-muted' : 'text-display text-text-primary'}><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.worth)}</bdi></p>}
                 {/* An approximate result names its range as approximate, and never as the expected one. */}
                 {rough ? (

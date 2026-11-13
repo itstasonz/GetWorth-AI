@@ -461,8 +461,19 @@ export function listingPriceFor(result, listingCondition) {
   return Number.isFinite(p) && p > 0 ? p : '';
 }
 
+/**
+ * A unit the owner confirmed as MODIFIED (a custom or replacement shell, an aftermarket part): the market price found is for
+ * a standard unit, and what the modification is worth is not known (founder's DualSense, 2026-11-13). Returns the confirmed
+ * fact that says so, or null.
+ */
+const MODIFIED = /(custom|replacement|aftermarket|modified|modded|מותאם|הוחלף|החלפה|אפטרמרקט|שונה)/i;
+export function unitModification(identity) {
+  return (identity?.confirmed ?? []).find((c) => !c.unsure && c.value && MODIFIED.test(`${c.value}`) && !/^(original|מקורי)/i.test(String(c.value).trim())) ?? null;
+}
+
 export function buildListingDraft(s = state) {
-  const band = bandFor(s.valuation, s.condition);
+  // A modified unit's draft starts with no price: the market price found is a standard unit's.
+  const band = unitModification(s.identity) ? null : bandFor(s.valuation, s.condition);
   const i = s.identity ?? {};
   return {
     title: fallbackTitle(i),

@@ -52,7 +52,7 @@ uncertainty_note: at most ten words in ${out} naming what is not established, or
 visible_condition: what the photograph shows of the condition, or unknown. The owner will choose the real condition later.
 condition_notes: up to two observations in ${out}, a few words each (scratches, wear, sealed box). Empty when nothing is visible.
 listing_description: two short factual sentences in ${out} a seller would write in a listing: what it is, the variant, what is included. No price, no condition, nothing the photograph does not show.
-search: hebrew_name is what a seller in Israel calls this in Hebrew, 1-5 words. aliases and model_numbers are OTHER names this exact product is sold under, not a repeat of the fields above; they only phrase a search. Usually empty.
+search: hebrew_name is what a seller in Israel writes in a second-hand ad title for this exact product, in Hebrew, 1-5 words, as sellers write it ("אייפון 13", not a translation of the English name). aliases and model_numbers are OTHER names this exact product is sold under, not a repeat of the fields above, and they are matched against ad titles: when Israeli sellers name the product by something else — a PlayStation 5 DualSense is advertised as "שלט פלייסטיישן 5" or "שלט PS5" — give that Hebrew name as an alias. Only names that mean THIS product and no other model; never a generic word ("שלט", "controller") alone. Usually empty.
 
 WHAT KIND OF THING THIS IS, AND WHAT MATTERS ABOUT IT
 Every item is sold in its own market, with its own value drivers, and the questions that matter differ. A used car is not a used mouse. Decide for THIS item.

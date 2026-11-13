@@ -378,3 +378,39 @@ describe('MI-18 price stability comes from pooling, not freezing (iPhone 12, Pro
     assert.equal(pooled.price_confidence, 'low', 'pooling does not invent confidence: storage is still unknown');
   });
 });
+
+describe('MI-19 the founder\'s DualSense (Production scan dcb5196d, 2026-11-13)', () => {
+  // The identity as the scan produced it, with the Hebrew seller alias the prompt now asks for.
+  const dualsense = (aliases = ['PS5 controller', 'שלט פלייסטיישן 5']) => normalizeIdentity({ ...RAW_IDENTITY, category: 'Electronics', item_type: 'game controller', brand: 'Sony', product_family: 'DualSense', model: 'DualSense Wireless Controller', canonical_name: 'sony dualsense wireless controller', display_name: 'Sony DualSense Wireless Controller', color: 'green and black', search: { hebrew_name: 'שלט דואלסנס לפלייסטיישן 5', aliases, model_numbers: [] } });
+  const homeless = (t, price) => ({ type: 'listing', title: `${t} למכירה בבאר שבע ${price} ש"ח`, text: `# ${t} למכירה בבאר שבע\n\n${price} ₪\n\n## פריט\n\n${t}\n\n### מחיר: \n\n${price}` });
+  const bind = async (t, price, id, match = 'exact') => { const { bindPrice } = await import('../api/_lib/scan/binding.js'); return bindPrice({ price, currency: 'ILS', title: t, match }, homeless(t, price), id); };
+  test('MI-19a the Homeless ad "שלט פליסטישן סוני 5 שחור ₪270" (misspelt, brand inside the name) is tied to the DualSense through its Hebrew seller alias', async () => {
+    const r = await bind('שלט פליסטישן סוני 5 שחור', 270, dualsense());
+    assert.equal(r.level, 'strong', JSON.stringify(r));
+    assert.notEqual((await bind('שלט פליסטישן סוני 5 שחור', 270, dualsense(['PS5 controller']))).level, 'strong', 'without the Hebrew alias it was never tied: the scan\'s failure');
+  });
+  test('MI-19b another model is never the DualSense: Edge, a PS4 controller, a controller "for" PS5', async () => {
+    const edge = await bind('שלט פלייסטיישן 5 אדג', 600, dualsense());
+    assert.equal(edge.match, 'sibling_model');
+    assert.notEqual((await bind('שלט פלייסטיישן 4 שחור', 120, dualsense())).level, 'strong');
+    assert.notEqual((await bind('שלט אלחוטי לפלייסטיישן 5', 90, dualsense())).level, 'strong');
+  });
+  test('MI-19c a short Hebrew word is not read by its consonants alone', async () => {
+    const { bindPrice } = await import('../api/_lib/scan/binding.js');
+    const id = dualsense(['שלט פלייסטיישן 5']);
+    assert.notEqual(bindPrice({ price: 100, currency: 'ILS', title: 'שולט פלייסטיישן 5', match: 'exact' }, homeless('שולט פלייסטיישן 5', 100), id).level, 'strong', '"שולט" (3 consonants) is not "שלט"');
+  });
+});
+
+describe('MI-20 a modified unit is priced as a standard unit, and says so', () => {
+  test('MI-20a a confirmed custom shell marks the market price as a standard unit\'s; "original" does not; the draft starts with no price', async () => {
+    const { unitModification, buildListingDraft } = await import('../src/lib/coreScan.js');
+    const custom = { confirmed: [{ attribute: 'original or custom shell', value: 'Custom replacement shell' }] };
+    assert.equal(unitModification(custom).value, 'Custom replacement shell');
+    assert.equal(unitModification({ confirmed: [{ attribute: 'original or custom shell', value: 'Original Sony shell' }] }), null);
+    assert.equal(unitModification({ confirmed: [{ attribute: 'original or custom shell', value: 'Custom replacement shell', unsure: true }] }), null);
+    const valuation = { status: 'priced', prices: { good: { low: 150, high: 230, worth: 190, list: 230, quick: 150 } } };
+    assert.equal(buildListingDraft({ identity: { display_name: 'Sony DualSense', ...custom }, valuation, condition: 'good' }).price, '');
+    assert.equal(buildListingDraft({ identity: { display_name: 'Sony DualSense' }, valuation, condition: 'good' }).price, 230);
+  });
+});
