@@ -114,6 +114,8 @@ const SEALED_FLOOR = 0.5;
 const SCALE_BOUNDS = [0.8, 2];
 /** Where the weight of the evidence spans more than this (P90 / P10), the evidence disagrees. */
 export const DISPERSION = Object.freeze({ agrees: 1.6, dispersed: 2.2 });
+/** One Israeli ad this many times away from each of two others is an error, a joke or another product, not a market (a stated heuristic, 2026-11-13). */
+export const ISOLATED_RATIO = 5;
 /**
  * Local weight, in the units of WEIGHT: a current exact Israeli listing weighs 1.
  *   drives  from here the Israeli evidence prices the item alone (and the search does not go abroad)
@@ -321,6 +323,16 @@ export function normalizeReferences(evidence, { basis = BASIS.ITEM, today = null
     const med = median(kept.map((p) => p.value));
     const mad = median(kept.map((p) => Math.abs(p.value - med)));
     if (mad > 0) for (const p of kept) if ((0.6745 * Math.abs(p.value - med)) / mad > MAD_THRESHOLD) p.dropped = SET_ASIDE.OUTLIER;
+  }
+  // AN ISOLATED ISRAELI AD AMONG THREE (2026-11-13). Too few for the MAD rule, and the weighted median follows the heaviest:
+  // a "Canon 5D Mark III" ad at ₪46,970 beside ₪3,000 and ₪2,000 ones priced the camera ≈₪42,500. An Israeli reference
+  // more than ISOLATED_RATIO times away from EVERY other Israeli reference is set aside. Israeli against Israeli only: an
+  // Israeli listing above cheaper ones abroad is a price level, not an outlier. A stated heuristic, like the MAD rule.
+  const ilKept = points.filter((p) => !p.dropped && p.evidence.market === 'IL');
+  if (ilKept.length === 3) {
+    const apart = (a, b) => Math.max(a.value, b.value) / Math.min(a.value, b.value) > ISOLATED_RATIO;
+    const isolated = ilKept.filter((p) => ilKept.every((q) => q === p || apart(p, q)));
+    if (isolated.length === 1) isolated[0].dropped = SET_ASIDE.OUTLIER;
   }
   return { points, anchorIl, anchorInStock: il ? il.inStock : null, anchorRange: il ? { low: il.low, high: il.high, dispersed: il.dispersed } : null, scale, local, localDrives };
 }

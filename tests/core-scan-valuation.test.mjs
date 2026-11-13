@@ -253,6 +253,12 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     assert.equal(close.status, 'priced', 'two references that roughly agree still price');
     const withAbroad = value([item({ price: 46970, kind: 'used_listing' }), item({ price: 2000, kind: 'used_listing' }), item({ price: 400, price_ils: 1276, currency: 'USD', market: 'INTL', kind: 'used_listing' })]);
     assert.equal(withAbroad.withdrawn, 'references_disagree', 'two Israeli ads 23× apart decide nothing, whatever stands abroad');
+    const three = value([46970, 3000, 2000].map((price) => item({ price, kind: 'used_listing' })));
+    assert.equal(three.status, 'priced');
+    assert.deepEqual(three.evidence.filter((e) => e.set_aside === 'outlier').map((e) => e.price), [46970], 'the isolated Israeli ad is set aside');
+    assert.ok(three.prices.good.worth <= 3000);
+    const spread = value([935, 1800, 3900].map((price) => item({ price, kind: 'used_listing' })));
+    assert.equal(spread.evidence.filter((e) => e.set_aside === 'outlier').length, 0, 'a spread where each ad has a neighbour keeps them all');
   });
   test('CS-3h the centre is where half the weight lies, not where half the listings are', () => {
     const centre = (list) => aggregate(normalizeReferences(list, { today: TODAY }).points).centre;
