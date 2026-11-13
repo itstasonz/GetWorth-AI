@@ -141,3 +141,15 @@ Defects found and fixed today: faulty-condition headline, confirmed model not in
 Canon outlier pricing (three iterations). Still open: confirmed Apple Watch series not in its name; no size question for
 a watch; a Production scan re-searches when the model words its identification differently (research key includes the
 query wording); the service-worker "update available" banner did not appear once while a new version was waiting.
+
+## 9. Listing test and latency, 2026-11-13 (Production c659004)
+
+- **Listing publish is broken in Production, root cause found.** The Storage bucket `listings` does not exist (only
+  `avatars`, `verification-photos`, `scan-lab`); its policies do (20260519000007). The app uploads every listing photo
+  there and refuses to publish without one, so no listing has been created since 2026-07-17 (all 45 existing rows hold
+  base64 photos). Also fixed on the way: `fetch(data:)` was refused by the CSP (8448e70), and the failure was invisible
+  (c659004 shows it). **Fix prepared, NOT applied (permission guard): migration 20261113150000** (public bucket, ≤5 MB,
+  JPEG/PNG/WebP). The QA test listing was therefore never created (DB check: 0 rows titled "GetWorth QA Test%").
+- **Latency from Production telemetry (server time; add ~1 s network):** cold scans n=11 — identify+market p50 19.7 s,
+  p90 23.0 s (market p50 12.6 s, p90 15.9 s); repeat scans n=3 — p50 7.1 s, p90 7.3 s (market 0.4–0.6 s). Index read
+  233–903 ms in parallel with the cache read; the index served one scan outright and joined the pool in four.
