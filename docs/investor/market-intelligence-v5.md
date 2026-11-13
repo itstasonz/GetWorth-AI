@@ -195,3 +195,27 @@ query wording); the service-worker "update available" banner did not appear once
   tokens ≈ 5.3 s of generation) + quota 0.48 s + auth ~0. Image p50 186 KB, ~4k input tokens. NOT changed: running the
   quota beside the model call would let rate-limited requests start paid calls; shortening the output needs the labelled
   accuracy benchmark first. Before = after.
+
+## 12. Price stability, identification benchmark, mobile QA, 2026-11-13 (Production 89411a0, dpl_Fepb5YvL6esjNdCk4hUC1gLjfM6h)
+
+- **iPhone 12 ₪950 → ₪1,300 root cause:** two searches reached different Homeless ads (09:29: ₪1,050 exact + ₪2,000, ₪800,
+  ₪1,450; 11:44: ₪2,000, ₪1,400, ₪1,200, ₪1,450) — search variance on sparse evidence, no wrong model, no outlier, no
+  classification change; the 7-day pool that normally merges searches was empty for the second one because RESEARCH_VERSION
+  5 (11:30) changed the cache keys. Pooled, the eight ads give ₪1,250 (range ₪950–1,750), still low (storage unknown).
+  Regression test MI-18 on the real evidence (tests/fixtures/iphone12-two-searches-2026-11-13.json). No freezing added.
+- **Coverage / confidence (current code, replays):** original recordings 11/20 (2 medium, 9 low); live run 1 10/20
+  (4 medium, 6 low); live run 3 9/20 (6 medium, 3 low). Unpriced = no current Israeli second-hand ad tied to the exact
+  product (most), or too few comparables. "High" needs ≈3 agreeing current Israeli ads — searches return 1–4.
+- **Identification benchmark (18 labelled Commons photos, production config, $≈0.36):** full-size 11 correct / 0 wrong-
+  confident / 7 hedged, p50 6.5 s p90 9.2 s, 465 output tokens; 768 px 9 / 0 / 9, p50 6.2 s p90 7.1 s — rejected (−2
+  correct). No identification change shipped; Production identify p50 7.3 s.
+- **Mobile QA:** Playwright-core 1.64.1 driving installed Chrome with iPhone SE (320), iPhone 13 (390), iPhone 15 Pro Max
+  (430) profiles — Chromium emulation, NOT Safari/WebKit and NOT hardware: home and browse RTL, no horizontal overflow, no
+  page errors; header icons 32–36 → 44 px, View All 20 → 44 px. Signed-in 390×787 window (same session): scan → model
+  question → no-price screen, no overflow; scan close and update-banner buttons → 44 px. Remaining small: category chips
+  42 px tall, gallery-upload pill 36 px tall.
+- **Flaky test V2-30h:** it timed the module's first cold call under the parallel suite; now judges the fastest of five
+  warm runs. Full suite 2,145 pass / 0 fail / 1 skip, twice.
+- **Device-only checks left for the founder (real iPhone, installed PWA):** camera capture and permission prompt, HEIC
+  from the photo picker, safe-area insets (notch/home bar), update banner after a deploy, Hebrew keyboard input in the
+  listing form, scroll of the evidence sheet with a thumb, offline/poor-network behaviour.
