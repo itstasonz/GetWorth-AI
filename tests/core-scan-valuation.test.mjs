@@ -251,6 +251,8 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     assert.deepEqual(few.evidence.map((e) => e.set_aside).sort(), ['references_disagree', 'references_disagree']);
     const close = value([300, 450].map((price) => item({ price, kind: 'sold' })));
     assert.equal(close.status, 'priced', 'two references that roughly agree still price');
+    const withAbroad = value([item({ price: 46970, kind: 'used_listing' }), item({ price: 2000, kind: 'used_listing' }), item({ price: 400, price_ils: 1276, currency: 'USD', market: 'INTL', kind: 'used_listing' })]);
+    assert.equal(withAbroad.withdrawn, 'references_disagree', 'two Israeli ads 23× apart decide nothing, whatever stands abroad');
   });
   test('CS-3h the centre is where half the weight lies, not where half the listings are', () => {
     const centre = (list) => aggregate(normalizeReferences(list, { today: TODAY }).points).centre;

@@ -460,10 +460,14 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     ? (standing.filter(qualifies).length < COMPARABLE_MIN ? WITHDRAWN.TOO_FEW_COMPARABLES : (dispersionOf(standing) > DISPERSION.dispersed ? WITHDRAWN.COMPARABLES_DISAGREE : null))
     : null;
   if (comparableReason) for (const p of standing) p.dropped = SET_ASIDE.SIMILAR_CONTEXT;
-  // TWO REFERENCES THAT DISAGREE (WITHDRAWN.REFERENCES_DISAGREE): both are shown, neither prices.
-  const pair = points.filter((p) => !p.dropped);
+  // TWO REFERENCES THAT DISAGREE (WITHDRAWN.REFERENCES_DISAGREE): both are shown, neither prices. The pair is the two
+  // references that stand, or the two ISRAELI ones beside any abroad (an Israeli reference outweighs one abroad, so two
+  // Israeli ads 23× apart decide the price between them: Canon 5D Mark III, ₪46,970 and ₪2,000 beside $399, 2026-11-13).
+  const standingNow = points.filter((p) => !p.dropped);
+  const israeliNow = standingNow.filter((p) => p.evidence.market === 'IL');
+  const pair = standingNow.length === 2 ? standingNow : israeliNow.length === 2 ? israeliNow : [];
   const disagree = pair.length === 2 && Math.max(pair[0].value, pair[1].value) / Math.min(pair[0].value, pair[1].value) > DISPERSION.dispersed;
-  if (disagree) for (const p of pair) p.dropped = SET_ASIDE.DISAGREE;
+  if (disagree) for (const p of standingNow) p.dropped = SET_ASIDE.DISAGREE;
   const kept = points.filter((p) => !p.dropped);
   const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
