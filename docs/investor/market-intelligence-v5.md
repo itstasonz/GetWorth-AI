@@ -174,3 +174,24 @@ query wording); the service-worker "update available" banner did not appear once
 - Open: the Apple Watch Series 4 price (≈₪900, low) rests on an Ivory refurbished unit and a Homeless ad titled only
   "שעוני אפל ווטש" — weak evidence, shown as such. Edit/delete icon buttons on My listings lack accessible labels. A
   listing's own page offers "message seller" to its seller.
+
+## 11. Final hardening, 2026-11-13 (Production 5390628, dpl_8TQKwizFY3R97gamvF7Yaxm6gEYP)
+
+- **Apple Watch Series 4 ≈₪900 — root cause:** identity = family "Apple Watch" (model null, exact false) + owner-confirmed
+  "Series 4". Its name runs reduce to "watch", so a Homeless category row titled only "שעוני אפל ווטש" (₪1,000) bound as
+  verified_row/close_comparable; the Ivory refurbished Series 4 (₪1,699, shop page) then joined as supporting evidence
+  (refurbished alone is set aside). **Fix (dd61e4f):** a row must state the number of a confirmed generation/series/year
+  (`row_does_not_state_the_confirmed_generation`); RESEARCH_VERSION 5 (5390628) so research bound by the older rule is
+  not reused. Re-scan on Production: **no price** (fresh search). Replays unchanged (11/20, 10/20, 9/20).
+- **Canon regression:** fresh Production scan ≈₪4,400 (range ₪2,200–4,800, low) from three genuine 5D Mark III ads
+  (₪4,900 current exact, ₪3,000 old, ₪2,000 comparable) — no outlier; the ₪46,970 case stays covered by tests.
+- **Storage (20261113170000, APPLIED):** rehearsal on Production (rolled back): before — anon/owner/other user each see 1
+  object; after — anon 0, owner 1, other user 0. Live: with the QA photo in the bucket, anonymous list of the root and
+  of the owner's folder both return []; the public photo URL returns 200; the owner's delete removed the object.
+- **QA listing #2 `2937abf6-c0ae-447a-a330-df3902c1c1b1`:** published at ₪999 (seller_entered, title_hebrew empty →
+  seller title shown in Hebrew), anon-visible, opened from My listings (labelled edit/delete buttons, no "message seller"
+  on own listing), deleted → status deleted, anon [], 0 objects, photo 400.
+- **Identification profile (Production, n=16):** total p50 7.3 s / p90 8.3 s = OpenAI 6.9 s (first token 1.6 s; ~460 output
+  tokens ≈ 5.3 s of generation) + quota 0.48 s + auth ~0. Image p50 186 KB, ~4k input tokens. NOT changed: running the
+  quota beside the model call would let rate-limited requests start paid calls; shortening the output needs the labelled
+  accuracy benchmark first. Before = after.
