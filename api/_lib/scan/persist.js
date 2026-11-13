@@ -66,7 +66,7 @@ export async function saveMarketResearch(key, record, scanUuid, { supa = getServ
 
 /** How many references a valuation row keeps: market.js asks each stage for at most 12, two stages, merged with a pool. */
 export const MAX_STORED_EVIDENCE = 40;
-const STORED_FIELDS = ['url', 'domain', 'title', 'price', 'currency', 'price_ils', 'shipping', 'kind', 'match', 'market', 'condition', 'page', 'listed', 'archived', 'binding', 'binding_reason', 'stock', 'seen', 'source', 'verification'];
+const STORED_FIELDS = ['url', 'domain', 'title', 'price', 'currency', 'price_ils', 'shipping', 'kind', 'match', 'market', 'condition', 'page', 'listed', 'archived', 'binding', 'binding_reason', 'stock', 'seen', 'source', 'verification', 'sightings'];
 /** One reference as the calculation read it: its own fields, none of the outputs (used, weight, set_aside, freshness). */
 function storedReference(e) {
   const out = {};

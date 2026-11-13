@@ -371,11 +371,40 @@ export function requalify(e) {
  * rests on more references moves less with whichever listings happened to
  * appear today. A listing's own date travels with it, so pooled evidence ages.
  */
+// ── THE SAME AD, SEEN MORE THAN ONCE (2026-11-13) ───────────────────────────
+// Five live runs of the same 20 products: one Homeless ad ("דייסון V11 למכירה בפתח תקווה", ₪1,100) was classified exact in
+// three searches and "bundle" in the fourth; the newest sighting won, and the product lost its only Israeli reference. What an
+// ad IS is a judgement made again at every sighting, so it is decided by the MAJORITY of its sightings; a tie goes to the
+// less usable reading (never the more convenient one). Whether the price was tied to the product is a fact about the ad's own
+// text: one sighting that proved it is proof. Only evidence already inside the research window is merged; nothing new is kept.
+const LESS_USABLE = ['exact', 'close_comparable', 'sibling_model', 'bundle', 'accessory', 'part', 'box_only', 'irrelevant'];
+const BIND_ORDER = ['strong', 'verified_row', 'weak', 'unbound'];
+const MAX_SIGHTINGS = 6;
+const sightingOf = (e) => ({ match: e.match, kind: e.kind, condition: e.condition, binding: e.binding, binding_reason: e.binding_reason ?? null });
+function majority(values, order = null) {
+  const count = new Map();
+  for (const v of values) count.set(v, (count.get(v) ?? 0) + 1);
+  const top = Math.max(...count.values());
+  const leaders = [...count.keys()].filter((v) => count.get(v) === top);
+  if (leaders.length === 1 || !order) return leaders[0];
+  return leaders.sort((a, b) => order.indexOf(b) - order.indexOf(a))[0];
+}
+function combine(newer, older) {
+  const sightings = [...(newer.sightings ?? [sightingOf(newer)]), ...(older.sightings ?? [sightingOf(older)])].slice(0, MAX_SIGHTINGS);
+  if (sightings.length < 2) return newer;
+  const match = majority(sightings.map((x) => x.match), LESS_USABLE);
+  const kind = majority(sightings.map((x) => x.kind)) ?? newer.kind;
+  const condition = majority(sightings.map((x) => x.condition)) ?? newer.condition;
+  const proof = [...sightings].sort((a, b) => BIND_ORDER.indexOf(a.binding) - BIND_ORDER.indexOf(b.binding))[0];
+  return { ...newer, match, kind, condition, binding: proof.binding, binding_reason: proof.binding_reason, sightings };
+}
+
 export function mergeEvidence(fresh, earlier, max = 20) {
   const byPage = new Map();
   for (const e of [...(Array.isArray(fresh) ? fresh : []), ...(Array.isArray(earlier) ? earlier : [])]) {
     const id = `${pageKey(e?.url)}|${e?.price}|${e?.currency}`;
-    if (e?.url && !byPage.has(id)) byPage.set(id, e);
+    if (!e?.url) continue;
+    byPage.set(id, byPage.has(id) ? combine(byPage.get(id), e) : e);
   }
   return [...byPage.values()].slice(0, max);
 }

@@ -35,7 +35,7 @@ import { researchMarket, marketDate, buildSearchQueries, IL_SEARCH_DOMAINS } fro
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
-import { loadMarketplaceSales, salesEvidenceFor } from './marketplace.js';
+import { loadMarketplaceSales, salesEvidenceFor, loadMarketplaceListings, listingEvidenceFor } from './marketplace.js';
 import { afterResponse } from './telemetry.js';
 import { resolveMarketFreshMs, resolveMarketSwr, resolveMarketIndex } from './config.js';
 import { defaultIndex, nullIndex } from '../market/index-store.js';
@@ -188,6 +188,8 @@ export async function runPrice({
   parallel = resolveMarketParallel(),
   // Genuine GetWorth sales (marketplace.js): read alongside the research, never cached with it, never blocking it.
   marketplace = loadMarketplaceSales,
+  // Genuine GetWorth asking prices (marketplace.js listingEvidenceFor): read alongside, never cached with the research.
+  marketplaceListings = loadMarketplaceListings,
   freshMs = resolveMarketFreshMs(), swr = resolveMarketSwr(),
   // Where a stale-while-revalidate refresh runs: after the response (telemetry.js afterResponse, Vercel's waitUntil).
   background = afterResponse,
@@ -201,8 +203,9 @@ export async function runPrice({
   // How this KIND of item is valued, chosen from what it is (valuation.js strategyFor), never from the evidence found.
   const strategy = strategyFor(identity);
   const salesPending = identity?.incomplete ? Promise.resolve([]) : Promise.resolve().then(() => marketplace({ now: t0 })).catch(() => []);
+  const listingsPending = identity?.incomplete ? Promise.resolve([]) : Promise.resolve().then(() => marketplaceListings({ now: t0 })).catch(() => []);
   const priced = async (record, extra) => {
-    const sales = salesEvidenceFor(identity, await salesPending, { today: marketDate(t0) });
+    const sales = [...salesEvidenceFor(identity, await salesPending, { today: marketDate(t0) }), ...listingEvidenceFor(identity, await listingsPending, { today: marketDate(t0) })];
     const valuation = buildValuation({
       evidence: [...record.evidence, ...sales], searchPerformed: record.search_performed !== false, unverified: record.unverified ?? 0,
       approximate, familyLevel, strategy, searched: { ...record.searched, at: new Date(record.at).toISOString() },

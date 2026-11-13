@@ -73,3 +73,62 @@ export function salesEvidenceFor(identity, rows, { today = new Date().toISOStrin
   }
   return out;
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// GENUINE GETWORTH ASKING PRICES (2026-11-13)
+//
+// marketplace_listing_evidence (service_role only) returns the active listings whose price the SELLER set — the database
+// trigger marks a price within 2% / ₪5 of any number GetWorth showed as 'getworth_valuation', never evidence — from genuine
+// accounts, one per seller per product. Each becomes an Israeli PRIVATE ASKING price of the same class as a Homeless ad:
+// kind used_listing, never 'sold'. A listing is not a sale until a buyer confirms one (the sale evidence above).
+// ══════════════════════════════════════════════════════════════════════════════
+export const LISTING_SOURCE = 'getworth_listing';
+export const LISTING_URL_PREFIX = 'getworth:listing:';
+export const LISTING_LOOKBACK_DAYS = 120;
+
+/** The qualifying listings, or [] — never throws. */
+export async function loadMarketplaceListings({ supa = getServiceClient(), now = Date.now(), timeoutMs = SALE_TIMEOUT_MS } = {}) {
+  if (!supa) return [];
+  const since = new Date(now - LISTING_LOOKBACK_DAYS * 864e5).toISOString();
+  try {
+    const result = await Promise.race([
+      supa.rpc('marketplace_listing_evidence', { p_since: since }),
+      new Promise((resolve) => { setTimeout(() => resolve({ error: { message: 'timeout' } }), timeoutMs); }),
+    ]);
+    if (result?.error) { console.warn('[Scan] marketplace listings unavailable:', result.error.message); return []; }
+    return Array.isArray(result?.data) ? result.data : [];
+  } catch (err) {
+    console.warn('[Scan] marketplace listings unavailable:', err?.message);
+    return [];
+  }
+}
+
+/** The asking prices of this product, as valuation references. One per listing reference; anything unidentified is skipped. */
+export function listingEvidenceFor(identity, rows, { today = new Date().toISOString().slice(0, 10) } = {}) {
+  if (!identity || !Array.isArray(rows) || rows.length === 0) return [];
+  const key = marketKey(identity);
+  const seen = new Set();
+  const out = [];
+  for (const row of rows) {
+    const ref = typeof row?.listing_ref === 'string' && /^[0-9a-f]{8,32}$/.test(row.listing_ref) ? row.listing_ref : null;
+    const price = Number(row?.price);
+    if (!ref || seen.has(ref) || !(price > 0)) continue;
+    if (!row.identity || typeof row.identity !== 'object' || marketKey(row.identity) !== key) continue;
+    seen.add(ref);
+    out.push({
+      url: `${LISTING_URL_PREFIX}${ref}`,
+      domain: 'getworth',
+      title: String(row.identity.display_name ?? '').slice(0, 120) || null,
+      price, currency: 'ILS', price_ils: price,
+      kind: 'used_listing', match: 'exact', market: 'IL',
+      condition: CONDITION[row.condition] ?? 'unknown',
+      page: 'listing',
+      listed: String(row.created_at ?? '').slice(0, 10) || null,
+      binding: 'verified_row',
+      seen: today,
+      source: LISTING_SOURCE,
+      verification: 'seller_entered',
+    });
+  }
+  return out;
+}

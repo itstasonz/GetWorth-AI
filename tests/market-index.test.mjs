@@ -463,3 +463,69 @@ describe('MI-23 the new-price reference is its own thing', () => {
     assert.equal(v.retail_new_ils, 280);
   });
 });
+
+describe('MI-24 the same ad seen in several searches is decided by the majority of its sightings', () => {
+  const ad = (match, binding = 'strong', kind = 'used_listing') => ({ url: 'https://www.homeless.co.il/yad2/viewad,1.aspx', domain: 'homeless.co.il', title: 'דייסון V11 למכירה בפתח תקווה', price: 1100, currency: 'ILS', price_ils: 1100, kind, match, market: 'IL', condition: 'like_new', page: 'listing', binding, seen: today });
+  test('MI-24a exact ×3 then bundle ×1 (newest) is exact; one sighting of each is the less usable', async () => {
+    const { mergeEvidence } = await import('../api/_lib/scan/valuation.js');
+    let pool = [ad('exact')];
+    pool = mergeEvidence([ad('exact')], pool);
+    pool = mergeEvidence([ad('exact')], pool);
+    pool = mergeEvidence([ad('bundle')], pool);
+    assert.equal(pool.length, 1);
+    assert.equal(pool[0].match, 'exact', 'three readings against one');
+    assert.equal(pool[0].sightings.length, 4);
+    assert.equal(mergeEvidence([ad('bundle')], [ad('exact')])[0].match, 'bundle', 'a tie is never resolved in the convenient direction');
+  });
+  test('MI-24b a price once proven tied to the ad stays proven; a different price is a different observation', async () => {
+    const { mergeEvidence } = await import('../api/_lib/scan/valuation.js');
+    assert.equal(mergeEvidence([ad('exact', 'weak')], [ad('exact', 'strong')])[0].binding, 'strong');
+    assert.equal(mergeEvidence([{ ...ad('exact'), price: 1000, price_ils: 1000 }], [ad('exact')]).length, 2);
+  });
+});
+
+describe('MI-25 first-party asking prices', () => {
+  const ident = { canonical_name: 'logitech g pro x superlight', display_name: 'Logitech G Pro X Superlight', brand: 'Logitech', model: 'G Pro X Superlight', configuration: 'complete_item' };
+  test('MI-25a a qualifying listing of THIS product becomes an Israeli private asking price, never a sale; another product is ignored', async () => {
+    const { listingEvidenceFor } = await import('../api/_lib/scan/marketplace.js');
+    const rows = [
+      { listing_ref: 'a1b2c3d4e5f60718', price: 320, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: ident },
+      { listing_ref: 'b1b2c3d4e5f60718', price: 900, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: { ...ident, canonical_name: 'logitech g502', model: 'G502' } },
+      { listing_ref: 'a1b2c3d4e5f60718', price: 320, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: ident },
+    ];
+    const refs = listingEvidenceFor(normalizeIdentity(RAW_IDENTITY), rows, { today });
+    assert.equal(refs.length, 1);
+    assert.deepEqual([refs[0].kind, refs[0].market, refs[0].source, refs[0].verification, refs[0].condition], ['used_listing', 'IL', 'getworth_listing', 'seller_entered', 'good']);
+    assert.notEqual(refs[0].kind, 'sold');
+  });
+  test('MI-25b the feedback guard: a GetWorth asking price is evidence only as a seller-entered ask', () => {
+    const ask = { url: 'getworth:listing:a1b2c3d4e5f60718', source: 'getworth_listing', verification: 'seller_entered', kind: 'used_listing' };
+    assert.equal(isSelfGenerated(ask), false);
+    assert.equal(isSelfGenerated({ ...ask, verification: 'getworth_valuation' }), true);
+    assert.equal(isSelfGenerated({ ...ask, kind: 'sold' }), true);
+  });
+  test('MI-25c the SQL function: seller prices only, genuine sellers only, active and recent, one per seller per product', async () => {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const fs = await import('node:fs');
+    const db = new PGlite();
+    await db.exec(`create role anon; create role authenticated; create role service_role;
+      create table profiles (id uuid primary key, is_admin boolean default false, is_test boolean default false);
+      create table valuations (id uuid primary key, valuation_version int, ai_raw_response jsonb);
+      create table listings (id uuid primary key default gen_random_uuid(), seller_id uuid, valuation_id uuid, status text, price numeric, price_source text, condition text, category text, created_at timestamptz default now());`);
+    await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261113190000_marketplace_listing_evidence.sql', import.meta.url), 'utf8'));
+    const S = { real: '00000000-0000-0000-0000-000000000001', other: '00000000-0000-0000-0000-000000000002', admin: '00000000-0000-0000-0000-000000000003', test: '00000000-0000-0000-0000-000000000004' };
+    await db.query(`insert into profiles (id, is_admin, is_test) values ($1,false,false),($2,false,false),($3,true,false),($4,false,true)`, [S.real, S.other, S.admin, S.test]);
+    const V = '10000000-0000-0000-0000-000000000001';
+    await db.query(`insert into valuations values ($1, 3, $2)`, [V, JSON.stringify({ identity: { canonical_name: 'x phone', display_name: 'X Phone' } })]);
+    const L = (seller, price, source, status = 'active', age = '1 day') => db.query(`insert into listings (seller_id, valuation_id, status, price, price_source, condition, category, created_at) values ($1,$2,$3,$4,$5,'used','Electronics', now() - $6::interval)`, [seller, V, status, price, source, age]);
+    await L(S.real, 500, 'seller_entered');                 // counts
+    await L(S.real, 480, 'seller_entered', 'active', '2 days'); // same seller, same product, older → not twice
+    await L(S.other, 900, 'getworth_valuation');            // copied GetWorth price → never
+    await L(S.admin, 450, 'seller_entered');                // admin → never
+    await L(S.test, 450, 'seller_entered');                 // test account → never
+    await L(S.other, 520, 'seller_entered', 'deleted');     // not active → never
+    await L(S.other, 530, 'seller_entered', 'active', '200 days'); // too old → never
+    const { rows } = await db.query(`select price from marketplace_listing_evidence()`);
+    assert.deepEqual(rows.map((r) => Number(r.price)), [500]);
+  });
+});
