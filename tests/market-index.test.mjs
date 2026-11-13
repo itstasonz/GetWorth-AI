@@ -300,3 +300,42 @@ describe('MI-13 images become files without the network', () => {
     assert.doesNotMatch(src, /await fetch\((img|compressed|dataUrl)\)/);
   });
 });
+
+describe('MI-14 the listing text follows the confirmed model', () => {
+  test('MI-14a a sentence naming the other candidate, or doubting the model, is dropped; the rest stays', async () => {
+    const { applyConfirmed, withoutOtherModels } = await import('../api/_lib/scan/confirmed.js');
+    const a = { brand: 'Apple', display_name: 'Apple iPhone 12 או 12 mini', listing_description: 'מכשיר Apple iPhone כחול עם שתי מצלמות אחוריות. נראה מדגמי iPhone 12 או iPhone 12 mini.', attributes: [], alternatives: [{ name: 'iPhone 12 mini' }], confirmed: [{ attribute: 'model', value: 'iPhone 12' }] };
+    applyConfirmed(a);
+    assert.equal(a.listing_description, 'מכשיר Apple iPhone כחול עם שתי מצלמות אחוריות.');
+    assert.equal(withoutOtherModels('Blue phone, light scratches. The exact model could be a 12 or a 12 mini.', 'iPhone 12', []), 'Blue phone, light scratches.');
+    assert.equal(withoutOtherModels('Silver laptop in good shape.', 'MacBook Air M1', [{ name: 'MacBook Air M2' }]), 'Silver laptop in good shape.');
+  });
+});
+
+describe('MI-15 a confirmed series names the product', () => {
+  test('MI-15a "Apple Watch" confirmed as Series 4 is "Apple Watch Series 4"; a name that already has it is kept', async () => {
+    const { applyConfirmed } = await import('../api/_lib/scan/confirmed.js');
+    const w = { brand: 'Apple', product_family: 'Apple Watch', model: null, display_name: 'שעון חכם Apple Watch ללא רצועה', attributes: [], alternatives: [], confirmed: [{ attribute: 'generation', value: 'Series 4' }] };
+    applyConfirmed(w);
+    assert.equal(w.display_name, 'Apple Watch Series 4');
+    const k = { brand: 'Apple', product_family: 'Apple Watch', display_name: 'Apple Watch Series 4', attributes: [], alternatives: [], confirmed: [{ attribute: 'generation', value: 'Series 4' }] };
+    applyConfirmed(k);
+    assert.equal(k.display_name, 'Apple Watch Series 4');
+  });
+});
+
+describe('MI-16 the same product in other words reuses its research', () => {
+  test('MI-16a research saved for one wording answers a scan whose identity words the product differently', async () => {
+    const rows = new Map();
+    const s = { load: async (k) => rows.get(k) ?? null, save: async (k, r) => { rows.set(k, r); } };
+    const first = await price(fakeIndex(), fakeProvider(), { store: s });
+    assert.equal(first.reused, false);
+    resetMarketCache();
+    const other = normalizeIdentity({ ...RAW_IDENTITY, search: { hebrew_name: 'עכבר לוג׳יטק סופרלייט', aliases: ['Superlight'], model_numbers: [] } });
+    const fetchImpl = fakeProvider();
+    const again = await runPrice({ identity: other, model: 'm', apiKey: 'k', fetchImpl, store: s, index: fakeIndex(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, marketplace: async () => [], background: () => {} });
+    assert.equal(again.reused, true);
+    assert.equal(fetchImpl.of('market').length, 0, 'no second search');
+    assert.equal(again.valuation.prices?.good?.worth, first.valuation.prices?.good?.worth);
+  });
+});

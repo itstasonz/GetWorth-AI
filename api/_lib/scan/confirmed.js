@@ -83,8 +83,34 @@ export function applyConfirmed(identity) {
       // contains the chosen model, but it is not the owner's answer, and it became the listing's title.
       const shown = String(identity.display_name ?? '');
       if (!shown.toLowerCase().includes(c.value.toLowerCase()) || /\s(או|or)\s|\s\/\s?|\S\/\S/i.test(shown)) identity.display_name = named;
+      // THE LISTING TEXT FOLLOWS THE OWNER'S ANSWER (Production E2E 2026-11-13: the iPhone 12 draft still read "נראה מדגמי
+      // iPhone 12 או iPhone 12 mini"). Sentences that name a candidate the owner did not choose, or doubt the exact model,
+      // are dropped; what the photograph showed otherwise stays. Nothing is added.
+      if (identity.listing_description) identity.listing_description = withoutOtherModels(identity.listing_description, c.value, identity.alternatives);
       identity.alternatives = [];
+    }
+    // A CONFIRMED GENERATION OR SERIES NAMES THE PRODUCT (Production E2E 2026-11-13: an Apple Watch confirmed as "Series 4"
+    // was still called "שעון חכם Apple Watch ללא רצועה"). The product's own name with the owner's answer, once.
+    if (/^(generation|series|gen|model year)$/i.test(String(c.attribute ?? '').trim()) && c.value && !String(identity.display_name ?? '').toLowerCase().includes(String(c.value).toLowerCase())) {
+      const brand = String(identity.brand ?? '').trim();
+      const base = String(identity.model ?? identity.product_family ?? identity.item_type ?? '').trim();
+      const product = brand && base && !base.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${base}` : (base || brand);
+      if (product && !product.toLowerCase().includes(String(c.value).toLowerCase())) identity.display_name = `${product} ${c.value}`;
     }
     if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c, identity)) identity.uncertainty_note = null;
   }
+}
+
+const DOUBTS_MODEL = /(הדגם המדויק|לא ניתן (?:לקבוע|להבחין)|ייתכן ש|נראה מדגמי|exact model|could be|may be either|either the)/i;
+/** The description without sentences naming another candidate model, or doubting which model it is. */
+export function withoutOtherModels(text, chosen, alternatives = []) {
+  const pick = String(chosen ?? '').toLowerCase();
+  const others = (alternatives ?? []).map((a) => String(a?.name ?? a ?? '').toLowerCase().trim()).filter((n) => n && n !== pick && !pick.includes(n));
+  const sentences = String(text).split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter((t) => {
+    const low = t.toLowerCase();
+    const namesOther = others.some((n) => low.includes(n)) || (/\s(או|or)\s/i.test(t) && low.includes(pick) && /\d/.test(pick));
+    return !namesOther && !DOUBTS_MODEL.test(t);
+  });
+  return kept.join(' ').trim();
 }

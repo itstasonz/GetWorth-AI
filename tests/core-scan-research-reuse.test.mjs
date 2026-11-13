@@ -46,7 +46,7 @@ describe('RR-2 older research answers now and is renewed in the background', () 
     assert.equal(jobs.length, 1);
     await jobs[0];
     assert.ok(fetchImpl.of('market').length >= 1, 'the background search ran');
-    assert.equal(s.saves, 1);
+    assert.equal(s.saves, 2, "kept under its search and under its product");
     const next = await price(s, fakeProvider(), { background: () => assert.fail('no second refresh') });
     assert.deepEqual([next.reused, next.stale ?? false, next.refreshing ?? false], [true, false, false]);
   });

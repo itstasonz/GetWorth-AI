@@ -3930,7 +3930,11 @@ export function AppProvider({ children }) {
         category: normalizedCategory,
       });
       const listingRow = {
-        seller_id: user.id, title: listingData.title, title_hebrew: result?.nameHebrew || '',
+        seller_id: user.id, title: listingData.title,
+        // The Hebrew name GetWorth suggested is the Hebrew title ONLY while the seller kept the suggested title: a title the
+        // seller wrote is the title, in every language (Production E2E 2026-11-13: "GetWorth QA Test — Temporary Listing"
+        // showed as "אייפון 12" everywhere in Hebrew).
+        title_hebrew: listingData.title === (result?.name ?? listingData.title) ? (result?.nameHebrew || '') : '',
         description: listingData.desc || '', category: normalizedCategory,
         condition, price: listingData.price, images: imageUrls,
         location: listingData.location, contact_phone: listingData.phone, status: 'active',

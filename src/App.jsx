@@ -89,8 +89,7 @@ function usePWAUpdate() {
         setHasUpdate(true);
       }
 
-      onUpdateFound = () => {
-        const installing = reg.installing;
+      const watch = (installing) => {
         if (!installing) return;
         installing.addEventListener('statechange', () => {
           // controller check = not a first install. Repeated deploys in one
@@ -102,7 +101,11 @@ function usePWAUpdate() {
           }
         });
       };
+      onUpdateFound = () => watch(reg.installing);
       reg.addEventListener('updatefound', onUpdateFound);
+      // ALREADY INSTALLING ON OPEN (Production E2E 2026-11-13): the browser's own update check on navigation can find the
+      // new version before this listener exists — its 'updatefound' is gone, and the version then waited with no banner.
+      if (reg.installing && navigator.serviceWorker.controller) watch(reg.installing);
 
       // Background discovery: on mount + every return to foreground (catches
       // deploys while the PWA was backgrounded). Discovery only — the worker

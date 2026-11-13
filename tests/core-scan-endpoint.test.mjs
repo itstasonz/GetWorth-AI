@@ -185,7 +185,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
   test('CE-2Rd the research is shared: another server instance reads it from the store instead of searching', async () => {
     const store = fakeStore();
     const first = await run(fakeProvider(), store);
-    assert.equal(store.saves, 1);
+    assert.equal(store.saves, 2, "kept under its search and under its product");
     resetMarketCache();                       // a different instance: nothing in memory
     const elsewhere = fakeProvider();
     const second = await run(elsewhere, store, { now: at(T0 + 10 * 60_000) });

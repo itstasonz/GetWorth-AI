@@ -169,6 +169,8 @@ function fnv1a(text) {
   for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
   return h.toString(16).padStart(8, '0');
 }
+/** The research of a PRODUCT, whatever words its identification used: no query wording in it. */
+export const productResearchKey = (identity, answer = null) => `${marketKey(identity, answer)}|r${RESEARCH_VERSION}:product`;
 export function researchKey(identity, answer = null) {
   const plan = ['local', 'expand'].map((stage) => buildSearchQueries({ identity, answer, stage }).join(' ; ')).join(' || ');
   return `${marketKey(identity, answer)}|r${RESEARCH_VERSION}:${fnv1a(plan)}`;
@@ -214,10 +216,16 @@ export async function runPrice({
   // The exchange rates are only needed once a search has answered: they are fetched alongside it, never before it
   // (a cold instance waited up to FX_TIMEOUT_MS here first). getFxTable never throws.
   const fxPending = getFxTable({ fetchImpl });
-  const [cached, indexed] = await Promise.all([
+  // THE SAME PRODUCT IN OTHER WORDS (2026-11-13: three scans of one Canon 5D Mark III searched three times, because the
+  // model named it slightly differently each time and the research key carries the query wording). Research is also kept
+  // under the PRODUCT (marketKey + RESEARCH_VERSION); the newest of the two answers.
+  const productKey = productResearchKey(identity, answer);
+  const [cachedExact, cachedProduct, indexed] = await Promise.all([
     recall(key, store, t0),
+    recall(productKey, store, t0),
     Promise.resolve().then(() => index.load(identity, answer, { now: t0, rulesVersion: RESEARCH_VERSION })).catch(() => ({ rows: [], ms: 0, error: 'failed' })),
   ]);
+  const cached = cachedExact && (!cachedProduct || cachedExact.at >= cachedProduct.at) ? cachedExact : cachedProduct;
   const fromIndex = indexRecord(indexed?.rows, marketDate(t0));
   const indexInfo = (used) => ({ rows: indexed?.rows?.length ?? 0, ms: indexed?.ms ?? 0, error: indexed?.error ?? null, used });
   // Fresh research for this item: reuse it. No search, the same evidence, the same price.
@@ -347,8 +355,10 @@ export async function runPrice({
   if (searched) {
     remember(key, record);
     // The research joins the shared store, and what it verified joins the product's index (permission-gated there).
-    const [, saved] = await Promise.all([
+    remember(productKey, record);
+    const [, , saved] = await Promise.all([
       Promise.resolve().then(() => store.save(key, record, scanUuid)).catch(() => null),
+      Promise.resolve().then(() => store.save(productKey, record, scanUuid)).catch(() => null),
       Promise.resolve().then(() => index.save(identity, answer, found, { seenAt: t0, rulesVersion: RESEARCH_VERSION })).catch(() => null),
     ]);
     indexedNow = saved?.stored ?? null;
