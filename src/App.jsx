@@ -64,6 +64,7 @@ function usePWAUpdate() {
   const reloadingRef = useRef(false);  // reload exactly once per page life
   const retryTimerRef = useRef(null);
   const regRef = useRef(null);
+  const recheckRef = useRef(null);
 
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
@@ -110,12 +111,19 @@ function usePWAUpdate() {
       // Background discovery: on mount + every return to foreground (catches
       // deploys while the PWA was backgrounded). Discovery only — the worker
       // still waits for approval.
-      reg.update().catch(() => {});
+      // After the check, look again: a version found by it (or by the browser before this ran) is waiting or installing.
+      const recheck = () => {
+        if (!navigator.serviceWorker.controller) return;
+        if (reg.waiting) { swWaitingRef.current = reg.waiting; setHasUpdate(true); } else watch(reg.installing);
+      };
+      recheckRef.current = recheck;
+      reg.update().then(recheck, recheck);
     });
 
     const onVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      regRef.current?.update().catch(() => {});
+      regRef.current?.update().then(() => recheckRef.current?.(), () => recheckRef.current?.());
+      recheckRef.current?.();
       setDismissed(false); // foreground return re-surfaces a dismissed banner
     };
     document.addEventListener('visibilitychange', onVisibility);
