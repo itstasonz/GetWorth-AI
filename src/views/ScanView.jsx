@@ -243,8 +243,10 @@ export default function ScanView() {
               {/* PRIMARY: one central worth. SECONDARY: what to ask, and what a quick sale brings. All three from the same
                   references (valuation.js conditionPrices); a band from before the three prices falls back to its range. */}
               <div className="text-center space-y-1" data-testid="scan-worth">
-                <p className="text-label text-text-muted">{rough ? copy.worthApprox : copy.worth}</p>
-                {band.worth && <p className="text-display text-text-primary"><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.worth)}</bdi></p>}
+                {/* NO PRICE FOR THE CHOSEN CONDITION (2026-11-13, Production E2E: "faulty" kept ₪950 as the dominant worth): the
+                    market price stays visible as context, labelled as NOT this unit's, and never as its estimated worth. */}
+                <p className="text-label text-text-muted" data-testid="scan-worth-label">{noConditionBand ? copy.marketOtherCondition(copy.conditions[s.condition]) : rough ? copy.worthApprox : copy.worth}</p>
+                {band.worth && <p className={noConditionBand ? 'text-title text-text-muted' : 'text-display text-text-primary'}><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.worth)}</bdi></p>}
                 {/* An approximate result names its range as approximate, and never as the expected one. */}
                 {rough ? (
                   <><p className="text-body-sm text-text-muted">{copy.approxLabel}</p><p className="text-body text-text-primary">{copy.range(band)}</p></>
@@ -252,7 +254,7 @@ export default function ScanView() {
                   <p className="text-body-sm text-text-secondary">{copy.expected}: <span className="text-text-primary">{copy.range(band)}</span></p>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-2" data-testid="scan-secondary-prices">
+              {!noConditionBand && <div className="grid grid-cols-2 gap-2" data-testid="scan-secondary-prices">
                 <div className="rounded-container border border-subtle bg-surface p-3 text-center">
                   {/* Approximate: what to ask is "about", never an exact-looking recommended price. */}
                   <p className="text-meta text-text-muted">{rough ? copy.listAbout : copy.recommended}</p>
@@ -262,7 +264,7 @@ export default function ScanView() {
                   <p className="text-meta text-text-muted">{copy.quickSale}</p>
                   <p className="text-body font-semibold text-text-primary"><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.quick ?? band.low)}</bdi></p>
                 </div>
-              </div>
+              </div>}
               {approximate && <p className="text-body-sm text-text-secondary">{s.valuation.basis === 'similar_items' ? copy.similarItemsNote : copy.approxNote}</p>}
               <p className="text-body-sm text-text-secondary">
                 {copy.priceConfidence}: <span className="font-semibold text-text-primary">{copy.levels[s.valuation.price_confidence] ?? copy.levels.low}</span>
