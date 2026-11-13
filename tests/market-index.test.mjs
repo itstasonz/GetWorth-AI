@@ -244,3 +244,10 @@ describe('MI-8 Hebrew brand + short model word (Xiaomi scooter, 2026-11-13)', ()
     }
   });
 });
+
+describe('MI-9 restricted sources', () => {
+  test('MI-9a an eBay price seen in a web search is kept only for the research window, never as history', () => {
+    assert.equal(mayKeepHistory(sourceOf('https://www.ebay.com/itm/1')), false);
+    assert.equal(retentionMs(sourceOf('https://www.ebay.com/itm/1'), MARKET_POOL_MS), MARKET_POOL_MS);
+  });
+});

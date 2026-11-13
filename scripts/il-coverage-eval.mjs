@@ -92,7 +92,7 @@ async function record(dir, only) {
       return p;
     };
     const t0 = Date.now();
-    const r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: crypto.randomUUID(), model: MODEL, apiKey: process.env.OPENAI_API_KEY, fetchImpl, now: () => NOW + (Date.now() - t0), store: memStore(), marketplace: async () => [], background: async () => {} });
+    const r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: crypto.randomUUID(), model: MODEL, apiKey: process.env.OPENAI_API_KEY, fetchImpl, now: () => NOW + (Date.now() - t0), store: memStore(), marketplace: async () => [], background: async () => {}, ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
     const ms = Date.now() - t0;
     await Promise.all(pending);
     // Billed: every stage that reached the provider, whether or not its evidence was used.
@@ -121,7 +121,7 @@ async function replay(dir, repo, outFile) {
       if (!s) { missing.push(stageOf(init)); return new Response('{"error":{"message":"not recorded"}}', { status: 500 }); }
       return new Response(s.body, { status: s.status, headers: { 'content-type': 'text/event-stream' } });
     };
-    const r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: null, model: MODEL, apiKey: 'replay', fetchImpl, now: () => NOW, store: memStore(), marketplace: async () => [], background: async () => {} });
+    const r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: null, model: MODEL, apiKey: 'replay', fetchImpl, now: () => NOW, store: memStore(), marketplace: async () => [], background: async () => {}, ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
     out.push({ id: item.id, name: item.raw.display_name, category: item.raw.category, live_ms: rec.live_ms, cost_usd: rec.cost_usd, stages: r.call?.stages ?? [], missing, ...summary(r.valuation) });
   }
   fs.writeFileSync(outFile, JSON.stringify(out, null, 1));

@@ -80,8 +80,11 @@ export const mayRetrieveAutomatically = (source) => source?.permission === PERMI
 export const mayUseInScan = (source) => !!source && source.permission !== PERMISSION.NOT_AUTHORIZED;
 /** May an observation from it enter the market index at all? */
 export const mayIndex = (source) => mayUseInScan(source);
-/** May it be kept as long-term price history? Only with permission. */
-export const mayKeepHistory = (source) => mayRetrieveAutomatically(source);
+/**
+ * May it be kept as long-term price history? Only with full permission: a restricted source (an official API with terms)
+ * permits ITS channel, and a price of it seen in an ordinary web search did not come through that channel.
+ */
+export const mayKeepHistory = (source) => source?.permission === PERMISSION.AUTHORIZED;
 
 /** How long an observation from this source may be kept, in ms: history for permitted sources, the scan's research window otherwise. */
 export const HISTORY_RETENTION_MS = 365 * 86_400_000;
