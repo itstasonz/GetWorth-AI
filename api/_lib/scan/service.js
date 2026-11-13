@@ -163,7 +163,10 @@ export const isFamilyLevel = (identity, answer) => !answer && identity?.exact_mo
 // 4: pages read by the 2026-11-12 rules — a variant after the name is another model, another capacity is another
 //    variant, a shop's product page is professional resale. Research read by the older rules (a DualSense priced from a
 //    DualSense Edge ad) is not reused.
-export const RESEARCH_VERSION = 4;
+// 5: rows must state a confirmed generation (2026-11-13: Apple Watch Series 4 priced from "שעוני אפל ווטש"). The tie of
+//    a row to its product is decided when the research is read from the page and kept with it, so research (and index
+//    observations) read by the older rule are not reused.
+export const RESEARCH_VERSION = 5;
 function fnv1a(text) {
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i += 1) { h ^= text.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
