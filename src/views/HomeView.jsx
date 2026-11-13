@@ -250,7 +250,7 @@ export default function HomeView() {
             </div>
             <button
               onClick={() => goTab('browse')}
-              className="text-sm font-semibold flex items-center gap-1 group/viewall"
+              className="text-sm font-semibold flex items-center gap-1 group/viewall min-h-[44px] px-2"
               style={{ color: STITCH.primary }}
             >
               {lang === 'he' ? 'הצג הכל' : 'View All'}

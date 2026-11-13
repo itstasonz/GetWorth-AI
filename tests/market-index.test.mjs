@@ -364,3 +364,17 @@ describe('MI-17 a confirmed generation must be in the row (Apple Watch Series 4,
     assert.equal(v.prices, null);
   });
 });
+
+describe('MI-18 price stability comes from pooling, not freezing (iPhone 12, Production 2026-11-13)', () => {
+  test('MI-18a two searches of the same product: ₪950 and ₪1,300 alone; pooled, the price rests on all eight ads and lies between', async () => {
+    const fs = await import('node:fs');
+    const { buildValuation, mergeEvidence, requalify } = await import('../api/_lib/scan/valuation.js');
+    const runs = JSON.parse(fs.readFileSync(new URL('./fixtures/iphone12-two-searches-2026-11-13.json', import.meta.url), 'utf8')).map((r) => r.evidence.map(requalify));
+    const v = (ev) => buildValuation({ evidence: ev, approximate: true, today: '2026-11-13' });
+    const [a, b, pooled] = [v(runs[0]), v(runs[1]), v(mergeEvidence(runs[1], runs[0], 20))];
+    assert.deepEqual([a.prices.good.worth, b.prices.good.worth], [950, 1300]);
+    assert.ok(pooled.counts.resale > Math.max(a.counts.resale, b.counts.resale), 'the pool holds more ads than either search');
+    assert.ok(pooled.prices.good.worth >= a.prices.good.worth && pooled.prices.good.worth <= b.prices.good.worth, `pooled ${pooled.prices.good.worth}`);
+    assert.equal(pooled.price_confidence, 'low', 'pooling does not invent confidence: storage is still unknown');
+  });
+});

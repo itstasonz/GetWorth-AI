@@ -556,7 +556,7 @@ function AppShell() {
           <div className="flex items-center justify-between px-6 h-16 w-full max-w-7xl mx-auto">
             {/* Left: back arrow + context label */}
             <div
-              className="flex items-center gap-4 cursor-pointer"
+              className="flex items-center gap-4 cursor-pointer min-h-[44px]"
               onClick={isBackView ? () => history.back() : () => { reset(); goTab('home'); }}
               role="button"
               aria-label={isBackView ? (lang === 'he' ? 'חזרה' : 'Back') : (lang === 'he' ? 'לדף הבית' : 'Go home')}
@@ -581,7 +581,7 @@ function AppShell() {
               {/* Language toggle — minimal icon-only button */}
               <button
                 onClick={() => setLang(lang === 'en' ? 'he' : 'en')}
-                className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A]"
+                className="w-11 h-11 flex items-center justify-center rounded-full transition-colors hover:bg-[#2A2A2A]"
                 title={lang === 'en' ? 'עברית' : 'English'}
                 aria-label={lang === 'en' ? 'החלף לעברית' : 'Switch to English'}
               >
@@ -590,7 +590,7 @@ function AppShell() {
               {/* Sound toggle — minimal icon-only button */}
               <button
                 onClick={() => setSoundEnabled(!soundEnabled)}
-                className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A]"
+                className="w-11 h-11 flex items-center justify-center rounded-full transition-colors hover:bg-[#2A2A2A]"
                 title={soundEnabled ? (lang === 'he' ? 'השתק' : 'Mute') : (lang === 'he' ? 'הפעל צליל' : 'Sound on')}
                 aria-label={soundEnabled ? (lang === 'he' ? 'השתק' : 'Mute') : (lang === 'he' ? 'הפעל צליל' : 'Sound on')}
               >
@@ -604,7 +604,7 @@ function AppShell() {
                   Profile, which no user expects from a bell. */}
               <button
                 onClick={() => setShowNotifications(true)}
-                className="p-2 rounded-full transition-colors hover:bg-[#2A2A2A] relative"
+                className="w-11 h-11 flex items-center justify-center rounded-full transition-colors hover:bg-[#2A2A2A] relative"
                 title={lang === 'he' ? 'התראות' : 'Notifications'}
                 aria-label={lang === 'he' ? 'התראות' : 'Notifications'}
               >
@@ -619,16 +619,15 @@ function AppShell() {
               <button
                 onClick={() => goTab('profile')}
                 aria-label={lang === 'he' ? 'פרופיל' : 'Profile'}
-                className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center"
-                style={{
-                  background: '#2A2A2A',
-                  border: '1px solid rgba(60, 73, 71, 0.15)',
-                }}
+                className="w-11 h-11 flex items-center justify-center rounded-full"
               >
+                {/* The avatar stays 32 px; the touch target around it is 44 px (Apple HIG; mobile QA 2026-11-13). */}
+                <span className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center" style={{ background: '#2A2A2A', border: '1px solid rgba(60, 73, 71, 0.15)' }}>
                 {profile?.avatar_url
                   ? <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
                   : <User className="w-4 h-4" style={{ color: '#BBC9C7' }} />
                 }
+                </span>
               </button>
             </div>
           </div>
