@@ -251,3 +251,12 @@ describe('MI-9 restricted sources', () => {
     assert.equal(retentionMs(sourceOf('https://www.ebay.com/itm/1'), MARKET_POOL_MS), MARKET_POOL_MS);
   });
 });
+
+describe('MI-10 a decade is a model', () => {
+  test('MI-10a a "Classic Vibe 60s" ad is another model for a Classic Vibe \'50s Stratocaster; a 50s ad is the item', async () => {
+    const { bindPrice } = await import('../api/_lib/scan/binding.js');
+    const strat = normalizeIdentity({ ...RAW_IDENTITY, category: 'Music', item_type: 'electric guitar', brand: 'Squier', product_family: 'Classic Vibe', model: "Classic Vibe '50s Stratocaster", canonical_name: 'squier classic vibe 50s stratocaster', display_name: "Squier Classic Vibe '50s Stratocaster", search: { hebrew_name: 'גיטרה חשמלית סקוויר', aliases: ['Classic Vibe'], model_numbers: [] } });
+    const page = (t) => ({ type: 'listing', title: t, text: `${t} ₪1700` });
+    assert.notEqual(bindPrice({ price: 1700, currency: 'ILS', title: 'Squier Classic Vibe 60s', match: 'close_comparable' }, page('חשמלית Squier Classic Vibe 60s למכירה'), strat).match, 'close_comparable');
+  });
+});

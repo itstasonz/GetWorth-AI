@@ -291,8 +291,12 @@ export function bindPrice(claim, page, identity, answer = null) {
     const generation = /^[2-9]$/.test(who.next.t) && !isPriceWord(who.next) && !(who.then && UNIT_WORD.test(who.then.t));
     return ((VARIANT_WORDS.has(who.next.t) && !SOFT_VARIANTS.has(who.next.t)) || generation) && !possible.has(who.next.t);
   };
+  // A DECADE IS A MODEL: a "Classic Vibe '50s" is not a "Classic Vibe 60s" (live eval 2026-11-13). A row naming another
+  // decade than the item's, and not the item's own, is another model.
+  const decades = [...own].filter((t) => /^\d0s$/.test(t));
+  const otherDecade = (row) => decades.length > 0 && !row.some((w) => decades.includes(w.t)) && row.some((w) => /^\d0s$/.test(w.t));
   const verdict = (row, who, stretch) => {
-    if (otherModel(who)) return { level, reason: BIND_REASON.VARIANT, match: 'sibling_model' };
+    if (otherModel(who) || otherDecade(row)) return { level, reason: BIND_REASON.VARIANT, match: 'sibling_model' };
     if (!exact) { const s = otherSize(stretch); return s ? sized(s) : { level, reason: BIND_REASON.ONE_LISTING, match: claim.match }; }
     const sibling = row.some((w) => {
       const c = CODE.exec(w.t);
