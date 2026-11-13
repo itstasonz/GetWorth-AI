@@ -190,16 +190,17 @@ function UpdateBanner({ hasUpdate, updating, onUpdate, onDismiss, lang }) {
         <button
           onClick={onUpdate}
           disabled={updating}
-          className="px-3 py-1.5 rounded-xl text-xs font-bold flex-shrink-0 active:scale-95 transition-transform disabled:opacity-60"
+          className="px-3 min-h-[44px] rounded-xl text-xs font-bold flex-shrink-0 active:scale-95 transition-transform disabled:opacity-60"
           style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
         >
           {updating ? (lang === 'he' ? 'מעדכן…' : 'Updating…') : (lang === 'he' ? 'עדכן' : 'Update')}
         </button>
         <button
           onClick={onDismiss}
-          className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0 hover:bg-white/20 transition-colors"
+          aria-label={lang === 'he' ? 'לא עכשיו' : 'Not now'}
+          className="w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 group/dismiss"
         >
-          <X className="w-3.5 h-3.5 text-white/70" />
+          <span className="w-7 h-7 rounded-full bg-white/10 group-hover/dismiss:bg-white/20 transition-colors flex items-center justify-center"><X className="w-3.5 h-3.5 text-white/70" /></span>
         </button>
       </div>
     </div>

@@ -217,7 +217,7 @@ export default function ScanView() {
     <div className="fixed inset-0 z-sheet overflow-y-auto bg-canvas" dir={rtl ? 'rtl' : 'ltr'}>
       <div className="max-w-md mx-auto px-gutter pt-4 pb-24 space-y-5">
         <div className="flex justify-end">
-          <button type="button" onClick={close} aria-label={copy.close} className="p-2 rounded-full text-text-secondary state-layer">
+          <button type="button" onClick={close} aria-label={copy.close} className="w-11 h-11 flex items-center justify-center rounded-full text-text-secondary state-layer">
             <X className="w-5 h-5" />
           </button>
         </div>
