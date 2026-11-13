@@ -541,9 +541,12 @@ export function DetailView() {
             </Btn>
           )}
           <div className="flex gap-3">
+            {/* Never offered to the seller on their own listing (Production E2E 2026-11-13). */}
+            {!(user && selected.seller_id === user.id) && (
             <Btn className="flex-1 py-4 bg-white/5 border border-white/10" onClick={contactSeller}>
               <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'הודעה למוכר' : 'Message Seller'}
             </Btn>
+            )}
             <Btn onClick={() => { if (!selected.id?.toString().startsWith('s')) { haptic(savedIds?.has(selected?.id) ? 8 : 12); toggleSave(selected); } }} className="px-5">
               <Heart className={`w-5 h-5 ${savedIds?.has(selected?.id) ?? false ? 'fill-current text-red-400' : ''}`} />
             </Btn>

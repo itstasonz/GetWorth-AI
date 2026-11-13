@@ -339,3 +339,28 @@ describe('MI-16 the same product in other words reuses its research', () => {
     assert.equal(again.valuation.prices?.good?.worth, first.valuation.prices?.good?.worth);
   });
 });
+
+describe('MI-17 a confirmed generation must be in the row (Apple Watch Series 4, 2026-11-13)', () => {
+  const watch = () => normalizeIdentity({ ...RAW_IDENTITY, category: 'Electronics', item_type: 'smartwatch', brand: 'Apple', product_family: 'Apple Watch', model: null, canonical_name: 'apple watch', display_name: 'Apple Watch', exact_model_established: false, search: { hebrew_name: 'שעון אפל ווטש', aliases: [], model_numbers: [] } });
+  const confirmed = () => ({ ...watch(), confirmed: [{ attribute: 'generation', value: 'Series 4' }] });
+  const page = (t, price) => ({ type: 'search_or_category', title: 'לוח יד שניה', text: `${t} ${price} ש"ח` });
+  test('MI-17a "שעוני אפל ווטש ₪1000" is not tied to a confirmed Series 4; "Apple Watch Series 4 40mm" and "אפל ווטש סדרה 4" are', async () => {
+    const { bindPrice, isBound } = await import('../api/_lib/scan/binding.js');
+    const tied = (t, price, match = 'close_comparable') => isBound({ binding: bindPrice({ price, currency: 'ILS', title: t, match }, page(t, price), confirmed()).level });
+    assert.equal(tied('שעוני אפל ווטש', 1000), false);
+    assert.equal(bindPrice({ price: 1000, currency: 'ILS', title: 'שעוני אפל ווטש', match: 'close_comparable' }, page('שעוני אפל ווטש', 1000), confirmed()).reason, 'row_does_not_state_the_confirmed_generation');
+    assert.equal(tied('Apple Watch Series 4 40mm', 800, 'exact'), true);
+    assert.equal(tied('Apple Watch S4 40mm', 800, 'exact'), true);
+    assert.equal(tied('אפל ווטש סדרה 4', 800), true);
+    assert.equal(tied('Apple Watch Series 40mm', 800), false, '40mm is a size, not the series');
+    assert.equal(bindPrice({ price: 1000, currency: 'ILS', title: 'שעוני אפל ווטש', match: 'close_comparable' }, page('שעוני אפל ווטש', 1000), watch()).level !== 'weak', true, 'without a confirmed generation the rule does not apply');
+  });
+  test('MI-17b refurbished alone never prices: with the generic row refused, the Ivory unit is set aside and there is no price', async () => {
+    const { buildValuation } = await import('../api/_lib/scan/valuation.js');
+    const ivory = { url: 'https://www.ivory.co.il/catalog.php?id=27338', domain: 'ivory.co.il', title: 'Apple Watch Series 4 GPS 40mm', price: 1699, currency: 'ILS', price_ils: 1699, kind: 'refurbished', match: 'exact', market: 'IL', condition: 'unknown', page: 'shop_product', listed: null, binding: 'strong', seen: today };
+    const generic = { url: 'https://m.homeless.co.il/yad2?inumber3=377', domain: 'homeless.co.il', title: 'שעוני אפל ווטש', price: 1000, currency: 'ILS', price_ils: 1000, kind: 'used_listing', match: 'close_comparable', market: 'IL', condition: 'unknown', page: 'search_or_category', listed: null, binding: 'weak', binding_reason: 'row_does_not_state_the_confirmed_generation', seen: today };
+    const v = buildValuation({ evidence: [ivory, generic], today });
+    assert.equal(v.status, 'insufficient_evidence');
+    assert.equal(v.prices, null);
+  });
+});

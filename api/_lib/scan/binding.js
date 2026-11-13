@@ -63,6 +63,8 @@ export const BIND_REASON = Object.freeze({
   OTHER_SIZE: 'row_states_another_size',
   SIZE_OPEN: 'row_states_a_size_the_item_has_not_settled',
   LEGACY: 'kept_from_before_binding_was_checked',
+  /** The owner confirmed a generation or series with a number ("Series 4"); this row does not state that number. */
+  GENERATION_ABSENT: 'row_does_not_state_the_confirmed_generation',
 });
 const UNBOUND_REASONS = new Set([BIND_REASON.OTHER_PRICE, BIND_REASON.AMBIGUOUS, BIND_REASON.OTHER_MODEL, BIND_REASON.NO_VAT_PRICE, BIND_REASON.FOR_THE_PRODUCT]);
 
@@ -295,7 +297,16 @@ export function bindPrice(claim, page, identity, answer = null) {
   // decade than the item's, and not the item's own, is another model.
   const decades = [...own].filter((t) => /^\d0s$/.test(t));
   const otherDecade = (row) => decades.length > 0 && !row.some((w) => decades.includes(w.t)) && row.some((w) => /^\d0s$/.test(w.t));
+  // A CONFIRMED GENERATION MUST BE IN THE ROW (2026-11-13: an Apple Watch confirmed as "Series 4" was priced from a Homeless
+  // row titled only "שעוני אפל ווטש" — "Apple watches" — because the item's name reduces to "watch"). When the owner
+  // confirmed a generation, series or model year that carries a number, a row that does not state that number is not tied
+  // to the product: it may be any generation. "S4", "4th" and "סדרה 4" state it; "40mm" does not.
+  const generations = (identity?.confirmed ?? [])
+    .filter((c) => !c.unsure && /^(generation|series|gen|model year|year)$/i.test(String(c.attribute ?? '').trim()))
+    .flatMap((c) => String(c.value ?? '').match(/\d+/g) ?? []);
+  const statesGeneration = (row) => generations.every((d) => row.some((w) => w.t === d || new RegExp(`^[a-z֐-׿]{0,8}${d}(st|nd|rd|th)?$`).test(w.t)));
   const verdict = (row, who, stretch) => {
+    if (generations.length && !statesGeneration(row)) return { refused: BIND_REASON.GENERATION_ABSENT };
     if (otherModel(who) || otherDecade(row)) return { level, reason: BIND_REASON.VARIANT, match: 'sibling_model' };
     if (!exact) { const s = otherSize(stretch); return s ? sized(s) : { level, reason: BIND_REASON.ONE_LISTING, match: claim.match }; }
     const sibling = row.some((w) => {

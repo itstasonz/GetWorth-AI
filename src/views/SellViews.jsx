@@ -270,6 +270,7 @@ export function MyListingsView() {
                         {item.status !== 'sold' && (
                         <button
                           onClick={e => { e.stopPropagation(); setEditTarget(item); }}
+                          aria-label={lang === 'he' ? `עריכת המודעה ${item.title ?? ''}` : `Edit listing ${item.title ?? ''}`}
                           className="w-8 h-8 rounded-full flex items-center justify-center transition-colors hover:bg-white/10"
                           style={{ color: SELL_STITCH.onSurfaceVariant }}>
                           <Pencil className="w-4 h-4" />
@@ -277,6 +278,7 @@ export function MyListingsView() {
                         )}
                         <button
                           onClick={e => { e.stopPropagation(); setDeleteTarget(item.id); }}
+                          aria-label={lang === 'he' ? `מחיקת המודעה ${item.title ?? ''}` : `Delete listing ${item.title ?? ''}`}
                           className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:bg-red-500/15 active:scale-90"
                           style={{ color: '#f87171' }}>
                           <Trash2 className="w-4 h-4" />
