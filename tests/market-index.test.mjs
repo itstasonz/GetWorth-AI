@@ -123,7 +123,7 @@ describe('MI-4 structured data', () => {
     assert.deepEqual(p.offers[0], { price: 2199, currency: 'ILS', condition: 'new_sealed', availability: 'in_stock', seller: null, valid_from: null, url: null });
   });
   test('MI-4b the permitted entry point refuses every source without retrieval permission', () => {
-    assert.throws(() => extractFromPermittedSource('https://ksp.co.il/web/item/1', html), /source_not_authorized:ksp:unknown/);
+    assert.throws(() => extractFromPermittedSource('https://ksp.co.il/web/item/1', html), /source_not_authorized:ksp:public_research_only/);
     assert.equal(extractFromPermittedSource('https://www.ebay.com/itm/1', html).products.length, 1);
   });
 });
