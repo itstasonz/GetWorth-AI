@@ -219,3 +219,42 @@ query wording); the service-worker "update available" banner did not appear once
 - **Device-only checks left for the founder (real iPhone, installed PWA):** camera capture and permission prompt, HEIC
   from the photo picker, safe-area insets (notch/home bar), update banner after a deploy, Hebrew keyboard input in the
   listing form, scroll of the evidence sheet with a thumb, offline/poor-network behaviour.
+
+## 13. Founder's real iPhone scan — DualSense, no price (scan dcb5196d, 2026-11-13 12:57–12:58 UTC)
+
+**What happened (Production telemetry).** Installed PWA, founder account. Identify 5.5 s → "Sony DualSense Wireless
+Controller", high confidence, exact model. Price 1: fresh search 10.2 s — 39 pages (12 Reddit, 3 Wikipedia, PlayStation,
+TechRadar…; ad.co.il 2, bidix 2, KSP 2, Zap 2), **0 prices reported**. Re-identify 5.9 s; price 2: fresh search 17.8 s —
+local 41 pages: GoodGame ₪289 new (unbound: another price between) and Ivory ₪288 new (weak: purple variant, price not
+beside name); expand 42 pages incl. 7 Homeless: one ad reported — "שלט לסוני DualSense edge" ₪600 → correctly another
+model. Owner then confirmed "Custom replacement shell"; price 3 reused the same research (0.36 s). no_price_cause: no
+Israeli second-hand ad of the standard model tied. **The custom shell did not narrow the search** (not a search attribute)
+and **no source-permission refusal** occurred. Cost ≈ 2 × $0.024.
+
+**Leads checked by hand (one browser view each, no collection):** Homeless 1063159 — "שלט פליסטישן סוני 5 שחור", ₪270,
+"new from the box, bought 12.11 at Bug for ₪330", **ad no longer available** → a sealed, expired private ask (new_sealed
+band at best, never a current used price). KSP — DualSense white ₪279 / Midnight Black ₪264 new (Eilat prices excluded) →
+new-retail reference only. bidix price guide — **could not be opened** (connection reset); a guide is context, never a sale.
+
+**Root causes and fixes (all live):**
+1. Israeli sellers do not write "DualSense": the identity's only alias was English ("PS5 controller"); Hebrew words were
+   compared letter for letter ("פליסטישן" ≠ "פלייסטיישן"); the brand sat inside the name ("שלט פליסטישן **סוני** 5").
+   → identity prompt asks for the Hebrew words sellers write (f3c63cc); Hebrew words ≥4 consonants match by consonants;
+   brand words are passed over inside a name; a Hebrew seller name with a number names an established product
+   (`hebrewNamesProduct`, c615286) — searched as written (no more "שלט פלייסטיישן 5 DualSense Wireless Controller") and
+   tied; the model's own numbers and edition words must be in it (never the Edge, never אייפד 10 for iPad 9).
+2. Re-scan 13:23 showed "new, sells for about ₪30": playstore.co.il sells it for ₪275 (page checked); ₪29 was another
+   number. → points/instalment numbers are never a price; an Israeli new price below half of the exact used/sold/guide
+   median or of the other shops is not the new price (ba61886).
+3. A confirmed modification (custom/replacement shell) → the market price is presented as a STANDARD unit's, "effect on the
+   price not verified"; list/quick hidden; listing draft starts empty (f3c63cc).
+
+**Result after the fixes (Production re-scans 13:14, 13:23, 13:41 UTC; controlled live runs ~13:50):** identification
+correct every time; the Homeless ₪270 ad is now found and tied, and correctly not used as a current used price; **still no
+price** — open search (30 pages, 12 Reddit) and an Israeli-sites-only search (18 Israeli pages) both found **zero current
+used ads for a standard DualSense** with a price. The no-price is now an absence of readable evidence, not a discard.
+Outcome shown: "found 1 Israeli second-hand ad, none a current used one" + sell at your own price.
+
+**Coverage before/after:** replays unchanged (11/20, 10/20, 9/20) — the fixes add evidence only where ads in seller wording
+exist. **Latency (Production, server, today):** cold n=23 identify+market p50 19.2 s / p90 23.0 s; repeat n=5 p50 7.1 s /
+p90 8.0 s.
