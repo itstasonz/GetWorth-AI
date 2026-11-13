@@ -69,6 +69,11 @@ export const WITHDRAWN = Object.freeze({
   TOO_FEW_COMPARABLES: 'too_few_comparable_items',
   /** The similar items that stand disagree too widely for a range to describe a market: shown, not priced from. */
   COMPARABLES_DISAGREE: 'comparable_items_disagree',
+  /**
+   * Exactly two references, further apart than DISPERSION.dispersed (Production E2E 2026-11-13: a Canon 5D Mark III priced
+   * ₪42,500 from a ₪46,970 ad beside a ₪2,000 one): nothing says which is the market, so no number is made.
+   */
+  REFERENCES_DISAGREE: 'references_disagree',
 });
 /** What the valuation rests on: this item; the models it may be, when only its family is established; or similar items, for a thing identified by description. */
 export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR_ITEMS: 'similar_items' });
@@ -119,6 +124,8 @@ export const LOCAL_STRENGTH = Object.freeze({ drives: 1.5, high: 2.5, medium: 1 
 /** Why a reference that qualifies took no part in the price. */
 export const SET_ASIDE = Object.freeze({
   ABOVE_NEW: 'above_new_price', SEALED_FAR_BELOW_NEW: 'sealed_far_below_new_price', OUTLIER: 'outlier',
+  /** One of exactly two references that disagree beyond DISPERSION.dispersed (WITHDRAWN.REFERENCES_DISAGREE). */
+  DISAGREE: 'references_disagree',
   /** Another size or capacity than the item's (binding.js OTHER_SIZE): another variant, shown, never priced from. */
   OTHER_SIZE: 'different_size_or_capacity',
   /** Priced above an Israeli private ad for a LARGER capacity of the same model: not credible for this one. */
@@ -453,6 +460,10 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     ? (standing.filter(qualifies).length < COMPARABLE_MIN ? WITHDRAWN.TOO_FEW_COMPARABLES : (dispersionOf(standing) > DISPERSION.dispersed ? WITHDRAWN.COMPARABLES_DISAGREE : null))
     : null;
   if (comparableReason) for (const p of standing) p.dropped = SET_ASIDE.SIMILAR_CONTEXT;
+  // TWO REFERENCES THAT DISAGREE (WITHDRAWN.REFERENCES_DISAGREE): both are shown, neither prices.
+  const pair = points.filter((p) => !p.dropped);
+  const disagree = pair.length === 2 && Math.max(pair[0].value, pair[1].value) / Math.min(pair[0].value, pair[1].value) > DISPERSION.dispersed;
+  if (disagree) for (const p of pair) p.dropped = SET_ASIDE.DISAGREE;
   const kept = points.filter((p) => !p.dropped);
   const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
@@ -539,6 +550,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   if (!searchPerformed && evidence.length === 0) return withdraw(WITHDRAWN.NO_SEARCH);
   if (strategy === STRATEGY.SPECIALISED) return withdraw(WITHDRAWN.NO_CALIBRATED_METHOD);
   if (comparableReason) return withdraw(comparableReason);
+  if (disagree) return withdraw(WITHDRAWN.REFERENCES_DISAGREE);
   const good = aggregate(kept);
   // References were found and none of them is an Israeli second-hand listing that stands: say that, not "nothing found".
   if (!good) return withdraw(points.length > 0 && !localEvidence ? WITHDRAWN.NO_LOCAL_EVIDENCE : WITHDRAWN.NO_RESALE_EVIDENCE);

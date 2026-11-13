@@ -239,12 +239,18 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
     const smaller = value([item({ price: 2000 }), item({ price: 500, match: 'close_comparable', binding_reason: 'row_states_another_size', size_relation: 'other' })]);
     assert.equal(smaller.status, 'priced', 'a smaller capacity says nothing about the ceiling');
   });
-  test('CS-3g with a distribution to be an outlier from, an outlier is set aside; with two or three points nothing is', () => {
+  test('CS-3g with a distribution to be an outlier from, an outlier is set aside; with two points ten times apart nothing prices', () => {
     const many = value([300, 310, 320, 330, 3000].map((price) => item({ price, kind: 'sold' })));
     assert.deepEqual(many.evidence.filter((e) => e.set_aside === 'outlier').map((e) => e.price), [3000]);
     assert.ok(many.prices.good.high < 400);
+    // Two references ten times apart (2026-11-13: a Canon 5D Mark III priced ₪42,500 from ₪46,970 beside ₪2,000): no MAD
+    // rule can say which is the market, so neither prices and both are shown.
     const few = value([300, 3000].map((price) => item({ price, kind: 'sold' })));
-    assert.equal(few.counts.resale, 2);
+    assert.equal(few.status, 'insufficient_evidence');
+    assert.equal(few.withdrawn, 'references_disagree');
+    assert.deepEqual(few.evidence.map((e) => e.set_aside).sort(), ['references_disagree', 'references_disagree']);
+    const close = value([300, 450].map((price) => item({ price, kind: 'sold' })));
+    assert.equal(close.status, 'priced', 'two references that roughly agree still price');
   });
   test('CS-3h the centre is where half the weight lies, not where half the listings are', () => {
     const centre = (list) => aggregate(normalizeReferences(list, { today: TODAY }).points).centre;
