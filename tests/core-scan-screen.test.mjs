@@ -397,7 +397,7 @@ describe('CV-3 honest when it cannot price', () => {
   test('CV-3a identified but unpriced says so, shows the new price as context only, and still lets the owner sell', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer(UNPRICED)] }));
     assert.match(text(), /I identified this as Logitech G Pro X Superlight, but I don't have enough reliable current second-hand evidence/);
-    assert.match(text(), /New, it currently sells for about ₪550 in Israel\./);
+    assert.match(text(), /New price in Israel — not second-hand worth\s*₪550/, 'the new price is its own card, never a used price');
     assert.doesNotMatch(text(), /Recommended listing price/);
     assert.ok(button('Sell at your own price'));
     assert.ok(button('What I found'));
@@ -417,7 +417,8 @@ describe('CV-3 honest when it cannot price', () => {
     };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(live)] }));
     assert.doesNotMatch(text(), /Recommended listing price|Sell for|₪430|₪389|₪190/, 'no used price, invented or borrowed, and no "Sell for ₪X"');
-    assert.match(text(), /New, it was listed at about ₪400 in Israel; that shop is currently out of stock\./);
+    assert.match(text(), /New price in Israel — not second-hand worth\s*₪400/);
+    assert.match(text(), /out of stock there/);
     assert.ok(button('Sell at your own price'));
     await click(button('What I found'));
     const said = container.querySelector('[role="dialog"]').textContent;

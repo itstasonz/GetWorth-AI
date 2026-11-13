@@ -167,6 +167,30 @@ function ConditionPicker({ condition, identity, copy, note = null }) {
 }
 
 /** "Prices checked 2 days ago" for research older than an hour; nothing for fresh research. */
+/**
+ * THE NEW PRICE IN ISRAEL, APART FROM THE SECOND-HAND WORTH (2026-11-13). The shop reference the engine accepted as the new
+ * price (valuation.js newPrice: bound to the product, VAT included, plausible): its price, the shop, when it was checked and
+ * whether the shop had it. Never part of the three prices, and never shown as a used price.
+ */
+export function retailReferenceOf(valuation) {
+  const ils = valuation?.retail_new_ils;
+  if (!ils) return null;
+  const shops = (valuation.evidence ?? []).filter((e) => e.kind === 'new_retail' && e.market === 'IL' && Number(e.price_ils) > 0);
+  const shop = shops.sort((a, b) => Math.abs(a.price_ils - ils) - Math.abs(b.price_ils - ils))[0] ?? null;
+  return { price: ils, inStock: valuation.retail_new_in_stock !== false, domain: shop?.domain ?? null, url: shop?.url ?? null, seen: shop?.seen ?? valuation.searched?.date ?? null };
+}
+function RetailReference({ valuation, copy }) {
+  const r = retailReferenceOf(valuation);
+  if (!r) return null;
+  return (
+    <div className="rounded-container border border-subtle bg-surface p-3 space-y-1" data-testid="scan-retail-reference">
+      <p className="text-meta text-text-muted">{copy.retailLabel}</p>
+      <p className="text-body font-semibold text-text-primary"><bdi dir="ltr">{formatPrice(r.price)}</bdi></p>
+      <p className="text-meta text-text-muted">{copy.retailSource(r.domain, r.seen, r.inStock)}</p>
+    </div>
+  );
+}
+
 export function checkedAgo(valuation, copy) {
   const at = Date.parse(valuation?.searched?.at ?? '');
   if (!Number.isFinite(at)) return null;
@@ -278,6 +302,7 @@ export default function ScanView() {
               {checkedAgo(s.valuation, copy) && <p className="text-body-sm text-text-muted" data-testid="scan-checked-ago">{checkedAgo(s.valuation, copy)}</p>}
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-refreshing">{copy.refreshingPrices}</p>}
             </div>
+            <RetailReference valuation={s.valuation} copy={copy} />
             {/* The price for the chosen condition comes from ads for units in that condition, or the screen says there are none (valuation.js conditionPrices). */}
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} note={conditionNote} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{noConditionBand ? copy.sellOwnPrice : (rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list)))}</Btn>
@@ -286,11 +311,10 @@ export default function ScanView() {
 
         {s.stage === STAGE.INSUFFICIENT && (
           <div className="space-y-4">
+            <RetailReference valuation={s.valuation} copy={copy} />
             <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
               <p className="text-body text-text-primary"><Bidi>{(s.valuation?.no_price_reason && copy.insufficientBy?.[s.valuation.no_price_reason]) ? copy.insufficientBy[s.valuation.no_price_reason](identity.display_name) : copy.insufficient(identity.display_name)}</Bidi></p>
-              {s.valuation?.retail_new_ils && (
-                <p className="text-body-sm text-text-secondary">{(s.valuation.retail_new_in_stock === false ? copy.retailContextUnavailable : copy.retailContext)(formatPrice(s.valuation.retail_new_ils))}</p>
-              )}
+
               {/* The specific gap, in counts, and what would help: not a generic "not enough evidence". */}
               {s.valuation?.evidence_gap && s.valuation.no_price_reason === 'no_verified_israeli_second_hand_reference' && (
                 <p className="text-body-sm text-text-secondary" data-testid="scan-evidence-gap">{copy.gap(s.valuation.evidence_gap)}</p>

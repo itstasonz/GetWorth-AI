@@ -130,7 +130,40 @@ async function replay(dir, repo, outFile) {
   console.log(`priced ${priced}/${out.length}`);
 }
 
+/**
+ * POOLED: the same products' recordings from several live runs replayed IN ORDER through ONE store per product, each run
+ * 25 hours after the last — what background refresh / repeat scans accumulate in Production (the 7-day research pool).
+ * Free (no network). usage: pooled <repo> <out.json> <dir1> <dir2> ...
+ */
+async function pooled(repo, outFile, dirs) {
+  const { runPrice } = await imp(repo, 'api/_lib/scan/service.js');
+  const { normalizeIdentity } = await imp(repo, 'api/_lib/scan/identify.js');
+  const out = [];
+  for (const item of ITEMS) {
+    const store = memStore();
+    let r = null; let runs = 0;
+    for (const [k, dir] of dirs.entries()) {
+      const file = path.join(dir, `${item.id}.json`);
+      if (!fs.existsSync(file)) continue;
+      const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
+      const fetchImpl = async (url, init = {}) => {
+        if (!String(url).includes('api.openai.com')) return fetch(url, init);
+        const st = rec.responses[stageOf(init)];
+        return st ? new Response(st.body, { status: st.status, headers: { 'content-type': 'text/event-stream' } }) : new Response('{"error":{"message":"not recorded"}}', { status: 500 });
+      };
+      const at = NOW + k * 25 * 3_600_000;
+      r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: `pool-${k}`, model: MODEL, apiKey: 'replay', fetchImpl, now: () => at, store, freshMs: 3_600_000, swr: false, marketplace: async () => [], background: async () => {}, ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
+      runs += 1;
+    }
+    if (r) out.push({ id: item.id, runs, ...summary(r.valuation), resale: r.valuation?.counts?.resale ?? 0 });
+  }
+  fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
+  for (const o of out) console.log(o.id.padEnd(13), String(o.runs), String(o.status).padEnd(22), o.good ? `worth ₪${o.good.worth} (${o.confidence}, ${o.resale} refs)` : (o.withdrawn ?? ''));
+  console.log(`pooled priced ${out.filter((o) => o.status === 'priced').length}/${out.length}`);
+}
+
 const [step, ...args] = process.argv.slice(2);
+if (step === 'pooled') { await pooled(args[0], args[1], args.slice(2)); process.exit(0); }
 if (step === 'record') await record(args[0], args.slice(1));
 else if (step === 'replay') await replay(args[0], args[1], args[2]);
 else { console.error('usage: record <dir> [ids...] | replay <dir> <repo> <out.json>'); process.exit(1); }

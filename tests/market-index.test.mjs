@@ -452,3 +452,14 @@ describe('MI-22 a new price is never a stray number (DualSense "new ₪30", 2026
     assert.equal(bindPrice({ price: 275, currency: 'ILS', title: 'Sony DualSense', match: 'exact' }, page('בקר Sony DualSense Midnight Black ₪275 מימוש: 299 נקודות'), id).level, 'strong');
   });
 });
+
+describe('MI-23 the new-price reference is its own thing', () => {
+  test('MI-23b the valuation keeps the new price apart from the three prices', async () => {
+    const { buildValuation } = await import('../api/_lib/scan/valuation.js');
+    const shop = { url: 'https://www.shop.co.il/p', domain: 'shop.co.il', title: 'Sony DualSense', price: 279, currency: 'ILS', price_ils: 279, kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', binding: 'strong', stock: 'in_stock', seen: today };
+    const v = buildValuation({ evidence: [shop], today });
+    assert.equal(v.status, 'insufficient_evidence', 'a new price alone is never a second-hand worth');
+    assert.equal(v.prices, null);
+    assert.equal(v.retail_new_ils, 280);
+  });
+});
