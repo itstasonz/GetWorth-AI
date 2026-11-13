@@ -258,3 +258,41 @@ Outcome shown: "found 1 Israeli second-hand ad, none a current used one" + sell 
 **Coverage before/after:** replays unchanged (11/20, 10/20, 9/20) — the fixes add evidence only where ads in seller wording
 exist. **Latency (Production, server, today):** cold n=23 identify+market p50 19.2 s / p90 23.0 s; repeat n=5 p50 7.1 s /
 p90 8.0 s.
+
+## 14. Israeli market-data acquisition — feasibility audit and measured ceiling (2026-11-13, Production 8174678)
+
+**Source by source** (robots.txt fetched once per site; terms read where reachable; terms read 2026-11-12 for Homeless /
+ad.co.il / Yad2 in docs/partnerships/israeli-market-data.md). "Scan-time" = the price appears in OpenAI web-search results a
+person's own scan triggered; "automated" = a GetWorth job fetching the site.
+
+| Source | Automated commercial access | Item listings + prices | Bind to exact product | Dates / condition | Retain / refresh | Measured contribution |
+|---|---|---|---|---|---|---|
+| Homeless | **No** — terms forbid robots + commercial use (robots.txt itself permissive) | Yes, ad pages with price in title | Good when the title names the model | Some dates; condition in text | Scan window only (7 d) | The main Israeli source in every priced result |
+| ad.co.il | **No** — written permission required | Mostly archive / category pages | Weak (rows off list pages) | Archive = expired | Scan window only | Rarely binds; archive excluded |
+| Yad2 | **No** — operator pursues unauthorised collection; bot wall | Collection pages, no prices in snippets | — | — | Not used | 0 (removed from queries) |
+| Facebook Marketplace | **No** — Meta terms; robots disallow | — | — | — | Not used | 0 |
+| zuzz.co.il | **No** — terms §9: no manual/automated collection, no commercial use | Some | Unmeasured | — | Scan window only | ~0 seen in results |
+| KSP | **No** — bot protection blocks automated requests | New prices only | 34% of all IL new prices bind (below) | In-stock flags | Scan window only | New-price reference only |
+| playstore.co.il | **No** — terms forbid automated collection + commercial use | New prices | — | — | Scan window only | New-price reference only |
+| Zap, Ivory, Bug | **Unknown** — terms not readable / not found without a browser session | New prices / comparison | 34% bind rate overall | — | Scan window only | New-price reference only |
+| eBay Browse API | **Yes** (official API, free keys — not configured) | Abroad used/sold | Good (structured) | Yes | Per API terms | Abroad context only — never an Israeli price |
+| GetWorth marketplace | **Yes** (own data) | 45 listings, all base64 test data; **0 genuine completed sales** | Exact (scan identity) | Yes | Yes (history) | 0 today |
+
+**The one permitted channel in use — OpenAI web search over public search results — measured on the fixed 20-product set:**
+
+| Acquisition approach | Priced / 20 | Notes |
+|---|---|---|
+| Open search, single run (live run 1) | 10 | 12 of ~30 local-stage pages are Reddit |
+| Israeli-sites-only search (allowed_domains), single run (live run 3) | 9 | slower; finds different items |
+| Union of both, run in parallel per scan | 11 | +Bugaboo Fox 3 from one ad (low) — +1 search call/scan |
+| Three runs accumulated through one store (what background refresh / product reuse gives) | 10 | the same ads recur; the model classifies the same ad differently between runs (PS5 ₪1,800: exact in one, sibling in another) |
+| Founder's DualSense (open and IL-only, live) | 0 / 1 | zero current used standard DualSense ads reachable; the only Israeli ad is an expired new-in-box ask |
+| Israeli new-retail prices that bind to the product (Production, since 2026-11-01) | 10 of 29 (34%) | snippets show the price apart from the name, without ₪, or between other prices |
+
+**Conclusion — a business dependency, measured:** with every currently permitted source, defensible Israeli second-hand
+coverage plateaus at **≈50–55% of common products, almost all low/medium confidence**, and accumulation does not raise it.
+More matching patches move single items, not the plateau. The step change requires **licensed, structured Israeli
+second-hand data** (Yad2, Homeless or ad.co.il under a written data agreement, or a GetWorth marketplace with real
+completed sales) — a founder/business decision; no provider was contacted. Engineering delivered against this limit: the
+new-price reference is now its own card (shop, date, stock; bd65889), product-level research reuse and the 7-day pool make
+repeat scans ≈7 s, and the registry blocks automated collection from every source whose terms forbid it.
