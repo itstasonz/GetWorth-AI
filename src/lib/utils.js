@@ -742,3 +742,19 @@ export const recognisedModelName = (recognition, identification) => {
     || (recognition?.modelNumberSource ? null : pick(recognition?.modelNumber))
     || pick(identification?.model);
 };
+
+/**
+ * A data: URL as a Blob, decoded in memory. NEVER `fetch(dataUrl)`: Production's Content-Security-Policy connect-src
+ * does not list `data:`, so the browser refuses that fetch — every listing publish from a scan failed with "image upload
+ * failed" (Production E2E, 2026-11-13), and avatar and serial-photo uploads went the same way.
+ */
+export function dataUrlToBlob(dataUrl) {
+  const m = /^data:([^;,]*)((?:;[^;,]*)*?)(;base64)?,([\s\S]*)$/.exec(String(dataUrl ?? ''));
+  if (!m) throw new Error('not a data URL');
+  const type = m[1] || 'application/octet-stream';
+  if (!m[3]) return new Blob([decodeURIComponent(m[4])], { type });
+  const bin = atob(m[4]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type });
+}

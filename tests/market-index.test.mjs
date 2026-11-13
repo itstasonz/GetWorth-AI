@@ -284,3 +284,19 @@ describe('MI-12 the saved valuation keeps the worth the person saw', () => {
     assert.deepEqual([row.price_low, row.price_mid, row.price_high], [870, 950, 1300]);
   });
 });
+
+describe('MI-13 images become files without the network', () => {
+  test('MI-13a a data: URL decodes to the same bytes and type', async () => {
+    const { dataUrlToBlob } = await import('../src/lib/utils.js');
+    const bytes = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
+    const blob = dataUrlToBlob(`data:image/jpeg;base64,${bytes.toString('base64')}`);
+    assert.equal(blob.type, 'image/jpeg');
+    assert.deepEqual(Buffer.from(await blob.arrayBuffer()), bytes);
+    assert.throws(() => dataUrlToBlob('https://example.com/a.jpg'));
+  });
+  test('MI-13b nothing in the app fetches a data: URL (the CSP connect-src refuses it in Production)', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync(new URL('../src/contexts/AppContext.jsx', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /await fetch\((img|compressed|dataUrl)\)/);
+  });
+});

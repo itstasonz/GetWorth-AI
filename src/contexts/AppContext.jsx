@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useRef, useCallback, useEff
 import { supabase } from '../lib/supabase';
 import T from '../lib/translations';
 import SoundEffects from '../lib/sounds';
-import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull, VALID_CATEGORIES, observedModelNumber, recognisedModelName } from '../lib/utils';
+import { sanitizeSearch, calcPrice, computeQualityScore, PAGE_SIZE, extractSerialFromOCR, maskSerial, validateIMEI, formatMessagePreview, hasRealPrice, observedPriceMid, positivePriceOrNull, VALID_CATEGORIES, observedModelNumber, recognisedModelName, dataUrlToBlob } from '../lib/utils';
 import { cacheGet, cacheSet, cacheDelete } from '../lib/appCache';
 import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
@@ -1804,8 +1804,7 @@ export function AppProvider({ children }) {
       const compressed = await compressImage(dataUrl, 512, 0.85);
 
       // Convert to blob
-      const res = await fetch(compressed);
-      const blob = await res.blob();
+      const blob = dataUrlToBlob(compressed);
 
       const filePath = `${user.id}/avatar.jpg`;
 
@@ -1876,8 +1875,7 @@ export function AppProvider({ children }) {
         reader.readAsDataURL(file);
       });
       const compressed = await compressImage(dataUrl, 1024, 0.85);
-      const res  = await fetch(compressed);
-      const blob = await res.blob();
+      const blob = dataUrlToBlob(compressed);
 
       // ── 3. Require active session ─────────────────────────────────────────
       if (!user.id) {
@@ -3880,8 +3878,7 @@ export function AppProvider({ children }) {
             return img.startsWith(storagePrefix) ? img : null;
           }
           try {
-            const response = await fetch(img);
-            const blob = await response.blob();
+            const blob = dataUrlToBlob(img);
             if (blob.size < 1000) {
               if (DEV) console.warn(`[Publish] Skipping image ${i}: too small (${blob.size} bytes)`);
               return null;
