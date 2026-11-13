@@ -40,6 +40,17 @@ export const EVIDENCE_PAGES = Object.freeze(['listing', 'search_or_category', 's
 export const EVIDENCE_STOCK = Object.freeze(['in_stock', 'out_of_stock', 'unknown']);
 export const MARKET_STAGES = Object.freeze(['local', 'expand']);
 export const MAX_EVIDENCE = 12;
+/**
+ * OPTIONAL: the Israeli stage searches Israeli second-hand boards and shops only (OpenAI web_search allowed_domains). OFF
+ * unless CORE_SCAN_MARKET_IL_DOMAINS is exactly 'true': on the 20-item live eval (2026-11-13) it priced 9/20 against 10/20
+ * open and was not faster, so it is an experiment switch, not the default. Yad2 and Facebook are never listed.
+ */
+export const IL_SEARCH_DOMAINS = Object.freeze([
+  'homeless.co.il', 'ad.co.il', 'zuzz.co.il', 'mezia.co.il', 'doskatv.co.il', 'prog.co.il', 'adtiny.com',
+  'zap.co.il', 'ksp.co.il', 'ivory.co.il', 'bug.co.il', 'payngo.co.il', 'machsanei-hashmal.co.il', 'lastprice.co.il',
+  'idigital.co.il', 'istore.co.il', 'cplace.co.il', 'mobileshop.co.il', 'playstore.co.il', 'goodgame.co.il',
+]);
+export const resolveLocalDomains = (env = process.env) => (String(env?.CORE_SCAN_MARKET_IL_DOMAINS ?? '').trim().toLowerCase() === 'true' ? IL_SEARCH_DOMAINS : null);
 
 const strict = (properties) => ({ type: 'object', additionalProperties: false, required: Object.keys(properties), properties });
 
@@ -289,6 +300,7 @@ EVIDENCE — every usable price you found, up to ${MAX_EVIDENCE}: second-hand pr
 export async function researchMarket({
   identity, answer = null, stage = 'local',
   model, effort = resolveMarketEffort(), apiKey, timeoutMs = MARKET_STAGE_TIMEOUT_MS, safetyIdentifier = null, fetchImpl = fetch, now = Date.now(), signal = null,
+  localDomains = resolveLocalDomains(),
 } = {}) {
   const body = {
     model,
@@ -303,6 +315,7 @@ export async function researchMarket({
       type: 'web_search',
       search_context_size: MARKET_SEARCH_CONTEXT_SIZE,
       user_location: { type: 'approximate', country: MARKET.country, timezone: MARKET.timezone },
+      ...(stage === 'local' && localDomains ? { filters: { allowed_domains: [...localDomains] } } : {}),
     }],
     tool_choice: 'required',
     include: ['web_search_call.action.sources', 'web_search_call.results'],
