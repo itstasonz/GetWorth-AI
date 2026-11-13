@@ -229,3 +229,18 @@ describe('MI-7 scheduled refresh', () => {
     assert.equal(purged, 1);
   });
 });
+
+describe('MI-8 Hebrew brand + short model word (Xiaomi scooter, 2026-11-13)', () => {
+  const scooter = () => normalizeIdentity({ ...RAW_IDENTITY, category: 'Sports', item_type: 'electric scooter', brand: 'Xiaomi', product_family: 'Mi Electric Scooter', model: 'Mi Electric Scooter Pro 2', canonical_name: 'xiaomi mi electric scooter pro 2', display_name: 'Xiaomi Mi Electric Scooter Pro 2', search: { hebrew_name: 'קורקינט חשמלי שיאומי פרו 2', aliases: [], model_numbers: [] } });
+  const page = (t) => ({ type: 'listing', title: `${t} למכירה באלעד`, text: `# ${t} למכירה באלעד\n\n600 ₪\n\n## פריט\n\n${t}\n\n### מחיר: \n\n600` });
+  test('MI-8a the ad written in Hebrew ("שיאומי פרו 2", ₪600 beside it) is tied to the product', async () => {
+    const { bindPrice } = await import('../api/_lib/scan/binding.js');
+    assert.equal(bindPrice({ price: 600, currency: 'ILS', title: 'קורקינט חשמלי שיאומי פרו 2', match: 'exact' }, page('קורקינט חשמלי שיאומי פרו 2'), scooter()).level, 'strong');
+  });
+  test('MI-8b another generation, a missing number or another brand is NOT tied', async () => {
+    const { bindPrice } = await import('../api/_lib/scan/binding.js');
+    for (const t of ['קורקינט חשמלי שיאומי פרו 3', 'קורקינט חשמלי שיאומי פרו', 'קורקינט חשמלי סגווי פרו 2']) {
+      assert.notEqual(bindPrice({ price: 600, currency: 'ILS', title: t, match: 'exact' }, page(t), scooter()).level, 'strong', t);
+    }
+  });
+});

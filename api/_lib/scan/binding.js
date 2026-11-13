@@ -134,9 +134,17 @@ export function namesOf(identity) {
   // least one of the model's words (the same word, or the same word in the other alphabet): "כורסה" alone never does.
   const hebrewName = tokens(i.search?.hebrew_name);
   const modelWords = generation(model);
+  // THE BRAND IN HEBREW BESIDE A SHORT MODEL WORD (2026-11-13). "שיאומי פרו 2" is "Xiaomi Pro 2": its model word "pro" is too
+  // short to be read across alphabets alone, but beside the brand written in Hebrew ("שיאומי" = "xiaomi") and every number
+  // of the model it names the product. The run is still the whole Hebrew name, in order: "פרו 3" or another brand never matches.
+  // A Chinese brand's initial x is said "sh" ("Xiaomi" is written "שיאומי"): that reading is tried for the brand only.
+  const brandInHebrew = [...brand].some((b) => b.length >= 3 && hebrewName.some((h) => transliterates(h, b, { minLength: 3 })
+    || (b.length >= 5 && /^x[aeiou]/.test(b) && transliterates(h, `sh${b.slice(1)}`, { minLength: 2 }))));
+  const hasDigits = modelWords.some((t) => /\d/.test(t));
   const carriesModel = hebrewName.length > 0 && modelWords.length > 0
     && modelWords.filter((t) => /\d/.test(t)).every((d) => hebrewName.includes(d))
-    && modelWords.some((t) => !/^\d+$/.test(t) && hebrewName.some((h) => h === t || transliterates(h, t, { minLength: 3 })));
+    && modelWords.some((t) => !/^\d+$/.test(t) && hebrewName.some((h) => h === t || transliterates(h, t, { minLength: 3 })
+      || (brandInHebrew && hasDigits && transliterates(h, t, { minLength: 2 }))));
   if (carriesModel) runs.push(hebrewName);
   for (const n of [i.model_number, ...(i.search?.model_numbers ?? [])]) runs.push(tokens(n));
   // A THING IDENTIFIED BY DESCRIPTION (a sofa, a handmade bowl) has no model name a row must carry: the row must name
