@@ -153,3 +153,24 @@ query wording); the service-worker "update available" banner did not appear once
 - **Latency from Production telemetry (server time; add ~1 s network):** cold scans n=11 — identify+market p50 19.7 s,
   p90 23.0 s (market p50 12.6 s, p90 15.9 s); repeat scans n=3 — p50 7.1 s, p90 7.3 s (market 0.4–0.6 s). Index read
   233–903 ms in parallel with the cache read; the index served one scan outright and joined the pool in four.
+
+## 10. Marketplace workflow verified end to end, 2026-11-13 (Production f9bf660)
+
+- **Bucket:** migration 20261113150000 applied after founder approval (project xbwxbdxuklrbnkpgonjc; bucket absent
+  before; policies: authenticated insert/update/delete only in the own-uid folder, public read; public, ≤5 MB,
+  JPEG/PNG/WebP; rollback refuses while any object exists). Note: the public SELECT policy also lets anyone LIST object
+  names (user-id folders) — as designed in 20260519000007, not changed.
+- **QA listing `d2e66c1e-86f7-4ab0-8a1c-ad57fdfe5ba5`:** scanned iPhone 12 → model question → storage "not sure" →
+  ≈₪950 / ≈₪1,300 / ≈₪870 (low) → condition good → draft → title "GetWorth QA Test — Temporary Listing", own price
+  ₪999 → published 11:04 UTC ("המודעה שלך פורסמה!"). Row: price 999, price_source seller_entered, condition used,
+  valuation linked, status active, 1 photo in Storage + thumbnail. Anonymous REST read returned it; photo URL HTTP 200
+  (199 KB). Opened from My listings → /listing/d2e66c1e… (photo, ₪999, used, description correct; title showed the AI
+  Hebrew name — fixed in 7038609). Deleted via the app's trash + confirm sheet → "המודעה נמחקה"; row status `deleted`
+  (soft delete by design), anonymous read returns [], Storage objects in `listings` = 0, photo URL HTTP 400.
+- Fixed and live (7038609, f9bf660): seller's title wins over the AI Hebrew name; description drops sentences naming
+  an unchosen candidate; confirmed series joins the name (verified live: "Apple Watch Series 4"); research shared
+  across wordings (product key); update banner — verified live: with 7038609 running, the banner for f9bf660 appeared
+  on its own and the app's Update button loaded it.
+- Open: the Apple Watch Series 4 price (≈₪900, low) rests on an Ivory refurbished unit and a Homeless ad titled only
+  "שעוני אפל ווטש" — weak evidence, shown as such. Edit/delete icon buttons on My listings lack accessible labels. A
+  listing's own page offers "message seller" to its seller.
