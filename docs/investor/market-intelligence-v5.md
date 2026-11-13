@@ -320,3 +320,30 @@ At 1,000 cold scans/month ≈ $30; prewarm capped at $0.30/day by founder approv
 automated commercial retrieval and retention — a written data agreement with an Israeli marketplace, or real completed sales
 on GetWorth. Every accessible alternative found either has no volume (Shukshuk), no rights (Yad2 scrapers), or no Israeli
 data (eBay, sold-comps APIs). 70–90% coverage is not supported by any measurement available today.
+
+## 16. Breaking the stalemate — stability, first-party evidence, feeds (2026-11-13, Production e46a309)
+
+**Stability vs absence (5 independent live runs of the 20 products, current code):** priced every time 6 (iPhone 13,
+AirPods Pro 2, Watch 8, iPad 9, MacBook Air M1, Marlin 5); 4 of 5 runs 4 (PS5, Switch OLED, Dyson V11, Xiaomi Pro 2);
+once 2 (Canon 5D III, Bugaboo Fox 3); never 8 (Galaxy S23, DualSense, G Pro Wireless, Essenza Mini, Airfryer XXL, POÄNG,
+KALLAX, Squier) → **single run 9–11, union 12/20, true absence in this channel 8/20.**
+**Why searches cancelled each other:** the same ad is re-classified at every sighting (Dyson ₪1,100: exact ×3, bundle ×1) and
+the newest overwrote the rest. Fixed: up to 6 sightings per ad, majority decides, ties to the less usable reading, binding =
+best proof (e46a309). Merged replays over six orders: the same **9 always priced**, PS5 5/6 (before: order-dependent, Dyson
+could vanish). Stable coverage after ≥2 searches of a product within the 7-day window: **6 → 9–10**; union unchanged (12).
+**Holdout (10 new products, live, once):** **3/10 priced** (Xbox Series S ₪540, AirPods 3 ₪270, Kindle Paperwhite ₪540 — each
+from ONE Israeli ad, low); iPhone 14, Galaxy S22, PS4 Pro, Watch SE, GoPro 9, Vertuo Next, Roomba i7: no price; a new-price
+reference existed for 5/10. Research p50 11.7 s, ≈$0.024 each.
+**First-party:** today 0 qualifying listings (all 45 pre-date provenance or are admin/test; the 8 "completed" orders have no
+buyer-confirmed price and were admin tests). Built: `marketplace_listing_evidence` (20261113190000 — rehearsed on Production,
+0 rows, not executable by anon/authenticated; **apply blocked, needs founder approval**) + scan connector: genuine sellers,
+`price_source = seller_entered` (the trigger already excludes prices within 2% / ₪5 of a GetWorth number), active, ≤120 days,
+one per seller per product → an Israeli private ASKING price (never a sale). PGlite test covers each exclusion.
+**Feeds:** Israeli trade-in programmes (Pelephone, iDigital, Machsanei Hashmal) are in-store, no feed; Samsung IL trade-in
+not offered; B2B buyback APIs (Reconext, Cellbie Spark, Phobio) do not state Israeli coverage — confirming needs contact
+(founder decision). A trade-in quote would be a separate class (dealer BUY price, a lower bound), never a market price.
+
+**Quantified dependency:** the permitted channel's ceiling is the union of what it can ever retrieve — **12/20 (60%) on the
+benchmark, 3/10 on the holdout** — and 8/20 benchmark products were never retrieved in five runs. Stability work makes the
+reachable ~10 consistent; it cannot reach the rest. Material growth needs (a) a licensed Israeli second-hand feed, or (b) real
+GetWorth listings and confirmed sales (the connector is ready once 20261113190000 is applied).
