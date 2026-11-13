@@ -1,3 +1,4 @@
+import { transliterates } from '../script-normalization.js';
 // ══════════════════════════════════════════════════════════════════════════════
 // CORE SCAN — WHAT KIND OF THING, HOW IT IS VALUED, AND WHAT MAKES IT "THE SAME"
 //
@@ -121,4 +122,26 @@ export function marketKey(identity, answer = null) {
     confirmed.join(','),
     ...(code ? [`code=${code}`] : []),
   ].join('|');
+}
+
+/**
+ * THE HEBREW NAME A SELLER WRITES, WITH A NUMBER IN IT, NAMES THE PRODUCT (2026-11-13, founder's DualSense: "שלט פלייסטיישן
+ * 5"). For an item whose exact model is established, a Hebrew name of at least two words carrying a digit is used as the
+ * product's name as it is — searched as written and matched against ad titles — without the English model glued on
+ * (no Israeli seller writes "שלט פלייסטיישן 5 DualSense Wireless Controller"). A Hebrew name without a number ("שואב אבק
+ * דייסון", "כורסה") keeps the stricter rule: it counts only when it carries the model's own words.
+ */
+const GENERIC_MODEL_WORDS = new Set(['wireless', 'controller', 'edition', 'standard', 'console', 'phone', 'smartphone', 'headphones', 'earbuds', 'camera', 'body']);
+export function hebrewNamesProduct(identity) {
+  const i = identity ?? {};
+  const toks = (v) => String(v ?? '').normalize('NFKC').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const words = toks(i.search?.hebrew_name);
+  if (!(i.exact_model_established === true && words.length >= 2 && words.some((w) => /\d/.test(w)) && words.some((w) => /[א-ת]{3,}/.test(w)))) return false;
+  const model = toks(i.model ?? i.product_family);
+  // A model's own number must be the Hebrew name's ("אייפד 10" is not an iPad 9).
+  if (!model.filter((t) => /\d/.test(t)).every((d) => words.includes(d))) return false;
+  // A model word beyond the family and the generic words — an edition ("Edge"), a tier ("Pro") — must be in the Hebrew
+  // name too, in either alphabet: "שלט פלייסטיישן 5" is the standard DualSense, never the DualSense Edge.
+  const generic = new Set([...toks(i.product_family), ...toks(i.brand), ...toks(i.item_type), ...GENERIC_MODEL_WORDS]);
+  return model.filter((t) => !/\d/.test(t) && !generic.has(t)).every((t) => words.some((w) => w === t || transliterates(w, t, { minLength: 2 })));
 }

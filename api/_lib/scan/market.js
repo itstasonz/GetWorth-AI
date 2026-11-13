@@ -30,7 +30,7 @@ import { streamResponse } from '../v2/openai-stream.js';
 import {
   CONDITIONS, MARKET, MARKET_STAGE_TIMEOUT_MS, MARKET_MAX_OUTPUT_TOKENS, MARKET_SEARCH_CONTEXT_SIZE, MAX_USER_TEXT, resolveMarketEffort,
 } from './config.js';
-import { SEARCHABLE_ATTRIBUTES as SEARCHABLE } from './strategy.js';
+import { SEARCHABLE_ATTRIBUTES as SEARCHABLE, hebrewNamesProduct } from './strategy.js';
 
 export const EVIDENCE_KINDS = Object.freeze(['used_listing', 'sold', 'refurbished', 'new_retail', 'price_guide', 'other']);
 export const EVIDENCE_MATCHES = Object.freeze(['exact', 'close_comparable', 'sibling_model', 'accessory', 'part', 'box_only', 'bundle', 'irrelevant']);
@@ -165,7 +165,7 @@ export function searchNames(identity, answer = null) {
     const words = h.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
     return !model || model.toLowerCase().split(/\s+/).every((t) => h.toLowerCase().includes(t) || words.some((w) => transliterates(w, t, { minLength: 3 })));
   };
-  const hebrewName = hebrew && hebrew.toLowerCase() !== name.toLowerCase() ? (carries(hebrew) ? hebrew : `${hebrew} ${model}`) : null;
+  const hebrewName = hebrew && hebrew.toLowerCase() !== name.toLowerCase() ? (carries(hebrew) || hebrewNamesProduct(i) ? hebrew : `${hebrew} ${model}`) : null;
   return { name, codes, aliases, hebrew: hebrewName, alternatives };
 }
 

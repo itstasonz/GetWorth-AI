@@ -414,3 +414,22 @@ describe('MI-20 a modified unit is priced as a standard unit, and says so', () =
     assert.equal(buildListingDraft({ identity: { display_name: 'Sony DualSense' }, valuation, condition: 'good' }).price, 230);
   });
 });
+
+describe('MI-21 the Hebrew seller name with a number names the product', () => {
+  const id = (hebrew, exact = true) => normalizeIdentity({ ...RAW_IDENTITY, category: 'Electronics', item_type: 'game controller', brand: 'Sony', product_family: 'DualSense', model: 'DualSense', canonical_name: 'sony dualsense', display_name: 'Sony DualSense', exact_model_established: exact, search: { hebrew_name: hebrew, aliases: ['שלט PS5'], model_numbers: [] } });
+  test('MI-21a the scan of 13:14: hebrew_name "שלט פלייסטיישן 5" ties the Homeless ad and is searched as written', async () => {
+    const { bindPrice } = await import('../api/_lib/scan/binding.js');
+    const { buildSearchQueries } = await import('../api/_lib/scan/market.js');
+    const t = 'שלט פליסטישן סוני 5 ש"חור';
+    const page = { type: 'listing', title: `${t} למכירה בבאר שבע 270 ש"ח`, text: `# ${t} למכירה בבאר שבע\n\n270 ₪\n\n## פריט\n\n${t}\n\n### מחיר: \n\n270` };
+    assert.equal(bindPrice({ price: 270, currency: 'ILS', title: t, match: 'exact' }, page, id('שלט פלייסטיישן 5')).level, 'strong');
+    assert.ok(buildSearchQueries({ identity: id('שלט פלייסטיישן 5'), stage: 'local' }).includes('שלט פלייסטיישן 5 יד שנייה'));
+    assert.ok(!buildSearchQueries({ identity: id('שלט פלייסטיישן 5'), stage: 'local' }).some((q) => /שלט פלייסטיישן 5 DualSense/.test(q)));
+  });
+  test('MI-21b without an established model, or without a number, the Hebrew name is not enough', async () => {
+    const { hebrewNamesProduct } = await import('../api/_lib/scan/strategy.js');
+    assert.equal(hebrewNamesProduct(id('שלט פלייסטיישן 5', false)), false);
+    assert.equal(hebrewNamesProduct(id('שלט סוני')), false);
+    assert.equal(hebrewNamesProduct(id('שלט פלייסטיישן 5')), true);
+  });
+});

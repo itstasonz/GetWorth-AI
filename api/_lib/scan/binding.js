@@ -43,6 +43,7 @@
 import { pricedNumbers, MAX_DISTANCE } from '../phaseb/content-binding.js';
 import { transliterates, skeletonOf, scriptOf, SCRIPT } from '../script-normalization.js';
 import { openVariant } from './identify.js';
+import { hebrewNamesProduct } from './strategy.js';
 
 // A storage variant still open on the item, and the units a row states storage in.
 const STORAGE_VARIANT = /^(storage|capacity|memory|ram)/;
@@ -147,7 +148,7 @@ export function namesOf(identity) {
     && modelWords.filter((t) => /\d/.test(t)).every((d) => hebrewName.includes(d))
     && modelWords.some((t) => !/^\d+$/.test(t) && hebrewName.some((h) => h === t || transliterates(h, t, { minLength: 3 })
       || (brandInHebrew && hasDigits && transliterates(h, t, { minLength: 2 }))));
-  if (carriesModel) runs.push(hebrewName);
+  if (carriesModel || hebrewNamesProduct(i)) runs.push(hebrewName);
   for (const n of [i.model_number, ...(i.search?.model_numbers ?? [])]) runs.push(tokens(n));
   // A THING IDENTIFIED BY DESCRIPTION (a sofa, a handmade bowl) has no model name a row must carry: the row must name
   // what KIND of thing it is — in English (its type) or in Hebrew (what a seller here calls it) — beside its price.
