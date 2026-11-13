@@ -296,3 +296,27 @@ second-hand data** (Yad2, Homeless or ad.co.il under a written data agreement, o
 completed sales) — a founder/business decision; no provider was contacted. Engineering delivered against this limit: the
 new-price reference is now its own card (shop, date, stock; bd65889), product-level research reuse and the 7-day pool make
 repeat scans ≈7 s, and the registry blocks automated collection from every source whose terms forbid it.
+
+## 15. Additional data sources — discovery, proof of concept, decision (2026-11-13)
+
+| Rank | Source | Israeli second-hand coverage | Rights for GetWorth's use | Measured | Decision |
+|---|---|---|---|---|---|
+| 1 | OpenAI web search over public results (in use) | ≈50% of the 20-product set | Search results consumed at scan time; sites allowing OAI-SearchBot | 10/20 baseline, live 2026-11-13; ≈$0.024/research; p50 ≈11.5 s | Keep (only permitted channel) |
+| 2 | Same + a parallel Israeli-sites-only search (`CORE_SCAN_MARKET_DUAL_LOCAL`) | Same pool | Same | **10/20** (+Dyson, −Xiaomi); +$0.012/research; p50 ≈12.2 s | Not enabled — no gain |
+| 3 | GetWorth marketplace (in use) | 45 listings, all test data; 0 genuine completed sales | Own data | 0 | Grows only with real users and sales |
+| 4 | eBay Browse API (official, free keys) | None in Israel | Permitted under API terms | Not run (no keys) | Abroad context only; cannot price an Israeli item — **founder: create free developer keys if wanted** |
+| 5 | Shukshuk MCP (shukshuk.co.il/api/mcp, free, no auth) | **0 results** for DualSense, "שלט פלייסטיישן", iPhone 13, PS5, Nintendo Switch, AirPods, Dyson | Terms §4: no automated systematic collection, no external database without written consent | 7 manual evaluation queries | Excluded (no volume; consent needed) |
+| 6 | ReefAPI "Yad2 API" | Yad2 business-seller products, cars, real estate | **No Yad2 authorization stated**; mentions rotating requests when "blocked" | Not run | Excluded (no rights; anti-bot circumvention) |
+| 7 | Apify Yad2 actors (solidcode, dami_studio, swerve, stealth_mode, leadproof…) | Yad2 second-hand market | Third-party scrapers; no Yad2 licence; Yad2 pursues unauthorised collection | Not run | Excluded |
+| 8 | Resale Comps | — | — | docs URL returns 404; sold-comps APIs found (Underpriced AI, CompsAPI) cover eBay only | Not Israeli |
+| 9 | zuzz, playstore, KSP, Zap, Ivory, Bug (via own fetching) | New prices / some ads | Terms forbid automated collection (zuzz, playstore); KSP bot-walls; others unknown | §14 | Scan-time search only |
+
+**Coverage before/after: 10/20 → 10/20** with every source GetWorth may use. **Cost**: identification ≈$0.006/scan (gpt-6.1-terra,
+≈4k in / 460 out); fresh research ≈$0.024 (≈$0.043 per priced product at 50% coverage); repeat scan ≈$0.006 (research reused).
+At 1,000 cold scans/month ≈ $30; prewarm capped at $0.30/day by founder approval (trial ends 2026-11-21).
+**Latency**: cold p50 19.2 s / p90 23.0 s, repeat p50 7.1 s (Production, today).
+
+**The blocker is a rights decision, not engineering:** broader Israeli coverage requires a data source with permission for
+automated commercial retrieval and retention — a written data agreement with an Israeli marketplace, or real completed sales
+on GetWorth. Every accessible alternative found either has no volume (Shukshuk), no rights (Yad2 scrapers), or no Israeli
+data (eBay, sold-comps APIs). 70–90% coverage is not supported by any measurement available today.

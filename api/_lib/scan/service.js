@@ -31,7 +31,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity, openVariant } from './identify.js';
-import { researchMarket, marketDate, buildSearchQueries } from './market.js';
+import { researchMarket, marketDate, buildSearchQueries, IL_SEARCH_DOMAINS } from './market.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
@@ -325,8 +325,17 @@ export async function runPrice({
   const early = parallel && widens([]) ? settle(request('expand', cancel.signal)) : null;
   const drop = () => { if (early && !cancel.signal.aborted) { cancel.abort(); cancelled.push('expand'); } };
 
+  // TWO ISRAELI SEARCHES AT ONCE (CORE_SCAN_MARKET_DUAL_LOCAL = 'true', default off): the open one, and one held to Israeli
+  // boards and shops (market.js IL_SEARCH_DOMAINS). Run side by side, no wait is added; they reach different pages
+  // (2026-11-13: open 10/20, Israeli-only 9/20, different items). One more search call per fresh research.
+  const dual = String(process.env.CORE_SCAN_MARKET_DUAL_LOCAL ?? '').trim().toLowerCase() === 'true';
+  const ilOnly = dual ? settle(researchMarket({ identity, answer, stage: 'local', model, apiKey, safetyIdentifier, fetchImpl, now: t0, localDomains: IL_SEARCH_DOMAINS })) : null;
+
   // ISRAEL FIRST.
-  try { await accept('local', await request('local')); } catch (err) {
+  try {
+    await accept('local', await request('local'));
+    if (ilOnly) { const { res } = await ilOnly; if (res) await accept('local_il', res); }
+  } catch (err) {
     drop();
     const failure = classifyOpenAIFailure(err?.message);
     console.warn(`[Scan] market failed stage=local code=${failure}`);
