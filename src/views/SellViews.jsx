@@ -1624,7 +1624,7 @@ export function ListingFlowView() {
     listingStep, setListingStep, listingData, setListingData,
     images, setImages, addListingImages,
     publishing, publishListing, selectCondition, setView,
-    reset, goTab, playSound, showToastMsg,
+    reset, goTab, playSound, showToastMsg, error,
   } = useApp();
 
   const fileInputRef = useRef(null);
@@ -1843,6 +1843,8 @@ export function ListingFlowView() {
               onChange={(e) => setListingData({ ...listingData, location: e.target.value })}
               placeholder={rtl ? 'תל אביב, ירושלים...' : 'Tel Aviv, Jerusalem...'} />
           </FadeIn>
+          {/* A failed publish is said where the button is (Production E2E 2026-11-13: the upload failed and nothing showed). */}
+          {error && !publishing && <p role="alert" data-testid="publish-error" className="text-red-400 text-xs px-1">{error}</p>}
           <FadeIn delay={300}>
             <Btn primary className="w-full py-4" onClick={publishListing} disabled={publishing}>
               {publishing ? <><Loader2 className="w-5 h-5 animate-spin" />{t.publishing}</> : <><Check className="w-5 h-5" />{t.publish}</>}
