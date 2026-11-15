@@ -41,6 +41,7 @@ import { resolveMarketFreshMs, resolveMarketSwr, resolveMarketIndex } from './co
 import { defaultIndex, nullIndex } from '../market/index-store.js';
 import { sourceOf, mayUseInScan } from '../market/sources.js';
 import { refreshMsFor } from '../market/refresh-policy.js';
+import { productDriftKey } from './product-key.js';
 import {
   CONDITIONS, MARKET_FRESH_MS, MARKET_POOL_MS, MARKET_CACHE_MAX_ENTRIES, MAX_FOLLOWUPS, MAX_USER_TEXT,
   resolveMarketParallel,
@@ -178,6 +179,13 @@ function fnv1a(text) {
 }
 /** The research of a PRODUCT, whatever words its identification used: no query wording in it. */
 export const productResearchKey = (identity, answer = null) => `${marketKey(identity, answer)}|r${RESEARCH_VERSION}:product`;
+/** The research of a product whatever words NAMED it (product-key.js); null when the identity names nothing. */
+export function driftResearchKey(identity, answer = null) {
+  const k = productDriftKey(identity, answer);
+  return k ? `${k}|r${RESEARCH_VERSION}:drift` : null;
+}
+/** Searches running on this instance, by product: a concurrent request for the same product joins one. */
+const inflight = new Map();
 export function researchKey(identity, answer = null) {
   const plan = ['local', 'expand'].map((stage) => buildSearchQueries({ identity, answer, stage }).join(' ; ')).join(' || ');
   return `${marketKey(identity, answer)}|r${RESEARCH_VERSION}:${fnv1a(plan)}`;
@@ -198,6 +206,8 @@ export async function runPrice({
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
+  // The record this request's own search kept, handed to any request that joined it (research() below).
+  let kept = null;
   const approximate = isApproximate(identity, answer);
   const familyLevel = isFamilyLevel(identity, answer);
   // How this KIND of item is valued, chosen from what it is (valuation.js strategyFor), never from the evidence found.
@@ -230,12 +240,16 @@ export async function runPrice({
   // model named it slightly differently each time and the research key carries the query wording). Research is also kept
   // under the PRODUCT (marketKey + RESEARCH_VERSION); the newest of the two answers.
   const productKey = productResearchKey(identity, answer);
-  const [cachedExact, cachedProduct, indexed] = await Promise.all([
+  // AND UNDER THE PRODUCT'S WORDS (2026-11-15, product-key.js): "sony dualsense" and "sony dualsense wireless controller"
+  // are one product; colours and descriptive words do not split it, variants and capacities do.
+  const driftKey = driftResearchKey(identity, answer);
+  const [cachedExact, cachedProduct, cachedDrift, indexed] = await Promise.all([
     recall(key, store, t0),
     recall(productKey, store, t0),
+    driftKey ? recall(driftKey, store, t0) : null,
     Promise.resolve().then(() => index.load(identity, answer, { now: t0, rulesVersion: RESEARCH_VERSION })).catch(() => ({ rows: [], ms: 0, error: 'failed' })),
   ]);
-  const cached = cachedExact && (!cachedProduct || cachedExact.at >= cachedProduct.at) ? cachedExact : cachedProduct;
+  const cached = [cachedExact, cachedProduct, cachedDrift].reduce((best, r) => (r && (!best || r.at > best.at) ? r : best), null);
   const fromIndex = indexRecord(indexed?.rows, marketDate(t0));
   const indexInfo = (used) => ({ rows: indexed?.rows?.length ?? 0, ms: indexed?.ms ?? 0, error: indexed?.error ?? null, used });
   // Fresh research for this item: reuse it. No search, the same evidence, the same price.
@@ -259,10 +273,31 @@ export async function runPrice({
     }
     return priced(earlier, { reused: true, stale: true, refreshing: true, index: indexInfo(via), call: { ...noCall, ms: now() - t0 } });
   }
+  // ONE SEARCH PER PRODUCT AT A TIME (2026-11-15: two scans of one DualSense a minute apart each paid for a search). A
+  // search for this product already running on this instance is joined, not repeated; its record prices this request
+  // with this request's own identity. A joined search that found nothing usable leaves this request to search itself.
+  const running = inflight.get(productKey);
+  if (running) {
+    const shared = await running.catch(() => null);
+    if (shared) return priced(shared, { reused: true, joined: true, index: indexInfo(via), call: { ...noCall, ms: now() - t0 } });
+  }
   return research();
 
-  /** A fresh search for this product; its record joins the shared store. */
+  /** A fresh search for this product, registered so a concurrent request for the same product joins it. */
   async function research() {
+    let settle;
+    const shared = new Promise((resolve) => { settle = resolve; });
+    inflight.set(productKey, shared);
+    try {
+      return await search();
+    } finally {
+      settle(kept);
+      if (inflight.get(productKey) === shared) inflight.delete(productKey);
+    }
+  }
+
+  /** A fresh search for this product; its record joins the shared store. */
+  async function search() {
 
   const today = marketDate(t0);
   const stages = [];
@@ -372,12 +407,15 @@ export async function runPrice({
   // Only research that really searched is worth keeping.
   let indexedNow = null;
   if (searched) {
+    kept = record;
     remember(key, record);
     // The research joins the shared store, and what it verified joins the product's index (permission-gated there).
     remember(productKey, record);
-    const [, , saved] = await Promise.all([
+    if (driftKey) remember(driftKey, record);
+    const [, , , saved] = await Promise.all([
       Promise.resolve().then(() => store.save(key, record, scanUuid)).catch(() => null),
       Promise.resolve().then(() => store.save(productKey, record, scanUuid)).catch(() => null),
+      Promise.resolve().then(() => (driftKey ? store.save(driftKey, record, scanUuid) : null)).catch(() => null),
       Promise.resolve().then(() => index.save(identity, answer, found, { seenAt: t0, rulesVersion: RESEARCH_VERSION })).catch(() => null),
     ]);
     indexedNow = saved?.stored ?? null;

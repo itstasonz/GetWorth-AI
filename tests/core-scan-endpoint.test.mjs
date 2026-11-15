@@ -185,7 +185,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
   test('CE-2Rd the research is shared: another server instance reads it from the store instead of searching', async () => {
     const store = fakeStore();
     const first = await run(fakeProvider(), store);
-    assert.equal(store.saves, 2, "kept under its search and under its product");
+    assert.equal(store.saves, 3, "kept under its search, its product and its product's words (product-key.js)");
     resetMarketCache();                       // a different instance: nothing in memory
     const elsewhere = fakeProvider();
     const second = await run(elsewhere, store, { now: at(T0 + 10 * 60_000) });
@@ -548,9 +548,9 @@ describe('CE-8 every request leaves one privacy-safe telemetry row', () => {
     const r = await call({ action: 'report', scan_uuid: UUID, token, report: { identity_shown_ms: 4100, price_shown_ms: 9999999, outcome: 'priced', extra: 'x' } });
     assert.deepEqual([r.status, r.payload.status], [200, 'reported']);
     const last = () => log.events.filter((e) => e.type === 'core_scan_request').at(-1);
-    assert.deepEqual(last().payload.client, { identity_shown_ms: 4100, price_shown_ms: 600000, outcome: 'priced' });
+    assert.deepEqual(last().payload.client, { identity_shown_ms: 4100, price_shown_ms: 600000, prepared_ms: null, identify_sent_ms: null, price_sent_ms: null, outcome: 'priced' });
     await call({ action: 'report', scan_uuid: UUID, token, report: { price_shown_ms: 'x', outcome: 'DROP TABLE' } });
-    assert.deepEqual(last().payload.client, { identity_shown_ms: null, price_shown_ms: null, outcome: null });
+    assert.deepEqual(last().payload.client, { identity_shown_ms: null, price_shown_ms: null, prepared_ms: null, identify_sent_ms: null, price_sent_ms: null, outcome: null });
     assert.deepEqual([log.charge, log.identify, log.price], [1, 1, 0], 'a report costs nothing');
   });
 });

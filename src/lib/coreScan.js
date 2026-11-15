@@ -66,7 +66,8 @@ const initial = () => ({
   correction: null,        // what the owner said the item really is
   error: null,             // { message, code, step, retryable }
   // Milliseconds from the accepted photograph, measured here, on the phone.
-  timings: { identity_shown_ms: null, price_shown_ms: null },
+  // Where the wait went (2026-11-15): photo ready (compressed + checked), identify request sent, price request sent.
+  timings: { identity_shown_ms: null, price_shown_ms: null, prepared_ms: null, identify_sent_ms: null, price_sent_ms: null },
 });
 
 let state = initial();
@@ -191,11 +192,12 @@ async function prepare(dataUrl) {
   try { pixels = await deps.assess(compressed); } catch { pixels = null; }
   if (mine !== controller) throw left();
   if (pixels && pixels.ok === false) { fail('identify', 'photo', { code: `photo_${pixels.reason ?? 'blank'}`, retryable: false }); return null; }
+  if (state.timings.prepared_ms === null) set({ timings: { ...state.timings, prepared_ms: elapsed() } });
   return compressed;
 }
 
 async function identify({ correction = null } = {}) {
-  set({ stage: STAGE.IDENTIFYING, error: null });
+  set({ stage: STAGE.IDENTIFYING, error: null, timings: { ...state.timings, identify_sent_ms: state.timings.identify_sent_ms ?? elapsed() } });
   const r = await post({ action: 'identify', images: state.images, ...(state.token ? { token: state.token } : {}), ...(correction ? { correction } : {}) }, IDENTIFY_TIMEOUT_MS);
   // NO OTHER ENGINE STANDS BEHIND THIS ONE (2026-11-08): a scan that is switched off says so and offers a retry. The older
   // engine's model-invented prices are not a fallback.
@@ -249,13 +251,13 @@ function followUpOnce() {
 
 /** Tell the server how long this scan took on the phone. Best effort, fire and forget. */
 function report(outcome) {
-  const { identity_shown_ms, price_shown_ms } = state.timings;
-  post({ action: 'report', token: state.token, report: { identity_shown_ms, price_shown_ms, outcome } }, 5_000).catch(() => {});
+  const { identity_shown_ms, price_shown_ms, prepared_ms, identify_sent_ms, price_sent_ms } = state.timings;
+  post({ action: 'report', token: state.token, report: { identity_shown_ms, price_shown_ms, prepared_ms, identify_sent_ms, price_sent_ms, outcome } }, 5_000).catch(() => {});
 }
 
 // ── STEP 2 — PRICE ──────────────────────────────────────────────────────────
 async function price({ answer = null } = {}) {
-  set({ stage: STAGE.PRICING, error: null, ...(answer === null ? {} : { answered: answer }) });
+  set({ stage: STAGE.PRICING, error: null, ...(answer === null ? {} : { answered: answer }), timings: { ...state.timings, price_sent_ms: state.timings.price_sent_ms ?? elapsed() } });
   const r = await post({ action: 'price', token: state.token, ...(answer === null ? {} : { answer }), client_elapsed_ms: elapsed() }, PRICE_TIMEOUT_MS);
   if (refused('price', r)) return;
   const p = r.payload ?? {};

@@ -27,7 +27,7 @@
 // refuses when it cannot be checked. A 503 now means only that this deployment
 // has the scan switched off, and its reason is recorded.
 //
-// { action: 'report', scan_uuid, token, report: { identity_shown_ms, price_shown_ms, outcome } }
+// { action: 'report', scan_uuid, token, report: { identity_shown_ms, price_shown_ms, prepared_ms, identify_sent_ms, price_sent_ms, outcome } }
 //     The phone's own clock: how long the person waited. Token-bound, numbers
 //     only, no provider call, no quota.
 //
@@ -210,7 +210,12 @@ export function createScanHandler({
       const r = body?.report && typeof body.report === 'object' ? body.report : {};
       const ms = (v) => (Number.isFinite(v) && v >= 0 ? Math.min(600_000, Math.round(v)) : null);
       const outcome = typeof r.outcome === 'string' && /^[a-z_]{1,24}$/.test(r.outcome) ? r.outcome : null;
-      return done({ status: 'reported' }, 200, null, { client: { identity_shown_ms: ms(r.identity_shown_ms), price_shown_ms: ms(r.price_shown_ms), outcome } });
+      return done({ status: 'reported' }, 200, null, { client: {
+        identity_shown_ms: ms(r.identity_shown_ms), price_shown_ms: ms(r.price_shown_ms),
+        // Where the phone's wait went: photo compressed and checked, identify sent, price sent (all from the accepted photo).
+        prepared_ms: ms(r.prepared_ms), identify_sent_ms: ms(r.identify_sent_ms), price_sent_ms: ms(r.price_sent_ms),
+        outcome,
+      } });
     }
 
     // ── PRICE ────────────────────────────────────────────────────────────────
