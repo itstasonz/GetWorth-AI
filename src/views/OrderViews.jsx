@@ -164,9 +164,10 @@ function CheckoutForm({ listing }) {
 
           {/* Order summary */}
           <div className="bg-white/5 rounded-2xl p-4 space-y-2">
-            <div className="flex justify-between text-sm"><span className="text-slate-400">{lang === 'he' ? 'מחיר' : 'Price'}</span><span className="font-bold">{formatPrice(listing.price)}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-slate-400">{lang === 'he' ? 'מחיר המודעה' : 'Listing price'}</span><span className="font-bold">{formatPrice(listing.price)}</span></div>
             <div className="flex justify-between text-sm"><span className="text-slate-400">{lang === 'he' ? 'מסירה' : 'Delivery'}</span><span className="text-slate-300">{deliveryMethod === 'pickup' ? (lang === 'he' ? 'איסוף עצמי' : 'Pickup') : (lang === 'he' ? 'משלוח' : 'Shipping')}</span></div>
-            <div className="border-t border-white/10 pt-2 flex justify-between text-sm font-bold"><span>{lang === 'he' ? 'סה"כ לשלם' : 'Total to pay'}</span><span className="text-emerald-400">{formatPrice(listing.price)}</span></div>
+            <div className="border-t border-white/10 pt-2 flex justify-between text-sm font-bold"><span>{lang === 'he' ? 'סה"כ (משולם ישירות למוכר)' : 'Total (paid directly to the seller)'}</span><span className="text-emerald-400">{formatPrice(listing.price)}</span></div>
+            <p className="text-xs text-slate-400">{lang === 'he' ? 'GetWorth לא מעבדת תשלומים: התשלום והמסירה מתואמים ביניכם.' : 'GetWorth does not process payments: you arrange payment and handover with the seller.'}</p>
           </div>
           <div className="flex gap-3">
             <button onClick={() => setShowCheckout(false)} className="flex-1 py-3.5 rounded-xl bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 transition-all">{lang === 'he' ? 'ביטול' : 'Cancel'}</button>
@@ -482,6 +483,7 @@ export function OrderDetailView() {
             <div className="flex-1 min-w-0">
               <h3 className="font-bold truncate">{lang === 'he' && listing?.title_hebrew ? listing.title_hebrew : (listing?.title || '')}</h3>
               <p className="text-2xl font-bold text-emerald-400">{formatPrice(order.price)}</p>
+              <p className="text-xs text-slate-400">{lang === 'he' ? 'מחיר המודעה' : 'Listing price'}</p>
             </div>
           </div>
         </Card>
@@ -646,8 +648,8 @@ export function OrderDetailView() {
           <Card className="p-6 text-center space-y-2" gradient="linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.06))">
             <div className="text-4xl mb-1">🎉</div>
             <h3 className="text-xl font-bold text-emerald-300">{lang === 'he' ? 'עסקה הושלמה בהצלחה!' : 'Deal Complete!'}</h3>
-            <p className="text-sm text-slate-400">{lang === 'he' ? `שילמת ${formatPrice(order.price)}. תודה שהשתמשת ב-GetWorth!` : `You paid ${formatPrice(order.price)}. Thanks for using GetWorth!`}</p>
-            <SalePriceConfirm orderId={order.id} userId={user?.id} lang={lang} />
+            <p className="text-sm text-slate-400">{lang === 'he' ? 'תודה שהשתמשת ב-GetWorth!' : 'Thanks for using GetWorth!'}</p>
+            <SalePriceConfirm orderId={order.id} userId={user?.id} listingPrice={order.price} lang={lang} />
           </Card>
         </FadeIn>
       )}

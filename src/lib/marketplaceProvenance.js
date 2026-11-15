@@ -57,11 +57,13 @@ export async function listingProvenanceSupported(supabase) {
 /**
  * WHERE A LISTING PRICE CAME FROM (migration 20261115120000): 'getworth_prefilled' — GetWorth's number left as filled;
  * 'after_suggestion' — the seller typed a price after a GetWorth price was shown (influenced, whatever the amount);
- * 'independent' — no GetWorth price was shown. The database derives its own answer and keeps the stricter of the two.
+ * 'after_reference' — only an Israeli NEW retail price was shown (migration 20261115140000); 'independent' — no GetWorth
+ * price of any kind was shown. The database derives its own answer and keeps the stricter of the two.
  */
 export function listingPriceOrigin(listingData) {
   if (listingData?.priceOrigin === 'suggestion') return 'getworth_prefilled';
-  return listingData?.suggestionSeen ? 'after_suggestion' : 'independent';
+  if (listingData?.suggestionSeen) return 'after_suggestion';
+  return listingData?.referenceSeen ? 'after_reference' : 'independent';
 }
 
 /** Does this database record a listing's price origin yet? Checked once per page load; a missing column is an error. */
@@ -86,6 +88,34 @@ export async function recordSalePrice(supabase, orderId, input) {
     const { error } = await supabase.rpc('record_sale_price', { p_order_id: orderId, p_price: p.value });
     return error ? { error: error.message } : { ok: true };
   } catch (err) { return { error: err?.message ?? 'failed' }; }
+}
+
+/**
+ * WHAT A COMPLETED ORDER'S PRICE IS (2026-11-15). Only three things may be said, from what is actually recorded:
+ *   • 'listing'     — the listing's asking price: all that is known until both parties state the same final price;
+ *   • 'agreed'      — buyer and seller each stated the same final price: the parties' word, not a payment record;
+ *   • 'verified'    — an independently verified transaction price: GetWorth has no such source (it processes no
+ *                     payments), so this is never produced today.
+ * The note never says or implies that GetWorth took or processed a payment.
+ */
+export function completedPriceLine({ listingPrice, buyer = null, seller = null, role = null, lang = 'en' } = {}) {
+  const he = lang === 'he';
+  const agreed = Number(buyer) > 0 && Number(buyer) === Number(seller);
+  if (agreed) {
+    return {
+      kind: 'agreed', amount: Number(buyer),
+      label: he ? 'מחיר סופי מוסכם' : 'Final agreed price',
+      note: he ? 'כפי שדיווחו הקונה והמוכר. התשלום נעשה ישירות ביניהם — GetWorth לא מעבדת תשלומים.'
+        : 'As reported by both buyer and seller. Payment was made directly between them — GetWorth does not process payments.',
+    };
+  }
+  return {
+    kind: 'listing', amount: Number(listingPrice) || 0,
+    label: he ? 'מחיר המודעה' : 'Listing price',
+    note: role === 'seller'
+      ? (he ? 'המחיר שפרסמת. התשלום נעשה ישירות מול הקונה — GetWorth לא מעבדת תשלומים.' : 'The price you listed. Payment is made directly with the buyer — GetWorth does not process payments.')
+      : (he ? 'המחיר שפרסם המוכר. התשלום נעשה ישירות מול המוכר — GetWorth לא מעבדת תשלומים.' : 'The price the seller listed. Payment is made directly with the seller — GetWorth does not process payments.'),
+  };
 }
 
 /** The ids of accounts marked as test, or null when the database has no such function yet (or the caller is no admin). */

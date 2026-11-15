@@ -4514,6 +4514,11 @@ export function AppProvider({ children }) {
     return p == null ? '' : p;
   };
 
+  // A NEW Israeli retail price shown for this item (the scan's new-price card, or the legacy result's catalog price): a
+  // price typed after it is 'after_reference', never independent (lib/marketplaceProvenance.js listingPriceOrigin).
+  const referenceShown = (r) => Number(r?.marketValue?.newRetailPrice) > 0
+    || (!!r?.coreScan && Number(scanStore.getSnapshot()?.valuation?.retail_new_ils) > 0);
+
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     // No condition chosen yet, so this is the server's mid as-is — the delta is
@@ -4524,7 +4529,7 @@ export function AppProvider({ children }) {
     const opening = hasRealPrice(mv) ? Number(mv.mid) : '';
     // priceOrigin: GetWorth filled the price ('suggestion') or the seller typed it ('seller') — sent as the listing's stated intent.
     // suggestionSeen: a GetWorth price was shown for this item at any point — a price typed after it is influenced.
-    setListingData({ title: result?.name || '', desc: '', price: opening, priceOrigin: opening === '' ? 'seller' : 'suggestion', suggestionSeen: opening !== '', phone: '', location: '' });
+    setListingData({ title: result?.name || '', desc: '', price: opening, priceOrigin: opening === '' ? 'seller' : 'suggestion', suggestionSeen: opening !== '', referenceSeen: referenceShown(result), phone: '', location: '' });
     setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
   };
 
@@ -4545,7 +4550,8 @@ export function AppProvider({ children }) {
     const draft = buildListingDraft(scan);
     setResult((prev) => (prev?.coreScan ? { ...prev, ...draft.result } : prev));
     // The scan's price arriving is a price shown, whether or not it fills the box.
-    setListingData((prev) => (!prev ? prev : prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion', suggestionSeen: true } : { ...prev, suggestionSeen: true }));
+    const reference = Number(scan.valuation?.retail_new_ils) > 0;
+    setListingData((prev) => (!prev ? prev : prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion', suggestionSeen: true, referenceSeen: prev.referenceSeen || reference } : { ...prev, suggestionSeen: true, referenceSeen: prev.referenceSeen || reference }));
   }), []);
 
   const sellFromScan = () => {
@@ -4558,7 +4564,7 @@ export function AppProvider({ children }) {
     setImages(scan.images);
     // The seller's phone and area rarely change: start from their latest listing.
     const last = myListings?.[0];
-    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', suggestionSeen: draft.price !== '' || scan.stage === SCAN_STAGE.PRICED, phone: last?.contact_phone || '', location: last?.location || '' });
+    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', suggestionSeen: draft.price !== '' || scan.stage === SCAN_STAGE.PRICED, referenceSeen: Number(scan.valuation?.retail_new_ils) > 0, phone: last?.contact_phone || '', location: last?.location || '' });
     setCondition(draft.condition); setAnswers({}); setSerialData(null);
     setListingStep(2); setNavDirection('push'); setView('listing');
   };
