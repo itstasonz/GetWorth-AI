@@ -4516,8 +4516,8 @@ export function AppProvider({ children }) {
 
   // A NEW Israeli retail price shown for this item (the scan's new-price card, or the legacy result's catalog price): a
   // price typed after it is 'after_reference', never independent (lib/marketplaceProvenance.js listingPriceOrigin).
-  const referenceShown = (r) => Number(r?.marketValue?.newRetailPrice) > 0
-    || (!!r?.coreScan && Number(scanStore.getSnapshot()?.valuation?.retail_new_ils) > 0);
+  const referenceShown = (r) => Number(r?.marketValue?.newRetailPrice) > 0 || !!r?.comparative
+    || (!!r?.coreScan && (Number(scanStore.getSnapshot()?.valuation?.retail_new_ils) > 0 || !!scanStore.getSnapshot()?.valuation?.comparative));
 
   const startListing = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
@@ -4550,7 +4550,7 @@ export function AppProvider({ children }) {
     const draft = buildListingDraft(scan);
     setResult((prev) => (prev?.coreScan ? { ...prev, ...draft.result } : prev));
     // The scan's price arriving is a price shown, whether or not it fills the box.
-    const reference = Number(scan.valuation?.retail_new_ils) > 0;
+    const reference = Number(scan.valuation?.retail_new_ils) > 0 || !!scan.valuation?.comparative;
     setListingData((prev) => (!prev ? prev : prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion', suggestionSeen: true, referenceSeen: prev.referenceSeen || reference } : { ...prev, suggestionSeen: true, referenceSeen: prev.referenceSeen || reference }));
   }), []);
 
@@ -4564,7 +4564,7 @@ export function AppProvider({ children }) {
     setImages(scan.images);
     // The seller's phone and area rarely change: start from their latest listing.
     const last = myListings?.[0];
-    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', suggestionSeen: draft.price !== '' || scan.stage === SCAN_STAGE.PRICED, referenceSeen: Number(scan.valuation?.retail_new_ils) > 0, phone: last?.contact_phone || '', location: last?.location || '' });
+    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', suggestionSeen: draft.price !== '' || scan.stage === SCAN_STAGE.PRICED, referenceSeen: Number(scan.valuation?.retail_new_ils) > 0 || !!scan.valuation?.comparative, phone: last?.contact_phone || '', location: last?.location || '' });
     setCondition(draft.condition); setAnswers({}); setSerialData(null);
     setListingStep(2); setNavDirection('push'); setView('listing');
   };

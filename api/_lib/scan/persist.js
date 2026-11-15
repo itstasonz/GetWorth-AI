@@ -102,6 +102,8 @@ export function buildValuationRow({ id, userId, scanUuid, identity, valuation, l
         approximate: valuation.approximate, basis: valuation.basis, withdrawn: valuation.withdrawn, counts: valuation.counts,
         local_strength: valuation.local_strength, dispersion: valuation.dispersion, reference_range: valuation.reference_range,
         estimate_basis: valuation.estimate_basis ?? null, evidence_gap: valuation.evidence_gap ?? null,
+        // The observed Israeli ads shown with no valuation (valuation.js comparativeOf); the listing trigger reads it (20261115160000).
+        comparative: valuation.comparative ?? null,
         retail_new_ils: valuation.retail_new_ils, retail_new_in_stock: valuation.retail_new_in_stock, intl_scale: valuation.intl_scale, searched: valuation.searched,
         // THE CALCULATION, REPRODUCIBLE: every reference as it was weighed, and the inputs beside it (reproduceValuation).
         inputs: valuation.inputs ?? null,

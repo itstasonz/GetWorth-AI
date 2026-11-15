@@ -580,7 +580,8 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     inputs: { search_performed: searchPerformed, unverified, approximate, family_level: familyLevel, strategy, today: day },
   };
   // `no_price_reason` is the same code under the name the screen reads it by.
-  const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason, no_price_reason: reason });
+  // With no price, the genuine Israeli second-hand ads that stood are still shown, as what they are (comparativeOf).
+  const withdraw = (reason) => ({ ...base, status: 'insufficient_evidence', prices: null, price_confidence: null, withdrawn: reason, no_price_reason: reason, comparative: comparativeOf(base.evidence) });
 
   if (!searchPerformed && evidence.length === 0) return withdraw(WITHDRAWN.NO_SEARCH);
   if (strategy === STRATEGY.SPECIALISED) return withdraw(WITHDRAWN.NO_CALIBRATED_METHOD);
@@ -597,6 +598,46 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     price_confidence: priceConfidence({ kept, scale, approximate: rough, basis }),
     withdrawn: null,
     no_price_reason: null,
+    comparative: null,
+  };
+}
+
+/**
+ * A LIMITED COMPARATIVE RANGE (founder decision, 2026-11-15). When there is no valuation but genuine Israeli second-hand
+ * ads for this product stood every check and were left out only because there were too few of them (SIMILAR_CONTEXT) or
+ * the two found disagreed (DISAGREE), the screen shows those ads' own prices — never a worth, never three prices.
+ * An ad counts only when it is: in Israel; a private ad or a sale (not a shop, not a price guide); bound to the product on
+ * its page; this exact item or a verified comparable of it (never another model, another size, a bundle); not sealed new or
+ * broken; not archived. Every number is an observed price. One ad is shown as itself (low = high = null), never a range.
+ */
+export const COMPARATIVE_REASONS = Object.freeze(new Set([SET_ASIDE.SIMILAR_CONTEXT, SET_ASIDE.DISAGREE]));
+const COMPARATIVE_KINDS = new Set(['used_listing', 'sold']);
+export function comparativeOf(evidence) {
+  const seen = new Set();
+  const observations = [];
+  for (const e of evidence ?? []) {
+    if (e.market !== 'IL' || !COMPARATIVE_KINDS.has(e.kind) || !isBound(e) || !COMPARATIVE_REASONS.has(e.set_aside)) continue;
+    if (e.match !== 'exact' && e.match !== 'close_comparable') continue;
+    if (e.condition === 'new_sealed' || e.condition === 'poor' || e.archived === true || e.freshness === 'archived') continue;
+    const price = Math.round(Number(e.price_ils));
+    if (!(price > 0)) continue;
+    const key = String(e.url ?? `${e.domain}|${price}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    observations.push({
+      price_ils: price, match: e.match, kind: e.kind, condition: e.condition ?? 'unknown', domain: e.domain ?? null, url: e.url ?? null,
+      title: e.title ?? null, listed: e.listed ?? null, freshness: e.freshness ?? null,
+    });
+  }
+  if (observations.length === 0) return null;
+  observations.sort((a, b) => a.price_ils - b.price_ils);
+  const range = observations.length >= 2;
+  return {
+    count: observations.length,
+    exact_count: observations.filter((o) => o.match === 'exact').length,
+    low: range ? observations[0].price_ils : null,
+    high: range ? observations.at(-1).price_ils : null,
+    observations: observations.slice(0, 8),
   };
 }
 

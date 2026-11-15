@@ -17,6 +17,7 @@ import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice, getQualityBadge } from '../lib/utils';
 // A core scan's listing keeps the engine's price for each condition; the percentage ladder is for the older scan only.
 import { listingPriceFor } from '../lib/coreScan';
+import { scanCopy } from '../lib/scanCopy';
 
 export function MyListingsView() {
   const { t, lang, rtl, user, myListings, deleteListing, updateListing, viewItem, goTab, reset, orders, setView, loadOrders, viewOrder } = useApp();
@@ -1845,6 +1846,16 @@ export function ListingFlowView() {
                     setListingData({ ...listingData, price: Number.isFinite(n) && n >= 0 ? n : '', priceOrigin: 'seller' });
                   }} />
               </div>
+              {/* State B: real Israeli ads' asking prices, for reference only — the price above stays the seller's. */}
+              {result?.comparative?.count > 0 && (
+                <p className="mt-2 text-xs text-slate-400" data-testid="listing-comparative" dir="auto">
+                  {scanCopy(lang).comparativeListing(
+                    formatPrice(result.comparative.low ?? result.comparative.observations[0].price_ils),
+                    result.comparative.low ? formatPrice(result.comparative.high) : null,
+                    result.comparative.count,
+                  )}
+                </p>
+              )}
             </Card>
           </FadeIn>
           <FadeIn delay={200}><InputField label={t.phone} icon={Phone} rtl={rtl} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} /></FadeIn>

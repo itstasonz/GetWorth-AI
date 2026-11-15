@@ -60,7 +60,7 @@ const memStore = () => { const m = new Map(); return { load: async (k) => m.get(
 const summary = (v) => ({
   status: v?.status ?? null, withdrawn: v?.withdrawn ?? null, confidence: v?.price_confidence ?? null, basis: v?.basis ?? null,
   good: v?.prices?.good ? { worth: v.prices.good.worth, list: v.prices.good.list, quick: v.prices.good.quick, low: v.prices.good.low, high: v.prices.good.high } : null,
-  retail_new_ils: v?.retail_new_ils ?? null, counts: v?.counts ?? null, gap: v?.evidence_gap ?? null,
+  retail_new_ils: v?.retail_new_ils ?? null, counts: v?.counts ?? null, gap: v?.evidence_gap ?? null, comparative: v?.comparative ?? null,
   evidence: (v?.evidence ?? []).map((e) => ({ url: e.url, domain: e.domain, title: e.title, kind: e.kind, market: e.market, match: e.match, price: e.price, currency: e.currency, ils: e.price_ils, condition: e.condition, listed: e.listed, freshness: e.freshness, binding: e.binding, binding_reason: e.binding_reason, used: e.used, why: e.set_aside ?? null })),
 });
 

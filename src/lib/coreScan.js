@@ -504,6 +504,8 @@ export function buildListingDraft(s = state) {
       // mid is the engine's own worth for this condition, not an average of the range's ends.
       marketValue: band ? { low: band.low, mid: band.worth ?? Math.round((band.low + band.high) / 2), high: band.high, price_method: 'core_scan_web' } : null,
       listingPrices: listingPricesOf(s.valuation),
+      // State B: the observed Israeli ads, shown in the listing form for reference only — never a prefilled price.
+      comparative: s.valuation?.status === 'priced' ? null : (s.valuation?.comparative ?? null),
       valuation_id: s.valuationId ?? undefined,
       coreScan: true,
     },
