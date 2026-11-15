@@ -198,7 +198,7 @@ describe('RW-2 one more photograph after the search', () => {
       charge: async () => ({ allowed: true, charged: true, limitType: null, retryAfter: 0 }),
       refund: async () => {},
       identify: (args) => runIdentify({ ...args, fetchImpl }),
-      price: async (args) => { const r = await runPrice({ ...args, fetchImpl, store, now: () => NOW }); results.push(r); return r; },
+      price: async (args) => { const r = await runPrice({ independentMin: 1, ...args, fetchImpl, store, now: () => NOW }); results.push(r); return r; },
       record: async () => 'val-1',
       logEvent: async (s, type, payload) => { events.push({ type, payload }); },
     });
@@ -236,24 +236,24 @@ describe('RW-2 one more photograph after the search', () => {
     const recorded = events.filter((e) => e.type === 'core_scan_priced').map((e) => e.payload);
     assert.deepEqual(recorded.map((p) => [p.status, p.reused, p.tool_calls, p.asked_after]), [['insufficient_evidence', false, 2, 'model label'], ['priced', false, 2, null]]);
     // And a plain second look at the SAME identity, with no code, still reads the hour-old research: reuse is kept where the item did not change.
-    const same = await runPrice({ identity: first.payload.identity, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl, store, now: () => NOW + 60_000 });
+    const same = await runPrice({ independentMin: 1, identity: first.payload.identity, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl, store, now: () => NOW + 60_000 });
     assert.deepEqual([same.reused, same.call.tool_calls, fetchImpl.of('market').length], [true, 0, 4]);
   });
 });
 
 describe('RW-3 a specialised market: context only, no figure of any kind', () => {
   test('RW-3a a car: the new car\'s price is not shown as the used car\'s value — no anchor, no retail line, the shop page is context', () => {
-    const v = buildValuation({ strategy: STRATEGY.SPECIALISED, today: TODAY, evidence: [
+    const v = buildValuation({ independentMin: 1, strategy: STRATEGY.SPECIALISED, today: TODAY, evidence: [
       ref(SOURCES.IL_RETAIL, 161000, { kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock' }),
       ref(SOURCES.IL_USED_1, 120000), ref(SOURCES.IL_USED_2, 118000),
     ] });
     assert.deepEqual([v.status, v.withdrawn, v.prices, v.retail_new_ils, v.retail_new_in_stock, v.retail_new_range, v.counts.retail_il, v.counts.resale], ['insufficient_evidence', WITHDRAWN.NO_CALIBRATED_METHOD, null, null, null, null, 0, 0]);
     assert.ok(v.evidence.every((e) => e.set_aside === SET_ASIDE.SPECIALISED_CONTEXT && !e.used), 'every reference, the shop\'s included, is context');
     // The same evidence for an EXACT item has its anchor: the rule is the strategy's.
-    assert.equal(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_RETAIL, 1610, { kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock' }), ref(SOURCES.IL_USED_1, 1200)] }).retail_new_ils, 1600);
+    assert.equal(buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_RETAIL, 1610, { kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock' }), ref(SOURCES.IL_USED_1, 1200)] }).retail_new_ils, 1600);
   });
   test('RW-3b a collectible: foreign listings are verified and shown, never a price, never an Israeli reference, and no spread is offered as a range', () => {
-    const v = buildValuation({ strategy: STRATEGY.SPECIALISED, today: TODAY, evidence: [
+    const v = buildValuation({ independentMin: 1, strategy: STRATEGY.SPECIALISED, today: TODAY, evidence: [
       ref(SOURCES.INTL_USED, 440, { market: 'INTL', currency: 'USD', price: 125, kind: 'sold' }),
       ref('https://www.ebay.com/itm/2', 215, { market: 'INTL', currency: 'USD', price: 61.35 }),
       ref('https://www.ebay.com/itm/3', 245, { market: 'INTL', currency: 'USD', price: 69.71 }),
@@ -265,26 +265,26 @@ describe('RW-3 a specialised market: context only, no figure of any kind', () =>
 
 describe('RW-4 a phone listing that is old or above the new price', () => {
   test('RW-4a one Israeli listing from 2024 is old: it opens no gate and is shown as such; one above the new price is not a second-hand price; one with no date still counts, at a lower weight', () => {
-    const old = buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2025-05-01' })] });
+    const old = buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2025-05-01' })] });
     assert.deepEqual([old.status, old.withdrawn, old.evidence[0].set_aside, old.evidence[0].freshness], ['insufficient_evidence', WITHDRAWN.NO_LOCAL_EVIDENCE, SET_ASIDE.NOT_CURRENT, 'older']);
-    assert.equal(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2024-05-01' })] }).evidence[0].freshness, 'archived', 'two years on, the site\'s history');
-    const dear = buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 3400), ref(SOURCES.IL_RETAIL, 2000, { kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock' })] });
+    assert.equal(buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2024-05-01' })] }).evidence[0].freshness, 'archived', 'two years on, the site\'s history');
+    const dear = buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 3400), ref(SOURCES.IL_RETAIL, 2000, { kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock' })] });
     assert.deepEqual([dear.status, dear.evidence.find((e) => e.price === 3400).set_aside, dear.retail_new_ils], ['insufficient_evidence', SET_ASIDE.ABOVE_NEW, 2000]);
-    const undated = buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: null })] });
+    const undated = buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: null })] });
     assert.deepEqual([undated.status, undated.price_confidence, undated.evidence[0].freshness, undated.evidence[0].weight], ['priced', 'low', 'unknown', 0.6]);
   });
   test('RW-4b the scan\'s own record says why: reasons and hosts as counts, nothing else', () => {
-    const v = buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2024-05-01' }), ref(SOURCES.INTL_USED, 900, { market: 'INTL', currency: 'USD', price: 250 })], searched: { date: TODAY, queries: 4, planned: 8, pages: 28, stages: ['local'] } });
+    const v = buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2024-05-01' }), ref(SOURCES.INTL_USED, 900, { market: 'INTL', currency: 'USD', price: 250 })], searched: { date: TODAY, queries: 4, planned: 8, pages: 28, stages: ['local'] } });
     const d = diagnosticsOf(v);
     assert.deepEqual(d, { searched: { date: TODAY, queries: 4, planned: 8, pages: 28, stages: ['local'] }, evidence: 2, reasons: { [SET_ASIDE.NOT_CURRENT]: 1, [SET_ASIDE.ABROAD_ONLY]: 1 }, hosts: { 'www.secondhand.example.co.il': 1, 'www.used.example.com': 1 }, unverified: 0, unbound: 0, israeli_private: { [SET_ASIDE.NOT_CURRENT]: 1 }, no_price_cause: 'israeli_listings_old_or_sealed' });
-    assert.equal(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2025-05-01' })] }).evidence[0].freshness, 'older');
+    assert.equal(buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { listed: '2025-05-01' })] }).evidence[0].freshness, 'older');
     assert.deepEqual(diagnosticsOf(null), { searched: null, evidence: 0, reasons: {}, hosts: {}, unverified: null, unbound: null, israeli_private: {}, no_price_cause: null });
     // Nothing Israeli reached: the market data is missing, not refused.
-    assert.equal(diagnosticsOf(buildValuation({ today: TODAY, evidence: [ref(SOURCES.INTL_USED, 900, { market: 'INTL', currency: 'USD', price: 250 })] })).no_price_cause, 'no_israeli_listing_reached');
+    assert.equal(diagnosticsOf(buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.INTL_USED, 900, { market: 'INTL', currency: 'USD', price: 250 })] })).no_price_cause, 'no_israeli_listing_reached');
     // Reached and not tied to the item: the binding's own reason is kept.
-    const loose = diagnosticsOf(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { binding: 'weak', binding_reason: 'product_not_named_beside_the_price' })] }));
+    const loose = diagnosticsOf(buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200, { binding: 'weak', binding_reason: 'product_not_named_beside_the_price' })] }));
     assert.deepEqual([loose.no_price_cause, loose.israeli_private], ['israeli_listings_not_tied_to_item', { 'unbound:product_not_named_beside_the_price': 1 }]);
-    assert.equal(diagnosticsOf(buildValuation({ today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200)] })).no_price_cause, null, 'priced: no cause');
+    assert.equal(diagnosticsOf(buildValuation({ independentMin: 1, today: TODAY, evidence: [ref(SOURCES.IL_USED_1, 1200)] })).no_price_cause, null, 'priced: no cause');
   });
 });
 
@@ -333,7 +333,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const SAME = 'https://www.secondhand.example.co.il/item/128';
     const OTHER = 'https://market.example.co.il/ads/256';
     const market = { evidence: [listing(SAME, 'Huawei P30 Pro 128GB יד שנייה', 700), listing(OTHER, 'Huawei P30 Pro 256GB יד שנייה', 900)] };
-    const price = (identity, answer = null) => runPrice({ identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: [SAME, OTHER], pageText: {} }), store: fakeStore(), now: () => NOW });
+    const price = (identity, answer = null) => runPrice({ independentMin: 1, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: [SAME, OTHER], pageText: {} }), store: fakeStore(), now: () => NOW });
     const confirmed = [{ attribute: 'storage', value: '128 GB', question: 'How much storage does it have?' }];
     const known = await price(completeIdentity(normalizeIdentity(PHONE), { lang: 'en', followupsLeft: 2, confirmed }), { question: 'How much storage does it have?', text: '128 GB' });
     const other = known.valuation.evidence.find((e) => e.url === OTHER);
@@ -350,11 +350,11 @@ describe('RW-5 a variant nobody asked about', () => {
     assert.deepEqual([unknown.valuation.counts.il_used_exact, unknown.valuation.counts.il_used_close], [0, 2]);
     resetMarketCache();
     const PLAIN = 'https://www.secondhand.example.co.il/item/plain';
-    const plain = await runPrice({ identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800)] }], reached: [PLAIN], pageText: {} }), store: fakeStore(), now: () => NOW });
+    const plain = await runPrice({ independentMin: 1, identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800)] }], reached: [PLAIN], pageText: {} }), store: fakeStore(), now: () => NOW });
     assert.deepEqual([plain.valuation.evidence[0].match, plain.valuation.evidence[0].binding_reason, plain.valuation.approximate], ['exact', BIND_REASON.ONE_LISTING, true]);
     // With no Israeli listing at all, unknown storage buys nothing: the gate is the gate.
     resetMarketCache();
-    const nothing = await runPrice({ identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [] }], reached: [], pageText: {} }), store: fakeStore(), now: () => NOW });
+    const nothing = await runPrice({ independentMin: 1, identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [] }], reached: [], pageText: {} }), store: fakeStore(), now: () => NOW });
     assert.deepEqual([nothing.status, nothing.valuation.prices], ['insufficient_evidence', null]);
   });
   test('RW-5e THE SERVER DECIDES when a phone\'s storage is open, not the model\'s report (release gate 2026-10-12): omitted, guessed, or called medium, the storage is asked for, the price is approximate, and a row that states a size is a comparable — never the exact variant the item was not shown to be; settled by the owner or the photograph, it is exact', async () => {
@@ -362,7 +362,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const S256 = 'https://market.example.co.il/ads/256';
     const PLAIN = 'https://www.secondhand.example.co.il/item/plain';
     const rows = { [S128]: listing(S128, 'Huawei P30 Pro 128GB יד שנייה', 700), [S256]: listing(S256, 'Huawei P30 Pro 256GB יד שנייה', 900), [PLAIN]: listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800) };
-    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
+    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ independentMin: 1, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
     const bound = (r, url) => { const e = r.valuation.evidence.find((x) => x.url === url); return [e.match, e.binding_reason, e.used]; };
     /** One way the model reported the storage: what the server asks, and how a 256 GB row and a silent row are priced with the allowance spent. */
     const unresolved = async (label, attributes) => {
@@ -413,7 +413,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const S128 = 'https://www.secondhand.example.co.il/item/128';
     const S256 = 'https://market.example.co.il/ads/256';
     const rows = { [S128]: listing(S128, 'Huawei P30 Pro 128GB יד שנייה', 700), [S256]: listing(S256, 'Huawei P30 Pro 256GB יד שנייה', 900) };
-    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
+    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ independentMin: 1, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
     const bound = (r, url) => { const e = r.valuation.evidence.find((x) => x.url === url); return [e.match, e.binding_reason, e.used]; };
     for (const [label, attribute] of [['inferred', A('storage', '128 GB', 'inferred', 'high')], ['unknown', A('storage', null, 'unknown', 'high')], ['inferred, medium', A('storage', '128 GB', 'inferred', 'medium')]]) {
       const asked = phone({ size_or_capacity: '128 GB', attributes: [attribute, A('color', 'blue')] });

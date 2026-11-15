@@ -181,7 +181,7 @@ describe('V3-6 a site\'s estimate and a site\'s front page are never priced from
     ev({ url: 'https://fliptip.ai/price/nintendo-switch-oled', domain: 'fliptip.ai', kind: 'price_guide', market: 'INTL', price: 578, page: 'price_guide', listed: null }),
   ];
   test('V3-6a the Israeli ad prices; the estimate is context and the front page is set aside, each saying why', () => {
-    const v = buildValuation({ evidence: pool, today: '2026-11-08' });
+    const v = buildValuation({ independentMin: 1, evidence: pool, today: '2026-11-08' });
     assert.equal(v.status, 'priced');
     const why = Object.fromEntries(v.evidence.map((e) => [e.domain, e.set_aside ?? (e.used ? 'used' : null)]));
     assert.equal(why['m.homeless.co.il'], 'used');
@@ -190,7 +190,7 @@ describe('V3-6 a site\'s estimate and a site\'s front page are never priced from
     assert.equal(v.evidence.filter((e) => e.used).length, 1);
   });
   test('V3-6b estimates alone never open the gate: no Israeli listing, no price', () => {
-    const v = buildValuation({ evidence: [pool[3], { ...pool[3], url: 'https://aionrulez.net/price/x', domain: 'aionrulez.net', market: 'IL' }], today: '2026-11-08' });
+    const v = buildValuation({ independentMin: 1, evidence: [pool[3], { ...pool[3], url: 'https://aionrulez.net/price/x', domain: 'aionrulez.net', market: 'IL' }], today: '2026-11-08' });
     assert.notEqual(v.status, 'priced');
   });
   test('V3-6c a front page is a bare host, with or without a slash or query; any path is a page', () => {

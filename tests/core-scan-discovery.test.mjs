@@ -175,7 +175,7 @@ describe('CD-2 before the search, the identity must name ONE product', () => {
   });
   test('CD-2d the market step makes NO call for an incomplete identity, and answers with the no-price state and why', async () => {
     const incomplete = completeIdentity(HOUSE, { lang: 'he' });
-    const r = await runPrice({ identity: incomplete, model: 'm', apiKey: 'k', fetchImpl: noCall, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const r = await runPrice({ independentMin: 1, identity: incomplete, model: 'm', apiKey: 'k', fetchImpl: noCall, store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([r.status, r.valuation.status, r.valuation.prices, r.valuation.withdrawn, r.valuation.no_price_reason, r.valuation.missing, r.call.tool_calls], [SCAN_STATUS.INSUFFICIENT, 'insufficient_evidence', null, WITHDRAWN.IDENTITY_INCOMPLETE, WITHDRAWN.IDENTITY_INCOMPLETE, INCOMPLETE.FRAGRANCE_NAME_OR_SIZE, 0]);
     assert.deepEqual([r.valuation.evidence, r.valuation.counts.resale, r.valuation.retail_new_ils], [[], 0, null]);
     assert.equal(incompleteValuation('x').missing, 'x');
@@ -198,7 +198,7 @@ describe('CD-3 the three scans of 2026-10-11, replayed', () => {
     const provenance = extractSearchProvenance(LIVE.output);
     const claims = JSON.parse(LIVE.output.find((i) => i.type === 'message').content[0].text).evidence;
     const { evidence } = verifyEvidence(claims, provenance, FX, LIVE.today, { identity: MOUSE, answer: null });
-    const v = buildValuation({ evidence, today: LIVE.today });
+    const v = buildValuation({ independentMin: 1, evidence, today: LIVE.today });
     // (In the saved call the model reported the ₪399 shop's stock as unknown; on the phone that day it said out of stock. Either way: no price.)
     assert.deepEqual([v.status, v.prices, v.withdrawn, v.retail_new_ils, v.counts.il_qualifying], ['insufficient_evidence', null, WITHDRAWN.NO_LOCAL_EVIDENCE, 400, 0]);
     assert.equal(identityGap(MOUSE), null, 'nothing was missing from the identity: this is a discovery limit, not an identification one');
@@ -222,7 +222,7 @@ describe('CD-3 the three scans of 2026-10-11, replayed', () => {
         { url: SOURCES.IL_RETAIL, title: 'Ninja Detect Duo Power Blender Pro TB401', price: 1290, currency: 'ILS', kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null, stock: 'in_stock', shipping: null },
       ],
     };
-    const others = await runPrice({ identity: NINJA, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [found], expand: [{ evidence: [] }], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const others = await runPrice({ independentMin: 1, identity: NINJA, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [found], expand: [{ evidence: [] }], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([others.status, others.valuation.prices, others.valuation.retail_new_ils], [SCAN_STATUS.INSUFFICIENT, null, 1300], 'no price from other machines; the new price of THIS one is context');
     const by = (v, url) => v.evidence.find((e) => e.url === url);
     assert.deepEqual([by(others.valuation, SOURCES.IL_USED_1).set_aside, by(others.valuation, SOURCES.IL_USED_1).used], [SET_ASIDE.DIFFERENT_MODEL, false]);
@@ -230,7 +230,7 @@ describe('CD-3 the three scans of 2026-10-11, replayed', () => {
     // The same search, with one Israeli listing for THIS model: that one prices it, alone.
     resetMarketCache();
     const mine = { evidence: [...found.evidence, { url: SOURCES.INTL_USED, title: 'Ninja Detect Duo Power Blender Pro יד שנייה', price: 700, currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-03', stock: 'unknown', shipping: null }] };
-    const priced = await runPrice({ identity: NINJA, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [mine], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const priced = await runPrice({ independentMin: 1, identity: NINJA, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [mine], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([priced.status, priced.valuation.counts.resale, priced.valuation.counts.il_qualifying, priced.valuation.evidence.filter((e) => e.used).map((e) => e.price)], [SCAN_STATUS.PRICED, 1, 1, [700]]);
     assert.equal(priced.valuation.evidence.find((e) => e.url === SOURCES.INTL_USED).market, 'IL', 'the fixture\'s host is read as the claim says when the address does not settle it');
     assert.equal(by(priced.valuation, SOURCES.IL_USED_1).set_aside, SET_ASIDE.DIFFERENT_MODEL, 'and the BL642 still takes no part');
@@ -239,7 +239,7 @@ describe('CD-3 the three scans of 2026-10-11, replayed', () => {
   test('CD-3c the perfume: a house alone buys no search; once named and sized, the other house\'s perfume does not bind, the flanker is a comparable, and the queries carry name and size', async () => {
     // Step 2 on the identity as that scan had it: no call, no price, the photograph asked for.
     const house = completeIdentity(HOUSE, { lang: 'he' });
-    const blocked = await runPrice({ identity: house, model: 'm', apiKey: 'k', fetchImpl: noCall, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const blocked = await runPrice({ independentMin: 1, identity: house, model: 'm', apiKey: 'k', fetchImpl: noCall, store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([blocked.status, blocked.valuation.withdrawn], [SCAN_STATUS.INSUFFICIENT, WITHDRAWN.IDENTITY_INCOMPLETE]);
     // After the photograph of the label: the queries name the fragrance and its size, in both alphabets.
     const q = buildSearchQueries({ identity: PERFUME, answer: { question: 'How much perfume is left in the bottle?', text: 'About half' } });
@@ -267,7 +267,7 @@ describe('CD-5 an uncertain identity stays uncertain: listings for the models it
   const asked = identity({ ...base, followup: { kind: 'choice', affects: 'price', question: 'Which generation?', options: ['1st generation', '2nd generation'] } });
   const listings = (match) => ({ evidence: [300, 450, 650].map((price, k) => ({ url: [SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL][k], title: `AirPods Pro 2 ${match}`, price, currency: 'ILS', kind: 'used_listing', match, market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', stock: 'unknown', shipping: null })) });
   const pages = Object.fromEntries([SOURCES.IL_USED_1, SOURCES.IL_USED_2, SOURCES.IL_RETAIL].map((u, k) => [u, `AirPods Pro 2 יד שנייה ₪${[300, 450, 650][k]} · פורסם 01/10/2026`]));
-  const run = (who, market, answer = null) => runPrice({ identity: who, answer, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
+  const run = (who, market, answer = null) => runPrice({ independentMin: 1, identity: who, answer, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText: pages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
 
   test('CD-5a no open question (the photograph could not tell the generations apart, and they sell alike): approximate, low, family-level — never an exact listing price', async () => {
     const r = await run(quiet, listings('close_comparable'));
@@ -300,7 +300,7 @@ describe('CD-4 the market step is told the queries ran, and the pool records it'
   beforeEach(() => { resetMarketCache(); resetFxCache(); });
   test('CD-4a the record says how many queries the server built and how many the tool ran', async () => {
     const fetchImpl = fakeProvider();
-    const r = await runPrice({ identity: identity(), model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const r = await runPrice({ independentMin: 1, identity: identity(), model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.equal(r.valuation.searched.planned, buildSearchQueries({ identity: identity() }).length);
     assert.equal(r.valuation.searched.queries, 1, 'the fake tool ran one');
     const sent = fetchImpl.of('market')[0].body.input[0].content[0].text;

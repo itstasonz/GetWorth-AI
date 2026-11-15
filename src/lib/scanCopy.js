@@ -85,6 +85,7 @@ export const SCAN_COPY = {
     similarItemsWhy: 'This kind of item is compared by type, size, material and condition, so the listings are for similar items, not the same one.',
     // Why there is no price on the result, by reason, when the general sentence would mislead.
     insufficientBy: {
+      single_israeli_listing: (name) => `I identified this as ${name}. Only one Israeli second-hand ad for it was verified — one seller's asking price, not a market — so I show that ad at its own price and no estimated worth.`,
       too_few_comparable_items: (name) => `I identified this as ${name}. Only one similar item was verified in Israel, and a range from similar items needs at least two, so I show what I found without a number.`,
       comparable_items_disagree: (name) => `I identified this as ${name}. The similar items found in Israel are too far apart in price for a range to mean anything, so I show what I found without a number.`,
       no_calibrated_valuation_method_for_this_market: (name) => `I identified this as ${name}. Items like this are valued by year, mileage, reference, authentication or grading, which I cannot price reliably yet, so I show what I found without a number.`,
@@ -196,6 +197,7 @@ export const SCAN_COPY = {
     details: 'How this was worked out',
     // Why there is no price, when there is none.
     noPriceWhy: {
+      single_israeli_listing: 'Only one Israeli second-hand ad was verified. One asking price is not a market, so it is shown at its own price and no worth, listing price or quick-sale price is made from it.',
       too_few_comparable_items: 'Only one similar item was verified in Israel. A range from similar items needs at least two that stand, so what was found is shown as context only.',
       comparable_items_disagree: 'The similar items found in Israel are too far apart in price for a range to mean anything, so they are shown as context only and no number is made from them.',
       no_verified_second_hand_reference: 'No second-hand listing for this item could be verified, so there is no price to stand behind.',
@@ -274,6 +276,7 @@ export const SCAN_COPY = {
     similarItemsNote: 'לפריט מהסוג הזה אין דגם מדויק. הטווח מבוסס על מודעות לפריטים דומים, לא לאותו פריט.',
     similarItemsWhy: 'פריט מהסוג הזה מושווה לפי סוג, גודל, חומר ומצב, ולכן המודעות הן לפריטים דומים, לא לאותו פריט.',
     insufficientBy: {
+      single_israeli_listing: (name) => `זיהיתי את הפריט כ־${name}. אומתה בישראל רק מודעת יד שנייה אחת — מחיר מבוקש של מוכר אחד, לא שוק — ולכן אני מציג אותה במחיר שלה, בלי שווי משוער.`,
       too_few_comparable_items: (name) => `זיהיתי את הפריט כ־${name}. אומת בישראל רק פריט דומה אחד, וטווח מפריטים דומים צריך לפחות שניים, ולכן אני מציג מה שמצאתי בלי מספר.`,
       comparable_items_disagree: (name) => `זיהיתי את הפריט כ־${name}. הפריטים הדומים שנמצאו בישראל רחוקים מדי זה מזה במחיר כדי שטווח יאמר משהו, ולכן אני מציג מה שמצאתי בלי מספר.`,
       no_calibrated_valuation_method_for_this_market: (name) => `זיהיתי את הפריט כ־${name}. פריטים כאלה מוערכים לפי שנה, קילומטראז׳, דגם מדויק, אימות או דירוג, שאותם עדיין איני יכול לתמחר באופן אמין, ולכן אני מציג את מה שמצאתי בלי מספר.`,
@@ -378,6 +381,7 @@ export const SCAN_COPY = {
     groupRejected: 'לא המוצר הזה, או לא שמיש',
     details: 'איך זה חושב',
     noPriceWhy: {
+      single_israeli_listing: 'אומתה בישראל רק מודעת יד שנייה אחת. מחיר מבוקש אחד אינו שוק, ולכן היא מוצגת במחיר שלה ולא נקבעים ממנה שווי, מחיר לפרסום או מחיר למכירה מהירה.',
       too_few_comparable_items: 'אומת בישראל רק פריט דומה אחד. טווח מפריטים דומים צריך לפחות שניים שעומדים, ולכן מה שנמצא מוצג כהקשר בלבד.',
       comparable_items_disagree: 'הפריטים הדומים שנמצאו בישראל רחוקים מדי זה מזה במחיר כדי שטווח יאמר משהו, ולכן הם מוצגים כהקשר בלבד ולא נקבע מהם מספר.',
       no_verified_second_hand_reference: 'לא ניתן היה לאמת אף מודעת יד שנייה לפריט הזה, ולכן אין מחיר שאפשר לעמוד מאחוריו.',

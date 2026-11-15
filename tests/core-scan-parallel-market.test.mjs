@@ -40,7 +40,7 @@ function delayed(inner, { local = 0, expand = 0 } = {}) {
   return fetchImpl;
 }
 
-const run = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, freshMs: 3_600_000, swr: false, ...extra });
+const run = (fetchImpl, extra = {}) => runPrice({ independentMin: 1, identity, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, freshMs: 3_600_000, swr: false, ...extra });
 const comparable = (r) => ({ status: r.status, prices: r.valuation?.prices ?? null, counts: r.valuation?.counts ?? null, stages: r.call?.stages, withdrawn: r.valuation?.withdrawn ?? null });
 
 describe('PM-1 the wider search starts with the Israeli one; which evidence prices the item does not change', () => {
@@ -109,7 +109,7 @@ describe('PM-1 the wider search starts with the Israeli one; which evidence pric
   test('PM-1h a thing valued from similar items never asks abroad, in parallel either', async () => {
     const sofa = normalizeIdentity({ ...RAW_IDENTITY, market_class: 'furniture', identity_precision: 'descriptive', brand: null, model: null, model_number: null, exact_model_established: false });
     const fetchImpl = fakeProvider({ markets: [THIN] });
-    const r = await runPrice({ identity: sofa, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, parallel: true });
+    const r = await runPrice({ independentMin: 1, identity: sofa, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, parallel: true });
     assert.deepEqual([fetchImpl.stages(), r.call.cancelled], [['local'], []]);
   });
 

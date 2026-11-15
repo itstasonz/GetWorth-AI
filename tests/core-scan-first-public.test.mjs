@@ -16,7 +16,7 @@ const item = (over = {}) => { serial += 1; return { url: `https://ex.example.co.
 const il = (price, over) => item({ price, ...over });
 const abroad = (price, over) => item({ price, currency: 'USD', market: 'INTL', domain: 'www.ebay.com', url: `https://www.ebay.com/itm/${serial + 1000}`, ...over });
 const shop = (price, over) => item({ price, kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', listed: null, ...over });
-const value = (evidence, opts = {}) => buildValuation({ evidence, today: TODAY, ...opts });
+const value = (evidence, opts = {}) => buildValuation({ independentMin: 1, evidence, today: TODAY, ...opts });
 
 // What the founder's screen showed: new prices ₪389–₪659 in Israeli shops, one used listing abroad.
 const IL_SHOPS = () => [shop(389, { url: 'https://www.bug.co.il/gpw', domain: 'www.bug.co.il' }), shop(659, { url: 'https://www.zap.co.il/gpw', domain: 'www.zap.co.il' })];
@@ -66,7 +66,7 @@ describe('FP-2 the evidence the scan had, and what each shape of it gives', () =
       assert.equal(v.status, 'insufficient_evidence', JSON.stringify(over));
     }
   });
-  test('FP-2f one current Israeli used listing opens the ordinary gate: priced from Israel, with three prices in order', () => {
+  test('FP-2f one current Israeli used listing opens the ordinary gate: priced from Israel, with three prices in order — under the one-ad allowance stored valuations made before 2026-11-15 are reproduced with (independentMin: 1)', () => {
     const v = value([...IL_SHOPS(), il(250), abroad(60, { price_ils: 220 })]);
     assert.deepEqual([v.status, v.estimate_basis, v.evidence_gap], ['priced', ESTIMATE_BASIS.ISRAEL, null]);
     const g = v.prices.good;
@@ -147,7 +147,7 @@ describe('FP-5 the research is the search that made it', () => {
     const store = { load: async (k) => (k === marketKey(identity) ? old : null), save: async () => {} };
     let calls = 0;
     const fetchImpl = async () => { calls += 1; return new Response(JSON.stringify({ error: { message: 'offline' } }), { status: 503 }); };
-    const r = await runPrice({ identity, store, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's' });
+    const r = await runPrice({ independentMin: 1, identity, store, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's' });
     assert.ok(calls > 0, 'a search was attempted');
     assert.notEqual(r.reused, true);
     resetMarketCache();
@@ -163,7 +163,7 @@ test('FP-6 the research records its funnel: hosts reached, prices the model repo
   resetMarketCache(); resetFxCache();
   const fetchImpl = fakeProvider({ markets: [{ evidence: [] }], expand: [RAW_EXPAND] });
   const store = { load: async () => null, save: async () => {} };
-  const r = await runPrice({ identity: normalizeIdentity(RAW_IDENTITY), store, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's', now: () => NOW });
+  const r = await runPrice({ independentMin: 1, identity: normalizeIdentity(RAW_IDENTITY), store, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's', now: () => NOW });
   const funnel = r.valuation.searched.funnel;
   assert.deepEqual(funnel.map((f) => f.stage), ['local', 'expand']);
   for (const f of funnel) {

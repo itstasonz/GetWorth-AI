@@ -78,7 +78,9 @@ export function reproduceValuation(stored, build = buildValuation) {
   const v = stored?.ai_raw_response?.valuation ?? stored;
   if (!v?.inputs || !Array.isArray(v.evidence_full)) return null;
   const i = v.inputs;
-  return build({ evidence: v.evidence_full, searchPerformed: i.search_performed, unverified: i.unverified, approximate: i.approximate, familyLevel: i.family_level, strategy: i.strategy, searched: v.searched, today: i.today });
+  return build({ evidence: v.evidence_full, searchPerformed: i.search_performed, unverified: i.unverified, approximate: i.approximate, familyLevel: i.family_level, strategy: i.strategy, searched: v.searched, today: i.today,
+    // Stored before the independent-references rule (2026-11-15) a valuation was made with one ad allowed: reproduced so.
+    independentMin: Number.isInteger(i.independent_min) ? i.independent_min : 1 });
 }
 
 /** The valuations row for a scan. Prices are numbers only when the scan priced; never 0. */

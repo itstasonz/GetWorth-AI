@@ -275,19 +275,19 @@ describe('CU-4 research and valuation follow the kind of item', () => {
     const listing = (url, price, match = 'close_comparable') => ({ url, title: `t ${match}`, price, currency: 'ILS', kind: 'used_listing', match, market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', stock: 'unknown', shipping: null });
     const market = { evidence: [listing(SOURCES.IL_USED_1, 900), listing(SOURCES.IL_USED_2, 1100), listing(SOURCES.IL_RETAIL, 800)] };
     const pages = Object.fromEntries(market.evidence.map((e) => [e.url, `ספה תלת מושבית אפורה יד שנייה ₪${e.price.toLocaleString()} · פורסם 01/10/2026`]));
-    const run = (identity, pageText = pages) => runPrice({ identity, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const run = (identity, pageText = pages) => runPrice({ independentMin: 1, identity, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
     const sofa = await run(scan(ITEMS.sofa));
     assert.deepEqual([sofa.status, sofa.valuation.strategy, sofa.valuation.basis, sofa.valuation.approximate, sofa.valuation.price_confidence, sofa.valuation.counts.resale], [SCAN_STATUS.PRICED, STRATEGY.COMPARABLE, BASIS.SIMILAR_ITEMS, true, 'low', 3]);
     resetMarketCache();
     const carPages = Object.fromEntries(Object.values(SOURCES).map((u) => [u, 'טויוטה קורולה 2019 יד שנייה ₪90,000 · פורסם 01/10/2026']));
     const car = recordAnswer(scan(ITEMS.car), 2019, { lang: 'en', followupsLeft: 2 }).identity;
     const carMarket = { evidence: [listing(SOURCES.IL_USED_1, 90000, 'exact'), listing(SOURCES.IL_USED_2, 90000, 'exact')] };
-    const priced = await runPrice({ identity: car, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [carMarket], reached: Object.values(SOURCES), pageText: carPages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const priced = await runPrice({ independentMin: 1, identity: car, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [carMarket], reached: Object.values(SOURCES), pageText: carPages, rows: false }), store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([priced.status, priced.valuation.prices, priced.valuation.withdrawn, priced.valuation.no_price_reason, priced.valuation.strategy], [SCAN_STATUS.INSUFFICIENT, null, WITHDRAWN.NO_CALIBRATED_METHOD, WITHDRAWN.NO_CALIBRATED_METHOD, STRATEGY.SPECIALISED]);
     assert.ok(priced.valuation.evidence.length === 2 && priced.valuation.evidence.every((e) => e.set_aside === SET_ASIDE.SPECIALISED_CONTEXT && !e.used), 'verified, shown as context, not priced from');
     for (const name of ['watch', 'card']) assert.equal(strategyFor(scan(ITEMS[name])), STRATEGY.SPECIALISED, name);
     // The existing method, for the existing kind of item, exactly as before.
-    const mouse = buildValuation({ evidence: [{ url: SOURCES.IL_USED_1, domain: 'x.co.il', title: 't', price: 300, currency: 'ILS', price_ils: 300, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-09-20', binding: 'strong', stock: 'unknown', shipping: null, seen: TODAY }], today: TODAY });
+    const mouse = buildValuation({ independentMin: 1, evidence: [{ url: SOURCES.IL_USED_1, domain: 'x.co.il', title: 't', price: 300, currency: 'ILS', price_ils: 300, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-09-20', binding: 'strong', stock: 'unknown', shipping: null, seen: TODAY }], today: TODAY });
     assert.deepEqual([mouse.status, mouse.strategy, mouse.basis, mouse.approximate], ['priced', STRATEGY.EXACT, BASIS.ITEM, false]);
   });
   test('CU-4d the market key: what the owner confirmed is part of what the item is, so one scan\'s facts never read another\'s research', () => {
@@ -300,7 +300,7 @@ describe('CU-4 research and valuation follow the kind of item', () => {
   });
   test('CU-4e similar items are not this item: no new-price anchor from a similar thing, nothing from abroad, at least two Israeli comparables that stand, and no number when they disagree', () => {
     const ref = (url, price, over = {}) => ({ url, domain: new URL(url).host, title: 'ספה תלת מושבית', price, currency: 'ILS', price_ils: price, kind: 'used_listing', match: 'close_comparable', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', binding: 'strong', stock: 'unknown', shipping: null, seen: TODAY, ...over });
-    const similar = (evidence) => buildValuation({ evidence, strategy: STRATEGY.COMPARABLE, today: TODAY });
+    const similar = (evidence) => buildValuation({ independentMin: 1, evidence, strategy: STRATEGY.COMPARABLE, today: TODAY });
     // ONE similar item is one seller's opinion of another thing: shown, not priced from.
     const one = similar([ref(SOURCES.IL_USED_1, 900)]);
     assert.deepEqual([one.status, one.withdrawn, one.no_price_reason, one.prices, one.evidence[0].set_aside, one.evidence[0].used, one.reference_range], ['insufficient_evidence', WITHDRAWN.TOO_FEW_COMPARABLES, WITHDRAWN.TOO_FEW_COMPARABLES, null, SET_ASIDE.SIMILAR_CONTEXT, false, { low: 900, high: 900 }]);
@@ -318,7 +318,7 @@ describe('CU-4 research and valuation follow the kind of item', () => {
     assert.ok(withShop.evidence.every((e) => e.set_aside !== SET_ASIDE.ABOVE_NEW), 'a used sofa dearer than a similar new one is not "above new"');
     assert.equal(withShop.prices.new_sealed, null, 'no sealed ads: no sealed band, and no similar shop price makes one');
     // The same evidence for an EXACT item uses the anchor and sets the dearer listing aside: the rule is the strategy's, not the data's.
-    const exact = buildValuation({ evidence: [ref(SOURCES.IL_USED_1, 900, { match: 'exact' }), ref(SOURCES.IL_USED_2, 1100, { match: 'exact' }), ref('https://ads.example.co.il/3', 1500, { match: 'exact' }), { ...shop, match: 'exact' }], today: TODAY });
+    const exact = buildValuation({ independentMin: 1, evidence: [ref(SOURCES.IL_USED_1, 900, { match: 'exact' }), ref(SOURCES.IL_USED_2, 1100, { match: 'exact' }), ref('https://ads.example.co.il/3', 1500, { match: 'exact' }), { ...shop, match: 'exact' }], today: TODAY });
     assert.deepEqual([exact.retail_new_ils, exact.evidence.find((e) => e.price === 1500).set_aside, exact.evidence.find((e) => e.price === 900).set_aside], [1000, SET_ASIDE.ABOVE_NEW, null]);
     // A similar item abroad says nothing about Israel: never a reference, whatever stands locally.
     const abroad = similar([ref(SOURCES.IL_USED_1, 900), ref(SOURCES.IL_USED_2, 1100), ref(SOURCES.INTL_USED, 700, { market: 'INTL', currency: 'USD', price: 200 })]);
@@ -328,11 +328,11 @@ describe('CU-4 research and valuation follow the kind of item', () => {
     const market = { evidence: [{ url: SOURCES.IL_USED_1, title: 'ספה תלת מושבית אפורה', price: 900, currency: 'ILS', kind: 'used_listing', match: 'close_comparable', market: 'IL', condition: 'good', page: 'listing', listed: '2026-10-01', stock: 'unknown', shipping: null }] };
     const pages = { [SOURCES.IL_USED_1]: 'ספה תלת מושבית אפורה יד שנייה ₪900 · פורסם 01/10/2026' };
     const fetchImpl = fakeProvider({ markets: [market], reached: Object.values(SOURCES), pageText: pages, rows: false });
-    const sofa = await runPrice({ identity: scan(ITEMS.sofa), model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const sofa = await runPrice({ independentMin: 1, identity: scan(ITEMS.sofa), model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([sofa.status, sofa.valuation.withdrawn, fetchImpl.stages(), sofa.call.stages], [SCAN_STATUS.INSUFFICIENT, WITHDRAWN.TOO_FEW_COMPARABLES, ['local'], ['local']]);
     resetMarketCache();
     const thin = fakeProvider({ markets: [{ evidence: [] }], reached: Object.values(SOURCES), pageText: {}, rows: false });
-    const mouse = await runPrice({ identity: scan(ITEMS.mouse), model: 'm', apiKey: 'k', fetchImpl: thin, store: fakeStore(), scanUuid: UUID, now: () => NOW });
+    const mouse = await runPrice({ independentMin: 1, identity: scan(ITEMS.mouse), model: 'm', apiKey: 'k', fetchImpl: thin, store: fakeStore(), scanUuid: UUID, now: () => NOW });
     assert.deepEqual([mouse.call.stages, thin.stages()], [['local', 'expand'], ['local', 'expand']]);
   });
 });

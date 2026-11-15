@@ -40,7 +40,7 @@ let serial = 0;
 const item = (over = {}) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 300, currency: 'ILS', price_ils: over.price ?? 300, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-09-20', binding: 'strong', stock: 'unknown', shipping: null, seen: TODAY, ...over }; };
 const refurbished = (price, over = {}) => item({ price, kind: 'refurbished', condition: 'unknown', page: 'shop_product', stock: 'in_stock', listed: null, ...over });
 const shop = (price, over = {}) => item({ price, kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', stock: 'in_stock', listed: null, ...over });
-const value = (evidence, opts = {}) => buildValuation({ evidence, today: TODAY, ...opts });
+const value = (evidence, opts = {}) => buildValuation({ independentMin: 1, evidence, today: TODAY, ...opts });
 
 describe('CC-1 the live search of 2026-10-11, replayed', () => {
   const identity = normalizeIdentity(LIVE.identity_raw, { followupsLeft: 0 });
@@ -230,7 +230,7 @@ describe('CC-4 the new-price anchor: context, not proof', () => {
 // takes part as before.
 describe('CC-5 no Israeli used listing, no Israeli price', () => {
   const foreign = (price) => item({ price, currency: 'USD', price_ils: price, market: 'INTL', domain: 'used.example.com', kind: 'sold' });
-  test('CC-5a what opens the gate: one current Israeli private listing for a used unit, dated or not — not an old one, not a sealed one, not a shop\'s, not one abroad', () => {
+  test('CC-5a what opens the gate: one current Israeli private listing for a used unit, dated or not — not an old one, not a sealed one, not a shop\'s, not one abroad — under the one-ad allowance stored valuations made before 2026-11-15 are reproduced with (independentMin: 1)', () => {
     for (const [label, pool, open] of [
       ['one current used listing', [item({ price: 300 })], true],
       ['one undated used listing', [item({ price: 300, listed: null })], true],

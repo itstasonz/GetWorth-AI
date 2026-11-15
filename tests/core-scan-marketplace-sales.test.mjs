@@ -38,9 +38,9 @@ describe('MS-1 the engine keeps only this product\'s genuine sales', () => {
 });
 
 describe('MS-2 how a GetWorth sale counts', () => {
-  test('MS-2a a current genuine sale opens the Israeli gate on its own, at its final price, weighing as a listing (not a verified sale)', () => {
+  test('MS-2a a current genuine sale opens the Israeli gate on its own, at its final price, weighing as a listing (not a verified sale) — under the one-ad allowance stored valuations made before 2026-11-15 are reproduced with (independentMin: 1)', () => {
     const shop = { url: 'https://zap.co.il/x', domain: 'zap.co.il', title: 't', price: 600, currency: 'ILS', price_ils: 600, kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null, binding: 'strong', seen: TODAY };
-    const v = buildValuation({ evidence: [shop, ...salesEvidenceFor(IDENTITY, [row()], { today: TODAY })], today: TODAY });
+    const v = buildValuation({ independentMin: 1, evidence: [shop, ...salesEvidenceFor(IDENTITY, [row()], { today: TODAY })], today: TODAY });
     assert.deepEqual([v.status, v.local_evidence, v.counts.sold], ['priced', true, 1]);
     const used = v.evidence.find((e) => e.source === 'getworth_sale');
     assert.equal(used.used, true);
@@ -48,9 +48,9 @@ describe('MS-2 how a GetWorth sale counts', () => {
     assert.equal(v.prices.good.worth, 300, 'a completed sale is taken at its price, with no negotiation allowance');
   });
   test('MS-2b an old sale (over 180 days) does not open the gate; a sealed-condition sale does not either', () => {
-    const old = buildValuation({ evidence: salesEvidenceFor(IDENTITY, [row({ completed_at: '2026-03-01T00:00:00Z' })], { today: TODAY }), today: TODAY });
+    const old = buildValuation({ independentMin: 1, evidence: salesEvidenceFor(IDENTITY, [row({ completed_at: '2026-03-01T00:00:00Z' })], { today: TODAY }), today: TODAY });
     assert.equal(old.status, 'insufficient_evidence');
-    const sealed = buildValuation({ evidence: salesEvidenceFor(IDENTITY, [row({ condition: 'newSealed' })], { today: TODAY }), today: TODAY });
+    const sealed = buildValuation({ independentMin: 1, evidence: salesEvidenceFor(IDENTITY, [row({ condition: 'newSealed' })], { today: TODAY }), today: TODAY });
     assert.equal(sealed.status, 'insufficient_evidence');
   });
   test('MS-2c the price step merges them, fresh each time, and the stored row keeps their source and verification', async () => {
@@ -63,7 +63,7 @@ describe('MS-2 how a GetWorth sale counts', () => {
     const fetchImpl = fakeProvider({ markets: [{ evidence: [] }], expand: [{ evidence: [] }] });
     let asked = 0;
     const marketplace = async () => { asked += 1; return [row({ completed_at: `${today}T08:00:00Z` })]; };
-    const r = await runPrice({ identity: IDENTITY, store: { load: async () => null, save: async () => {} }, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's', now: () => NOW, marketplace });
+    const r = await runPrice({ independentMin: 1, identity: IDENTITY, store: { load: async () => null, save: async () => {} }, fetchImpl, model: 'm', apiKey: 'k', safetyIdentifier: 's', now: () => NOW, marketplace });
     assert.equal(asked, 1);
     assert.equal(r.valuation.status, 'priced');
     assert.ok(r.valuation.evidence.some((e) => e.source === 'getworth_sale' && e.used));

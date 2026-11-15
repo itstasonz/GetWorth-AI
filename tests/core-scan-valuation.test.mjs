@@ -39,7 +39,7 @@ const CURRENT = '2026-09-20';
 let serial = 0;
 /** A verified evidence item, as the pool holds it. */
 const item = (over) => { serial += 1; return { url: `https://ex.example.co.il/ad/${serial}`, domain: 'ex.example.co.il', title: 't', price: 260, currency: 'ILS', price_ils: over?.price ?? 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: null, binding: 'strong', seen: TODAY, ...over }; };
-const value = (evidence, opts = {}) => buildValuation({ evidence, today: TODAY, ...opts });
+const value = (evidence, opts = {}) => buildValuation({ independentMin: 1, evidence, today: TODAY, ...opts });
 /** The item the fixtures are about, and each page saying what its own listing costs. */
 const ITEM = { identity: normalizeIdentity(RAW_IDENTITY), answer: null };
 const pool = () => verifyEvidence(RAW_MARKET.evidence, reached(undefined, { text: pageTexts(RAW_MARKET, PAGE_TEXT) }), FX, TODAY, ITEM).evidence;
@@ -273,18 +273,18 @@ describe('CS-3 NORMALIZE and AGGREGATE — the price is calculated, the same way
   });
   test('CS-3i total: garbage in, a well-formed "no price" out', () => {
     for (const evidence of [null, undefined, 'x', [null, 5, {}], [{ kind: 'used_listing', match: 'exact', market: 'IL' }]]) {
-      const v = buildValuation({ evidence });
+      const v = buildValuation({ independentMin: 1, evidence });
       assert.equal(v.status, 'insufficient_evidence');
       assert.equal(v.prices, null);
       assert.ok(Array.isArray(v.evidence));
     }
-    assert.equal(buildValuation({ evidence: [], searchPerformed: false }).withdrawn, WITHDRAWN.NO_SEARCH);
+    assert.equal(buildValuation({ independentMin: 1, evidence: [], searchPerformed: false }).withdrawn, WITHDRAWN.NO_SEARCH);
     assert.equal(buildValuation().withdrawn, WITHDRAWN.NO_RESALE_EVIDENCE);
   });
 });
 
 describe('CS-4 thin evidence is priced, and says it is thin', () => {
-  test('CS-4a one reference: a price, the widest range, and low confidence', () => {
+  test('CS-4a one reference: a price, the widest range, and low confidence — under the one-ad allowance stored valuations made before 2026-11-15 are reproduced with (independentMin: 1)', () => {
     const v = value([item({ price: 500 })]);
     assert.deepEqual([v.status, v.price_confidence, v.counts.resale], ['priced', 'low', 1]);
     const g = v.prices.good;

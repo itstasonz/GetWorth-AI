@@ -299,3 +299,23 @@ describe('SB-4 the chained scan: identity then price on one request (2026-11-15)
     assert.match(read('api/_lib/v2/http.js'), /if \(webRes\.body && \/ndjson\/\.test/);
   });
 });
+
+describe('SB-5 one ad for an exact product is State B, not a worth (2026-11-15 audit)', () => {
+  test('SB-5a the real path: one Israeli ad → no estimated worth, the ad at its own price, and why — in Hebrew and English', async () => {
+    for (const lang of ['en', 'he']) {
+      const r = await scanWith({ identity: MOUSE, market: { evidence: [ad(1, 260, { title: 'Logitech G Pro X Superlight' })] } }, { lang });
+      assert.equal(r.priced.status, 'insufficient_evidence');
+      assert.equal(r.priced.valuation.withdrawn, 'single_israeli_listing');
+      assert.equal(headline(r.card), '₪260');
+      if (lang === 'en') {
+        assert.match(r.text, /one seller's asking price, not a market/);
+        assert.doesNotMatch(r.text, /Recommended listing price|Estimated worth/);
+      } else {
+        assert.match(r.text, /מחיר מבוקש של מוכר אחד, לא שוק/);
+        assert.doesNotMatch(r.text, /מחיר מומלץ לפרסום/);
+      }
+      await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
+      await act(async () => { scan.scanStore.reset(); });
+    }
+  });
+});

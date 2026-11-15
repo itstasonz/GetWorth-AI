@@ -74,6 +74,13 @@ export const WITHDRAWN = Object.freeze({
    * ₪42,500 from a ₪46,970 ad beside a ₪2,000 one): nothing says which is the market, so no number is made.
    */
   REFERENCES_DISAGREE: 'references_disagree',
+  /**
+   * ONE ISRAELI AD IS ONE SELLER'S ASKING PRICE, NOT A MARKET (founder audit, 2026-11-15): 4 of 11 priced items in the
+   * fixed 20-item set showed an "estimated worth", a listing price and a quick-sale price made from a single ad. A worth
+   * needs at least INDEPENDENT_MIN independent Israeli private references; with fewer, the ad is shown at its own price
+   * (State B, comparativeOf) and no number is made from it.
+   */
+  SINGLE_LISTING: 'single_israeli_listing',
 });
 /** What the valuation rests on: this item; the models it may be, when only its family is established; or similar items, for a thing identified by description. */
 export const BASIS = Object.freeze({ ITEM: 'this_item', FAMILY: 'product_family', SIMILAR_ITEMS: 'similar_items' });
@@ -155,11 +162,43 @@ export const SET_ASIDE = Object.freeze({
   PRICE_GUIDE_CONTEXT: 'price_guide_context',
   /** A reference whose address is a site's front page names no listing and no sale: its provenance cannot be audited. */
   NOT_SPECIFIC: 'not_a_specific_listing',
+  /** The only independent Israeli private reference (WITHDRAWN.SINGLE_LISTING): shown at its own price, never a worth. */
+  SINGLE: 'single_israeli_listing',
 });
 /** Is this address only a site's front page (no path), so no one listing or sale can be pointed at? */
 export const isFrontPage = (url) => /^https?:\/\/[^/?#]+\/?([?#].*)?$/i.test(String(url ?? '').trim());
 /** How many Israeli comparables, current and for a used unit, a range from similar items needs. */
 export const COMPARABLE_MIN = 2;
+/** How many INDEPENDENT Israeli private references a worth needs (WITHDRAWN.SINGLE_LISTING). */
+export const INDEPENDENT_MIN = 2;
+
+/**
+ * ONE AD, SEEN TWICE, IS ONE AD (2026-11-15 audit): the same Homeless ad reached as m.homeless.co.il and homeless.co.il
+ * (Apple Watch 8, viewad 1069137), and one ad shown on two of a board's list pages (AirPods Pro 2: same price, the same
+ * words in another order) were counted as two sellers. Two references are the same listing when they are on the same site
+ * (www./m. aside) and carry the same ad number, or have the same price and the same words in their title. Different
+ * sellers asking the same price on different sites stay two.
+ */
+const siteOf = (e) => String(e?.domain ?? '').toLowerCase().replace(/^(www|m|mobile)\./, '');
+const adNumber = (url) => {
+  const u = String(url ?? '');
+  return (/viewad(?:%2C|,)(\d+)/i.exec(u) ?? /(?:[?&$/]|%24|%26)(?:highlight_id|adid|ad_id|item_id)(?:=|%3D)(\d+)/i.exec(u) ?? /\/item\/([A-Za-z0-9]{5,})(?:[/?#]|$)/.exec(u))?.[1] ?? null;
+};
+const titleWords = (t) => [...new Set(String(t ?? '').toLowerCase().normalize('NFKC').split(/[^\p{L}\p{N}]+/u).filter(Boolean))].sort().join(' ');
+export function sameListing(a, b) {
+  if (siteOf(a) !== siteOf(b)) return false;
+  if (a.url && a.url === b.url) return true;
+  const [na, nb] = [adNumber(a.url), adNumber(b.url)];
+  if (na && nb) return na === nb;
+  const [pa, pb] = [Math.round(Number(a.price_ils)), Math.round(Number(b.price_ils))];
+  return pa > 0 && pa === pb && titleWords(a.title) !== '' && titleWords(a.title) === titleWords(b.title);
+}
+/** One reference per independent listing, in the order given (the first of each). */
+export function independentOf(evidence) {
+  const out = [];
+  for (const e of evidence ?? []) if (!out.some((o) => sameListing(o, e))) out.push(e);
+  return out;
+}
 /**
  * ISRAEL FIRST (founder decision 2026-11-08). GetWorth values what an item sells for second-hand IN ISRAEL. Listings
  * abroad never stand in for that: with no Israeli second-hand reference standing they are context, and nothing is priced
@@ -449,7 +488,7 @@ export function conditionPrices(good, kept, points, anchorIl) {
  * moves the price. Another model of the family is never this item's price:
  * with nothing found for the item or a close comparable there is no price.
  */
-export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, strategy = STRATEGY.EXACT, searched = null, today = null } = {}) {
+export function buildValuation({ evidence: pool, searchPerformed = true, unverified = 0, approximate = false, familyLevel = false, strategy = STRATEGY.EXACT, searched = null, today = null, independentMin = INDEPENDENT_MIN } = {}) {
   const evidence = (Array.isArray(pool) ? pool : []).filter((e) => e && typeof e === 'object');
   const day = today ?? new Date().toISOString().slice(0, 10);
   const basis = strategy === STRATEGY.COMPARABLE ? BASIS.SIMILAR_ITEMS : (familyLevel ? BASIS.FAMILY : BASIS.ITEM);
@@ -488,7 +527,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   // disagree widely describe no market. Otherwise they are shown as context and no number is made from them.
   const standing = points.filter((p) => !p.dropped);
   const comparableReason = similar && standing.length
-    ? (standing.filter(qualifies).length < COMPARABLE_MIN ? WITHDRAWN.TOO_FEW_COMPARABLES : (dispersionOf(standing) > DISPERSION.dispersed ? WITHDRAWN.COMPARABLES_DISAGREE : null))
+    ? (independentOf(standing.filter(qualifies).map((p) => p.evidence)).length < COMPARABLE_MIN ? WITHDRAWN.TOO_FEW_COMPARABLES : (dispersionOf(standing) > DISPERSION.dispersed ? WITHDRAWN.COMPARABLES_DISAGREE : null))
     : null;
   if (comparableReason) for (const p of standing) p.dropped = SET_ASIDE.SIMILAR_CONTEXT;
   // TWO REFERENCES THAT DISAGREE (WITHDRAWN.REFERENCES_DISAGREE): both are shown, neither prices. The pair is the two
@@ -499,6 +538,11 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   const pair = standingNow.length === 2 ? standingNow : israeliNow.length === 2 ? israeliNow : [];
   const disagree = pair.length === 2 && Math.max(pair[0].value, pair[1].value) / Math.min(pair[0].value, pair[1].value) > DISPERSION.dispersed;
   if (disagree) for (const p of standingNow) p.dropped = SET_ASIDE.DISAGREE;
+  // ONE INDEPENDENT ISRAELI AD (WITHDRAWN.SINGLE_LISTING): no worth, no listing price, no quick-sale price. What stood is
+  // shown — the ad at its own price — and a reference abroad or a shop's refurbished offer never makes one ad a market.
+  const single = !similar && !specialised && !disagree && localEvidence
+    && independentOf(points.filter((p) => !p.dropped && qualifies(p)).map((p) => p.evidence)).length < independentMin;
+  if (single) for (const p of points.filter((q) => !q.dropped)) p.dropped = SET_ASIDE.SINGLE;
   const kept = points.filter((p) => !p.dropped);
   const unused = points.filter((p) => p.dropped === SET_ASIDE.LOCAL_SUFFICIENT).length;
   const byEvidence = new Map(points.map((p) => [p.evidence, p]));
@@ -577,7 +621,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
     strategy,
     searched,
     // Everything besides the evidence that this calculation read: with `evidence` it reproduces the valuation exactly (persist.js reproduceValuation).
-    inputs: { search_performed: searchPerformed, unverified, approximate, family_level: familyLevel, strategy, today: day },
+    inputs: { search_performed: searchPerformed, unverified, approximate, family_level: familyLevel, strategy, today: day, independent_min: independentMin },
   };
   // `no_price_reason` is the same code under the name the screen reads it by.
   // With no price, the genuine Israeli second-hand ads that stood are still shown, as what they are (comparativeOf).
@@ -587,6 +631,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   if (strategy === STRATEGY.SPECIALISED) return withdraw(WITHDRAWN.NO_CALIBRATED_METHOD);
   if (comparableReason) return withdraw(comparableReason);
   if (disagree) return withdraw(WITHDRAWN.REFERENCES_DISAGREE);
+  if (single) return withdraw(WITHDRAWN.SINGLE_LISTING);
   const good = aggregate(kept);
   // References were found and none of them is an Israeli second-hand listing that stands: say that, not "nothing found".
   if (!good) return withdraw(points.length > 0 && !localEvidence ? WITHDRAWN.NO_LOCAL_EVIDENCE : WITHDRAWN.NO_RESALE_EVIDENCE);
@@ -610,7 +655,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
  * its page; this exact item or a verified comparable of it (never another model, another size, a bundle); not sealed new or
  * broken; not archived. Every number is an observed price. One ad is shown as itself (low = high = null), never a range.
  */
-export const COMPARATIVE_REASONS = Object.freeze(new Set([SET_ASIDE.SIMILAR_CONTEXT, SET_ASIDE.DISAGREE]));
+export const COMPARATIVE_REASONS = Object.freeze(new Set([SET_ASIDE.SIMILAR_CONTEXT, SET_ASIDE.DISAGREE, SET_ASIDE.SINGLE]));
 const COMPARATIVE_KINDS = new Set(['used_listing', 'sold']);
 export function comparativeOf(evidence) {
   const seen = new Set();
@@ -622,7 +667,7 @@ export function comparativeOf(evidence) {
     const price = Math.round(Number(e.price_ils));
     if (!(price > 0)) continue;
     const key = String(e.url ?? `${e.domain}|${price}`);
-    if (seen.has(key)) continue;
+    if (seen.has(key) || observations.some((o) => sameListing(o, { ...e, price_ils: price }))) continue;
     seen.add(key);
     observations.push({
       price_ils: price, match: e.match, kind: e.kind, condition: e.condition ?? 'unknown', domain: e.domain ?? null, url: e.url ?? null,

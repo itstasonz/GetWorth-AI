@@ -32,7 +32,7 @@
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity, openVariant } from './identify.js';
 import { researchMarket, marketDate, buildSearchQueries, IL_SEARCH_DOMAINS } from './market.js';
-import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH } from './valuation.js';
+import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH, INDEPENDENT_MIN } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import { loadMarketplaceSales, salesEvidenceFor, loadMarketplaceListings, listingEvidenceFor } from './marketplace.js';
@@ -203,6 +203,9 @@ export async function runPrice({
   background = afterResponse,
   // THE MARKET INDEX (../market/index-store.js): verified observations of this PRODUCT from earlier research.
   index = resolveMarketIndex() ? defaultIndex : nullIndex,
+  // How many independent Israeli private references a worth needs (valuation.js INDEPENDENT_MIN). Production never passes
+  // it; suites that exercise OTHER rules on a one-ad pool pass 1, the allowance before 2026-11-15.
+  independentMin = INDEPENDENT_MIN,
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -221,6 +224,7 @@ export async function runPrice({
       approximate, familyLevel, strategy, searched: { ...record.searched, at: new Date(record.at).toISOString() },
       // A listing's age is measured to TODAY, not to the day it was retrieved: pooled and reused evidence ages.
       today: marketDate(t0),
+      independentMin,
     });
     return {
       status: valuation.status === 'priced' ? SCAN_STATUS.PRICED : SCAN_STATUS.INSUFFICIENT,

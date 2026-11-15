@@ -50,7 +50,7 @@ const ITEM = { identity: normalizeIdentity(RAW_IDENTITY), answer: null };
 const il = (price, over) => item({ price, ...over });
 const abroad = (price, over) => item({ price, currency: 'USD', market: 'INTL', domain: 'used.example.com', ...over });
 const shop = (price, over) => item({ price, kind: 'new_retail', condition: 'new_sealed', page: 'shop_product', ...over });
-const value = (evidence, opts = {}) => buildValuation({ evidence, today: TODAY, ...opts });
+const value = (evidence, opts = {}) => buildValuation({ independentMin: 1, evidence, today: TODAY, ...opts });
 const weigh = (evidence, opts = {}) => normalizeReferences(evidence, { today: TODAY, ...opts });
 const centre = (evidence) => Math.round(aggregate(weigh(evidence).points.filter((p) => !p.dropped)).centre);
 const weightOf = (e, context = []) => weigh([e, ...context]).points[0].weight;
@@ -353,7 +353,7 @@ const THIN = { evidence: [RAW_MARKET.evidence[1], RAW_MARKET.evidence[2]] };   /
 
 describe('LM-4 the search looks in Israel first, and further only when Israel is thin', () => {
   const identity = normalizeIdentity(RAW_IDENTITY);
-  const run = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, freshMs: 3_600_000, swr: false, ...extra });
+  const run = (fetchImpl, extra = {}) => runPrice({ independentMin: 1, identity, model: 'm', apiKey: 'k', fetchImpl, store: fakeStore(), scanUuid: '11111111-2222-3333-4444-555555555555', now: () => NOW, freshMs: 3_600_000, swr: false, ...extra });
   beforeEach(() => { resetMarketCache(); resetFxCache(); });
 
   test('LM-4a the two stages ask for different things, and neither asks for a price', () => {

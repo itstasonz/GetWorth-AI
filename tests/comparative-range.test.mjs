@@ -17,8 +17,8 @@ const ad = (price, over = {}) => ({ url: `https://www.homeless.co.il/yad2/viewad
 const obs = (over = {}) => ({ market: 'IL', kind: 'used_listing', binding: 'strong', set_aside: SET_ASIDE.SIMILAR_CONTEXT, match: 'exact', condition: 'good', price_ils: 450, url: 'https://www.homeless.co.il/yad2/viewad,1.aspx', domain: 'homeless.co.il', freshness: 'current', ...over });
 
 describe('CR-1 which ads may be shown, and how', () => {
-  test('CR-1a only the two "stood, but too few / disagreed" reasons qualify', () => {
-    assert.deepEqual([...COMPARATIVE_REASONS].sort(), [SET_ASIDE.DISAGREE, SET_ASIDE.SIMILAR_CONTEXT].sort());
+  test('CR-1a only the "stood, but too few / disagreed / one ad alone" reasons qualify', () => {
+    assert.deepEqual([...COMPARATIVE_REASONS].sort(), [SET_ASIDE.DISAGREE, SET_ASIDE.SIMILAR_CONTEXT, SET_ASIDE.SINGLE].sort());
   });
   test('CR-1b one ad is shown as itself — no invented range', () => {
     const c = comparativeOf([obs()]);

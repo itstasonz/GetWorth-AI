@@ -50,7 +50,7 @@ describe('IN-1 every priced valuation rests on an Israeli second-hand reference,
   test('IN-1a over 600 pools: the invariants hold for every price', () => {
     let priced = 0;
     for (const seed of SEEDS) {
-      const v = buildValuation({ evidence: pool(seed), today: TODAY });
+      const v = buildValuation({ independentMin: 1, evidence: pool(seed), today: TODAY });
       const used = v.evidence.filter((e) => e.used);
       if (v.status !== 'priced') {
         assert.equal(v.prices, null, `seed ${seed}: no price means no number`);
@@ -86,8 +86,8 @@ describe('IN-1 every priced valuation rests on an Israeli second-hand reference,
   test('IN-1b the same evidence in any order gives the same answer', () => {
     for (const seed of SEEDS.slice(0, 150)) {
       const p = pool(seed);
-      const a = buildValuation({ evidence: p, today: TODAY });
-      const b = buildValuation({ evidence: [...p].reverse(), today: TODAY });
+      const a = buildValuation({ independentMin: 1, evidence: p, today: TODAY });
+      const b = buildValuation({ independentMin: 1, evidence: [...p].reverse(), today: TODAY });
       assert.deepEqual([b.status, b.prices, b.price_confidence, b.withdrawn], [a.status, a.prices, a.price_confidence, a.withdrawn], `seed ${seed}`);
     }
   });
@@ -99,7 +99,7 @@ describe('IN-2 a stored valuation is reproduced from its own row', () => {
     for (const seed of SEEDS) {
       const r = rng(seed * 7);
       const opts = { approximate: r() < 0.2, familyLevel: r() < 0.2, today: TODAY, unverified: Math.floor(r() * 3) };
-      const v = buildValuation({ evidence: pool(seed), ...opts });
+      const v = buildValuation({ independentMin: 1, evidence: pool(seed), ...opts });
       const row = buildValuationRow({ id: 'v', userId: 'u', scanUuid: 's', identity, valuation: v, lang: 'he' });
       const again = reproduceValuation(row);
       assert.ok(again, `seed ${seed}: the row carries its inputs`);
@@ -114,7 +114,7 @@ describe('IN-2 a stored valuation is reproduced from its own row', () => {
 });
 
 describe('IN-3 the listing keeps the engine\'s prices', () => {
-  const v = buildValuation({ evidence: [
+  const v = buildValuation({ independentMin: 1, evidence: [
     { url: 'https://a.example.co.il/1', domain: 'a.example.co.il', title: 't', price: 300, currency: 'ILS', price_ils: 300, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-11-01', binding: 'strong', seen: TODAY },
     { url: 'https://a.example.co.il/2', domain: 'a.example.co.il', title: 't', price: 280, currency: 'ILS', price_ils: 280, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good', page: 'listing', listed: '2026-11-03', binding: 'strong', seen: TODAY },
   ], today: TODAY });
@@ -170,7 +170,7 @@ describe('IN-5 the scan history shows a price only where the current engine stan
     assert.deepEqual(historyPriceOf({ price_mid: null, price_method: 'manual_required' }), {});
     assert.match(HISTORY_COLUMNS, /, reproducible:ai_raw_response->valuation->inputs$/);
     // The row the engine writes today carries exactly that path.
-    const v = buildValuation({ evidence: pool(3), today: TODAY });
+    const v = buildValuation({ independentMin: 1, evidence: pool(3), today: TODAY });
     const row = buildValuationRow({ id: 'v', userId: 'u', scanUuid: 's', identity: normalizeIdentity(RAW_IDENTITY), valuation: v, lang: 'he' });
     assert.ok(row.ai_raw_response.valuation.inputs && typeof row.ai_raw_response.valuation.inputs === 'object');
   });

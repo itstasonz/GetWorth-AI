@@ -99,7 +99,7 @@ const band = (b) => ({ list: b.list, low: b.low, high: b.high });
 
 describe('CE-2 step 2: the model finds evidence, the server prices it', () => {
   const identity = normalizeIdentity(RAW_IDENTITY);
-  const price = (fetchImpl, extra = {}) => runPrice({ identity, model: 'm-market', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW, ...extra });
+  const price = (fetchImpl, extra = {}) => runPrice({ independentMin: 1, identity, model: 'm-market', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID, now: () => NOW, ...extra });
   /** An Israeli search that found one undated listing and the new price: thin, so the search goes on (core-scan-local-market LM-4). */
   const THIN = { evidence: RAW_MARKET.evidence.slice(1) };
   test('CE-2a ONE call when Israel answers: the hosted web_search tool, located in Israel, required, asked for its own record; no photograph, and no field for a price', async () => {
@@ -152,7 +152,7 @@ describe('CE-2R market research belongs to the item: reused, shared and pooled',
   const identity = normalizeIdentity(RAW_IDENTITY);
   const T0 = NOW;
   const at = (ms) => () => ms;
-  const run = (fetchImpl, store, extra = {}) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl, store, scanUuid: UUID, now: at(T0), freshMs: 3_600_000, swr: false, ...extra });
+  const run = (fetchImpl, store, extra = {}) => runPrice({ independentMin: 1, identity, model: 'm', apiKey: KEY, fetchImpl, store, scanUuid: UUID, now: at(T0), freshMs: 3_600_000, swr: false, ...extra });
   test('CE-2Ra a second scan of the same item within the hour makes no search and gets the same price', async () => {
     const fetchImpl = fakeProvider();
     const store = fakeStore();
@@ -250,7 +250,7 @@ describe('CE-2F an item known only by its family is priced from the models it ma
   const COMPARABLES = listings('close_comparable');
   const SIBLINGS = listings('sibling_model');
   const family = normalizeIdentity({ ...RAW_IDENTITY, canonical_name: 'apple airpods pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], followup: { kind: 'photo', affects: 'identity', question: 'Take a close-up photo of the text inside the lid', options: [] } });
-  const run = (identity, market = COMPARABLES) => runPrice({ identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [market], pageText: {} }), store: fakeStore(), scanUuid: UUID });
+  const run = (identity, market = COMPARABLES) => runPrice({ independentMin: 1, identity, model: 'm', apiKey: KEY, fetchImpl: fakeProvider({ markets: [market], pageText: {} }), store: fakeStore(), scanUuid: UUID });
   test('CE-2Fa listings for the models the item may be price an item whose generation is unknown, as an approximate range', async () => {
     const r = await run(family);
     assert.deepEqual([r.status, r.valuation.approximate, r.valuation.family_level, r.valuation.price_confidence, r.valuation.counts.resale], [SCAN_STATUS.PRICED, true, true, 'low', 3]);
@@ -268,7 +268,7 @@ describe('CE-2F an item known only by its family is priced from the models it ma
   test('CE-2Fc the market prompt tells the model which models a family-level item may be', async () => {
     const fetchImpl = fakeProvider({ markets: [COMPARABLES], pageText: {} });
     resetMarketCache();
-    await runPrice({ identity: family, model: 'm', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID });
+    await runPrice({ independentMin: 1, identity: family, model: 'm', apiKey: KEY, fetchImpl, store: fakeStore(), scanUuid: UUID });
     const prompt = fetchImpl.of('market')[0].body.input[0].content[0].text;
     assert.match(prompt, /exact_model_established: no/);
     assert.match(prompt, /could_also_be: Apple AirPods Pro \(1st generation\), Apple AirPods Pro \(2nd generation\)/);
@@ -557,7 +557,7 @@ describe('CE-8 every request leaves one privacy-safe telemetry row', () => {
 
 describe('CE-5 what a scan leaves behind', () => {
   const identity = normalizeIdentity(RAW_IDENTITY);
-  const pricedValuation = buildValuation({ evidence: [
+  const pricedValuation = buildValuation({ independentMin: 1, evidence: [
     { url: 'https://a.example.co.il/1', price: 260, currency: 'ILS', price_ils: 260, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'good' },
     { url: 'https://a.example.co.il/2', price: 250, currency: 'ILS', price_ils: 250, kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown' },
     { url: 'https://a.example.co.il/3', price: 549, currency: 'ILS', price_ils: 549, kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed' },
@@ -569,7 +569,7 @@ describe('CE-5 what a scan leaves behind', () => {
     assert.ok(row.price_low <= row.price_mid && row.price_mid <= row.price_high);
     assert.deepEqual([row.price_method, row.ai_name, row.ai_category, row.user_id, row.scan_uuid], [PRICE_METHOD, 'Logitech G Pro X Superlight', 'Electronics', 'u', UUID]);
     assert.equal(row.ai_raw_response.valuation.sources.length, 3);
-    const none = buildValuationRow({ id: 'v', userId: 'u', scanUuid: UUID, identity, lang: 'he', valuation: buildValuation({ evidence: [] }) });
+    const none = buildValuationRow({ id: 'v', userId: 'u', scanUuid: UUID, identity, lang: 'he', valuation: buildValuation({ independentMin: 1, evidence: [] }) });
     assert.deepEqual([none.price_low, none.price_mid, none.price_high, none.price_method], [null, null, null, 'manual_required']);
   });
   test('CE-5b the row holds no photograph and no token', () => {
