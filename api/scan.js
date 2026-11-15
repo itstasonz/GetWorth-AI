@@ -45,6 +45,7 @@ import {
 import { runIdentify, runPrice, startingCondition, SCAN_STATUS } from './_lib/scan/service.js';
 import { recordAnswer, questionAfterResearch } from './_lib/scan/identify.js';
 import { signScanToken, verifyScanToken } from './_lib/scan/token.js';
+import { identityCacheKey, recallIdentity, rememberIdentity } from './_lib/scan/identity-cache.js';
 import { chargeScan, refundScan, warmQuota } from './_lib/scan/quota.js';
 import { recordValuation, logScanEvent } from './_lib/scan/persist.js';
 import { recordRequest, instanceInfo } from './_lib/scan/telemetry.js';
@@ -133,6 +134,9 @@ export function noPriceCause(valuation, israeli = {}) {
 export function createScanHandler({
   identify = runIdentify, price = runPrice, charge = chargeScan, refund = refundScan, verify = verifyJWT,
   record = recordValuation, logEvent = logScanEvent, warm = warmQuota,
+  // The same-photograph cache (identity-cache.js) stands in front of the real identification; a suite that injects its own
+  // identify step decides for itself.
+  cacheIdentity = identify === runIdentify,
 } = {}) {
   return async function handleRequest(req) {
     const headers = cors(req.headers.get('origin') || '');
@@ -323,11 +327,17 @@ export function createScanHandler({
       }, 429, { ...headers, 'Retry-After': String(quota.retryAfter) });
     }
 
-    const result = await identify({
-      images: read.images, lang, correction,
-      prior: prior ? { identity: prior.identity, followups: prior.followups ?? 0 } : null,
-      model: resolveIdentityModel(process.env), apiKey, safetyIdentifier,
-    });
+    // The same photograph again (identity-cache.js): a first identification only, after the quota like any scan.
+    const cacheKey = cacheIdentity && !correction && !prior ? await identityCacheKey(user.id, lang, read.images) : null;
+    const remembered = recallIdentity(cacheKey);
+    const result = remembered
+      ? { ...remembered, call: { stage: 'identify', model: remembered.model, ms: 0, usage: null, first_output_ms: null } }
+      : await identify({
+        images: read.images, lang, correction,
+        prior: prior ? { identity: prior.identity, followups: prior.followups ?? 0 } : null,
+        model: resolveIdentityModel(process.env), apiKey, safetyIdentifier,
+      });
+    if (!remembered) rememberIdentity(cacheKey, result);
     if (result.status === SCAN_STATUS.FAILED) {
       // A failed scan never uses up the person's daily allowance (founder rule, 2026-11-10): it is given back whether or not
       // the provider billed the call. The per-minute limits are not given back, so a run of failures is still throttled.
@@ -350,7 +360,7 @@ export function createScanHandler({
       question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? String(result.identity.followup.attribute ?? result.identity.followup.kind).slice(0, 40) : null,
       incomplete: !!result.identity?.incomplete, images: read.images.length, image_bytes: read.images.reduce((n, b) => n + Math.round(b.length * 0.75), 0),
       revision: prior ? (prior.revisions ?? 0) + 1 : 0,
-      quota_ms: quotaMs, quota_timing: quota.timing ?? null, sign_ms: Date.now() - tSign,
+      quota_ms: quotaMs, quota_timing: quota.timing ?? null, sign_ms: Date.now() - tSign, identity_cached: !!remembered,
     };
     // CHAINED (2026-11-15): with nothing to ask before the search, the phone would only send the token straight back to start
     // it — a round trip and a second request's set-up (~0.6-0.8 s in Production telemetry). Asked for (body.chain), the
