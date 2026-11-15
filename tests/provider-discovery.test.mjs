@@ -81,6 +81,8 @@ const HOST_REGISTRY = {
   'api.openai.com':          'PROVIDER',
   'vision.googleapis.com':   'PROVIDER',
   'api.voyageai.com':        'PROVIDER',
+  // The second search provider of the core scan (api/_lib/scan/perplexity.js), off unless configured.
+  'api.perplexity.ai':       'PROVIDER',
   // The Bank of Israel's representative exchange rates (api/_lib/scan/fx.js).
   'www.boi.org.il':          'PUBLIC',
   'get-worth-ai.vercel.app': 'INBOUND',

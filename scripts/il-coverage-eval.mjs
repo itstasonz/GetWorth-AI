@@ -54,7 +54,7 @@ export const ITEMS = [
   P('squiercv', { category: 'Music', item_type: 'electric guitar', brand: 'Squier', product_family: 'Classic Vibe', model: "Classic Vibe '50s Stratocaster", display_name: "Squier Classic Vibe '50s Stratocaster", canonical_name: 'squier classic vibe 50s stratocaster', market_class: 'other', search: { hebrew_name: 'גיטרה חשמלית סקוויר קלאסיק וייב סטרטוקסטר' } }),
 ];
 
-const stageOf = (init) => { const b = String(init?.body ?? ''); return /SEARCH — LOOK CLOSER/.test(b) ? 'deep' : (/SEARCH — LOOK FURTHER/.test(b) ? 'expand' : 'local'); };
+const stageOf = (init, url = '') => { if (String(url).includes('api.perplexity.ai')) return 'perplexity'; const b = String(init?.body ?? ''); return /SEARCH — LOOK CLOSER/.test(b) ? 'deep' : (/SEARCH — LOOK FURTHER/.test(b) ? 'expand' : 'local'); };
 // The closer look runs after the answer (service.js closerLook): the harness waits for it and asks once more, as the phone does.
 async function priceWithFollowUp(runPrice, args) {
   const bg = [];
@@ -87,8 +87,8 @@ async function record(dir, only) {
     const pending = [];
     // Every OpenAI response is read WHOLE and kept, even when the price step stops listening (a wider stage it cancelled).
     const fetchImpl = (url, init = {}) => {
-      if (!String(url).includes('api.openai.com')) return fetch(url, init);
-      const stage = stageOf(init);
+      if (!/api\.openai\.com|api\.perplexity\.ai/.test(String(url))) return fetch(url, init);
+      const stage = stageOf(init, url);
       const { signal, ...rest } = init;
       const p = fetch(url, rest).then(async (res) => {
         const text = await res.text();
@@ -124,10 +124,10 @@ async function replay(dir, repo, outFile) {
     const rec = JSON.parse(fs.readFileSync(file, 'utf8'));
     const missing = [];
     const fetchImpl = async (url, init = {}) => {
-      if (!String(url).includes('api.openai.com')) return fetch(url, init);
-      const s = rec.responses[stageOf(init)];
-      if (!s) { missing.push(stageOf(init)); return new Response('{"error":{"message":"not recorded"}}', { status: 500 }); }
-      return new Response(s.body, { status: s.status, headers: { 'content-type': 'text/event-stream' } });
+      if (!/api\.openai\.com|api\.perplexity\.ai/.test(String(url))) return fetch(url, init);
+      const s = rec.responses[stageOf(init, url)];
+      if (!s) { missing.push(stageOf(init, url)); return new Response('{"error":{"message":"not recorded"}}', { status: 500 }); }
+      return new Response(s.body, { status: s.status, headers: { 'content-type': stageOf(init, url) === 'perplexity' ? 'application/json' : 'text/event-stream' } });
     };
     resetMarketCache?.();
     const r = await priceWithFollowUp(runPrice, { identity: normalizeIdentity(item.raw), scanUuid: null, model: MODEL, apiKey: 'replay', fetchImpl, now: () => NOW, store: memStore(), marketplace: async () => [], ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });

@@ -32,6 +32,7 @@
 import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity, openVariant } from './identify.js';
 import { researchMarket, marketDate, buildSearchQueries, IL_SEARCH_DOMAINS } from './market.js';
+import { researchPerplexity, resolvePerplexity } from './perplexity.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH, INDEPENDENT_MIN } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
@@ -208,6 +209,8 @@ export async function runPrice({
   independentMin = INDEPENDENT_MIN,
   // The closer look after a no-price answer (config.js SCAN_MARKET_DEEP_ENV), and how long a follow-up waits for it.
   deep = resolveMarketDeep(), deepWaitMs = MARKET_DEEP_WAIT_MS,
+  // A second search provider alongside the OpenAI Israeli search (perplexity.js): { key, model } or null (off).
+  perplexity = resolvePerplexity(),
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -324,6 +327,8 @@ export async function runPrice({
   let searched = false;
   let firstSearchMs = null;
   let refusedSources = 0;
+  /** What the second provider reported it charged (USD), for the call record. */
+  let providerCost = 0;
   let usedModel = model;
   /** One stage's provider request. Throws what the provider threw. */
   const request = (stage, signal = null) => researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0, signal });
@@ -345,8 +350,11 @@ export async function runPrice({
     funnel.push({ stage, reached: provenance.sources?.length ?? 0, hosts: Object.fromEntries(Object.entries(hosts).sort((a, b) => b[1] - a[1]).slice(0, 15)), reported: Array.isArray(raw?.evidence) ? raw.evidence.length : 0, verified: verified.evidence.length, unverified: verified.unverified });
     searched = searched || provenance.search_performed;
     firstSearchMs ??= meta.timings?.first_search_ms ?? null;
-    usedModel = meta.model ?? usedModel;
-    for (const k of Object.keys(usage)) usage[k] += meta.usage?.[k] ?? 0;
+    // OpenAI's model and tokens only: the second provider's cost is its own (providerCost), never priced as OpenAI tokens.
+    if (stage !== 'perplexity') {
+      usedModel = meta.model ?? usedModel;
+      for (const k of Object.keys(usage)) usage[k] += meta.usage?.[k] ?? 0;
+    }
     stages.push(stage);
   };
   const call = () => ({
@@ -355,6 +363,7 @@ export async function runPrice({
     // Stages that were started alongside the Israeli search and cancelled: their evidence is not in the price, but the
     // request was made and may have been billed.
     cancelled: [...cancelled],
+    ...(perplexity ? { second_provider: { name: 'perplexity', model: perplexity.model, cost_usd: Math.round(providerCost * 1e5) / 1e5 } } : {}),
   });
 
   // LOOK FURTHER ONLY WHEN ISRAEL DID NOT ANSWER. Decided by the server, from the verified evidence in hand (this
@@ -379,6 +388,9 @@ export async function runPrice({
   const dual = String(process.env.CORE_SCAN_MARKET_DUAL_LOCAL ?? '').trim().toLowerCase() === 'true';
   const ilOnly = dual ? settle(researchMarket({ identity, answer, stage: 'local', model, apiKey, safetyIdentifier, fetchImpl, now: t0, localDomains: IL_SEARCH_DOMAINS })) : null;
 
+  // THE SECOND PROVIDER, started WITH the Israeli search (perplexity.js); its evidence joins after it, checked the same way.
+  const second = perplexity ? settle(researchPerplexity({ identity, answer, key: perplexity.key, model: perplexity.model, fetchImpl, now: t0 })) : null;
+
   // ISRAEL FIRST.
   try {
     await accept('local', await request('local'));
@@ -390,6 +402,10 @@ export async function runPrice({
     // The search failed, but evidence gathered for this item in the last days is still evidence.
     if (earlier) return priced(earlier, { reused: true, stale: true, index: indexInfo(via), call: call() });
     return { status: SCAN_STATUS.FAILED, failure, valuation: null, reused: false, call: call() };
+  }
+  if (second) {
+    const { res, err } = await second;
+    if (res) { await accept('perplexity', res); providerCost += res.meta.cost_usd ?? 0; } else console.warn(`[Scan] market failed stage=perplexity ${String(err?.message ?? err).slice(0, 160)}`);
   }
   if (widens(found)) {
     const wide = early ?? settle(request('expand'));

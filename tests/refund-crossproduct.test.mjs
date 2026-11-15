@@ -234,7 +234,7 @@ import { discoverModules } from './helpers/provider-scan.mjs';
 const ANALYZE = readFileSync(new URL('../api/analyze.js', import.meta.url), 'utf8');
 const OPENAI_LIB = readFileSync(new URL('../api/_lib/openai-recognition.js', import.meta.url), 'utf8');
 
-const PROVIDER_HOSTS = ['api.anthropic.com', 'api.openai.com', 'vision.googleapis.com', 'api.voyageai.com'];
+const PROVIDER_HOSTS = ['api.anthropic.com', 'api.openai.com', 'vision.googleapis.com', 'api.voyageai.com', 'api.perplexity.ai'];
 
 // ── Source resolution helpers ───────────────────────────────────────────────
 
@@ -475,6 +475,9 @@ const INVENTORY = [
   // the daily scan quota — an open item for V2, and the reason it is
   // allowlist-only.
   { file: 'api/_lib/v2/openai-stream.js', fn: 'streamResponse', host: 'api.openai.com', ledger: 'PHASE_B' },
+  // THE CORE SCAN'S SECOND SEARCH PROVIDER (2026-11-15) — reached only from /api/scan's price step, never from
+  // /api/analyze; the core scan keeps its own quota and refund (api/scan.js), and XP-PHASEB proves the isolation.
+  { file: 'api/_lib/scan/perplexity.js', fn: 'researchPerplexity', host: 'api.perplexity.ai', ledger: 'PHASE_B' },
 ];
 
 // Provider helpers deliberately kept with NO reachable caller. Empty, and that

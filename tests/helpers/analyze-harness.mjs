@@ -204,7 +204,7 @@ export async function harness() {
     refunds: 0, charged: true,
     anthropic: null, openai: null, vision: null,
     voyage: null,
-    rpcLog: [], otherLog: [], providerCalls: { anthropic: 0, openai: 0, vision: 0, voyage: 0 },
+    rpcLog: [], otherLog: [], providerCalls: { anthropic: 0, openai: 0, vision: 0, voyage: 0, perplexity: 0 },
     unknownHosts: [],
   };
 
@@ -273,6 +273,13 @@ export async function harness() {
       if (r instanceof Response) return r;
       if (r && r.throw) throw r.throw;
       return jsonRes(r?.body ?? { data: [{ embedding: new Array(8).fill(0) }] }, r?.status ?? 200);
+    }
+
+    // The core scan's second search provider (api/_lib/scan/perplexity.js) is never reached from /api/analyze. A call here
+    // is counted and refused, so a path that did reach it would show in providerCalls instead of passing silently.
+    if (isHost('api.perplexity.ai')) {
+      state.providerCalls.perplexity++;
+      return jsonRes({ error: { message: 'not reachable from /api/analyze' } }, 500);
     }
 
     // ── Supabase ──
@@ -347,7 +354,7 @@ export async function harness() {
 
     async run(bodyObj, { headers = {}, quiet = true, allowUnknownHosts = false } = {}) {
       state.refunds = 0; state.rpcLog = []; state.otherLog = [];
-      state.providerCalls = { anthropic: 0, openai: 0, vision: 0, voyage: 0 };
+      state.providerCalls = { anthropic: 0, openai: 0, vision: 0, voyage: 0, perplexity: 0 };
       state.unknownHosts = [];
       const logs = [];
       const orig = { log: console.log, warn: console.warn, error: console.error };
