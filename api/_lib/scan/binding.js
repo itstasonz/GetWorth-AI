@@ -129,6 +129,14 @@ export function namesOf(identity) {
   const model = strip(i.model ?? i.product_family ?? i.canonical_name);
   const variant = strip(i.variant).filter((t) => !model.includes(t));
   const runs = [[...model, ...variant], ...(i.search?.aliases ?? []).map(strip)];
+  // "WIRELESS CONTROLLER" DESCRIBES, IT DOES NOT NAME (2026-11-15: a shop's one-product page "בקר מקורי PS5 DUALSENSE",
+  // one price on the page, refused because the identity's model was "DualSense Wireless Controller" and no shop or seller
+  // writes the description). The name without it counts too — only when what is left still names one product: two or
+  // more words, or one word of six letters or more ("dualsense"; never "xbox", which names consoles too). A variant word
+  // after it ("DualSense Edge") still makes the row another model (bindPrice otherModel).
+  const describedAs = model.at(-1) === 'controller' ? (model.at(-2) === 'wireless' ? 2 : 1) : 0;
+  const core = describedAs ? model.slice(0, -describedAs) : [];
+  if (core.length >= 2 || (core.length === 1 && /^\p{L}{6,}$/u.test(core[0]))) runs.push([...core, ...variant]);
   // A GENERATION IS WRITTEN AS ITS NUMBER in a seller's ad: "AirPods Pro (2nd generation)" is listed as "AirPods Pro 2",
   // "iPad (9th generation)" as "iPad 9" (Homeless, 2026-11-12). The same words with the ordinal as a plain number, in
   // the same order: nothing is dropped and no other generation can match.

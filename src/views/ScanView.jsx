@@ -334,7 +334,9 @@ export default function ScanView() {
           </div>
         )}
 
-        {(settled || needsDetail) && question && (
+        {/* The question is there while the price is researched, so the wait can be used to answer it (not a photograph:
+            a new photograph identifies the item again, so it is asked for once a result stands). */}
+        {(settled || needsDetail || (s.stage === STAGE.PRICING && question?.kind !== 'photo')) && question && (
           <Question
             question={question} copy={copy} lang={lang} required={needsDetail || question.required === true}
             onPhoto={() => addPhoto('camera')} onUpload={() => fileRef.current?.click()}

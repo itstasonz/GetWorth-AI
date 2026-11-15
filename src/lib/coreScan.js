@@ -257,9 +257,15 @@ function report(outcome) {
 }
 
 // ── STEP 2 — PRICE ──────────────────────────────────────────────────────────
+// THE NEWEST PRICE REQUEST WINS (2026-11-15). The owner may answer the question while the first search is still running;
+// that answer starts a second request. Whichever returns first, only the latest request's answer is ever shown: an older
+// response that lands later is dropped, so a price without the owner's answer never overwrites the one with it.
+let priceSeq = 0;
 async function price({ answer = null } = {}) {
+  const seq = ++priceSeq;
   set({ stage: STAGE.PRICING, error: null, ...(answer === null ? {} : { answered: answer }), timings: { ...state.timings, price_sent_ms: state.timings.price_sent_ms ?? elapsed() } });
   const r = await post({ action: 'price', token: state.token, ...(answer === null ? {} : { answer }), client_elapsed_ms: elapsed() }, PRICE_TIMEOUT_MS);
+  if (seq !== priceSeq) return;
   if (refused('price', r)) return;
   const p = r.payload ?? {};
   // The answer was recorded and another question stands before the search: the identity comes back with it, and the
@@ -375,7 +381,10 @@ const isAnswer = (a) => Number.isInteger(a) || (typeof a === 'number' && Number.
  */
 export function answerQuestion(value, lang) {
   const q = openQuestion();
-  if (!state.active || !settled() || !q || !deps) return Promise.resolve();
+  // While the price is still being researched the owner may already answer (2026-11-15: the wait is theirs to use). A
+  // photograph is asked for only once a result stands: a new photograph identifies the item again.
+  const early = state.stage === STAGE.PRICING && q?.kind !== 'photo';
+  if (!state.active || !(settled() || early) || !q || !deps) return Promise.resolve();
   let answer = null;
   if (q.kind === 'number') answer = typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
   else if (Number.isInteger(value)) answer = value;

@@ -156,6 +156,34 @@ describe('CC-2 the one question never stands in front of the answer', () => {
     await answerQuestion(0, 'he');
     assert.equal(requests.length, 3);
   });
+  test('CC-2a2 the owner answers WHILE the price is researched; a slower, older answer never overwrites the newer one', async () => {
+    let releaseFirst;
+    const first = new Promise((r) => { releaseFirst = r; });
+    const answered = { ...VALUATION, test_tag: 'answered' };
+    server({ identify: [identified({ followup: CHOICE })], price: [{ ...pricedAnswer(), hold: first }, pricedAnswer(answered)] });
+    const scanning = startScan(deps());
+    for (let i = 0; i < 50 && snap().stage !== STAGE.PRICING; i += 1) await new Promise((r) => { setTimeout(r, 1); });
+    assert.equal(snap().stage, STAGE.PRICING);
+    assert.equal(openQuestion().question, 'What storage size is it?', 'the question is there during the wait');
+    await answerQuestion(1, 'he');
+    assert.equal(requests[2].body.answer, 1);
+    assert.equal(snap().valuation.test_tag, 'answered');
+    releaseFirst();
+    await scanning;
+    assert.equal(snap().valuation.test_tag, 'answered', 'the older, unanswered response landed later and was dropped');
+    assert.equal(snap().stage, STAGE.PRICED);
+  });
+  test('CC-2a3 a photograph is not asked for while the price is researched', async () => {
+    let release;
+    const held = new Promise((r) => { release = r; });
+    server({ identify: [identified({ followup: { ...PHOTO, affects: 'price' } })], price: [{ ...pricedAnswer(), hold: held }] });
+    const scanning = startScan(deps());
+    for (let i = 0; i < 50 && snap().stage !== STAGE.PRICING; i += 1) await new Promise((r) => { setTimeout(r, 1); });
+    await answerQuestion(0, 'he');
+    assert.equal(requests.filter((r) => r.body.action === 'price').length, 1, 'no answer taken for a photograph during pricing');
+    release();
+    await scanning;
+  });
   test('CC-2b "not sure" keeps the price already shown and makes no request', async () => {
     server({ identify: [identified({ followup: CHOICE })], price: [pricedAnswer()] });
     await startScan(deps());

@@ -115,3 +115,22 @@ describe('SR-3 where the phone\'s wait went', () => {
     assert.match(sell, /return title \? `"\$\{title\}" — \$\{what\}` : what;/);
   });
 });
+
+describe('SR-4 a shop page that names the product by its name, not its description (2026-11-15, DualSense)', async () => {
+  const { bindPrice, BOUND } = await import('../api/_lib/scan/binding.js');
+  const ds = normalizeIdentity({ ...RAW_IDENTITY, brand: 'Sony', product_family: 'PlayStation 5', model: 'DualSense Wireless Controller', canonical_name: 'sony dualsense wireless controller', display_name: 'Sony DualSense', item_type: 'game controller', variant: null, model_number: null, size_or_capacity: null, alternatives: [], search: { hebrew_name: 'בקר DualSense לפלייסטיישן 5', aliases: ['PS5 controller'], model_numbers: [] } });
+  const shop = (title, text, price) => bindPrice({ price, currency: 'ILS', match: 'exact', title, shipping: null }, { type: 'shop_product', title, text }, ds);
+  test('SR-4a the recorded gadget-team page: one product, one price, its title says DUALSENSE → bound', () => {
+    const text = 'מק"ט: 711719399704 קטגוריות: אביזרים ל PS5\nבקר שלט מקורי DUALSENSE לסוני פלייסטיישן 5 — חוויית משחק מתקדמת עם טכנולוגיה חדשנית.\n# בקר שלט מקורי לסוני פלייסטיישן 5 PS5 DUALSENSE\n₪340.00\nמידע משלוחים';
+    assert.equal(shop('בקר מקורי PS5 DUALSENSE | שלט PlayStation 5 | GADGET TEAM', text, 340).level, BOUND.STRONG);
+  });
+  test('SR-4b a DualSense Edge page is another model, never this one', () => {
+    const r = shop('DualSense Edge Wireless Controller | PS5', '# Sony DualSense Edge Wireless Controller\n₪899', 899);
+    assert.equal(r.match, 'sibling_model');
+  });
+  test('SR-4c the description is dropped only when a real name is left: "Xbox Wireless Controller" never binds an Xbox console', () => {
+    const xb = normalizeIdentity({ ...RAW_IDENTITY, brand: 'Microsoft', product_family: 'Xbox', model: 'Xbox Wireless Controller', canonical_name: 'microsoft xbox wireless controller', display_name: 'Xbox Wireless Controller', item_type: 'game controller', variant: null, model_number: null, size_or_capacity: null, alternatives: [], search: { hebrew_name: null, aliases: [], model_numbers: [] } });
+    const r = bindPrice({ price: 1500, currency: 'ILS', match: 'exact', title: 'Xbox Series X', shipping: null }, { type: 'shop_product', title: 'Xbox Series X 1TB', text: '# Xbox Series X 1TB\n₪1,500' }, xb);
+    assert.notEqual(r.level, BOUND.STRONG);
+  });
+});
