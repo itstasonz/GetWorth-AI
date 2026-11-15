@@ -19,6 +19,7 @@
 // computed by the server from one body of evidence.
 // ══════════════════════════════════════════════════════════════════════════════
 
+import { lineReader } from './scanStream.js';
 export const STAGE = Object.freeze({
   IDLE: 'idle',
   PREPARING: 'preparing',       // the photograph is being readied
@@ -129,15 +130,16 @@ function fail(step, key, { code = key, retryable = true } = {}) {
 /** Thrown when an answer arrives for a scan the user has already left or replaced. */
 const left = () => Object.assign(new Error('scan left'), { name: 'AbortError' });
 
-async function post(body, timeoutMs) {
+async function post(body, timeoutMs, { chained = false } = {}) {
   const mine = controller;
   const token = await deps.getToken();
   if (mine !== controller) throw left();
   if (!token) return { status: 401, payload: null };
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  let timer = setTimeout(() => ctrl.abort(), timeoutMs);
   const onAbort = () => ctrl.abort();
   mine?.signal.addEventListener('abort', onAbort);
+  let streaming = false;
   try {
     const res = await fetch('/api/scan', {
       method: 'POST',
@@ -146,13 +148,28 @@ async function post(body, timeoutMs) {
       signal: ctrl.signal,
     });
     let payload = null;
-    try { payload = await res.json(); } catch { /* not json */ }
+    let rest = null;
+    if (chained && res.body && /ndjson/.test(res.headers?.get?.('content-type') ?? '')) {
+      // CHAINED (api/scan.js body.chain): the identity is the first line; the price follows on the same request, on the
+      // price step's own clock and the same abort. `rest` is that second line, or null when the stream ends without it.
+      const next = lineReader(res);
+      payload = await next();
+      if (mine !== controller) throw left();
+      streaming = true;
+      clearTimeout(timer);
+      timer = setTimeout(() => ctrl.abort(), PRICE_TIMEOUT_MS);
+      rest = next().catch(() => null).finally(() => { clearTimeout(timer); mine?.signal.removeEventListener('abort', onAbort); });
+    } else {
+      try { payload = await res.json(); } catch { /* not json */ }
+    }
     // A late answer must not bring back a scan that was closed, or land in the next one.
     if (mine !== controller) throw left();
-    return { status: res.status, payload };
+    return { status: res.status, payload, rest };
   } finally {
-    clearTimeout(timer);
-    mine?.signal.removeEventListener('abort', onAbort);
+    if (!streaming) {
+      clearTimeout(timer);
+      mine?.signal.removeEventListener('abort', onAbort);
+    }
   }
 }
 
@@ -199,7 +216,7 @@ async function prepare(dataUrl) {
 
 async function identify({ correction = null } = {}) {
   set({ stage: STAGE.IDENTIFYING, error: null, timings: { ...state.timings, identify_sent_ms: state.timings.identify_sent_ms ?? elapsed() } });
-  const r = await post({ action: 'identify', images: state.images, ...(state.token ? { token: state.token } : {}), ...(correction ? { correction } : {}) }, IDENTIFY_TIMEOUT_MS);
+  const r = await post({ action: 'identify', chain: true, images: state.images, ...(state.token ? { token: state.token } : {}), ...(correction ? { correction } : {}) }, IDENTIFY_TIMEOUT_MS, { chained: true });
   // NO OTHER ENGINE STANDS BEHIND THIS ONE (2026-11-08): a scan that is switched off says so and offers a retry. The older
   // engine's model-invented prices are not a fallback.
   if (r.status === 503) { fail('identify', 'unavailable', { code: 'scan_unavailable' }); return 'unavailable'; }
@@ -220,7 +237,8 @@ async function identify({ correction = null } = {}) {
   // The identity goes on screen now; the price joins it when the search returns.
   set({ stage: STAGE.PRICING });
   deps.onIdentified?.();
-  await price();
+  // The server already started the search on this request (p.chained): its answer is the stream's next line.
+  await price({ pending: p.chained === true ? r.rest : null });
   return 'ok';
 }
 
@@ -261,10 +279,15 @@ function report(outcome) {
 // that answer starts a second request. Whichever returns first, only the latest request's answer is ever shown: an older
 // response that lands later is dropped, so a price without the owner's answer never overwrites the one with it.
 let priceSeq = 0;
-async function price({ answer = null } = {}) {
+async function price({ answer = null, pending = null } = {}) {
   const seq = ++priceSeq;
+  const mine = controller;
   set({ stage: STAGE.PRICING, error: null, ...(answer === null ? {} : { answered: answer }), timings: { ...state.timings, price_sent_ms: state.timings.price_sent_ms ?? elapsed() } });
-  const r = await post({ action: 'price', token: state.token, ...(answer === null ? {} : { answer }), client_elapsed_ms: elapsed() }, PRICE_TIMEOUT_MS);
+  // A chained answer when there is one; when the stream ended without it, the phone asks for the price itself (the
+  // server's research for this product is then joined or reused, not searched again).
+  const line = pending ? await pending : null;
+  if (seq !== priceSeq || mine !== controller) return;
+  const r = line ? { status: 200, payload: line } : await post({ action: 'price', token: state.token, ...(answer === null ? {} : { answer }), client_elapsed_ms: elapsed() }, PRICE_TIMEOUT_MS);
   if (seq !== priceSeq) return;
   if (refused('price', r)) return;
   const p = r.payload ?? {};

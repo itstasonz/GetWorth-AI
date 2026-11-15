@@ -626,7 +626,7 @@ export function comparativeOf(evidence) {
     seen.add(key);
     observations.push({
       price_ils: price, match: e.match, kind: e.kind, condition: e.condition ?? 'unknown', domain: e.domain ?? null, url: e.url ?? null,
-      title: e.title ?? null, listed: e.listed ?? null, freshness: e.freshness ?? null,
+      title: e.title ?? null, listed: e.listed ?? null, freshness: e.freshness ?? null, seen: e.seen ?? null,
     });
   }
   if (observations.length === 0) return null;

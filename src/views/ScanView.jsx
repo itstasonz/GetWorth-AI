@@ -322,7 +322,7 @@ export default function ScanView() {
               {s.valuation?.evidence_gap && s.valuation.no_price_reason === 'no_verified_israeli_second_hand_reference' && (
                 <p className="text-body-sm text-text-secondary" data-testid="scan-evidence-gap">{copy.gap(s.valuation.evidence_gap)}</p>
               )}
-              {s.valuation?.no_price_reason && <p className="text-body-sm text-text-muted">{copy.gapNext}</p>}
+              {s.valuation?.no_price_reason && <p className="text-body-sm text-text-muted">{retailReferenceOf(s.valuation) ? copy.gapNext : copy.gapNextNoRetail}</p>}
             </div>
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{copy.sellOwnPrice}</Btn>

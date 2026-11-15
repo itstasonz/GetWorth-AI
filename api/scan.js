@@ -174,15 +174,73 @@ export function createScanHandler({
     const base = { scan_uuid: scanUuid };
     const safetyIdentifier = `gw-${scanUuid}`;
     const apiKey = process.env[SCAN_KEY_ENV];
-    const done = async (payload, status, call, extra = {}) => {
-      const total = Date.now() - t0;
+    // One telemetry row per STEP: a chained identify → price request (body.chain) records both, each with its own clock.
+    const finish = async (act, payload, status, call, extra = {}, since = t0) => {
+      const total = Date.now() - since;
       await recordRequest(logEvent, scanUuid, {
-        action, http: status, outcome: payload.status ?? payload.error ?? 'unknown', reason: payload.failure ?? payload.detail ?? null,
+        action: act, http: status, outcome: payload.status ?? payload.error ?? 'unknown', reason: payload.failure ?? payload.detail ?? null,
         userId: user.id, totalMs: total, call, extra: { ...instance, auth_ms: authMs, body_ms: bodyMs, ...extra },
       });
-      console.log(`[Scan] action=${action} scan=${scanUuid.slice(0, 8)} http=${status} status=${payload.status ?? payload.error} total_ms=${total}`
+      console.log(`[Scan] action=${act} scan=${scanUuid.slice(0, 8)} http=${status} status=${payload.status ?? payload.error} total_ms=${total}`
         + (call ? ` model=${call.model} provider_ms=${call.ms} in=${call.usage?.input_tokens ?? '-'} out=${call.usage?.output_tokens ?? '-'} tools=${call.tool_calls ?? '-'}` : ''));
-      return json({ ...base, ...payload, timings: { total_ms: total, provider_ms: call?.ms ?? null, first_output_ms: call?.first_output_ms ?? null, first_search_ms: call?.first_search_ms ?? null } }, status, headers);
+      return { ...base, ...payload, timings: { total_ms: total, provider_ms: call?.ms ?? null, first_output_ms: call?.first_output_ms ?? null, first_search_ms: call?.first_search_ms ?? null } };
+    };
+    const done = async (payload, status, call, extra = {}) => json(await finish(action, payload, status, call, extra), status, headers);
+
+    // THE PRICE STEP — the market research for a signed identity, and what the scan leaves behind. Shared by the price
+    // action and a chained identify (body.chain), so both answer alike; `reply` is how the answer is sent.
+    const researchStep = async ({ identity, prior, answer, reply }) => {
+      const result = await price({ identity, answer, scanUuid, model: resolveMarketModel(process.env), apiKey, safetyIdentifier });
+      if (result.status === SCAN_STATUS.FAILED) return reply({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call);
+      // ONE MORE PHOTOGRAPH MAY CHANGE THE NEXT SEARCH (identify.js questionAfterResearch): when a technical item with no
+      // model code found no second-hand reference, the model label is offered beside the result, in a re-signed token.
+      const more = questionAfterResearch(identity, result.valuation, { lang, followupsLeft: MAX_FOLLOWUPS - (prior.followups ?? 0) });
+      if (more) {
+        identity = { ...identity, followup: more, asked_label: true };
+        base.token = await signScanToken({
+          userId: user.id, scanUuid, identity, started: prior.iat ?? null,
+          counters: { revisions: prior.revisions ?? 0, followups: (prior.followups ?? 0) + 1, identify_ms: prior.identify_ms ?? null },
+        });
+      }
+      // What the scan leaves behind: the row a listing links to, and its own timings.
+      const clientMs = Number.isFinite(body?.client_elapsed_ms) ? Math.max(0, Math.min(600_000, Math.round(body.client_elapsed_ms))) : null;
+      const [valuationId] = await Promise.all([
+        record({ userId: user.id, scanUuid, identity, valuation: result.valuation, lang }),
+        logEvent(scanUuid, 'core_scan_priced', {
+          // Why the research priced or did not: hosts and reasons only — no page text, no photograph, no person.
+          diagnostics: diagnosticsOf(result.valuation), asked_after: more ? more.attribute : null,
+          status: result.status, withdrawn: result.valuation?.withdrawn ?? null, price_confidence: result.valuation?.price_confidence ?? null,
+          // STATE B on this scan: how many genuine Israeli ads were shown at their own prices, and how many of this exact model.
+          comparative: result.valuation?.comparative ? { count: result.valuation.comparative.count, exact: result.valuation.comparative.exact_count } : null,
+          identity_confidence: identity.identity_confidence, category: identity.category, counts: result.valuation?.counts ?? null,
+          identify_ms: prior.identify_ms ?? null, market_ms: result.call?.ms ?? null, first_search_ms: result.call?.first_search_ms ?? null,
+          tool_calls: result.call?.tool_calls ?? null, stages: result.call?.stages ?? null, usage: result.call?.usage ?? null, model: result.call?.model ?? null,
+          basis: result.valuation?.basis ?? null, strategy: result.valuation?.strategy ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null, unbound: result.valuation?.counts?.unbound ?? null,
+          reused: result.reused === true, stale: result.stale === true, approximate: result.valuation?.approximate === true,
+          // The market index (api/_lib/market): rows read, read time, whether it priced, pooled or was unused, rows stored.
+          index: result.index ?? null, indexed: result.indexed === true,
+          market_class: identity.market_class ?? null, identity_precision: identity.identity_precision ?? null, confirmed: identity.confirmed?.length ?? 0,
+          revisions: prior.revisions ?? 0, answered: !!answer, client_elapsed_before_price_ms: clientMs,
+        }),
+      ]);
+      // With an answer recorded the token was re-signed: the client carries the newest one.
+      const v = result.valuation;
+      // What the research found and why it priced or did not — hosts, counts and reasons only — in the runtime log as well
+      // as in scan_events, so a scan can be explained from either. No page text, no person.
+      console.log(`[Scan] research scan=${scanUuid.slice(0, 8)} ${JSON.stringify({ ...diagnosticsOf(v), withdrawn: v?.withdrawn ?? null, estimate_basis: v?.estimate_basis ?? null, gap: v?.evidence_gap ?? null, retail_new_ils: v?.retail_new_ils ?? null, reused: result.reused === true }).slice(0, 3000)}`);
+      // Every reference by its public page: what it was, what it cost in shekels, and whether it counted and why not.
+      console.log(`[Scan] evidence scan=${scanUuid.slice(0, 8)} ${JSON.stringify((v?.evidence ?? []).slice(0, 16).map((e) => ({ u: String(e.url ?? '').slice(0, 140), k: e.kind, m: e.match, mk: e.market, ils: e.price_ils ?? null, c: e.condition ?? null, f: e.freshness ?? null, b: e.binding ?? null, used: e.used === true, why: e.set_aside ?? null })))}`);
+      return reply({ status: result.status, valuation: v, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, stale: result.stale === true, refreshing: result.refreshing === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call, {
+        stale: result.stale === true, refreshing: result.refreshing === true,
+        item: String(identity.display_name ?? '').slice(0, 120) || null, category: identity.category ?? null,
+        priced: result.status === 'priced', withdrawn: v?.withdrawn ?? null, price_confidence: v?.price_confidence ?? null,
+        comparative_count: v?.comparative?.count ?? 0, retail_reference: Number(v?.retail_new_ils) > 0,
+        approximate: v?.approximate === true, basis: v?.basis ?? null, reused: result.reused === true,
+        searches: Array.isArray(v?.searched?.queries) ? v.searched.queries.length : null, evidence: Array.isArray(v?.evidence) ? v.evidence.length : 0,
+        evidence_used: Array.isArray(v?.evidence) ? v.evidence.filter((e) => e.used).length : 0, resale_refs: v?.counts?.resale ?? null,
+        hosts: [...new Set((v?.evidence ?? []).map((e) => String(e.domain ?? '').slice(0, 60)).filter(Boolean))].slice(0, 12),
+        client_elapsed_before_price_ms: clientMs,
+      });
     };
 
     // ── WARM — the camera is opening (src/lib/coreScan.js warmScan) ─────────
@@ -243,54 +301,7 @@ export function createScanHandler({
         prior = { ...prior, identity };
         base.token = token;
       }
-      const result = await price({ identity, answer, scanUuid, model: resolveMarketModel(process.env), apiKey, safetyIdentifier });
-      if (result.status === SCAN_STATUS.FAILED) return done({ status: result.status, failure: result.failure, retryable: !LASTING_FAILURE.test(String(result.failure ?? '')) }, 200, result.call);
-      // ONE MORE PHOTOGRAPH MAY CHANGE THE NEXT SEARCH (identify.js questionAfterResearch): when a technical item with no
-      // model code found no second-hand reference, the model label is offered beside the result, in a re-signed token.
-      const more = questionAfterResearch(identity, result.valuation, { lang, followupsLeft: MAX_FOLLOWUPS - (prior.followups ?? 0) });
-      if (more) {
-        identity = { ...identity, followup: more, asked_label: true };
-        base.token = await signScanToken({
-          userId: user.id, scanUuid, identity, started: prior.iat ?? null,
-          counters: { revisions: prior.revisions ?? 0, followups: (prior.followups ?? 0) + 1, identify_ms: prior.identify_ms ?? null },
-        });
-      }
-      // What the scan leaves behind: the row a listing links to, and its own timings.
-      const clientMs = Number.isFinite(body?.client_elapsed_ms) ? Math.max(0, Math.min(600_000, Math.round(body.client_elapsed_ms))) : null;
-      const [valuationId] = await Promise.all([
-        record({ userId: user.id, scanUuid, identity, valuation: result.valuation, lang }),
-        logEvent(scanUuid, 'core_scan_priced', {
-          // Why the research priced or did not: hosts and reasons only — no page text, no photograph, no person.
-          diagnostics: diagnosticsOf(result.valuation), asked_after: more ? more.attribute : null,
-          status: result.status, withdrawn: result.valuation?.withdrawn ?? null, price_confidence: result.valuation?.price_confidence ?? null,
-          identity_confidence: identity.identity_confidence, category: identity.category, counts: result.valuation?.counts ?? null,
-          identify_ms: prior.identify_ms ?? null, market_ms: result.call?.ms ?? null, first_search_ms: result.call?.first_search_ms ?? null,
-          tool_calls: result.call?.tool_calls ?? null, stages: result.call?.stages ?? null, usage: result.call?.usage ?? null, model: result.call?.model ?? null,
-          basis: result.valuation?.basis ?? null, strategy: result.valuation?.strategy ?? null, local_strength: result.valuation?.local_strength ?? null, dispersion: result.valuation?.dispersion ?? null, unbound: result.valuation?.counts?.unbound ?? null,
-          reused: result.reused === true, stale: result.stale === true, approximate: result.valuation?.approximate === true,
-          // The market index (api/_lib/market): rows read, read time, whether it priced, pooled or was unused, rows stored.
-          index: result.index ?? null, indexed: result.indexed === true,
-          market_class: identity.market_class ?? null, identity_precision: identity.identity_precision ?? null, confirmed: identity.confirmed?.length ?? 0,
-          revisions: prior.revisions ?? 0, answered: !!answer, client_elapsed_before_price_ms: clientMs,
-        }),
-      ]);
-      // With an answer recorded the token was re-signed: the client carries the newest one.
-      const v = result.valuation;
-      // What the research found and why it priced or did not — hosts, counts and reasons only — in the runtime log as well
-      // as in scan_events, so a scan can be explained from either. No page text, no person.
-      console.log(`[Scan] research scan=${scanUuid.slice(0, 8)} ${JSON.stringify({ ...diagnosticsOf(v), withdrawn: v?.withdrawn ?? null, estimate_basis: v?.estimate_basis ?? null, gap: v?.evidence_gap ?? null, retail_new_ils: v?.retail_new_ils ?? null, reused: result.reused === true }).slice(0, 3000)}`);
-      // Every reference by its public page: what it was, what it cost in shekels, and whether it counted and why not.
-      console.log(`[Scan] evidence scan=${scanUuid.slice(0, 8)} ${JSON.stringify((v?.evidence ?? []).slice(0, 16).map((e) => ({ u: String(e.url ?? '').slice(0, 140), k: e.kind, m: e.match, mk: e.market, ils: e.price_ils ?? null, c: e.condition ?? null, f: e.freshness ?? null, b: e.binding ?? null, used: e.used === true, why: e.set_aside ?? null })))}`);
-      return done({ status: result.status, valuation: v, valuation_id: valuationId ?? null, fx_date: result.fx_date ?? null, reused: result.reused === true, stale: result.stale === true, refreshing: result.refreshing === true, ...(base.token ? { token: base.token, identity } : {}) }, 200, result.call, {
-        stale: result.stale === true, refreshing: result.refreshing === true,
-        item: String(identity.display_name ?? '').slice(0, 120) || null, category: identity.category ?? null,
-        priced: result.status === 'priced', withdrawn: v?.withdrawn ?? null, price_confidence: v?.price_confidence ?? null,
-        approximate: v?.approximate === true, basis: v?.basis ?? null, reused: result.reused === true,
-        searches: Array.isArray(v?.searched?.queries) ? v.searched.queries.length : null, evidence: Array.isArray(v?.evidence) ? v.evidence.length : 0,
-        evidence_used: Array.isArray(v?.evidence) ? v.evidence.filter((e) => e.used).length : 0, resale_refs: v?.counts?.resale ?? null,
-        hosts: [...new Set((v?.evidence ?? []).map((e) => String(e.domain ?? '').slice(0, 60)).filter(Boolean))].slice(0, 12),
-        client_elapsed_before_price_ms: clientMs,
-      });
+      return researchStep({ identity, prior, answer, reply: done });
     }
 
     // ── IDENTIFY ─────────────────────────────────────────────────────────────
@@ -332,14 +343,43 @@ export function createScanHandler({
       counters: { revisions: prior ? (prior.revisions ?? 0) + 1 : 0, followups: result.followups, identify_ms: result.call?.ms ?? null },
     });
     console.log(`[Scan] identity scan=${scanUuid.slice(0, 8)} ${JSON.stringify({ item: String(result.identity?.display_name ?? '').slice(0, 120), confidence: result.identity?.identity_confidence ?? null, precision: result.identity?.identity_precision ?? null, exact: result.identity?.exact_model_established === true, incomplete: result.identity?.incomplete ?? null, question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? `${result.identity.followup.kind}:${result.identity.followup.attribute ?? ''}` : null })}`);
-    return done({ status: result.status, identity: result.identity, default_condition: result.default_condition, token }, 200, result.call, {
+    const idPayload = { status: result.status, identity: result.identity, default_condition: result.default_condition, token };
+    const idExtra = {
       item: String(result.identity?.display_name ?? '').slice(0, 120) || null, category: result.identity?.category ?? null,
       identity_confidence: result.identity?.identity_confidence ?? null, identity_precision: result.identity?.identity_precision ?? null,
       question: result.identity?.followup?.kind && result.identity.followup.kind !== 'none' ? String(result.identity.followup.attribute ?? result.identity.followup.kind).slice(0, 40) : null,
       incomplete: !!result.identity?.incomplete, images: read.images.length, image_bytes: read.images.reduce((n, b) => n + Math.round(b.length * 0.75), 0),
       revision: prior ? (prior.revisions ?? 0) + 1 : 0,
       quota_ms: quotaMs, quota_timing: quota.timing ?? null, sign_ms: Date.now() - tSign,
+    };
+    // CHAINED (2026-11-15): with nothing to ask before the search, the phone would only send the token straight back to start
+    // it — a round trip and a second request's set-up (~0.6-0.8 s in Production telemetry). Asked for (body.chain), the
+    // search starts here at once: the identity goes out as the first line, the price as the second. The same token, the
+    // same quota (none is charged for a price), the same single search; a question the owner answers meanwhile is a new
+    // price request, and the phone shows only the newest.
+    const chain = body?.chain === true && result.status === SCAN_STATUS.IDENTIFIED && result.identity?.is_sellable_item === true
+      && !result.identity?.incomplete && result.identity?.followup?.required !== true;
+    if (!chain) return done(idPayload, 200, result.call, idExtra);
+    const first = await finish(action, { ...idPayload, chained: true }, 200, result.call, idExtra);
+    const verified = await verifyScanToken(token, { userId: user.id, scanUuid });
+    const enc = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(out) {
+        out.enqueue(enc.encode(`${JSON.stringify(first)}\n`));
+        const tPrice = Date.now();
+        try {
+          const second = verified.ok
+            ? await researchStep({ identity: result.identity, prior: verified.state, answer: null, reply: (p, st, call, extra) => finish('price', p, st, call, extra, tPrice) })
+            : null;
+          if (second) out.enqueue(enc.encode(`${JSON.stringify(second)}\n`));
+        } catch (err) {
+          // The phone sees the stream end without a price and asks for it itself.
+          console.warn(`[Scan] chained price failed scan=${scanUuid.slice(0, 8)} ${String(err?.message ?? err).slice(0, 120)}`);
+        }
+        out.close();
+      },
     });
+    return new Response(stream, { status: 200, headers: { ...headers, 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store' } });
   };
 }
 

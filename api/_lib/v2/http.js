@@ -135,6 +135,18 @@ export function nodeHandler(handleRequest, { maxBodyBytes, tag }) {
       const webRes = await handleRequest(toWebRequest(req, maxBodyBytes));
       res.statusCode = webRes.status;
       webRes.headers.forEach((value, key) => res.setHeader(key, value));
+      // A streamed answer (NDJSON: the chained scan) goes out line by line as it is produced.
+      if (webRes.body && /ndjson/.test(webRes.headers.get('content-type') ?? '')) {
+        res.flushHeaders?.();
+        const reader = webRes.body.getReader();
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          res.write(Buffer.from(value));
+        }
+        res.end();
+        return;
+      }
       res.end(await webRes.text());
     } catch (err) {
       console.error(`[${tag}] adapter fatal:`, err?.bodyTooLarge ? 'payload_too_large' : err?.message);
