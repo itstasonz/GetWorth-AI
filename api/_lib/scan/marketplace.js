@@ -103,32 +103,41 @@ export async function loadMarketplaceListings({ supa = getServiceClient(), now =
   }
 }
 
-/** The asking prices of this product, as valuation references. One per listing reference; anything unidentified is skipped. */
+/**
+ * The asking prices of this product, as valuation references. One per listing reference AND one per seller (the newest):
+ * a seller with two listings of the product — relisted, or named two ways that resolve to this market key — is one ask,
+ * never two votes. seller_ref is the function's per-call salted grouping key; it is used here and never leaves this module.
+ * Anything unidentified, or not grouped by seller, is skipped.
+ */
 export function listingEvidenceFor(identity, rows, { today = new Date().toISOString().slice(0, 10) } = {}) {
   if (!identity || !Array.isArray(rows) || rows.length === 0) return [];
   const key = marketKey(identity);
+  const HEX = /^[0-9a-f]{8,32}$/;
+  const at = (row) => Date.parse(row?.updated_at ?? row?.created_at ?? '') || 0;
+  const bySeller = new Map();
   const seen = new Set();
-  const out = [];
   for (const row of rows) {
-    const ref = typeof row?.listing_ref === 'string' && /^[0-9a-f]{8,32}$/.test(row.listing_ref) ? row.listing_ref : null;
+    const ref = typeof row?.listing_ref === 'string' && HEX.test(row.listing_ref) ? row.listing_ref : null;
+    const seller = typeof row?.seller_ref === 'string' && HEX.test(row.seller_ref) ? row.seller_ref : null;
     const price = Number(row?.price);
-    if (!ref || seen.has(ref) || !(price > 0)) continue;
+    if (!ref || !seller || seen.has(ref) || !(price > 0) || !Number.isFinite(price)) continue;
     if (!row.identity || typeof row.identity !== 'object' || marketKey(row.identity) !== key) continue;
     seen.add(ref);
-    out.push({
-      url: `${LISTING_URL_PREFIX}${ref}`,
-      domain: 'getworth',
-      title: String(row.identity.display_name ?? '').slice(0, 120) || null,
-      price, currency: 'ILS', price_ils: price,
-      kind: 'used_listing', match: 'exact', market: 'IL',
-      condition: CONDITION[row.condition] ?? 'unknown',
-      page: 'listing',
-      listed: String(row.created_at ?? '').slice(0, 10) || null,
-      binding: 'verified_row',
-      seen: today,
-      source: LISTING_SOURCE,
-      verification: 'seller_entered',
-    });
+    const kept = bySeller.get(seller);
+    if (!kept || at(row) > at(kept)) bySeller.set(seller, row);
   }
-  return out;
+  return [...bySeller.values()].map((row) => ({
+    url: `${LISTING_URL_PREFIX}${row.listing_ref}`,
+    domain: 'getworth',
+    title: String(row.identity.display_name ?? '').slice(0, 120) || null,
+    price: Number(row.price), currency: 'ILS', price_ils: Number(row.price),
+    kind: 'used_listing', match: 'exact', market: 'IL',
+    condition: CONDITION[row.condition] ?? 'unknown',
+    page: 'listing',
+    listed: String(row.created_at ?? '').slice(0, 10) || null,
+    binding: 'verified_row',
+    seen: today,
+    source: LISTING_SOURCE,
+    verification: 'seller_entered',
+  }));
 }

@@ -169,8 +169,17 @@ describe('MS-5 the historical cleanup batch', () => {
 test('MS-6 the evidence list shows a GetWorth sale for what it is: no link, buyer-confirmed', () => {
   const sheets = read('src/components/ScanSheets.jsx');
   assert.match(sheets, /const sale = e\.source === 'getworth_sale';/);
-  assert.match(sheets, /const rowProps = sale \? \{\} : \{ href: e\.url/);
+  assert.match(sheets, /const internal = sale \|\| ask;/);
+  assert.match(sheets, /const rowProps = internal \? \{\} : \{ href: e\.url/);
   assert.match(read('src/lib/scanCopy.js'), /getworthSale: 'Sold on GetWorth · price confirmed by the buyer, not a payment record'/);
+});
+
+test('MS-6b a GetWorth asking price is shown as an ask set by its seller, never as a sale, and is not a link', () => {
+  const sheets = read('src/components/ScanSheets.jsx');
+  assert.match(sheets, /const ask = e\.source === 'getworth_listing';/);
+  const copy = read('src/lib/scanCopy.js');
+  assert.match(copy, /getworthListing: 'Listed on GetWorth · asking price set by the seller, not a sale'/);
+  assert.match(copy, /getworthListing: 'מוצע למכירה ב-GetWorth · מחיר מבוקש שקבע המוכר, לא מכירה'/);
 });
 
 test('MS-7 the evidence function returns only the identity fields the market key reads — never visible text — and the key is unchanged by the projection', async () => {

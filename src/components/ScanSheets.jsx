@@ -105,10 +105,12 @@ function Source({ e, copy }) {
     copy.freshness[e.freshness] ?? null,
   ].filter(Boolean).join(' · ');
   const why = !e.used && e.set_aside ? copy.why[e.set_aside] ?? null : null;
-  // A GetWorth sale has no public page: it is said to be one, and to be the buyer's word, and it is not a link.
+  // A GetWorth sale or asking price has no public page: it says which it is and whose word it is, and it is not a link.
   const sale = e.source === 'getworth_sale';
-  const Row = sale ? 'div' : 'a';
-  const rowProps = sale ? {} : { href: e.url, target: '_blank', rel: 'noopener noreferrer' };
+  const ask = e.source === 'getworth_listing';
+  const internal = sale || ask;
+  const Row = internal ? 'div' : 'a';
+  const rowProps = internal ? {} : { href: e.url, target: '_blank', rel: 'noopener noreferrer' };
   return (
     <li>
       <Row
@@ -119,8 +121,8 @@ function Source({ e, copy }) {
           <span className="block text-body-sm text-text-primary line-clamp-2 break-words"><ForeignTitle>{e.title || e.domain}</ForeignTitle></span>
           <span className="block text-meta text-text-muted">{facts}</span>
           {why && <span className="block text-meta text-text-secondary">{why}</span>}
-          {sale ? (
-            <span className="block text-meta text-text-muted" data-testid="getworth-sale">{copy.getworthSale}</span>
+          {internal ? (
+            <span className="block text-meta text-text-muted" data-testid={sale ? 'getworth-sale' : 'getworth-listing'}>{sale ? copy.getworthSale : copy.getworthListing}</span>
           ) : (
             <span className="flex items-center gap-1 text-meta text-text-muted">
               <bdi dir="ltr">{e.domain}</bdi>

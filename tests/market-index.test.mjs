@@ -489,14 +489,38 @@ describe('MI-25 first-party asking prices', () => {
   test('MI-25a a qualifying listing of THIS product becomes an Israeli private asking price, never a sale; another product is ignored', async () => {
     const { listingEvidenceFor } = await import('../api/_lib/scan/marketplace.js');
     const rows = [
-      { listing_ref: 'a1b2c3d4e5f60718', price: 320, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: ident },
-      { listing_ref: 'b1b2c3d4e5f60718', price: 900, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: { ...ident, canonical_name: 'logitech g502', model: 'G502' } },
-      { listing_ref: 'a1b2c3d4e5f60718', price: 320, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: ident },
+      { listing_ref: 'a1b2c3d4e5f60718', seller_ref: '5e11e7aa5e11e7aa', price: 320, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: ident },
+      { listing_ref: 'b1b2c3d4e5f60718', seller_ref: '5e11e7bb5e11e7bb', price: 900, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: { ...ident, canonical_name: 'logitech g502', model: 'G502' } },
+      { listing_ref: 'a1b2c3d4e5f60718', seller_ref: '5e11e7aa5e11e7aa', price: 320, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity: ident },
     ];
     const refs = listingEvidenceFor(normalizeIdentity(RAW_IDENTITY), rows, { today });
     assert.equal(refs.length, 1);
     assert.deepEqual([refs[0].kind, refs[0].market, refs[0].source, refs[0].verification, refs[0].condition], ['used_listing', 'IL', 'getworth_listing', 'seller_entered', 'good']);
     assert.notEqual(refs[0].kind, 'sold');
+  });
+  test('MI-25d one seller is one ask: relisted or named two ways, the newest stands; another seller is another ask; ungrouped rows never count', async () => {
+    const { listingEvidenceFor } = await import('../api/_lib/scan/marketplace.js');
+    const ident2 = { ...ident, canonical_name: 'logitech superlight g pro x' }; // same market key, other wording
+    const rows = [
+      { listing_ref: 'aaaa000000000001', seller_ref: '5e11e7aa5e11e7aa', price: 300, created_at: '2026-10-01T10:00:00Z', condition: 'used', identity: ident },
+      { listing_ref: 'aaaa000000000002', seller_ref: '5e11e7aa5e11e7aa', price: 340, created_at: '2026-10-20T10:00:00Z', updated_at: '2026-11-02T10:00:00Z', condition: 'likeNew', identity: ident2 },
+      { listing_ref: 'aaaa000000000003', seller_ref: '5e11e7bb5e11e7bb', price: 310, created_at: '2026-10-05T10:00:00Z', condition: 'used', identity: ident },
+      { listing_ref: 'aaaa000000000004', price: 50, created_at: '2026-10-05T10:00:00Z', condition: 'used', identity: ident },
+      { listing_ref: 'aaaa000000000005', seller_ref: 'not a ref', price: 50, created_at: '2026-10-05T10:00:00Z', condition: 'used', identity: ident },
+    ];
+    const refs = listingEvidenceFor(normalizeIdentity(RAW_IDENTITY), rows, { today });
+    assert.deepEqual(refs.map((r) => [r.price, r.condition]).sort(), [[310, 'good'], [340, 'like_new']]);
+    assert.ok(refs.every((r) => !('seller_ref' in r) && !JSON.stringify(r).includes('5e11e7')), 'the seller grouping key never leaves the module');
+  });
+  test('MI-25e wrong model, other capacity, other configuration: not this product, never evidence', async () => {
+    const { listingEvidenceFor } = await import('../api/_lib/scan/marketplace.js');
+    const row = (i, identity) => ({ listing_ref: `bbbb00000000000${i}`, seller_ref: `cccc00000000000${i}`, price: 400, created_at: '2026-11-01T10:00:00Z', condition: 'used', identity });
+    const refs = listingEvidenceFor(normalizeIdentity(RAW_IDENTITY), [
+      row(1, { ...ident, canonical_name: 'logitech g pro x superlight 2', model: 'G Pro X Superlight 2' }),
+      row(2, { ...ident, size_or_capacity: '2 pack' }),
+      row(3, { ...ident, configuration: 'part_only' }),
+    ], { today });
+    assert.equal(refs.length, 0);
   });
   test('MI-25b the feedback guard: a GetWorth asking price is evidence only as a seller-entered ask', () => {
     const ask = { url: 'getworth:listing:a1b2c3d4e5f60718', source: 'getworth_listing', verification: 'seller_entered', kind: 'used_listing' };
@@ -504,28 +528,46 @@ describe('MI-25 first-party asking prices', () => {
     assert.equal(isSelfGenerated({ ...ask, verification: 'getworth_valuation' }), true);
     assert.equal(isSelfGenerated({ ...ask, kind: 'sold' }), true);
   });
-  test('MI-25c the SQL function: seller prices only, genuine sellers only, active and recent, one per seller per product', async () => {
+  test('MI-25c the SQL function: seller prices only, genuine sellers only, own valuation, active and recent, one per seller per product, no person returned', async () => {
     const { PGlite } = await import('@electric-sql/pglite');
     const fs = await import('node:fs');
     const db = new PGlite();
     await db.exec(`create role anon; create role authenticated; create role service_role;
       create table profiles (id uuid primary key, is_admin boolean default false, is_test boolean default false);
-      create table valuations (id uuid primary key, valuation_version int, ai_raw_response jsonb);
-      create table listings (id uuid primary key default gen_random_uuid(), seller_id uuid, valuation_id uuid, status text, price numeric, price_source text, condition text, category text, created_at timestamptz default now());`);
+      create table valuations (id uuid primary key, user_id uuid, valuation_version int, ai_raw_response jsonb);
+      create table listings (id uuid primary key default gen_random_uuid(), seller_id uuid, valuation_id uuid, status text, price numeric, price_source text, condition text, category text, created_at timestamptz default now(), updated_at timestamptz default now());`);
     await db.exec(fs.readFileSync(new URL('../supabase/migrations/20261113190000_marketplace_listing_evidence.sql', import.meta.url), 'utf8'));
-    const S = { real: '00000000-0000-0000-0000-000000000001', other: '00000000-0000-0000-0000-000000000002', admin: '00000000-0000-0000-0000-000000000003', test: '00000000-0000-0000-0000-000000000004' };
+    const S = { real: '00000000-0000-0000-0000-000000000001', other: '00000000-0000-0000-0000-000000000002', admin: '00000000-0000-0000-0000-000000000003', test: '00000000-0000-0000-0000-000000000004', ghost: '00000000-0000-0000-0000-000000000005' };
     await db.query(`insert into profiles (id, is_admin, is_test) values ($1,false,false),($2,false,false),($3,true,false),($4,false,true)`, [S.real, S.other, S.admin, S.test]);
-    const V = '10000000-0000-0000-0000-000000000001';
-    await db.query(`insert into valuations values ($1, 3, $2)`, [V, JSON.stringify({ identity: { canonical_name: 'x phone', display_name: 'X Phone' } })]);
-    const L = (seller, price, source, status = 'active', age = '1 day') => db.query(`insert into listings (seller_id, valuation_id, status, price, price_source, condition, category, created_at) values ($1,$2,$3,$4,$5,'used','Electronics', now() - $6::interval)`, [seller, V, status, price, source, age]);
-    await L(S.real, 500, 'seller_entered');                 // counts
-    await L(S.real, 480, 'seller_entered', 'active', '2 days'); // same seller, same product, older → not twice
-    await L(S.other, 900, 'getworth_valuation');            // copied GetWorth price → never
-    await L(S.admin, 450, 'seller_entered');                // admin → never
-    await L(S.test, 450, 'seller_entered');                 // test account → never
-    await L(S.other, 520, 'seller_entered', 'deleted');     // not active → never
-    await L(S.other, 530, 'seller_entered', 'active', '200 days'); // too old → never
-    const { rows } = await db.query(`select price from marketplace_listing_evidence()`);
+    const ID = JSON.stringify({ identity: { canonical_name: 'x phone', display_name: 'X Phone' } });
+    const V = {};
+    for (const [k, id] of Object.entries(S)) { V[k] = `1${id.slice(1)}`; await db.query(`insert into valuations values ($1, $2, 3, $3)`, [V[k], id, ID]); }
+    V.legacy = '20000000-0000-0000-0000-000000000001';
+    await db.query(`insert into valuations values ($1, $2, 1, $3)`, [V.legacy, S.other, ID]);
+    const own = (seller) => V[Object.keys(S).find((k) => S[k] === seller)];
+    const L = (seller, price, source, { status = 'active', age = '1 day', val = null } = {}) => db.query(`insert into listings (seller_id, valuation_id, status, price, price_source, condition, category, created_at) values ($1,$2,$3,$4,$5,'used','Electronics', now() - $6::interval)`, [seller, val ?? own(seller), status, price, source, age]);
+    await L(S.real, 500, 'seller_entered');                              // counts
+    await L(S.real, 480, 'seller_entered', { age: '2 days' });            // same seller, same product, older → not twice
+    await L(S.other, 900, 'getworth_valuation');                         // copied GetWorth price → never
+    await L(S.admin, 450, 'seller_entered');                             // admin → never
+    await L(S.test, 450, 'seller_entered');                              // test account → never
+    await L(S.ghost, 450, 'seller_entered');                             // no profile at all → never
+    await L(S.other, 520, 'seller_entered', { status: 'deleted' });      // deleted → never (and never a sale)
+    await L(S.other, 521, 'seller_entered', { status: 'sold' });         // marked sold → not an ask; sales come only from buyer-confirmed orders
+    await L(S.other, 530, 'seller_entered', { age: '200 days' });        // too old → never
+    await L(S.other, 540, 'seller_entered', { val: V.real });            // someone else's valuation → never
+    await L(S.other, 550, 'seller_entered', { val: V.legacy });          // legacy (non core-scan) valuation → never
+    const { rows, fields } = await db.query(`select * from marketplace_listing_evidence()`);
     assert.deepEqual(rows.map((r) => Number(r.price)), [500]);
+    assert.deepEqual(fields.map((f) => f.name), ['listing_ref', 'seller_ref', 'price', 'created_at', 'updated_at', 'condition', 'category', 'identity']);
+    assert.ok(!JSON.stringify(rows).includes(S.real) && /^[0-9a-f]{16}$/.test(rows[0].seller_ref) && /^[0-9a-f]{16}$/.test(rows[0].listing_ref));
+    // The seller grouping key is salted per call: it links to no account and changes every answer.
+    const a = (await db.query(`select seller_ref from marketplace_listing_evidence()`)).rows[0].seller_ref;
+    const b = (await db.query(`select seller_ref from marketplace_listing_evidence()`)).rows[0].seller_ref;
+    assert.notEqual(a, b);
+    assert.notEqual(a, (await db.query(`select left(md5($1), 16) r`, [S.real])).rows[0].r);
+    // service_role only
+    const grants = (await db.query(`select grantee from information_schema.routine_privileges where routine_name = 'marketplace_listing_evidence'`)).rows.map((r) => r.grantee);
+    assert.ok(grants.includes('service_role') && !grants.includes('anon') && !grants.includes('authenticated') && !grants.includes('PUBLIC'), grants.join(','));
   });
 });
