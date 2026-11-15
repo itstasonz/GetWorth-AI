@@ -324,7 +324,14 @@ export function MyListingsView() {
         open={deleteTarget !== null}
         icon={<Trash2 className="w-8 h-8 text-red-400" />}
         title={lang === 'he' ? 'מחיקת מודעה' : 'Delete Listing'}
-        body={lang === 'he' ? 'המודעה תוסר לצמיתות. לא ניתן לשחזר פריטים שנמחקו.' : 'This listing will be permanently removed. Buyers who saved it will no longer see it.'}
+        // THE SHEET SAYS WHICH LISTING (2026-11-15 QA: a restored scroll position put a tap on the wrong row's delete
+        // button, and the sheet gave no way to notice). The listing's own title is named before anything is removed.
+        body={(() => {
+          const named = myListings.find((l) => l.id === deleteTarget);
+          const title = named ? (lang === 'he' && named.title_hebrew ? named.title_hebrew : named.title) : '';
+          const what = lang === 'he' ? 'המודעה תוסר לצמיתות. לא ניתן לשחזר פריטים שנמחקו.' : 'This listing will be permanently removed. Buyers who saved it will no longer see it.';
+          return title ? `"${title}" — ${what}` : what;
+        })()}
         confirmLabel={lang === 'he' ? 'מחק מודעה' : 'Delete Listing'}
         cancelLabel={lang === 'he' ? 'ביטול' : 'Cancel'}
         onClose={() => setDeleteTarget(null)}

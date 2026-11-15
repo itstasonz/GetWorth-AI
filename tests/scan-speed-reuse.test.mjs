@@ -103,4 +103,15 @@ describe('SR-3 where the phone\'s wait went', () => {
     const server = read('api/scan.js');
     for (const f of ['prepared_ms', 'identify_sent_ms', 'price_sent_ms']) assert.match(server, new RegExp(`${f}: ms\\(r\\.${f}\\)`));
   });
+  test('SR-3b the phone reports once per scan, at the first price: an owner answering a question is not price latency', () => {
+    const client = read('src/lib/coreScan.js');
+    assert.match(client, /if \(!state\.reported\) \{ set\(\{ reported: true \}\); report\(/);
+    assert.match(client, /reported: false,/);
+    assert.equal((client.match(/\breport\(p\.status/g) ?? []).length, 1);
+  });
+  test('SR-3c the delete sheet names the listing it is about to remove (2026-11-15 QA)', () => {
+    const sell = read('src/views/SellViews.jsx');
+    assert.match(sell, /const named = myListings\.find\(\(l\) => l\.id === deleteTarget\);/);
+    assert.match(sell, /return title \? `"\$\{title\}" — \$\{what\}` : what;/);
+  });
 });

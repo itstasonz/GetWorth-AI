@@ -63,6 +63,7 @@ const initial = () => ({
   // The price was answered from a product's older research while the server renews it (service.js stale-while-revalidate).
   refreshing: false,
   answered: null,          // the option index the owner picked, 'dismissed', or null
+  reported: false,         // the phone's timings went to the server (once per scan)
   correction: null,        // what the owner said the item really is
   error: null,             // { message, code, step, retryable }
   // Milliseconds from the accepted photograph, measured here, on the phone.
@@ -280,7 +281,9 @@ async function price({ answer = null } = {}) {
   console.log(`[Scan] photo → identity ${state.timings.identity_shown_ms}ms · photo → price ${state.timings.price_shown_ms}ms (server ${p.timings?.total_ms ?? '?'}ms${p.reused ? ', market research reused' : ''})`);
   // The phone's own clock goes back to the server's telemetry: how long the person actually waited. Never awaited by the
   // screen, never retried, never an error on screen.
-  report(p.status === 'priced' ? 'priced' : 'no_price');
+  // ONCE per scan, at the FIRST price shown (2026-11-15: a later report after the owner answered a question counted the
+  // owner's own reading and tapping as price latency).
+  if (!state.reported) { set({ reported: true }); report(p.status === 'priced' ? 'priced' : 'no_price'); }
   set({ refreshing: p.refreshing === true });
   if (p.refreshing === true) followUpOnce();
 }
