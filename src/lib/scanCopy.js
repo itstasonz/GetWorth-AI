@@ -102,7 +102,7 @@ export const SCAN_COPY = {
     // STATE B — observed Israeli second-hand ads, no valuation (valuation.js comparativeOf).
     comparativeRange: 'Comparative price range',
     comparativeSingle: 'One Israeli second-hand ad',
-    comparativeCount: (n, exact) => `${n} ads in Israel${exact < n ? ` · ${exact} of this exact model` : ''} · low confidence`,
+    comparativeCount: (n, exact) => `${n === 1 ? '1 ad' : `${n} ads`} in Israel${exact < n ? ` · ${exact} of this exact model` : ''} · low confidence`,
     comparativeNote: 'Asking prices from ads — not a sale price and not an estimated worth.',
     comparativeMatch: { exact: 'same model', close_comparable: 'comparable model' },
     comparativeSold: 'sold',
@@ -292,7 +292,7 @@ export const SCAN_COPY = {
     retailLabel: 'מחיר חדש בישראל — לא שווי יד שנייה',
     comparativeRange: 'טווח מחירים להשוואה',
     comparativeSingle: 'מודעת יד שנייה אחת בישראל',
-    comparativeCount: (n, exact) => `${n} מודעות בישראל${exact < n ? ` · ${exact} מהדגם המדויק` : ''} · ביטחון נמוך`,
+    comparativeCount: (n, exact) => `${n === 1 ? 'מודעה אחת' : `${n} מודעות`} בישראל${exact < n ? ` · ${exact} מהדגם המדויק` : ''} · ביטחון נמוך`,
     comparativeNote: 'מחירים מבוקשים במודעות — לא מחיר מכירה ולא שווי משוער.',
     comparativeMatch: { exact: 'אותו דגם', close_comparable: 'דגם דומה' },
     comparativeSold: 'נמכר',

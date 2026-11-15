@@ -24,6 +24,31 @@ only old/archived ads:
 estimate.** It cannot be verified without trial access to a provider's data. The earlier "70–80%" figure is an
 unverified hypothesis and is not repeated here.
 
+## Update 2026-11-15 — what the latest measurements add
+
+- **The web-search tool returns no page text for any Israeli site** (0 of 400+ Israeli results across the 20-item
+  recordings: homeless 137, ad.co.il 96, yad2 27, zap 23 …). A price can be tied to an ad only when the model cites the ad's
+  own page. Prices read from board list pages (ad.co.il `/c/…`, Homeless `inumber` lists, prog.co.il) cannot be checked.
+  This, not code, is why Bugaboo Fox 3, Squier and the Philips Airfryer have no usable Israeli price.
+- **Prompting does not fix it:** a paid A/B asking the model to cite the ad's own page moved citations 16/34 → 18/29 with
+  no consistent change in outcomes (rejected, not shipped).
+- **Stricter, honest valuations raise the value of licensed data:** with a worth now requiring two independent Israeli
+  ads, 6 of 20 benchmark items (and 4 of the 10 holdout items) show one real ad (State B) instead of a worth. A licensed feed with item-level
+  price, date and status would plausibly turn several of these into State A.
+- New search (2026-11-15): still no official Yad2/Homeless/ad.co.il data programme; only unofficial Yad2 scrapers and
+  resellers (Apify actors, happyendpoint, Oxylabs), none licensed by Yad2 → not usable.
+
+### Approval needed per contact (nothing sent)
+
+| # | Company | Why it matters | What we would request | Channel | What would be disclosed |
+|---|---|---|---|---|---|
+| 1 | Yad2 | Largest Israeli second-hand board; most ads GetWorth cannot read today | Data licence/API for second-hand product ads (title, category, brand/model, asking price, condition, date, status); 1-week trial in 3 categories | No public BD address — founder to choose (LinkedIn BD contact or the site's business contact page) | That GetWorth is an Israeli app that photographs an item and shows its second-hand market price and lets the owner list it; that it links to the source ad. Nothing about architecture, models, strategy, users or metrics |
+| 2 | Homeless (Infotip) | Main readable source today; prices already in its ad titles | Written permission + feed of second-hand board ads (title, price, region, update date, condition) | homeless.co.il/shared/contactus.aspx | As above |
+| 3 | ad.co.il | Large board, but most reachable ads are archived | Written permission + current ads feed (title, price, condition, date) | Site contact page | As above |
+
+Each message is the matching draft below, unchanged except the founder's name and contact details. Approval for one
+company does not cover another.
+
 ## Providers
 
 | Provider | Official API / feed | Rights for commercial use | Cost | Verified facts | Unknowns |
