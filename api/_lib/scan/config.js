@@ -72,6 +72,8 @@ const effortOf = (env, name, fallback = 'low') => (EFFORTS.includes(String(env?.
 /** The identity step answers without a reasoning pass by default (the V3 benchmark above): same accuracy, ~2 s sooner. */
 export const SCAN_IDENTITY_EFFORT_DEFAULT = 'none';
 export const resolveIdentityEffort = (env = process.env) => effortOf(env, SCAN_IDENTITY_EFFORT_ENV, SCAN_IDENTITY_EFFORT_DEFAULT);
+// The market step keeps 'low' (2026-11-15 A/B, the 20-item set, both arms the same hour): 'none' priced 9/20 against 11/20,
+// research p50 9.8 s / p90 22.0 s (two timeouts) against 8.6 s / 12.5 s, and wrote longer answers (441 vs 316 tokens).
 export const resolveMarketEffort = (env = process.env) => effortOf(env, SCAN_MARKET_EFFORT_ENV);
 export const resolveIdentityModel = (env = process.env) => modelOf(env, SCAN_IDENTITY_MODEL_ENV, SCAN_IDENTITY_MODEL_DEFAULT);
 export const resolveMarketModel = (env = process.env) => modelOf(env, SCAN_MARKET_MODEL_ENV, SCAN_MARKET_MODEL_DEFAULT);

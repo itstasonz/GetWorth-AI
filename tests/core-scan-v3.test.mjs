@@ -33,11 +33,12 @@ describe('V3-1 the identity configuration is the measured one', () => {
     assert.equal(CFG.resolveIdentityEffort({ CORE_SCAN_IDENTITY_EFFORT: 'low' }), 'low');
     assert.equal(CFG.resolveMarketEffort({}), 'low', 'the market step keeps its own default');
   });
-  test('V3-1b lean output: the model names at most four attributes and two questions, and the prompt says so', () => {
+  test('V3-1b lean output: the model names at most four attributes and ONE question (2026-11-15 benchmark), and the prompt says so', () => {
     assert.equal(IDENTITY_SCHEMA.properties.attributes.maxItems, MODEL_MAX_ATTRIBUTES);
     assert.equal(MODEL_MAX_ATTRIBUTES, 4);
     assert.equal(IDENTITY_SCHEMA.properties.clarifications.maxItems, MAX_CLARIFICATIONS);
-    assert.equal(MAX_CLARIFICATIONS, 2);
+    assert.equal(MAX_CLARIFICATIONS, 1);
+    assert.match(buildIdentityPrompt({ lang: 'he' }), /listing_description: one short factual sentence/);
     const p = buildIdentityPrompt({ lang: 'he' });
     assert.match(p, /up to 4 facts, only those that matter high or medium/);
     assert.match(p, /WHEN THE MODEL OR GENERATION IS THE OPEN QUESTION/);

@@ -17,7 +17,11 @@ export const MAX_ATTRIBUTES = 8;
 // at most four attributes (the identity keeps room for the owner's confirmed answers, MAX_ATTRIBUTES) and two questions:
 // the server asks one at a time, and a third was never reached in the real scans.
 export const MODEL_MAX_ATTRIBUTES = 4;
-export const MAX_CLARIFICATIONS = 2;
+// 2026-11-15 (same 18 labelled photographs, two runs each, gpt-6.1-terra, no reasoning): ONE question and a one-sentence
+// listing description — p50 5.82/5.76 s, p90 7.75/7.58 s, 10/11 exact, 0 confidently wrong, every other photograph's
+// true model among the question's options — against two questions and two sentences: p50 6.03/6.43 s, p90 8.38/8.63 s,
+// 9/10 exact, 0 confidently wrong. The server asks one question per round and a later round writes its own.
+export const MAX_CLARIFICATIONS = 1;
 
 const LANGUAGE = { he: 'Hebrew', en: 'English' };
 export const languageName = (lang) => LANGUAGE[lang] ?? LANGUAGE.he;
@@ -51,7 +55,7 @@ canonical_name: the product's catalogue name in English, lowercase: brand, then 
 uncertainty_note: at most ten words in ${out} naming what is not established, or null.
 visible_condition: what the photograph shows of the condition, or unknown. The owner will choose the real condition later.
 condition_notes: up to two observations in ${out}, a few words each (scratches, wear, sealed box). Empty when nothing is visible.
-listing_description: two short factual sentences in ${out} a seller would write in a listing: what it is, the variant, what is included. No price, no condition, nothing the photograph does not show.
+listing_description: one short factual sentence in ${out} a seller would write in a listing: what it is, the variant, what is included. No price, no condition, nothing the photograph does not show.
 search: hebrew_name is what a seller in Israel writes in a second-hand ad title for this exact product, in Hebrew, 1-5 words, as sellers write it ("אייפון 13", not a translation of the English name). aliases and model_numbers are OTHER names this exact product is sold under, not a repeat of the fields above, and they are matched against ad titles: when Israeli sellers name the product by something else — a PlayStation 5 DualSense is advertised as "שלט פלייסטיישן 5" or "שלט PS5" — give that Hebrew name as an alias. Only names that mean THIS product and no other model; never a generic word ("שלט", "controller") alone. Usually empty.
 
 WHAT KIND OF THING THIS IS, AND WHAT MATTERS ABOUT IT
@@ -82,6 +86,6 @@ ${fence('OWNER_CONFIRMED', confirmed.map((c) => `${promptSafe(c.attribute, 40)}:
 ${fence('OWNER_CORRECTION', promptSafe(correction, MAX_USER_TEXT))}
 Take the owner's word for what the item is: brand, model and variant come from their statement where it gives them. Still read the photograph for colour, configuration, what is included and visible condition. If the statement names a product the photograph plainly cannot be (a phone, when the photograph is a chair), keep what the photograph shows and say so in uncertainty_note.`);
   }
-  parts.push('Be brief: every field is a short value, never an explanation; listing_description at most two short sentences. Do not estimate a price.');
+  parts.push('Be brief: every field is a short value, never an explanation; listing_description one short sentence. Do not estimate a price.');
   return parts.join('\n\n');
 }
