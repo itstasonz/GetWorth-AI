@@ -41,7 +41,7 @@ export function isSelfGenerated(ref) {
   if (SELF_SOURCES.has(ref.source) || SELF_SOURCES.has(ref.price_origin)) return true;
   if (ref.price_origin && ref.price_origin !== 'seller') return true;
   const url = String(ref.url ?? '');
-  const sale = ref.source === 'getworth_sale' && ref.verification === 'buyer_confirmed' && ref.kind === 'sold';
+  const sale = ref.source === 'getworth_sale' && ref.verification === 'mutually_reported' && ref.kind === 'sold';
   // A GetWorth seller's own asking price (the database trigger already excluded prices copied from GetWorth): an ask, never a sale.
   const ask = ref.source === 'getworth_listing' && ref.verification === 'seller_entered' && ref.kind === 'used_listing';
   if (/^getworth:/i.test(url) && !sale && !ask) return true;

@@ -13,6 +13,7 @@ import { formatPrice, timeAgo } from '../lib/utils';
 import { notifIconFor, resolveNotificationTarget } from '../lib/notifications';
 import FinalPriceField from '../components/FinalPriceField';
 import { completionMeta, parseFinalPrice } from '../lib/marketplaceProvenance';
+import SalePriceConfirm from '../components/SalePriceConfirm';
 
 // ═══════════════════════════════════════════════════════
 // ORDER STATUS CONFIG
@@ -646,6 +647,7 @@ export function OrderDetailView() {
             <div className="text-4xl mb-1">🎉</div>
             <h3 className="text-xl font-bold text-emerald-300">{lang === 'he' ? 'עסקה הושלמה בהצלחה!' : 'Deal Complete!'}</h3>
             <p className="text-sm text-slate-400">{lang === 'he' ? `שילמת ${formatPrice(order.price)}. תודה שהשתמשת ב-GetWorth!` : `You paid ${formatPrice(order.price)}. Thanks for using GetWorth!`}</p>
+            <SalePriceConfirm orderId={order.id} userId={user?.id} lang={lang} />
           </Card>
         </FadeIn>
       )}

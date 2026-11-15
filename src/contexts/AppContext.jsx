@@ -10,7 +10,7 @@ import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
 import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, warmScan, STAGE as SCAN_STAGE } from '../lib/coreScan';
 import { HISTORY_COLUMNS } from '../lib/valuationHistory';
-import { listingProvenanceSupported } from '../lib/marketplaceProvenance';
+import { listingProvenanceSupported, listingOriginSupported, listingPriceOrigin } from '../lib/marketplaceProvenance';
 import { LISTING_CARD_COLUMNS, SELLER_EMBED, LISTING_PREVIEW_COLUMNS, asCards, withCardListing, orderWithCardListing } from '../lib/listingImages';
 import { holdBackgroundSync, deferWhileBusy, resetBackgroundSync, scanHoldsSync } from '../lib/backgroundSync';
 import { nextAuthUser, profileRefetchNeeded } from '../lib/authUser';
@@ -3944,6 +3944,8 @@ export function AppProvider({ children }) {
         ...(result?.valuation_id && { valuation_id: result.valuation_id }),
         // The seller's stated pricing intent (the server may only make it stricter: listings_set_price_provenance).
         ...(await listingProvenanceSupported(supabase) && { price_source: listingData.priceOrigin === 'suggestion' ? 'getworth_valuation' : 'seller_entered' }),
+        // Where the price came from (listingPriceOrigin): the database can only make it stricter.
+        ...(await listingOriginSupported(supabase) && { price_origin: listingPriceOrigin(listingData) }),
         ...(result?.confidence && { ai_confidence: result.confidence }),
         // Serial/IMEI verification data (masked for public, never full serial)
         ...(serialData?.serial && {
@@ -4521,7 +4523,8 @@ export function AppProvider({ children }) {
     const mv = result?.marketValue;
     const opening = hasRealPrice(mv) ? Number(mv.mid) : '';
     // priceOrigin: GetWorth filled the price ('suggestion') or the seller typed it ('seller') — sent as the listing's stated intent.
-    setListingData({ title: result?.name || '', desc: '', price: opening, priceOrigin: opening === '' ? 'seller' : 'suggestion', phone: '', location: '' });
+    // suggestionSeen: a GetWorth price was shown for this item at any point — a price typed after it is influenced.
+    setListingData({ title: result?.name || '', desc: '', price: opening, priceOrigin: opening === '' ? 'seller' : 'suggestion', suggestionSeen: opening !== '', phone: '', location: '' });
     setCondition(null); setAnswers({}); setListingStep(0); setSerialData(null); setNavDirection('push'); setView('listing');
   };
 
@@ -4541,7 +4544,8 @@ export function AppProvider({ children }) {
     if (scan.stage !== SCAN_STAGE.PRICED) return;
     const draft = buildListingDraft(scan);
     setResult((prev) => (prev?.coreScan ? { ...prev, ...draft.result } : prev));
-    setListingData((prev) => (prev && prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion' } : prev));
+    // The scan's price arriving is a price shown, whether or not it fills the box.
+    setListingData((prev) => (!prev ? prev : prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion', suggestionSeen: true } : { ...prev, suggestionSeen: true }));
   }), []);
 
   const sellFromScan = () => {
@@ -4554,7 +4558,7 @@ export function AppProvider({ children }) {
     setImages(scan.images);
     // The seller's phone and area rarely change: start from their latest listing.
     const last = myListings?.[0];
-    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', phone: last?.contact_phone || '', location: last?.location || '' });
+    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', suggestionSeen: draft.price !== '' || scan.stage === SCAN_STAGE.PRICED, phone: last?.contact_phone || '', location: last?.location || '' });
     setCondition(draft.condition); setAnswers({}); setSerialData(null);
     setListingStep(2); setNavDirection('push'); setView('listing');
   };
@@ -4567,7 +4571,7 @@ export function AppProvider({ children }) {
     setListingData((prev) => {
       if (prev.priceOrigin === 'seller' && prev.price !== '' && prev.price != null) return prev;
       const p = suggestPrice(c);
-      return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion' };
+      return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion', suggestionSeen: prev.suggestionSeen || p !== '' };
     });
     // Show category-specific questions for used/poor; skip for new/likeNew
     setListingStep((c === 'used' || c === 'poor') ? 1 : 2);

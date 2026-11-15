@@ -10,7 +10,8 @@
 // into one reference the valuation weighs like any other.
 //
 // What a reference says about itself: an Israeli completed sale ('sold'),
-// `verification: 'buyer_confirmed'` — the buyer's word, not a payment record,
+// `verification: 'mutually_reported'` — buyer and seller each stated the same final price (2026-11-15:
+// record_sale_price); still two parties' word, not a payment record,
 // so it does not carry the extra weight a verified sale would (valuation.js).
 // It has no public page: its url is an opaque internal reference.
 //
@@ -53,7 +54,7 @@ export function salesEvidenceFor(identity, rows, { today = new Date().toISOStrin
   for (const row of rows) {
     const ref = typeof row?.sale_ref === 'string' && /^[0-9a-f]{8,32}$/.test(row.sale_ref) ? row.sale_ref : null;
     const price = Number(row?.final_price);
-    if (!ref || seen.has(ref) || !(price > 0) || row?.verification !== 'buyer_confirmed') continue;
+    if (!ref || seen.has(ref) || !(price > 0) || row?.verification !== 'mutually_reported') continue;
     if (!row.identity || typeof row.identity !== 'object' || marketKey(row.identity) !== key) continue;
     seen.add(ref);
     out.push({
@@ -68,7 +69,7 @@ export function salesEvidenceFor(identity, rows, { today = new Date().toISOStrin
       binding: 'verified_row',
       seen: today,
       source: SALE_SOURCE,
-      verification: 'buyer_confirmed',
+      verification: 'mutually_reported',
     });
   }
   return out;

@@ -72,7 +72,7 @@ describe('MI-2 observations', () => {
       assert.equal(isSelfGenerated(ref(6, 300, bad)), true, JSON.stringify(bad));
       assert.equal(toObservation(ref(6, 300, bad), opts).reason, 'self_generated');
     }
-    const sale = { url: 'getworth:sale:abcdef12', source: 'getworth_sale', verification: 'buyer_confirmed', kind: 'sold', page: 'listing' };
+    const sale = { url: 'getworth:sale:abcdef12', source: 'getworth_sale', verification: 'mutually_reported', kind: 'sold', page: 'listing' };
     assert.equal(isSelfGenerated(ref(7, 300, sale)), false);
     assert.equal(toObservation(ref(7, 300, sale), opts).observation.segment, SEGMENT.COMPLETED_SALE);
   });

@@ -54,6 +54,40 @@ export async function listingProvenanceSupported(supabase) {
   return provenanceSupport;
 }
 
+/**
+ * WHERE A LISTING PRICE CAME FROM (migration 20261115120000): 'getworth_prefilled' — GetWorth's number left as filled;
+ * 'after_suggestion' — the seller typed a price after a GetWorth price was shown (influenced, whatever the amount);
+ * 'independent' — no GetWorth price was shown. The database derives its own answer and keeps the stricter of the two.
+ */
+export function listingPriceOrigin(listingData) {
+  if (listingData?.priceOrigin === 'suggestion') return 'getworth_prefilled';
+  return listingData?.suggestionSeen ? 'after_suggestion' : 'independent';
+}
+
+/** Does this database record a listing's price origin yet? Checked once per page load; a missing column is an error. */
+let originSupport = null;
+export async function listingOriginSupported(supabase) {
+  if (originSupport !== null) return originSupport;
+  try {
+    const { error } = await supabase.from('listings').select('price_origin').limit(1);
+    originSupport = !error;
+  } catch { originSupport = false; }
+  return originSupport;
+}
+
+/**
+ * A party states the final price of a COMPLETED order (record_sale_price, once per side). Both sides equal = mutually
+ * reported — still not a verified payment. Resolves to { ok } or { error }.
+ */
+export async function recordSalePrice(supabase, orderId, input) {
+  const p = parseFinalPrice(input);
+  if (!p.value) return { error: p.error ?? 'empty' };
+  try {
+    const { error } = await supabase.rpc('record_sale_price', { p_order_id: orderId, p_price: p.value });
+    return error ? { error: error.message } : { ok: true };
+  } catch (err) { return { error: err?.message ?? 'failed' }; }
+}
+
 /** The ids of accounts marked as test, or null when the database has no such function yet (or the caller is no admin). */
 export async function loadTestAccountIds(supabase) {
   try {

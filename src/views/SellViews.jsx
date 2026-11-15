@@ -1744,6 +1744,7 @@ export function ListingFlowView() {
                 // rather than prefilling a meaningless 0.
                 price: suggested === null ? '' : suggested,
                 priceOrigin: suggested === null ? prev.priceOrigin : 'suggestion',
+                suggestionSeen: prev.suggestionSeen || suggested !== null,
               }));
               setListingStep(2);
             }}>

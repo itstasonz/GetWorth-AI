@@ -13,13 +13,13 @@ const read = (p) => readFileSync(new URL(`../${p}`, import.meta.url), 'utf8');
 const TODAY = '2026-11-08';
 const IDENTITY = normalizeIdentity(RAW_IDENTITY);
 const OTHER = normalizeIdentity({ ...RAW_IDENTITY, model: 'G Pro Wireless', display_name: 'Logitech G Pro Wireless', canonical_name: 'logitech g pro wireless' });
-const row = (over = {}) => ({ sale_ref: 'a1b2c3d4e5f60718', final_price: 300, completed_at: '2026-11-01T10:00:00Z', condition: 'used', category: 'Electronics', verification: 'buyer_confirmed', identity: IDENTITY, ...over });
+const row = (over = {}) => ({ sale_ref: 'a1b2c3d4e5f60718', final_price: 300, completed_at: '2026-11-01T10:00:00Z', condition: 'used', category: 'Electronics', verification: 'mutually_reported', identity: IDENTITY, ...over });
 
 describe('MS-1 the engine keeps only this product\'s genuine sales', () => {
   test('MS-1a same market identity → one Israeli sold reference, buyer-confirmed, no public link; another product → nothing', () => {
     const [e, ...rest] = salesEvidenceFor(IDENTITY, [row(), row({ sale_ref: 'ffffffffffffffff', identity: OTHER })], { today: TODAY });
     assert.equal(rest.length, 0);
-    assert.deepEqual([e.kind, e.match, e.market, e.condition, e.verification, e.source, e.binding, e.price_ils, e.listed], ['sold', 'exact', 'IL', 'good', 'buyer_confirmed', 'getworth_sale', 'verified_row', 300, '2026-11-01']);
+    assert.deepEqual([e.kind, e.match, e.market, e.condition, e.verification, e.source, e.binding, e.price_ils, e.listed], ['sold', 'exact', 'IL', 'good', 'mutually_reported', 'getworth_sale', 'verified_row', 300, '2026-11-01']);
     assert.ok(e.url.startsWith(SALE_URL_PREFIX) && !/^https?:/.test(e.url));
     assert.equal(marketKey(OTHER) === marketKey(IDENTITY), false);
   });
@@ -68,7 +68,7 @@ describe('MS-2 how a GetWorth sale counts', () => {
     assert.equal(r.valuation.status, 'priced');
     assert.ok(r.valuation.evidence.some((e) => e.source === 'getworth_sale' && e.used));
     const stored = buildValuationRow({ id: 'v', userId: 'u', scanUuid: 's', identity: IDENTITY, valuation: r.valuation, lang: 'he' });
-    assert.ok(stored.ai_raw_response.valuation.evidence_full.some((e) => e.source === 'getworth_sale' && e.verification === 'buyer_confirmed'));
+    assert.ok(stored.ai_raw_response.valuation.evidence_full.some((e) => e.source === 'getworth_sale' && e.verification === 'mutually_reported'));
     assert.deepEqual(reproduceValuation(stored).prices, r.valuation.prices, 'reproducible with the sale in it');
     resetMarketCache();
   });
@@ -171,7 +171,7 @@ test('MS-6 the evidence list shows a GetWorth sale for what it is: no link, buye
   assert.match(sheets, /const sale = e\.source === 'getworth_sale';/);
   assert.match(sheets, /const internal = sale \|\| ask;/);
   assert.match(sheets, /const rowProps = internal \? \{\} : \{ href: e\.url/);
-  assert.match(read('src/lib/scanCopy.js'), /getworthSale: 'Sold on GetWorth · price confirmed by the buyer, not a payment record'/);
+  assert.match(read('src/lib/scanCopy.js'), /getworthSale: 'Sold on GetWorth · final price reported by both buyer and seller, not a payment record'/);
 });
 
 test('MS-6b a GetWorth asking price is shown as an ask set by its seller, never as a sale, and is not a link', () => {
