@@ -19,7 +19,8 @@ import { formatPrice } from '../lib/utils';
 import { MAX_CORRECTION_CHARS } from '../lib/coreScan';
 
 // A run of Latin text: a brand, a model name, a size, a marketplace tag like "[H]". Kept whole, in its own order.
-const LATIN_RUN = /[A-Za-z0-9[(][A-Za-z0-9 .,:#'’"+&/()[\]\-]*[A-Za-z0-9)\]]|[A-Za-z0-9]/g;
+// Every Latin letter, accented ones too: "POÄNG" was split at its Ä on a Hebrew screen (2026-11-15 QA: "NGÄIKEA PO").
+const LATIN_RUN = /[\p{Script=Latin}0-9\[(][\p{Script=Latin}0-9 .,:#'’"+&/()\[\]\-]*[\p{Script=Latin}0-9)\]]|[\p{Script=Latin}0-9]/gu;
 // Hebrew or Arabic: a title with any of it is a right-to-left title; a title without it is a left-to-right one.
 const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 

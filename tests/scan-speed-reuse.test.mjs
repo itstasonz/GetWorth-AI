@@ -134,3 +134,17 @@ describe('SR-4 a shop page that names the product by its name, not its descripti
     assert.notEqual(r.level, BOUND.STRONG);
   });
 });
+
+describe('SR-5 accented Latin names stay whole on a Hebrew screen (2026-11-15 QA: "IKEA POÄNG" shown as "NGÄIKEA PO")', () => {
+  test('SR-5a the Latin run includes every Latin letter, accented ones too', () => {
+    const src = readFileSync(new URL('../src/components/ScanSheets.jsx', import.meta.url), 'utf8');
+    const m = src.match(/const LATIN_RUN = (\/.*\/gu);/);
+    assert.ok(m, 'LATIN_RUN is a unicode regex');
+    // eslint-disable-next-line no-eval
+    const re = eval(m[1]);
+    const runs = (t) => [...t.matchAll(re)].map((x) => x[0]);
+    assert.deepEqual(runs('כורסה IKEA POÄNG'), ['IKEA POÄNG']);
+    assert.deepEqual(runs('Café Crème [EU] (2) למכירה'), ['Café Crème [EU] (2)']);
+    assert.deepEqual(runs('שלט Sony DualSense לפלייסטיישן 5'), ['Sony DualSense', '5']);
+  });
+});
