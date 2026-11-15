@@ -198,7 +198,7 @@ describe('RW-2 one more photograph after the search', () => {
       charge: async () => ({ allowed: true, charged: true, limitType: null, retryAfter: 0 }),
       refund: async () => {},
       identify: (args) => runIdentify({ ...args, fetchImpl }),
-      price: async (args) => { const r = await runPrice({ independentMin: 1, ...args, fetchImpl, store, now: () => NOW }); results.push(r); return r; },
+      price: async (args) => { const r = await runPrice({ independentMin: 1, deep: false, ...args, fetchImpl, store, now: () => NOW }); results.push(r); return r; },
       record: async () => 'val-1',
       logEvent: async (s, type, payload) => { events.push({ type, payload }); },
     });
@@ -236,7 +236,7 @@ describe('RW-2 one more photograph after the search', () => {
     const recorded = events.filter((e) => e.type === 'core_scan_priced').map((e) => e.payload);
     assert.deepEqual(recorded.map((p) => [p.status, p.reused, p.tool_calls, p.asked_after]), [['insufficient_evidence', false, 2, 'model label'], ['priced', false, 2, null]]);
     // And a plain second look at the SAME identity, with no code, still reads the hour-old research: reuse is kept where the item did not change.
-    const same = await runPrice({ independentMin: 1, identity: first.payload.identity, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl, store, now: () => NOW + 60_000 });
+    const same = await runPrice({ independentMin: 1, deep: false, identity: first.payload.identity, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl, store, now: () => NOW + 60_000 });
     assert.deepEqual([same.reused, same.call.tool_calls, fetchImpl.of('market').length], [true, 0, 4]);
   });
 });
@@ -333,7 +333,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const SAME = 'https://www.secondhand.example.co.il/item/128';
     const OTHER = 'https://market.example.co.il/ads/256';
     const market = { evidence: [listing(SAME, 'Huawei P30 Pro 128GB יד שנייה', 700), listing(OTHER, 'Huawei P30 Pro 256GB יד שנייה', 900)] };
-    const price = (identity, answer = null) => runPrice({ independentMin: 1, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: [SAME, OTHER], pageText: {} }), store: fakeStore(), now: () => NOW });
+    const price = (identity, answer = null) => runPrice({ independentMin: 1, deep: false, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [market], reached: [SAME, OTHER], pageText: {} }), store: fakeStore(), now: () => NOW });
     const confirmed = [{ attribute: 'storage', value: '128 GB', question: 'How much storage does it have?' }];
     const known = await price(completeIdentity(normalizeIdentity(PHONE), { lang: 'en', followupsLeft: 2, confirmed }), { question: 'How much storage does it have?', text: '128 GB' });
     const other = known.valuation.evidence.find((e) => e.url === OTHER);
@@ -350,11 +350,11 @@ describe('RW-5 a variant nobody asked about', () => {
     assert.deepEqual([unknown.valuation.counts.il_used_exact, unknown.valuation.counts.il_used_close], [0, 2]);
     resetMarketCache();
     const PLAIN = 'https://www.secondhand.example.co.il/item/plain';
-    const plain = await runPrice({ independentMin: 1, identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800)] }], reached: [PLAIN], pageText: {} }), store: fakeStore(), now: () => NOW });
+    const plain = await runPrice({ independentMin: 1, deep: false, identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800)] }], reached: [PLAIN], pageText: {} }), store: fakeStore(), now: () => NOW });
     assert.deepEqual([plain.valuation.evidence[0].match, plain.valuation.evidence[0].binding_reason, plain.valuation.approximate], ['exact', BIND_REASON.ONE_LISTING, true]);
     // With no Israeli listing at all, unknown storage buys nothing: the gate is the gate.
     resetMarketCache();
-    const nothing = await runPrice({ independentMin: 1, identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [] }], reached: [], pageText: {} }), store: fakeStore(), now: () => NOW });
+    const nothing = await runPrice({ independentMin: 1, deep: false, identity: scan(PHONE, { followupsLeft: 0 }), scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: [] }], reached: [], pageText: {} }), store: fakeStore(), now: () => NOW });
     assert.deepEqual([nothing.status, nothing.valuation.prices], ['insufficient_evidence', null]);
   });
   test('RW-5e THE SERVER DECIDES when a phone\'s storage is open, not the model\'s report (release gate 2026-10-12): omitted, guessed, or called medium, the storage is asked for, the price is approximate, and a row that states a size is a comparable — never the exact variant the item was not shown to be; settled by the owner or the photograph, it is exact', async () => {
@@ -362,7 +362,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const S256 = 'https://market.example.co.il/ads/256';
     const PLAIN = 'https://www.secondhand.example.co.il/item/plain';
     const rows = { [S128]: listing(S128, 'Huawei P30 Pro 128GB יד שנייה', 700), [S256]: listing(S256, 'Huawei P30 Pro 256GB יד שנייה', 900), [PLAIN]: listing(PLAIN, 'Huawei P30 Pro יד שנייה', 800) };
-    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ independentMin: 1, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
+    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ independentMin: 1, deep: false, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
     const bound = (r, url) => { const e = r.valuation.evidence.find((x) => x.url === url); return [e.match, e.binding_reason, e.used]; };
     /** One way the model reported the storage: what the server asks, and how a 256 GB row and a silent row are priced with the allowance spent. */
     const unresolved = async (label, attributes) => {
@@ -413,7 +413,7 @@ describe('RW-5 a variant nobody asked about', () => {
     const S128 = 'https://www.secondhand.example.co.il/item/128';
     const S256 = 'https://market.example.co.il/ads/256';
     const rows = { [S128]: listing(S128, 'Huawei P30 Pro 128GB יד שנייה', 700), [S256]: listing(S256, 'Huawei P30 Pro 256GB יד שנייה', 900) };
-    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ independentMin: 1, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
+    const price = async (identity, urls, answer = null) => { resetMarketCache(); resetFxCache(); return runPrice({ independentMin: 1, deep: false, identity, answer, scanUuid: UUID, model: 'm', apiKey: 'k', fetchImpl: fakeProvider({ markets: [{ evidence: urls.map((u) => rows[u]) }], reached: urls, pageText: {} }), store: fakeStore(), now: () => NOW }); };
     const bound = (r, url) => { const e = r.valuation.evidence.find((x) => x.url === url); return [e.match, e.binding_reason, e.used]; };
     for (const [label, attribute] of [['inferred', A('storage', '128 GB', 'inferred', 'high')], ['unknown', A('storage', null, 'unknown', 'high')], ['inferred, medium', A('storage', '128 GB', 'inferred', 'medium')]]) {
       const asked = phone({ size_or_capacity: '128 GB', attributes: [attribute, A('color', 'blue')] });

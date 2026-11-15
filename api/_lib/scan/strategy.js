@@ -27,10 +27,18 @@ import { transliterates } from '../script-normalization.js';
 export const STRATEGY = Object.freeze({ EXACT: 'exact_model', COMPARABLE: 'comparable_items', SPECIALISED: 'specialised_market' });
 const SPECIALISED_CLASSES = new Set(['vehicle', 'luxury_watch_jewelry', 'collectible']);
 const COMPARABLE_CLASSES = new Set(['furniture', 'household', 'handmade_vintage']);
+const MANUFACTURED_CLASSES = new Set(['furniture', 'household']);
 export function strategyFor(identity) {
   const i = identity ?? {};
   if (SPECIALISED_CLASSES.has(i.market_class)) return STRATEGY.SPECIALISED;
-  if (i.identity_precision === 'descriptive' || COMPARABLE_CLASSES.has(i.market_class)) return STRATEGY.COMPARABLE;
+  if (i.identity_precision === 'descriptive') return STRATEGY.COMPARABLE;
+  // AN EXACT MODEL IS ONE PRODUCT, WHATEVER ITS CLASS (2026-11-15): a Nespresso Essenza Mini or a Philips HD9650 is valued
+  // as itself — its own verified new price is its ceiling — not as "a coffee machine". Valued as similar items, the
+  // Essenza showed a ₪650 used ad while Ivory sold it new for ₪365. Household and furniture items without an established
+  // model are still compared by kind.
+  const exactModel = i.exact_model_established === true && !!String(i.model ?? '').trim() && i.identity_precision !== 'family';
+  // Vintage and handmade things stay compared by kind even with a model: their price turns on the unit, not the model.
+  if (COMPARABLE_CLASSES.has(i.market_class) && !(exactModel && MANUFACTURED_CLASSES.has(i.market_class))) return STRATEGY.COMPARABLE;
   return STRATEGY.EXACT;
 }
 

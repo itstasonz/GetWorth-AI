@@ -104,6 +104,25 @@ export const resolveMarketParallel = (env = process.env) => String(env?.[SCAN_MA
 export const IDENTIFY_MAX_OUTPUT_TOKENS = 2_000;
 export const MARKET_MAX_OUTPUT_TOKENS = 3_000;
 export const MARKET_SEARCH_CONTEXT_SIZE = 'low';
+/**
+ * THE CLOSER LOOK (2026-11-15). When the fast search ends without a worth, one more search runs AFTER the answer is on
+ * screen, the way a person would research: its own queries, several search actions, the ads' own pages opened, the full
+ * search context. Measured live on 7 products the fast search could not value: it found ads the fast search had only
+ * seen on list pages (Galaxy S23 128GB ₪1,389 on ad.co.il; a second Apple Watch 8 ad ₪1,600) and new prices (KALLAX
+ * ₪275 at IKEA), in 14-23 s for ~$0.05. Its evidence goes through every check the fast search's does; the phone asks
+ * once more for the result (coreScan.js followUpOnce).
+ * OFF BY DEFAULT (measured 2026-11-15, 30 products recorded live, replayed with and without it): +0.9 candidates per
+ * product and NO product better classified — the ads it reached were years old (ad.co.il keeps expired ads at /ad/:
+ * 2018-2021), a shop's display unit, or another listing of an ad already known. Set CORE_SCAN_MARKET_DEEP to exactly
+ * 'true' to switch it on.
+ */
+export const SCAN_MARKET_DEEP_ENV = 'CORE_SCAN_MARKET_DEEP';
+export const resolveMarketDeep = (env = process.env) => String(env?.[SCAN_MARKET_DEEP_ENV] ?? '').trim().toLowerCase() === 'true';
+export const MARKET_DEEP_MAX_TOOL_CALLS = 4;
+export const MARKET_DEEP_CONTEXT_SIZE = 'high';
+export const MARKET_DEEP_TIMEOUT_MS = 30_000;
+/** How long a follow-up request waits for a closer look still running on its instance. */
+export const MARKET_DEEP_WAIT_MS = 25_000;
 
 // ── LIMITS ──────────────────────────────────────────────────────────────────
 export const MAX_IMAGES = 3;

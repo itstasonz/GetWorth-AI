@@ -257,7 +257,7 @@ describe('CB-6 through the whole price step', () => {
   const URLS = { category: 'https://www.board.example.co.il/c/23', listing: 'https://www.board.example.co.il/ad/777', shop: 'https://www.shop.example.co.il/p/gpw', abroad: 'https://www.used.example.com/itm/9' };
   const ev = (over) => ({ title: 'Logitech G Pro Wireless', currency: 'ILS', kind: 'used_listing', match: 'exact', market: 'IL', condition: 'unknown', page: 'listing', listed: null, stock: 'unknown', shipping: null, ...over });
   const store = () => ({ async load() { return null; }, async save() {} });
-  const run = (fetchImpl) => runPrice({ independentMin: 1, identity: MOUSE, model: 'm', apiKey: 'k', fetchImpl, store: store(), scanUuid: UUID, now: () => NOW });
+  const run = (fetchImpl) => runPrice({ independentMin: 1, deep: false, identity: MOUSE, model: 'm', apiKey: 'k', fetchImpl, store: store(), scanUuid: UUID, now: () => NOW });
   beforeEach(() => { resetMarketCache(); resetFxCache(); });
 
   test('CB-6a the Production scan again, with what the page most likely said: the ₪300 is found, not used, and the search goes on', async () => {

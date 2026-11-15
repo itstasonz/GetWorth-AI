@@ -37,7 +37,7 @@ import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
 import { loadMarketplaceSales, salesEvidenceFor, loadMarketplaceListings, listingEvidenceFor } from './marketplace.js';
 import { afterResponse } from './telemetry.js';
-import { resolveMarketFreshMs, resolveMarketSwr, resolveMarketIndex } from './config.js';
+import { resolveMarketFreshMs, resolveMarketSwr, resolveMarketIndex , resolveMarketDeep, MARKET_DEEP_WAIT_MS } from './config.js';
 import { defaultIndex, nullIndex } from '../market/index-store.js';
 import { sourceOf, mayUseInScan } from '../market/sources.js';
 import { refreshMsFor } from '../market/refresh-policy.js';
@@ -206,6 +206,8 @@ export async function runPrice({
   // How many independent Israeli private references a worth needs (valuation.js INDEPENDENT_MIN). Production never passes
   // it; suites that exercise OTHER rules on a one-ad pool pass 1, the allowance before 2026-11-15.
   independentMin = INDEPENDENT_MIN,
+  // The closer look after a no-price answer (config.js SCAN_MARKET_DEEP_ENV), and how long a follow-up waits for it.
+  deep = resolveMarketDeep(), deepWaitMs = MARKET_DEEP_WAIT_MS,
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -244,6 +246,10 @@ export async function runPrice({
   // model named it slightly differently each time and the research key carries the query wording). Research is also kept
   // under the PRODUCT (marketKey + RESEARCH_VERSION); the newest of the two answers.
   const productKey = productResearchKey(identity, answer);
+  // A CLOSER LOOK STILL RUNNING for this product on this instance (the phone's follow-up after a no-price answer): wait
+  // for it, bounded, so its evidence prices this request.
+  const closer = closerLooks.get(productKey);
+  if (closer) await Promise.race([closer.catch(() => null), new Promise((r) => { setTimeout(r, deepWaitMs); })]);
   // AND UNDER THE PRODUCT'S WORDS (2026-11-15, product-key.js): "sony dualsense" and "sony dualsense wireless controller"
   // are one product; colours and descriptive words do not split it, variants and capacities do.
   const driftKey = driftResearchKey(identity, answer);
@@ -424,7 +430,42 @@ export async function runPrice({
     ]);
     indexedNow = saved?.stored ?? null;
   }
-  return priced(record, { reused: false, index: { ...indexInfo(via), stored: indexedNow }, call: call() });
+  const answered = await priced(record, { reused: false, index: { ...indexInfo(via), stored: indexedNow }, call: call() });
+  // NO WORTH YET: A CLOSER LOOK, AFTER THE ANSWER (config.js MARKET_DEEP_*). Once per product at a time on this instance;
+  // the answer says it is refreshing, so the phone asks once more and gets whatever the closer look added.
+  if (deep && searched && answered.status !== SCAN_STATUS.PRICED && !closerLooks.has(productKey)) {
+    const look = closerLook(record).finally(() => closerLooks.delete(productKey));
+    closerLooks.set(productKey, look);
+    background(look.catch(() => null));
+    return { ...answered, refreshing: true, deepening: true };
+  }
+  return answered;
+
+  /** The closer look: its evidence verified like any stage's, merged into the research and kept under the same keys. */
+  async function closerLook(base) {
+    const t1 = now();
+    try {
+      await accept('deep', await request('deep'));
+    } catch (err) {
+      console.warn(`[Scan] market failed stage=deep code=${classifyOpenAIFailure(err?.message)}`);
+      return null;
+    }
+    const next = {
+      ...base, at: now(), evidence: mergeEvidence(found, earlier?.evidence), unverified,
+      searched: { ...base.searched, queries, pages, stages: [...stages], funnel },
+    };
+    remember(key, next);
+    remember(productKey, next);
+    if (driftKey) remember(driftKey, next);
+    await Promise.all([
+      Promise.resolve().then(() => store.save(key, next, scanUuid)).catch(() => null),
+      Promise.resolve().then(() => store.save(productKey, next, scanUuid)).catch(() => null),
+      Promise.resolve().then(() => (driftKey ? store.save(driftKey, next, scanUuid) : null)).catch(() => null),
+      Promise.resolve().then(() => index.save(identity, answer, found, { seenAt: now(), rulesVersion: RESEARCH_VERSION })).catch(() => null),
+    ]);
+    console.log(`[Scan] closer look ms=${now() - t1} evidence ${base.evidence.length}→${next.evidence.length}`);
+    return next;
+  }
   }
 }
 
@@ -453,3 +494,5 @@ function combine(cached, fromIndex) {
 
 /** Products whose research this instance is renewing in the background. */
 const refreshing = new Set();
+/** Closer looks running on this instance, by product: a follow-up for the product waits for its own. */
+const closerLooks = new Map();

@@ -29,6 +29,7 @@ import { transliterates } from '../script-normalization.js';
 import { streamResponse } from '../v2/openai-stream.js';
 import {
   CONDITIONS, MARKET, MARKET_STAGE_TIMEOUT_MS, MARKET_MAX_OUTPUT_TOKENS, MARKET_SEARCH_CONTEXT_SIZE, MAX_USER_TEXT, resolveMarketEffort,
+  MARKET_DEEP_MAX_TOOL_CALLS, MARKET_DEEP_CONTEXT_SIZE, MARKET_DEEP_TIMEOUT_MS,
 } from './config.js';
 import { SEARCHABLE_ATTRIBUTES as SEARCHABLE, hebrewNamesProduct } from './strategy.js';
 
@@ -256,10 +257,14 @@ ${queryBlock(queries)}
 They look, in this order, for: the ISRAELI second-hand market once more in different words — a Homeless ad shows its price in its title, read it from there; then used and SOLD prices abroad for this exact item (sold or completed listings, a price guide); and the price abroad for a NEW unit of this exact item, in the same currency. Prices abroad are context: they never make an Israeli price by themselves, and only bring one to Israeli price level once Israeli evidence exists.
 Skip results that are not a listing, a sold record or a price page: forum threads, news, reviews and how-to articles carry no price you may report.
 Read prices from the search results; do not open pages.`,
+  deep: (queries) => `SEARCH — LOOK CLOSER, LIKE A PERSON WOULD. A first search found too little to value this item. Research the ISRAELI second-hand market for THIS exact product again, in up to ${MARKET_DEEP_MAX_TOOL_CALLS} actions. Start from these queries and add your own: the exact model and model number, the Hebrew name, "יד שנייה", "משומש", "למכירה", on Israeli classifieds (homeless.co.il, ad.co.il, prog.co.il, Israeli forums' sale sections):
+${queryBlock(queries)}
+When a list or search page shows an ad for this product, OPEN that ad's own page and read its price, date and condition there, and give the ad page's address. Prefer ads' own pages to list pages. Also give the product's current NEW price at one Israeli shop when you see one.
+Skip forum discussions, news, reviews and how-to articles.`,
 };
 
 export function buildMarketPrompt({ identity, answer = null, today = marketDate(), stage = 'local' } = {}) {
-  const queries = buildSearchQueries({ identity, answer, stage });
+  const queries = buildSearchQueries({ identity, answer, stage: stage === 'deep' ? 'local' : stage });
   return `You are GetWorth's market researcher. Find what this item sells for SECOND-HAND IN ISRAEL RIGHT NOW, using the live web. Today is ${today}. You search, extract and classify. You do NOT set a price: the price is calculated from the evidence you return.
 
 ${FENCE_RULE}
@@ -299,7 +304,7 @@ EVIDENCE — every usable price you found, up to ${MAX_EVIDENCE}: second-hand pr
  */
 export async function researchMarket({
   identity, answer = null, stage = 'local',
-  model, effort = resolveMarketEffort(), apiKey, timeoutMs = MARKET_STAGE_TIMEOUT_MS, safetyIdentifier = null, fetchImpl = fetch, now = Date.now(), signal = null,
+  model, effort = resolveMarketEffort(), apiKey, timeoutMs = stage === 'deep' ? MARKET_DEEP_TIMEOUT_MS : MARKET_STAGE_TIMEOUT_MS, safetyIdentifier = null, fetchImpl = fetch, now = Date.now(), signal = null,
   localDomains = resolveLocalDomains(),
 } = {}) {
   const body = {
@@ -310,10 +315,11 @@ export async function researchMarket({
     reasoning: { effort },
     max_output_tokens: MARKET_MAX_OUTPUT_TOKENS,
     // One search action per stage, carrying several queries. Whether a second stage runs is the server's decision.
-    max_tool_calls: 1,
+    // The closer look (config.js MARKET_DEEP_*) may search more than once and open the ads' own pages.
+    max_tool_calls: stage === 'deep' ? MARKET_DEEP_MAX_TOOL_CALLS : 1,
     tools: [{
       type: 'web_search',
-      search_context_size: MARKET_SEARCH_CONTEXT_SIZE,
+      search_context_size: stage === 'deep' ? MARKET_DEEP_CONTEXT_SIZE : MARKET_SEARCH_CONTEXT_SIZE,
       user_location: { type: 'approximate', country: MARKET.country, timezone: MARKET.timezone },
       ...(stage === 'local' && localDomains ? { filters: { allowed_domains: [...localDomains] } } : {}),
     }],

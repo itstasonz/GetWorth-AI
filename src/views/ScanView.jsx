@@ -323,6 +323,7 @@ export default function ScanView() {
                 <p className="text-body-sm text-text-secondary" data-testid="scan-evidence-gap">{copy.gap(s.valuation.evidence_gap)}</p>
               )}
               {s.valuation?.no_price_reason && <p className="text-body-sm text-text-muted">{retailReferenceOf(s.valuation) ? copy.gapNext : copy.gapNextNoRetail}</p>}
+              {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-looking-closer">{copy.lookingCloser}</p>}
             </div>
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{copy.sellOwnPrice}</Btn>

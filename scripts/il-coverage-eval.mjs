@@ -54,7 +54,15 @@ export const ITEMS = [
   P('squiercv', { category: 'Music', item_type: 'electric guitar', brand: 'Squier', product_family: 'Classic Vibe', model: "Classic Vibe '50s Stratocaster", display_name: "Squier Classic Vibe '50s Stratocaster", canonical_name: 'squier classic vibe 50s stratocaster', market_class: 'other', search: { hebrew_name: 'גיטרה חשמלית סקוויר קלאסיק וייב סטרטוקסטר' } }),
 ];
 
-const stageOf = (init) => (/SEARCH — LOOK FURTHER/.test(String(init?.body ?? '')) ? 'expand' : 'local');
+const stageOf = (init) => { const b = String(init?.body ?? ''); return /SEARCH — LOOK CLOSER/.test(b) ? 'deep' : (/SEARCH — LOOK FURTHER/.test(b) ? 'expand' : 'local'); };
+// The closer look runs after the answer (service.js closerLook): the harness waits for it and asks once more, as the phone does.
+async function priceWithFollowUp(runPrice, args) {
+  const bg = [];
+  const store = args.store;
+  let r = await runPrice({ ...args, background: (p) => { bg.push(p); } });
+  if (bg.length) { await Promise.all(bg.map((p) => Promise.resolve(p).catch(() => null))); r = await runPrice({ ...args, store, background: () => {} }); r.call = { ...r.call, stages: r.valuation?.searched?.stages ?? r.call?.stages }; }
+  return r;
+}
 const imp = (repo, p) => import(pathToFileURL(path.resolve(repo, p)).href);
 const memStore = () => { const m = new Map(); return { load: async (k) => m.get(k) ?? null, save: async (k, v) => { m.set(k, v); } }; };
 const summary = (v) => ({
@@ -67,7 +75,7 @@ const summary = (v) => ({
 async function record(dir, only) {
   fs.mkdirSync(dir, { recursive: true });
   const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..');
-  const { runPrice } = await imp(repo, 'api/_lib/scan/service.js');
+  const { runPrice, resetMarketCache } = await imp(repo, 'api/_lib/scan/service.js');
   const { normalizeIdentity } = await imp(repo, 'api/_lib/scan/identify.js');
   const ledger = path.join(dir, 'spend.json');
   const spend = fs.existsSync(ledger) ? JSON.parse(fs.readFileSync(ledger, 'utf8')) : { usd: 0, items: {} };
@@ -92,7 +100,7 @@ async function record(dir, only) {
       return p;
     };
     const t0 = Date.now();
-    const r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: crypto.randomUUID(), model: MODEL, apiKey: process.env.OPENAI_API_KEY, fetchImpl, now: () => NOW + (Date.now() - t0), store: memStore(), marketplace: async () => [], background: async () => {}, ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
+    const r = await priceWithFollowUp(runPrice, { identity: normalizeIdentity(item.raw), scanUuid: crypto.randomUUID(), model: MODEL, apiKey: process.env.OPENAI_API_KEY, fetchImpl, now: () => NOW + (Date.now() - t0), store: memStore(), marketplace: async () => [], ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
     const ms = Date.now() - t0;
     await Promise.all(pending);
     // Billed: every stage that reached the provider, whether or not its evidence was used.
@@ -107,7 +115,7 @@ async function record(dir, only) {
 }
 
 async function replay(dir, repo, outFile) {
-  const { runPrice } = await imp(repo, 'api/_lib/scan/service.js');
+  const { runPrice, resetMarketCache } = await imp(repo, 'api/_lib/scan/service.js');
   const { normalizeIdentity } = await imp(repo, 'api/_lib/scan/identify.js');
   const out = [];
   for (const item of ITEMS) {
@@ -121,7 +129,8 @@ async function replay(dir, repo, outFile) {
       if (!s) { missing.push(stageOf(init)); return new Response('{"error":{"message":"not recorded"}}', { status: 500 }); }
       return new Response(s.body, { status: s.status, headers: { 'content-type': 'text/event-stream' } });
     };
-    const r = await runPrice({ identity: normalizeIdentity(item.raw), scanUuid: null, model: MODEL, apiKey: 'replay', fetchImpl, now: () => NOW, store: memStore(), marketplace: async () => [], background: async () => {}, ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
+    resetMarketCache?.();
+    const r = await priceWithFollowUp(runPrice, { identity: normalizeIdentity(item.raw), scanUuid: null, model: MODEL, apiKey: 'replay', fetchImpl, now: () => NOW, store: memStore(), marketplace: async () => [], ...(globalThis.__GW_EVAL_INDEX__ ? { index: globalThis.__GW_EVAL_INDEX__ } : {}) });
     out.push({ id: item.id, name: item.raw.display_name, category: item.raw.category, live_ms: rec.live_ms, cost_usd: rec.cost_usd, stages: r.call?.stages ?? [], missing, ...summary(r.valuation) });
   }
   fs.writeFileSync(outFile, JSON.stringify(out, null, 1));
@@ -136,7 +145,7 @@ async function replay(dir, repo, outFile) {
  * Free (no network). usage: pooled <repo> <out.json> <dir1> <dir2> ...
  */
 async function pooled(repo, outFile, dirs) {
-  const { runPrice } = await imp(repo, 'api/_lib/scan/service.js');
+  const { runPrice, resetMarketCache } = await imp(repo, 'api/_lib/scan/service.js');
   const { normalizeIdentity } = await imp(repo, 'api/_lib/scan/identify.js');
   const out = [];
   for (const item of ITEMS) {
