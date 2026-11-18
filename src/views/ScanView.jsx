@@ -53,14 +53,16 @@ function Identity({ identity, copy, done, lang }) {
         <span><Bidi>{identity.display_name}</Bidi></span>
       </h1>
       {details && <p className="text-body text-text-secondary"><Bidi>{details}</Bidi></p>}
-      {identity.uncertainty_note && <p className="text-body-sm text-text-muted"><Bidi>{identity.uncertainty_note}</Bidi></p>}
+      {/* The photo's doubt about the model is no longer shown once the owner's answer settled it (live scan 2026-11-18:
+          "הדור המדויק אינו מוצג בתמונה" under "Logitech MX Master 3S" after the owner chose 3S). */}
+      {identity.uncertainty_note && !(identity.exact_model_established && (identity.confirmed ?? []).some((c) => !c.unsure)) && <p className="text-body-sm text-text-muted"><Bidi>{identity.uncertainty_note}</Bidi></p>}
       <p className="text-body-sm text-text-secondary">
         {copy.identityConfidence}: <span className="font-semibold text-text-primary">{copy.levels[identity.identity_confidence] ?? copy.levels.low}</span>
       </p>
       {/* What the owner has confirmed, and what a photograph cannot establish (authenticity, a vehicle's papers): said plainly. */}
       {/* Each fact with WHAT it is: "200 cm" alone does not say width. Said as the owner's word, never as something seen. */}
       {(identity.confirmed ?? []).filter((c) => !c.unsure).length > 0 && (
-        <p className="text-body-sm text-text-secondary"><Bidi>{copy.confirmedFacts((identity.confirmed ?? []).filter((c) => !c.unsure).map((c) => (/^(followup|detail)$/.test(c.attribute) ? c.value : `${c.attribute}: ${c.value}`)).join(' · '))}</Bidi></p>
+        <p className="text-body-sm text-text-secondary"><Bidi>{copy.confirmedFacts((identity.confirmed ?? []).filter((c) => !c.unsure).map((c) => (/^(followup|detail)$/.test(c.attribute) || (lang === 'he' && !/[֐-׿]/.test(c.attribute)) ? c.value : `${c.attribute}: ${c.value}`)).join(' · '))}</Bidi></p>
       )}
       {(identity.eligibility_notes ?? []).slice(0, 2).map((note) => <p key={note} className="text-body-sm text-text-muted"><Bidi>{note}</Bidi></p>)}
     </div>

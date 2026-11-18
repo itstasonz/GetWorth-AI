@@ -69,6 +69,15 @@ describe('SA-5 a shop seen out of stock is not "unknown" (Apple Watch Series 4, 
   });
 });
 
+describe('SA-6 the identity block speaks Hebrew (live scan 2026-11-18)', () => {
+  test('SA-6a no internal English field name before the owner\'s answer in Hebrew; the photo\'s doubt goes once the owner settled the model', async () => {
+    const { readFileSync } = await import('node:fs');
+    const view = readFileSync(new URL('../src/views/ScanView.jsx', import.meta.url), 'utf8');
+    assert.match(view, /\(lang === 'he' && !\/\[[^\]]+\]\/\.test\(c\.attribute\)\) \? c\.value/, 'Hebrew shows the answer without an English field name');
+    assert.ok(view.includes('identity.uncertainty_note && !(identity.exact_model_established && (identity.confirmed ?? []).some((c) => !c.unsure))'), 'the settled doubt is hidden');
+  });
+});
+
 describe('SA-2 "3S" is not "3"', () => {
   const page = (t, price) => ({ type: 'search_or_category', title: 'list', text: `${t} ${price} ש"ח` });
   test('SA-2a a confirmed "MX Master 3S": a "3S" row binds, a "3" row does not', () => {
