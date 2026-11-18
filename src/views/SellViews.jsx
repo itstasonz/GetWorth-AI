@@ -1823,6 +1823,25 @@ export function ListingFlowView() {
           </FadeIn>
 
           <FadeIn delay={50}><InputField label={t.title} rtl={rtl} value={listingData.title} onChange={(e) => setListingData({ ...listingData, title: e.target.value })} /></FadeIn>
+          {/* A scan's listing chooses its condition here; the scan's own choice arrives selected (2026-11-18). */}
+          {result?.coreScan && (
+            <div data-testid="listing-condition">
+              <p className="text-sm text-slate-400 font-medium mb-1.5">{t.condition || 'Condition'}</p>
+              <div className="grid grid-cols-2 gap-2" role="group">
+                {EDIT_CONDITIONS.map((c) => (
+                  <button
+                    key={c} type="button" aria-pressed={condition === c} onClick={() => selectCondition(c, { stay: true })}
+                    className={[
+                      'min-h-tap py-3 px-3 rounded-control text-sm font-medium border transition-colors',
+                      condition === c ? 'bg-action-primary text-on-action border-transparent font-semibold' : 'bg-surface-high text-text-secondary border-subtle',
+                    ].join(' ')}
+                  >
+                    {t[c] || c}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <FadeIn delay={100}>
             <div className="space-y-2">
               <label className="text-sm text-slate-400 font-medium">{t.desc}</label>

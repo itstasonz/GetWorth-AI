@@ -306,7 +306,8 @@ describe('MI-14 the listing text follows the confirmed model', () => {
     const { applyConfirmed, withoutOtherModels } = await import('../api/_lib/scan/confirmed.js');
     const a = { brand: 'Apple', display_name: 'Apple iPhone 12 או 12 mini', listing_description: 'מכשיר Apple iPhone כחול עם שתי מצלמות אחוריות. נראה מדגמי iPhone 12 או iPhone 12 mini.', attributes: [], alternatives: [{ name: 'iPhone 12 mini' }], confirmed: [{ attribute: 'model', value: 'iPhone 12' }] };
     applyConfirmed(a);
-    assert.equal(a.listing_description, 'מכשיר Apple iPhone כחול עם שתי מצלמות אחוריות.');
+    // The doubting sentence is dropped, and the remaining mention names the confirmed model (withModelNamed, 2026-11-18).
+    assert.equal(a.listing_description, 'מכשיר Apple iPhone 12 כחול עם שתי מצלמות אחוריות.');
     assert.equal(withoutOtherModels('Blue phone, light scratches. The exact model could be a 12 or a 12 mini.', 'iPhone 12', []), 'Blue phone, light scratches.');
     assert.equal(withoutOtherModels('Silver laptop in good shape.', 'MacBook Air M1', [{ name: 'MacBook Air M2' }]), 'Silver laptop in good shape.');
   });

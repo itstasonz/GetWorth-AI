@@ -108,7 +108,7 @@ export function applyConfirmed(identity) {
       // THE LISTING TEXT FOLLOWS THE OWNER'S ANSWER (Production E2E 2026-11-13: the iPhone 12 draft still read "נראה מדגמי
       // iPhone 12 או iPhone 12 mini"). Sentences that name a candidate the owner did not choose, or doubt the exact model,
       // are dropped; what the photograph showed otherwise stays. Nothing is added.
-      if (identity.listing_description) identity.listing_description = withoutOtherModels(identity.listing_description, c.value, identity.alternatives);
+      if (identity.listing_description) identity.listing_description = withModelNamed(withoutOtherModels(identity.listing_description, c.value, identity.alternatives), c.value);
       identity.alternatives = [];
     }
     // A CONFIRMED GENERATION OR SERIES NAMES THE PRODUCT (Production E2E 2026-11-13: an Apple Watch confirmed as "Series 4"
@@ -117,7 +117,10 @@ export function applyConfirmed(identity) {
       const brand = String(identity.brand ?? '').trim();
       const base = String(identity.model ?? identity.product_family ?? identity.item_type ?? '').trim();
       const product = brand && base && !base.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${base}` : (base || brand);
-      if (product && !product.toLowerCase().includes(String(c.value).toLowerCase())) identity.display_name = `${product} ${c.value}`;
+      if (product && !product.toLowerCase().includes(String(c.value).toLowerCase())) {
+        identity.display_name = `${product} ${c.value}`;
+        if (identity.listing_description && base) identity.listing_description = withModelNamed(identity.listing_description, `${base} ${c.value}`);
+      }
     }
     if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c, identity)) identity.uncertainty_note = null;
   }
@@ -125,6 +128,31 @@ export function applyConfirmed(identity) {
 
 const DOUBTS_MODEL = /(הדגם המדויק|לא ניתן (?:לקבוע|להבחין)|ייתכן ש|נראה מדגמי|exact model|could be|may be either|either the)/i;
 /** The description without sentences naming another candidate model, or doubting which model it is. */
+/**
+ * THE LISTING TEXT NAMES THE MODEL THE OWNER CONFIRMED (Production E2E 2026-11-18: the MX Master 3S draft read "Logitech
+ * MX Master"). When the text names the start of the chosen name and not the whole of it, that mention is completed
+ * ("MX Master" → "MX Master 3S", "Apple Watch" → "Apple Watch Series 4"). Nothing else is changed or added.
+ */
+export function withModelNamed(text, chosen) {
+  const value = String(chosen ?? '').trim();
+  const t = String(text ?? '');
+  if (!value || !t || t.toLowerCase().includes(value.toLowerCase())) return t;
+  const words = value.split(/\s+/);
+  for (let k = words.length - 1; k >= 1; k--) {
+    const head = words.slice(0, k).join(' ');
+    if (head.length < 3) break;
+    const esc = head.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // A whole-word mention of the start of the name, not already followed by a longer name of another model.
+    const re = new RegExp(`(^|[^\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])`, 'iu');
+    const m = re.exec(t);
+    if (m) {
+      const at = m.index + m[1].length;
+      return `${t.slice(0, at)}${value}${t.slice(at + head.length)}`;
+    }
+  }
+  return t;
+}
+
 export function withoutOtherModels(text, chosen, alternatives = []) {
   const pick = String(chosen ?? '').toLowerCase();
   const others = (alternatives ?? []).map((a) => String(a?.name ?? a ?? '').toLowerCase().trim()).filter((n) => n && n !== pick && !pick.includes(n));

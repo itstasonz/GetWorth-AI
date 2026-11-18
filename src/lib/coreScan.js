@@ -546,10 +546,16 @@ export function buildListingDraft(s = state) {
   // A modified unit's draft starts with no price: the market price found is a standard unit's.
   const band = unitModification(s.identity) ? null : bandFor(s.valuation, s.condition);
   const i = s.identity ?? {};
+  const lang = deps?.lang === 'en' ? 'en' : 'he';
+  const facts = factsFromAnswers(i, s.productAnswers ?? {}, lang);
+  // FAULTY ON THE SCAN IS SAID IN THE LISTING (2026-11-18): the listing's lowest condition reads "fair or worn", so a
+  // unit the owner called faulty says so in its text unless an answer already did.
+  const faultSaid = s.productAnswers?.works === 'fault' || s.productAnswers?.looks === 'broken' || s.productAnswers?.structure === 'yes';
+  if (s.condition === 'poor' && !faultSaid) facts.unshift(lang === 'he' ? 'המוצר תקול' : 'Not working');
   return {
     title: fallbackTitle(i),
     // The facts the owner gave (box, warranty, battery, purity…) join the description; the owner can edit all of it.
-    desc: [i.listing_description || '', ...factsFromAnswers(i, s.productAnswers ?? {}, deps?.lang === 'en' ? 'en' : 'he').map((f) => `${f}.`)].filter(Boolean).join('\n'),
+    desc: [i.listing_description || '', ...facts.map((f) => `${f}.`)].filter(Boolean).join('\n'),
     price: band ? band.list : '',
     // No condition chosen on the scan: the listing asks for one — it is never assumed "used".
     condition: s.condition ? (LISTING_CONDITION[s.condition] ?? null) : null,

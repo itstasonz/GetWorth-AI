@@ -82,3 +82,44 @@ describe('PQ-3 the estimate from the new price follows the condition', () => {
     assert.equal(ineligibility(id({ visible_condition: 'poor' }), v), 'condition_excluded');
   });
 });
+
+describe('PQ-4 the listing text names the model the owner confirmed', () => {
+  test('PQ-4a a mention of the start of the name is completed; nothing else changes', async () => {
+    const { withModelNamed, applyConfirmed } = await import('../api/_lib/scan/confirmed.js');
+    assert.equal(withModelNamed('עכבר אלחוטי Logitech MX Master בצבע אפור.', 'MX Master 3S'), 'עכבר אלחוטי Logitech MX Master 3S בצבע אפור.');
+    assert.equal(withModelNamed('Sony DualSense wireless controller.', 'DualSense Edge'), 'Sony DualSense Edge wireless controller.');
+    assert.equal(withModelNamed('Logitech MX Master 3S mouse.', 'MX Master 3S'), 'Logitech MX Master 3S mouse.', 'already named: untouched');
+    assert.equal(withModelNamed('A wireless mouse.', 'MX Master 3S'), 'A wireless mouse.', 'nothing is added');
+    const id = { brand: 'Logitech', model: 'MX Master', display_name: 'Logitech MX Master', listing_description: 'עכבר Logitech MX Master אפור.', alternatives: [], attributes: [], confirmed: [{ attribute: 'model', value: 'MX Master 3S' }] };
+    applyConfirmed(id);
+    assert.match(id.listing_description, /MX Master 3S/);
+    const watch = { brand: 'Apple', product_family: 'Apple Watch', display_name: 'שעון חכם Apple Watch', listing_description: 'שעון חכם Apple Watch ללא רצועה.', alternatives: [], attributes: [], confirmed: [{ attribute: 'generation', value: 'Series 4' }] };
+    applyConfirmed(watch);
+    assert.equal(watch.listing_description, 'שעון חכם Apple Watch Series 4 ללא רצועה.');
+  });
+});
+
+describe('PQ-5 the listing draft carries the answers and the condition', () => {
+  test('PQ-5a facts join the description; a faulty unit says so; the condition maps to the listing\'s', async () => {
+    const { buildListingDraft } = await import('../src/lib/coreScan.js');
+    const identity = id({ item_type: 'smartphone', display_name: 'Apple iPhone 13 128GB', listing_description: 'Apple iPhone 13 בצבע כחול.' });
+    const a = buildListingDraft({ identity, condition: 'good', productAnswers: { battery: 'high', box: 'yes' }, valuation: null });
+    assert.equal(a.title, 'Apple iPhone 13 128GB');
+    assert.equal(a.condition, 'used');
+    assert.equal(a.price, '', 'no price without a valuation');
+    assert.match(a.desc, /בריאות סוללה 90% ומעלה\./);
+    const b = buildListingDraft({ identity, condition: 'poor', productAnswers: {}, valuation: null });
+    assert.equal(b.condition, 'poor');
+    assert.match(b.desc, /המוצר תקול\./);
+    const c = buildListingDraft({ identity, condition: 'poor', productAnswers: { works: 'fault' }, valuation: null });
+    assert.equal((c.desc.match(/תקלה|תקול/g) ?? []).length, 1, 'said once');
+    assert.equal(buildListingDraft({ identity, condition: null, productAnswers: {}, valuation: null }).condition, null, 'never assumed');
+  });
+  test('PQ-5b the review step offers the condition for a scan listing, and publishing requires one', async () => {
+    const { readFileSync } = await import('node:fs');
+    const sell = readFileSync(new URL('../src/views/SellViews.jsx', import.meta.url), 'utf8');
+    assert.match(sell, /data-testid="listing-condition"[\s\S]{0,600}selectCondition\(c, \{ stay: true \}\)/);
+    const app = readFileSync(new URL('../src/contexts/AppContext.jsx', import.meta.url), 'utf8');
+    assert.match(app, /if \(!condition\) \{ setError\(/);
+  });
+});

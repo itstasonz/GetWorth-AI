@@ -3845,6 +3845,8 @@ export function AppProvider({ children }) {
     if (!listingData.title || !listingData.price || !listingData.phone || !listingData.location) {
       setError(lang === 'he' ? 'מלאו את כל השדות' : 'Please fill all fields'); return;
     }
+    // A listing always states a condition (2026-11-18: a scan with none chosen published condition null).
+    if (!condition) { setError(lang === 'he' ? 'בחרו את מצב המוצר' : 'Choose the item\'s condition'); return; }
     publishLockRef.current = true;
     setPublishing(true);
     setError(null);
@@ -4570,7 +4572,7 @@ export function AppProvider({ children }) {
     setListingStep(2); setNavDirection('push'); setView('listing');
   };
 
-  const selectCondition = (c) => {
+  const selectCondition = (c, { stay = false } = {}) => {
     setCondition(c);
     // THE SELLER'S OWN PRICE STAYS THEIRS (2026-11-12): choosing a condition never overwrites a price the seller typed.
     // GetWorth's suggestion fills an empty box, or replaces its own earlier suggestion — and a condition GetWorth has no
@@ -4580,8 +4582,9 @@ export function AppProvider({ children }) {
       const p = suggestPrice(c);
       return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion', suggestionSeen: prev.suggestionSeen || p !== '' };
     });
-    // Show category-specific questions for used/poor; skip for new/likeNew
-    setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
+    // Show category-specific questions for used/poor; skip for new/likeNew. A scan's listing chooses on the review step and
+    // stays there (2026-11-18): its answers were already given on the scan.
+    if (!stay) setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
   };
 
   // ── Serial/IMEI verification: OCR a label photo and extract serial ──
