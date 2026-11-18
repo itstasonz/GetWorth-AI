@@ -8,21 +8,21 @@ const T = {
   en: {
     // App
     appName: 'GetWorth',
-    tagline: 'Discover what your stuff is worth',
+    tagline: 'What is your item worth?',
     welcome: 'Welcome',
 
     // Home Hero
-    aiPowered: 'AI-Powered',
-    heroTitle1: 'Know Your',
-    heroTitle2: "Item's Value",
-    heroSub: 'Snap or upload any item for instant AI valuation.',
+    aiPowered: 'AI',
+    heroTitle1: 'What is your',
+    heroTitle2: 'item worth?',
+    heroSub: 'Take a photo and see second-hand prices in Israel.',
     upload: 'Upload',
-    drop: 'Drop image here',
-    orButtons: 'or use buttons below',
-    hotItems: 'Hot Items',
-    seeAll: 'See All',
+    drop: 'Drop a photo here',
+    orButtons: 'or choose below',
+    hotItems: 'New listings',
+    seeAll: 'See all',
     sellBanner: 'Have something to sell?',
-    sellBannerSub: 'Scan your item and get instant valuation',
+    sellBannerSub: 'Scan it and publish a listing',
 
     // Nav
     home: 'Home',
@@ -43,7 +43,7 @@ const T = {
     // AUTH-001: /api/analyze requires a session — scanning is gated like
     // save/contact/list, and this is the copy for that prompt.
     signInScan: 'Sign in to scan an item',
-    signInBuy: 'Sign in to buy — we\'ll bring you right back to this listing',
+    signInBuy: 'Sign in to buy. We will bring you back to this listing.',
     google: 'Continue with Google',
     or: 'or',
     password: 'Password',
@@ -94,7 +94,7 @@ const T = {
     min: 'Min',
     max: 'Max',
     range: 'Range',
-    live: 'Your listing is now live!',
+    live: 'Your listing is live',
 
     // Valuation trust (VAL-001)
     // Two SEPARATE axes. Identity = how sure we are WHAT this is (a calibrated
@@ -113,7 +113,7 @@ const T = {
     basisVerifiedMarket: 'Based on verified market listings',
     basisComparableMarket: 'Based on comparable items on the market',
     basisMarketEstimate: 'Based on a GetWorth catalog reference',
-    basisAiEstimate:     'AI estimate — no market listings verified',
+    basisAiEstimate:     'Computer estimate. No listings found to compare.',
     priceEvidLimited:  'Limited pricing evidence',
     priceEvidWeak:     'Weak pricing evidence',
     priceEvidNone:     'No pricing evidence',
@@ -121,7 +121,7 @@ const T = {
     priceFromComps:    'Based on comparable sales',
     priceFromAi:       'AI estimate, no comparable sales',
     priceFromCatalog:  'Based on a similar catalog item',
-    priceQuickEst:     'Quick estimate — verify before listing',
+    priceQuickEst:     'Quick estimate. Check it before you publish.',
     priceFromCategory: 'Estimated from category data',
     priceSetManually:  'Set your own price',
     // UI-003 Wave 0: this used to read "Price subject to authenticity
@@ -129,7 +129,7 @@ const T = {
     // gates the number — `verification_required` is a LABEL, not a hold:
     // analyze.js:2439 sets it and no pricing step reads it, so the same figure
     // ships either way. The honest statement is what the price assumed.
-    priceVerificationPending: 'Priced as authentic — authenticity unconfirmed',
+    priceVerificationPending: 'Priced as authentic. Authenticity was not checked.',
     priceReplicaAdjusted:     'Replica-adjusted estimate',
 
     estimateOnly:      'An estimate, not a guaranteed sale price.',
@@ -179,8 +179,8 @@ const T = {
     daysAgo: 'd ago',
 
     // Scan & Analysis
-    analyzing: 'Analyzing...',
-    scanAnother: 'Scan Another',
+    analyzing: 'Identifying the item...',
+    scanAnother: 'Scan another item',
     desc: 'Description',
     review: 'Review & Publish',
     share: 'Share',
@@ -192,11 +192,11 @@ const T = {
     location: 'Location',
     publish: 'Publish Listing',
     publishing: 'Publishing...',
-    published: 'Published!',
+    published: 'Published',
     continue: 'Continue',
-    listItem: 'List for Sale',
-    myListings: 'My Listings',
-    noListings: 'No listings yet. Scan an item to start!',
+    listItem: 'List for sale',
+    myListings: 'My listings',
+    noListings: 'No listings yet. Scan an item to start.',
 
     // Auth (extended)
     signInReq: 'Sign In Required',
@@ -220,8 +220,8 @@ const T = {
     highLow: 'High-Low',
 
     // Errors
-    failed: 'Analysis failed',
-    cameraDenied: 'Camera access denied',
+    failed: 'We could not identify the item. Try again.',
+    cameraDenied: 'No camera access. You can allow it in your browser settings.',
 
     // ─── Category-Aware Question Labels ───
     // Generic (all categories)
@@ -250,12 +250,12 @@ const T = {
     size: 'Size?',
     materialType: 'Material type?',
     // Sports
-    sportType: 'Sport / activity type?',
-    gym: 'Gym / Fitness',
+    sportType: 'Which sport?',
+    gym: 'Gym and fitness',
     cycling: 'Cycling',
-    water: 'Water Sports',
-    ball: 'Ball Sports',
-    outdoor: 'Outdoor / Hiking',
+    water: 'Water sports',
+    ball: 'Ball sports',
+    outdoor: 'Outdoor and hiking',
     // Beauty / Jewelry
     beautyType: 'Item type?',
     jewelry: 'Jewelry',
@@ -295,21 +295,21 @@ const T = {
   he: {
     // App
     appName: 'GetWorth',
-    tagline: 'גלו כמה שווים הדברים שלכם',
+    tagline: 'כמה שווה המוצר שלכם',
     welcome: 'ברוכים הבאים',
 
     // Home Hero
     aiPowered: 'AI',
-    heroTitle1: 'גלה את',
-    heroTitle2: 'שווי הפריט',
-    heroSub: 'צלם או העלה תמונה לקבלת הערכה.',
+    heroTitle1: 'כמה שווה',
+    heroTitle2: 'המוצר שלכם?',
+    heroSub: 'מצלמים מוצר ומקבלים מחיר יד שנייה בישראל.',
     upload: 'העלאה',
-    drop: 'גרור תמונה',
-    orButtons: 'או לחץ למטה',
-    hotItems: 'פריטים חמים',
-    seeAll: 'הצג הכל',
+    drop: 'גררו תמונה לכאן',
+    orButtons: 'או בחרו למטה',
+    hotItems: 'מודעות חדשות',
+    seeAll: 'לכל המודעות',
     sellBanner: 'יש לכם משהו למכור?',
-    sellBannerSub: 'סרקו את הפריט וקבלו הערכה מיידית',
+    sellBannerSub: 'סורקים את המוצר ומפרסמים מודעה',
 
     // Nav
     home: 'בית',
@@ -324,16 +324,16 @@ const T = {
     // Auth
     signIn: 'התחברות',
     signUp: 'הרשמה',
-    signInAccess: 'התחברו כדי לגשת לכל התכונות',
-    signInSave: 'התחברו כדי לשמור פריטים',
-    signInList: 'התחברו כדי לפרסם פריטים',
-    signInScan: 'התחברו כדי לסרוק פריט',
-    signInBuy: 'התחברו כדי לקנות — נחזיר אתכם ישר למודעה',
-    google: 'המשך עם Google',
+    signInAccess: 'צריך להתחבר כדי להמשיך',
+    signInSave: 'התחברו כדי לשמור מודעות',
+    signInList: 'התחברו כדי לפרסם מודעה',
+    signInScan: 'התחברו כדי לסרוק מוצר',
+    signInBuy: 'התחברו כדי לקנות. אחרי ההתחברות נחזור למודעה הזו.',
+    google: 'כניסה עם Google',
     or: 'או',
     password: 'סיסמה',
-    haveAcc: 'כבר יש לך חשבון?',
-    noAcc: 'אין לך חשבון?',
+    haveAcc: 'כבר יש לכם חשבון?',
+    noAcc: 'אין לכם חשבון?',
 
     // Browse & Categories
     all: 'הכל',
@@ -355,63 +355,63 @@ const T = {
 
     // Browse UI
     noResults: 'לא נמצאו תוצאות',
-    noSaved: 'אין פריטים שמורים',
-    clear: 'נקה',
+    noSaved: 'עוד לא שמרתם מודעות',
+    clear: 'ניקוי',
     view: 'צפייה',
     more: 'פרטים נוספים',
     back: 'חזרה',
     filters: 'סינון',
     results: 'תוצאות',
-    trustScore: 'ציון אמון',
+    trustScore: 'דירוג אמינות',
     verified: 'מאומת',
 
     // Conditions
-    condition: 'מצב',
-    newSealed: 'חדש / אטום',
+    condition: 'מצב המוצר',
+    newSealed: 'חדש באריזה',
     likeNew: 'כמו חדש',
     used: 'משומש',
-    poor: 'סביר / בלוי',
+    poor: 'סביר או בלוי',
 
     // Pricing
-    marketValue: 'שווי שוק',
-    yourPrice: 'המחיר שלך',
+    marketValue: 'שווי משוער',
+    yourPrice: 'המחיר שלכם',
     min: 'מינ׳',
     max: 'מקס׳',
     range: 'טווח',
-    live: 'המודעה שלך פורסמה!',
+    live: 'המודעה פורסמה',
 
     // Valuation trust (VAL-001) — must carry the SAME claim as the English.
     // The word דיוק (accuracy) is deliberately absent from this whole block:
     // it is what made the old copy read as a promise about the price.
     idConfidence:      'ביטחון בזיהוי',
-    idStrong:          'התאמה חזקה',
-    idModerate:        'אשר כדי לשפר את הזיהוי',
-    idLow:             'דורש אישור',
-    idVeryLow:         'לא זוהה בבירור',
+    idStrong:          'זיהוי ברור',
+    idModerate:        'כדאי לאשר את הדגם',
+    idLow:             'צריך לאשר את הדגם',
+    idVeryLow:         'המוצר לא זוהה בבירור',
 
-    pricingEvidence:   'בסיס התמחור',
-    priceEvidStrong:   'בסיס תמחור חזק',
-    basisVerifiedMarket: 'מבוסס על מודעות מאומתות מהשוק',
-    basisComparableMarket: 'מבוסס על פריטים דומים בשוק',
-    basisMarketEstimate: 'מבוסס על מוצר מקטלוג GetWorth',
-    basisAiEstimate:     'הערכת AI — לא אומתו מודעות בשוק',
-    priceEvidLimited:  'בסיס תמחור מוגבל',
-    priceEvidWeak:     'בסיס תמחור חלש',
-    priceEvidNone:     'אין בסיס תמחור',
+    pricingEvidence:   'על מה המחיר מבוסס',
+    priceEvidStrong:   'הרבה נתוני מחיר',
+    basisVerifiedMarket: 'לפי מודעות יד שנייה שנבדקו',
+    basisComparableMarket: 'לפי מוצרים דומים בשוק',
+    basisMarketEstimate: 'לפי מוצר דומה בקטלוג GetWorth',
+    basisAiEstimate:     'הערכה ממוחשבת. לא נמצאו מודעות להשוואה.',
+    priceEvidLimited:  'מעט נתוני מחיר',
+    priceEvidWeak:     'נתוני מחיר חלשים',
+    priceEvidNone:     'אין נתוני מחיר',
 
-    priceFromComps:    'מבוסס על מכירות דומות',
-    priceFromAi:       'הערכת AI, ללא מכירות דומות להשוואה',
-    priceFromCatalog:  'מבוסס על פריט דומה בקטלוג',
-    priceQuickEst:     'הערכה מהירה — בדוק לפני פרסום',
-    priceFromCategory: 'הערכה לפי נתוני קטגוריה',
-    priceSetManually:  'קבע מחיר בעצמך',
+    priceFromComps:    'לפי מכירות דומות',
+    priceFromAi:       'הערכה ממוחשבת, בלי מכירות דומות להשוואה',
+    priceFromCatalog:  'לפי מוצר דומה בקטלוג',
+    priceQuickEst:     'הערכה מהירה. כדאי לבדוק לפני הפרסום.',
+    priceFromCategory: 'הערכה לפי הקטגוריה',
+    priceSetManually:  'קבעו מחיר בעצמכם',
     // UI-003 Wave 0 — see the English. 'מחיר תלוי אימות אותנטיות' promised an
     // authenticity check that gates the price; no such check exists.
-    priceVerificationPending: 'מתומחר כמקורי — האותנטיות לא אושרה',
-    priceReplicaAdjusted:     'מחיר מותאם לרפליקה',
+    priceVerificationPending: 'המחיר מניח שהמוצר מקורי. המקוריות לא נבדקה.',
+    priceReplicaAdjusted:     'מחיר לרפליקה',
 
-    estimateOnly:      'הערכה בלבד — לא מחיר מכירה מובטח.',
-    enterPricePrompt:  'הזן מחיר כדי להמשיך',
+    estimateOnly:      'זו הערכה, לא מחיר מכירה מובטח.',
+    enterPricePrompt:  'כדי להמשיך, הזינו מחיר',
 
     // ── אותנטיות (UI-003 Wave 0) — must carry the SAME claim as the English.
     // מאומת / אומת are deliberately absent from this entire block. They are
@@ -419,15 +419,15 @@ const T = {
     // a model reading a photograph is not one. In Hebrew, the app's DEFAULT
     // language, מאומת was the single word that made an AI guess and a real
     // credential render identically; do not reintroduce it here.
-    authSerialSeen:    'AI קרא מספר סידורי',
-    authDocsSeen:      'AI קרא מסמך',
-    authSignsSeen:     'AI: סימני מקוריות',
-    authIndicators:    'AI זיהה סימני מקוריות',
-    authUncertain:     'AI לא הצליח לקבוע אותנטיות',
-    authExpertAdvised: 'מומלץ אימות מומחה',
-    authFakeSigns:     'AI: סימני זיוף',
-    authReplicaSigns:  'AI: סימני רפליקה',
-    authNotInPhotos:   'לא נראה בתמונות שלך:',
+    authSerialSeen:    'ה־AI זיהה מספר סידורי בתמונה',
+    authDocsSeen:      'ה־AI זיהה מסמך בתמונה',
+    authSignsSeen:     'ה־AI זיהה סימני מקוריות',
+    authIndicators:    'ה־AI זיהה סימני מקוריות',
+    authUncertain:     'ה־AI לא יכול לקבוע מהתמונה אם המוצר מקורי',
+    authExpertAdvised: 'כדאי לבדוק אצל מומחה',
+    authFakeSigns:     'ה־AI זיהה סימני זיוף',
+    authReplicaSigns:  'ה־AI זיהה סימנים של רפליקה',
+    authNotInPhotos:   'לא נראה בתמונות:',
 
     // ── קליטת מספר סידורי (UI-003 Wave 0) — see the English.
     // אומת / מאומת are deliberately absent: nothing here was checked. The buyer
@@ -439,7 +439,7 @@ const T = {
     // מספר סידורי — ראה את האנגלית. אין כאן אימות, ולכן אין כאן אומת/מאומת.
     serialAdded:       'מספר סידורי נוסף',
     serialAddedImei:   'IMEI נוסף',
-    serialAddAction:   'הוסף',
+    serialAddAction:   'הוספה',
     serialProvided:    'מספר סידורי סופק',
 
     // Time
@@ -448,56 +448,56 @@ const T = {
     daysAgo: ' ימים',
 
     // Scan & Analysis
-    analyzing: 'מנתח...',
-    scanAnother: 'סרוק פריט נוסף',
+    analyzing: 'מזהה את המוצר...',
+    scanAnother: 'סריקת מוצר נוסף',
     desc: 'תיאור',
-    review: 'סקירה ופרסום',
-    share: 'שתף',
+    review: 'בדיקה ופרסום',
+    share: 'שיתוף',
     sales: 'מכירות',
 
     // Listing Flow
     title: 'כותרת',
     phone: 'טלפון',
     location: 'מיקום',
-    publish: 'פרסם מודעה',
+    publish: 'פרסום המודעה',
     publishing: 'מפרסם...',
-    published: 'פורסם!',
+    published: 'המודעה פורסמה',
     continue: 'המשך',
-    listItem: 'פרסם למכירה',
+    listItem: 'פרסום למכירה',
     myListings: 'המודעות שלי',
-    noListings: 'אין מודעות עדיין. סרקו פריט כדי להתחיל!',
+    noListings: 'עוד אין לכם מודעות. סרקו מוצר כדי להתחיל.',
 
     // Auth (extended)
-    signInReq: 'נדרשת התחברות',
-    signInContact: 'התחבר ליצירת קשר',
+    signInReq: 'צריך להתחבר',
+    signInContact: 'התחברו כדי ליצור קשר',
     name: 'שם',
     email: 'אימייל',
-    createAcc: 'צור חשבון',
-    join: 'הצטרף',
+    createAcc: 'יצירת חשבון',
+    join: 'הרשמה',
     cancel: 'ביטול',
 
     // Contact / Seller
-    contact: 'צור קשר',
-    call: 'התקשר',
+    contact: 'יצירת קשר',
+    call: 'התקשרות',
     whatsapp: 'וואטסאפ',
     seller: 'מוכר',
     views: 'צפיות',
 
     // Sort options
-    newest: 'חדש',
-    lowHigh: 'מחיר ↑',
-    highLow: 'מחיר ↓',
+    newest: 'החדשות ביותר',
+    lowHigh: 'מחיר: מהנמוך לגבוה',
+    highLow: 'מחיר: מהגבוה לנמוך',
 
     // Errors
-    failed: 'הניתוח נכשל',
-    cameraDenied: 'הגישה למצלמה נדחתה',
+    failed: 'הזיהוי לא הצליח. נסו שוב.',
+    cameraDenied: 'אין גישה למצלמה. אפשר לאשר אותה בהגדרות הדפדפן.',
 
     // ─── Category-Aware Question Labels ───
     scratches: 'שריטות או נזק חיצוני?',
     issues: 'תקלות בתפקוד?',
     battery: 'מצב סוללה?',
     storage: 'נפח אחסון?',
-    deviceType: 'איזה סוג מכשיר אלקטרוני?',
+    deviceType: 'איזה סוג מכשיר?',
     devicePhone: 'טלפון',
     deviceLaptop: 'מחשב נייד',
     deviceTablet: 'טאבלט',
@@ -513,12 +513,12 @@ const T = {
     boxPapers: 'קופסה ותעודות?',
     size: 'מידה?',
     materialType: 'סוג חומר?',
-    sportType: 'סוג ספורט / פעילות?',
+    sportType: 'לאיזה ספורט?',
     gym: 'חדר כושר',
     cycling: 'רכיבה',
     water: 'ספורט מים',
     ball: 'ספורט כדור',
-    outdoor: 'טיולים / שטח',
+    outdoor: 'טיולים ושטח',
     // Beauty / Jewelry
     beautyType: 'סוג פריט?',
     jewelry: 'תכשיטים',

@@ -337,7 +337,7 @@ export default function AdminPanel() {
           <AlertTriangle className="w-6 h-6 text-red-400 mx-auto" />
           <p className="text-sm text-red-300">{t('Failed to load data for this tab', 'טעינת הנתונים נכשלה')}</p>
           <button onClick={() => loadTab(tab)} className="text-xs font-semibold underline underline-offset-2" style={{ color: '#6FEEE1' }}>
-            {t('Retry', 'נסה שוב')}
+            {t('Try again', 'לנסות שוב')}
           </button>
         </Card>
       )}

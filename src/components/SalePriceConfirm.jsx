@@ -70,8 +70,8 @@ export default function SalePriceConfirm({ orderId, userId, listingPrice, lang }
           {parsed.error && <p className="text-sm text-red-300">{t('Enter a whole number of shekels.', 'הזינו מספר שלם בשקלים.')}</p>}
           {error && <p className="text-sm text-red-300">{error}</p>}
           <p className="text-xs text-slate-400">
-            {t('Recorded once, as your statement — not a payment record. When buyer and seller state the same amount it helps price similar items.',
-              'נשמר פעם אחת, כהצהרה שלך — לא כרישום תשלום. כשהקונה והמוכר מציינים את אותו סכום, זה עוזר לתמחר פריטים דומים.')}
+            {t('Saved once, as your statement. It is not a payment record. When the buyer and seller state the same amount, it helps price similar items.',
+              'נשמר פעם אחת, כהצהרה שלכם. זה לא רישום תשלום. כשהקונה והמוכר מציינים אותו סכום, זה עוזר לתמחר מוצרים דומים.')}
           </p>
         </div>
       ))}

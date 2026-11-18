@@ -147,7 +147,7 @@ export function MyListingsView() {
               }}
             >
               <Plus className="w-4 h-4" />
-              {lang === 'he' ? 'פרסם פריט' : 'Create Listing'}
+              {lang === 'he' ? 'פרסום מודעה' : 'Create listing'}
             </button>
           </div>
         </div>
@@ -296,7 +296,7 @@ export function MyListingsView() {
         <EmptyState
           icon={ShoppingBag}
           title={activeTab === 'sold' ? (lang === 'he' ? 'עדיין לא מכרת פריטים' : 'No sold items yet') : (lang === 'he' ? 'אין מודעות פעילות' : 'No active listings')}
-          subtitle={activeTab !== 'sold' ? (lang === 'he' ? 'סרוק פריט כדי לפרסם מודעה' : 'Scan an item to create your first listing') : undefined}
+          subtitle={activeTab !== 'sold' ? (lang === 'he' ? 'סרקו מוצר כדי לפרסם מודעה' : 'Scan an item to create your first listing') : undefined}
           cta={activeTab !== 'sold' && (
             <button
               onClick={() => goTab('home')}
@@ -304,7 +304,7 @@ export function MyListingsView() {
               style={{ background: SELL_STITCH.GRADIENT_PRIMARY, color: SELL_STITCH.onPrimary, fontFamily: SELL_STITCH.FONT_BODY }}
             >
               <Scan className="w-4 h-4" />
-              {lang === 'he' ? 'סרוק פריט' : 'Scan an item'}
+              {lang === 'he' ? 'סריקת מוצר' : 'Scan an item'}
             </button>
           )}
         />
@@ -330,10 +330,10 @@ export function MyListingsView() {
         body={(() => {
           const named = myListings.find((l) => l.id === deleteTarget);
           const title = named ? (lang === 'he' && named.title_hebrew ? named.title_hebrew : named.title) : '';
-          const what = lang === 'he' ? 'המודעה תוסר לצמיתות. לא ניתן לשחזר פריטים שנמחקו.' : 'This listing will be permanently removed. Buyers who saved it will no longer see it.';
-          return title ? `"${title}" — ${what}` : what;
+          const what = lang === 'he' ? 'המודעה תימחק לצמיתות ואי אפשר יהיה לשחזר אותה.' : 'This listing will be permanently removed. Buyers who saved it will no longer see it.';
+          return title ? `${title}. ${what}` : what;
         })()}
-        confirmLabel={lang === 'he' ? 'מחק מודעה' : 'Delete Listing'}
+        confirmLabel={lang === 'he' ? 'מחיקת המודעה' : 'Delete listing'}
         cancelLabel={lang === 'he' ? 'ביטול' : 'Cancel'}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => { deleteListing(deleteTarget); setDeleteTarget(null); }}
@@ -453,7 +453,7 @@ function EditListingSheet({ item, lang, rtl, t, onClose, onSave }) {
               style={{ background: SELL_STITCH.GRADIENT_PRIMARY, color: SELL_STITCH.onPrimary }}
             >
               {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-              {lang === 'he' ? 'שמור שינויים' : 'Save Changes'}
+              {lang === 'he' ? 'שמירת השינויים' : 'Save changes'}
             </button>
           </div>
         </div>
@@ -496,7 +496,7 @@ export function SavedView() {
         <EmptyState
           icon={Heart}
           title={t.noSaved}
-          subtitle={lang === 'he' ? 'לחץ על הלב בכל פריט כדי לשמור אותו כאן' : 'Tap the heart on any listing to save it here'}
+          subtitle={lang === 'he' ? 'לחצו על הלב במודעה כדי לשמור אותה כאן' : 'Tap the heart on any listing to save it here'}
           cta={<Btn primary onClick={() => goTab('browse')}>{lang === 'he' ? 'עיון בפריטים' : 'Browse Items'}</Btn>}
         />
       )}
@@ -1801,7 +1801,7 @@ export function ListingFlowView() {
                     className="flex-shrink-0 w-20 h-20 rounded-xl border-2 border-dashed border-white/20 flex flex-col items-center justify-center gap-1 hover:border-[#6FEEE1]/50 hover:bg-[#6FEEE1]/5 transition-all"
                   >
                     <Plus className="w-5 h-5 text-slate-500" />
-                    <span className="text-[9px] text-slate-500">{lang === 'he' ? 'הוסף' : 'Add'}</span>
+                    <span className="text-[9px] text-slate-500">{lang === 'he' ? 'הוספה' : 'Add'}</span>
                   </button>
                 )}
                 <input
@@ -1816,7 +1816,7 @@ export function ListingFlowView() {
               {images.length < 2 && (
                 <p className="text-[10px] text-amber-400/80 flex items-center gap-1">
                   <AlertTriangle className="w-3 h-3" />
-                  {lang === 'he' ? 'הוסף עוד תמונה לדירוג איכות גבוה יותר' : 'Add more photos for a higher quality score'}
+                  {lang === 'he' ? 'עוד תמונה תשפר את איכות המודעה' : 'Add more photos for a higher quality score'}
                 </p>
               )}
             </div>

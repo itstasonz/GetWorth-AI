@@ -88,7 +88,7 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
             <div className="flex items-center gap-2">
               <DollarSign className="w-5 h-5" style={{ color: C.primary }} />
               <h3 className="text-lg font-bold" style={{ fontFamily: 'Manrope,sans-serif', color: C.onSurface }}>
-                {lang === 'he' ? 'שלח הצעת מחיר' : 'Make an Offer'}
+                {lang === 'he' ? 'הצעת מחיר' : 'Make an offer'}
               </h3>
             </div>
             <button
@@ -163,7 +163,7 @@ function OfferSheet({ listing, lang, rtl, onClose, onSend }) {
               style={{ background: LIQUID_GRADIENT, color: C.onPrimary }}
             >
               <DollarSign className="w-4 h-4" />
-              {lang === 'he' ? 'שלח הצעה' : 'Send Offer'}
+              {lang === 'he' ? 'שליחת ההצעה' : 'Send offer'}
             </button>
           </div>
         </div>
@@ -228,7 +228,7 @@ export function InboxView() {
             <MessageCircle className="w-10 h-10" style={{ color: C.primary }} />
           </div>
           <p className="mb-5" style={{ color: C.onSurfaceVar }}>
-            {lang === 'he' ? 'התחבר כדי לראות הודעות' : 'Sign in to see messages'}
+            {lang === 'he' ? 'התחברו כדי לראות הודעות' : 'Sign in to see messages'}
           </p>
           <Btn primary onClick={() => goTab('profile')}>{t.signIn}</Btn>
         </FadeIn>
@@ -889,7 +889,7 @@ export function ChatView() {
               </p>
               <p className="text-xs leading-relaxed mb-5 max-w-[200px]" style={{ color: C.onSurfaceVar }}>
                 {lang === 'he'
-                  ? 'שאל על זמינות, מצב הפריט, או שלח הצעת מחיר.'
+                  ? 'אפשר לשאול על זמינות ומצב המוצר, או לשלוח הצעת מחיר.'
                   : 'Ask about availability, condition, or make an offer.'}
               </p>
               <div
@@ -1127,7 +1127,7 @@ export function ChatView() {
               {lang === 'he' ? 'תמונה מוכנה' : 'Photo ready'}
             </p>
             <p className="text-[10px] mt-0.5" style={{ color: C.onSurfaceVar }}>
-              {lang === 'he' ? 'לחץ שלח לשיתוף' : 'Tap send to share'}
+              {lang === 'he' ? 'לחצו על שליחה כדי לשתף' : 'Tap send to share'}
             </p>
           </div>
           <button
@@ -1185,7 +1185,7 @@ export function ChatView() {
             onKeyDown={e => {
               if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
             }}
-            placeholder={lang === 'he' ? 'כתוב הודעה...' : 'Message…'}
+            placeholder={lang === 'he' ? 'הודעה' : 'Message'}
             className="flex-1 bg-transparent border-none text-[15px] py-1.5 resize-none overflow-hidden"
             style={{ color: C.onSurface, maxHeight: '120px', lineHeight: '1.45' }}
             dir={rtl ? 'rtl' : 'ltr'}
@@ -1195,7 +1195,7 @@ export function ChatView() {
             onClick={() => fileInputRef.current?.click()}
             className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full transition-colors active:scale-90 mb-0.5"
             style={{ color: imgPreview ? C.primary : C.onSurfaceVar }}
-            aria-label={lang === 'he' ? 'שלח תמונה' : 'Send photo'}
+            aria-label={lang === 'he' ? 'שליחת תמונה' : 'Send photo'}
           >
             <Camera className="w-5 h-5" />
           </button>
@@ -1211,7 +1211,7 @@ export function ChatView() {
             color:      canSend ? C.onPrimary     : C.onSurfaceVar,
             boxShadow:  canSend ? '0 4px 20px rgba(111,238,225,0.30)' : 'none',
           }}
-          aria-label={lang === 'he' ? 'שלח' : 'Send'}
+          aria-label={lang === 'he' ? 'שליחה' : 'Send'}
         >
           {uploadingImage || sendingMessage
             ? <Loader2 className="w-5 h-5 animate-spin" />

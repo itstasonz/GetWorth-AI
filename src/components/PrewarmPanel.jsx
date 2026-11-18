@@ -16,12 +16,12 @@ export const DAILY_CAP_USD = 0.30;
 const TYPES = ['core_scan_prewarm', 'core_scan_prewarm_control', 'core_scan_alert'];
 const usd = (n) => (Number.isFinite(n) ? `$${n.toFixed(3)}` : '—');
 const ALERT_TEXT = {
-  openai_credit_exhausted: ['OpenAI credit exhausted — scans and pre-research fail until it is topped up', 'נגמר הקרדיט ב-OpenAI — סריקות ומחקר מוקדם נכשלים עד טעינה'],
-  prewarm_daily_cap_reached: ['Daily pre-research cap reached', 'הגיע תקרת ההוצאה היומית למחקר מוקדם'],
+  openai_credit_exhausted: ['OpenAI credit is used up. Scans and pre-research fail until it is topped up.', 'נגמר הקרדיט ב־OpenAI. סריקות ומחקר מוקדם ייכשלו עד שיוטען קרדיט.'],
+  prewarm_daily_cap_reached: ['Daily pre-research cap reached', 'הגענו לתקרת ההוצאה היומית למחקר מוקדם'],
   prewarm_failures: ['Half or more of a run\'s research failed', 'מחצית או יותר מהמחקר בהרצה נכשל'],
-  prewarm_spend_over_cap: ['Spend went over the cap — pre-research paused itself', 'ההוצאה עברה את התקרה — המחקר המוקדם הושהה אוטומטית'],
+  prewarm_spend_over_cap: ['Spend went over the cap, so pre-research paused itself', 'ההוצאה עברה את התקרה, לכן המחקר המוקדם הושהה'],
   prewarm_demand_unreadable: ['Could not read scan demand', 'לא ניתן היה לקרוא את הביקוש לסריקות'],
-  prewarm_trial_over: ['The 10-day pre-research trial is over (ended or $3 spent) — nothing more runs', 'תקופת הניסיון של 10 ימים הסתיימה (תם הזמן או נוצלו $3) — לא ירוץ עוד מחקר מוקדם'],
+  prewarm_trial_over: ['The 10-day pre-research trial is over (time ran out or $3 was spent). Nothing more runs.', 'תקופת הניסיון של 10 ימים הסתיימה (נגמר הזמן או נוצלו $3). לא ירוץ עוד מחקר מוקדם.'],
 };
 
 export default function PrewarmPanel({ lang }) {
@@ -77,7 +77,7 @@ export default function PrewarmPanel({ lang }) {
     <Card className="p-3 space-y-2" data-testid="prewarm-panel">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs" dir="ltr" data-testid="openai-health">
-          OpenAI: {health ? (health.ok ? t('OK — key has credit', 'תקין — יש קרדיט') : health.credit_exhausted ? t('OUT OF CREDIT', 'נגמר הקרדיט') : `${t('error', 'שגיאה')} ${health.provider_status ?? ''}`) : t('not checked', 'לא נבדק')}
+          OpenAI: {health ? (health.ok ? t('OK, the key has credit', 'תקין, יש קרדיט') : health.credit_exhausted ? t('OUT OF CREDIT', 'נגמר הקרדיט') : `${t('error', 'שגיאה')} ${health.provider_status ?? ''}`) : t('not checked', 'לא נבדק')}
         </p>
         <button onClick={checkHealth} disabled={busy} className="px-2.5 py-1 rounded-control text-xs bg-white/5 text-slate-200">{t('Check OpenAI', 'בדיקת OpenAI')}</button>
       </div>

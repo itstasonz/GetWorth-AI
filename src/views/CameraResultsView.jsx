@@ -152,7 +152,7 @@ export function CameraView() {
               style={{ color: STITCH.primary, fontFamily: STITCH.FONT_HEADLINE }}
             >
               {addPhotoMode
-                ? (lang === 'he' ? 'צלם תווית' : 'CAPTURE LABEL')
+                ? (lang === 'he' ? 'צילום התווית' : 'CAPTURE LABEL')
                 : (lang === 'he' ? 'יישר פריט' : 'ALIGN ITEM')}
             </p>
             <p
@@ -242,7 +242,7 @@ export function CameraView() {
               boxShadow: cameraReady ? '0 0 30px rgba(111, 238, 225, 0.40)' : 'none',
               opacity: cameraReady ? 1 : 0.5,
             }}
-            aria-label={lang === 'he' ? 'צלם' : 'Capture'}
+            aria-label={lang === 'he' ? 'צילום' : 'Capture'}
           >
             <div
               className="absolute rounded-full"
@@ -318,13 +318,13 @@ export function AnalyzingView() {
 
           <h3 className="text-xl font-bold" style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}>
             {pipelineState === 'compress_error'
-              ? (lang === 'he' ? 'שגיאה בעיבוד התמונה' : 'Image Processing Failed')
-              : (lang === 'he' ? 'שגיאה בניתוח' : 'Analysis Failed')
+              ? (lang === 'he' ? 'לא הצלחנו לקרוא את התמונה' : 'Could not read the photo')
+              : (lang === 'he' ? 'הזיהוי לא הצליח' : 'Identification failed')
             }
           </h3>
 
           <p className="text-sm" style={{ color: STITCH.onSurfaceVariant }}>
-            {pipelineError || (lang === 'he' ? 'משהו השתבש, נסה שוב' : 'Something went wrong, please try again')}
+            {pipelineError || (lang === 'he' ? 'משהו השתבש. נסו שוב.' : 'Something went wrong. Try again.')}
           </p>
 
           <div className="flex gap-3 pt-2">
@@ -354,8 +354,8 @@ export function AnalyzingView() {
             >
               <RefreshCw className="w-4 h-4" />
               {coolingDown
-                ? (lang === 'he' ? `המתן ${cooldownSecs}ש׳` : `Wait ${cooldownSecs}s`)
-                : (lang === 'he' ? 'נסה שוב' : 'Retry')}
+                ? (lang === 'he' ? `אפשר לנסות שוב בעוד ${cooldownSecs} שניות` : `Wait ${cooldownSecs}s`)
+                : (lang === 'he' ? 'לנסות שוב' : 'Try again')}
             </button>
           </div>
         </div>
@@ -881,26 +881,26 @@ function HelpIdentifyModal() {
           {canAddPhoto && (
             <div>
               <p className="text-xs text-slate-500 font-medium mb-2 uppercase tracking-wider">
-                {lang === 'he' ? 'אפשרות 1: צלם תווית' : 'Option 1: Photo of label'}
+                {lang === 'he' ? 'אפשרות 1: צילום התווית' : 'Option 1: Photo of the label'}
               </p>
               <div className="flex gap-2">
                 <button onClick={() => { setHelpModalOpen(false); addPhoto('camera'); }}
                   className="flex-1 py-3 rounded-xl text-sm font-medium flex items-center justify-center gap-2 transition-all active:scale-[0.97] hover:opacity-80"
                   style={{ background: 'rgba(111,238,225,0.1)', border: '1px solid rgba(111,238,225,0.25)', color: '#6FEEE1' }}>
                   <Camera className="w-4 h-4" />
-                  {lang === 'he' ? 'צלם תווית' : 'Take photo'}
+                  {lang === 'he' ? 'צילום' : 'Take photo'}
                 </button>
                 <button onClick={() => uploadFileRef.current?.click()}
                   className="py-3 px-4 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 flex items-center justify-center gap-2 hover:bg-white/10 transition-all">
                   <Upload className="w-4 h-4" />
-                  {lang === 'he' ? 'העלה' : 'Upload'}
+                  {lang === 'he' ? 'העלאה' : 'Upload'}
                 </button>
                 <input ref={uploadFileRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelect} />
               </div>
               <p className="text-[10px] text-slate-600 mt-1.5">
                 {lang === 'he'
-                  ? `${images.length}/3 תמונות — צלם את התווית, הלוגו או מספר הדגם`
-                  : `${images.length}/3 photos — capture the label, logo, or model number`}
+                  ? `${images.length}/3 תמונות. צלמו את התווית, הלוגו או מספר הדגם.`
+                  : `${images.length}/3 photos. Capture the label, logo or model number.`}
               </p>
             </div>
           )}
@@ -909,7 +909,7 @@ function HelpIdentifyModal() {
           {suggestions.length > 0 && (
             <div>
               <p className="text-xs text-slate-500 font-medium mb-2 uppercase tracking-wider">
-                {lang === 'he' ? 'אפשרות 2: בחר מותג' : 'Option 2: Select brand'}
+                {lang === 'he' ? 'אפשרות 2: בחירת מותג' : 'Option 2: Choose the brand'}
               </p>
               <div className="flex flex-wrap gap-2">
                 {visibleSuggestions.map((brand) => (
@@ -932,8 +932,8 @@ function HelpIdentifyModal() {
           <div>
             <p className="text-xs text-slate-500 font-medium mb-2 uppercase tracking-wider">
               {suggestions.length > 0
-                ? (lang === 'he' ? 'אפשרות 3: הקלד ידנית' : 'Option 3: Type manually')
-                : (lang === 'he' ? 'הקלד מותג ודגם' : 'Type brand & model')}
+                ? (lang === 'he' ? 'אפשרות 3: הקלדה ידנית' : 'Option 3: Type it')
+                : (lang === 'he' ? 'הקלדת מותג ודגם' : 'Type the brand and model')}
             </p>
             <div className="flex gap-2">
               <input type="text" value={brandInput} onChange={(e) => setBrandInput(e.target.value)}
@@ -952,7 +952,7 @@ function HelpIdentifyModal() {
           {/* Skip */}
           <button onClick={() => setHelpModalOpen(false)}
             className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-300 transition-colors">
-            {lang === 'he' ? 'דלג — הצג הערכה בלבד' : 'Skip — show estimate only'}
+            {lang === 'he' ? 'דילוג והצגת הערכה בלבד' : 'Skip and show the estimate'}
           </button>
         </div>
       </div>
@@ -1325,7 +1325,7 @@ export function ResultsView() {
             />
             <p className="text-xs leading-snug" style={{ color: tier === 'very_low' ? '#fca5a5' : '#fdba74' }}>
               {tier === 'very_low'
-                ? (lang === 'he' ? 'לא הצלחנו לזהות את הפריט בבירור. נסה תמונה קרובה יותר של התווית.' : "We couldn't clearly identify this item. Try a closer photo of the label.")
+                ? (lang === 'he' ? 'לא הצלחנו לזהות את המוצר בבירור. נסו לצלם את התווית מקרוב.' : "We couldn't clearly identify this item. Try a closer photo of the label.")
                 : (lang === 'he' ? 'ההערכה עשויה להיות חלקית. אישור יסייע לשפר את הדיוק.' : "Our estimate may not be fully accurate. Confirming helps improve pricing.")}
             </p>
           </div>
@@ -1340,7 +1340,7 @@ export function ResultsView() {
             style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurfaceVariant }}
           >
             {result.authenticity?.pricingMode === 'replica_adjusted'
-              ? (lang === 'he' ? 'ערך משוער — רפליקה' : 'Replica Estimate')
+              ? (lang === 'he' ? 'שווי משוער לרפליקה' : 'Replica estimate')
               : result.authenticity?.pricingMode === 'verification_required'
               ? (lang === 'he' ? 'הערכה מותנית' : 'Conditional Estimate')
               : tier === 'very_low'
@@ -1735,7 +1735,7 @@ export function ResultsView() {
                     className="text-sm font-semibold"
                     style={{ color: STITCH.onSurface, fontFamily: STITCH.FONT_BODY }}
                   >
-                    {lang === 'he' ? 'הוסף תמונה' : 'Add Photo'}
+                    {lang === 'he' ? 'הוספת תמונה' : 'Add photo'}
                   </span>
                 </button>
               )}
@@ -1869,7 +1869,7 @@ export function ResultsView() {
                             setSerialTextValue('');
                           }
                         }}
-                        placeholder={lang === 'he' ? 'הזן מספר סידורי...' : 'Enter serial number...'}
+                        placeholder={lang === 'he' ? 'מספר סידורי' : 'Serial number'}
                         className="flex-1 bg-transparent text-[13px] font-mono min-w-0 placeholder-slate-600"
                         style={{ color: STITCH.onSurface, caretColor: STITCH.primary }}
                       />
@@ -1907,7 +1907,7 @@ export function ResultsView() {
                       className="text-[11px] font-medium"
                       style={{ color: STITCH.onSurfaceVariant, fontFamily: STITCH.FONT_BODY }}
                     >
-                      {lang === 'he' ? 'הוסף מספר סידורי' : 'Add Serial'}
+                      {lang === 'he' ? 'הוספת מספר סידורי' : 'Add serial number'}
                     </span>
                     <div className="flex gap-2">
                       <button
@@ -1926,7 +1926,7 @@ export function ResultsView() {
                         <span className="text-[10px] font-semibold">
                           {serialLoading
                             ? (lang === 'he' ? 'קורא...' : 'Reading...')
-                            : (lang === 'he' ? 'סרוק' : 'Scan')
+                            : (lang === 'he' ? 'סריקה' : 'Scan')
                           }
                         </span>
                       </button>
@@ -1937,7 +1937,7 @@ export function ResultsView() {
                       >
                         <Keyboard className="w-5 h-5" strokeWidth={2} />
                         <span className="text-[10px] font-semibold">
-                          {lang === 'he' ? 'הקלד' : 'Type'}
+                          {lang === 'he' ? 'הקלדה' : 'Type'}
                         </span>
                       </button>
                     </div>
@@ -1964,14 +1964,14 @@ export function ResultsView() {
                     : `This looks like a ${identification.generic_name || result.category}, but we couldn't identify the brand`}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {lang === 'he' ? 'הוסף מותג ודגם לקבלת מחיר מדויק יותר.' : 'Add the brand and model for a more accurate price.'}
+                  {lang === 'he' ? 'הוסיפו מותג ודגם כדי לקבל מחיר מדויק יותר.' : 'Add the brand and model for a more accurate price.'}
                 </p>
               </div>
             </div>
 
             <div className="flex gap-2">
               <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
-                placeholder={lang === 'he' ? 'הקלד מותג ודגם...' : 'Type brand & model...'}
+                placeholder={lang === 'he' ? 'מותג ודגם' : 'Brand and model'}
                 className="flex-1 min-w-0 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                 autoFocus
@@ -2020,7 +2020,7 @@ export function ResultsView() {
                     : `Is this ${/^[aeiou]/i.test(result.name || '') ? 'an' : 'a'} ${result.name}?`}
                 </p>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  {lang === 'he' ? 'אשר או תקן לקבלת מחיר מדויק יותר' : 'Confirm or correct for more accurate pricing'}
+                  {lang === 'he' ? 'אשרו או תקנו כדי לקבל מחיר מדויק יותר' : 'Confirm or correct it for a more accurate price'}
                 </p>
               </div>
             </div>
@@ -2059,7 +2059,7 @@ export function ResultsView() {
             ) : (
               <div className="flex gap-2">
                 <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
-                  placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
+                  placeholder={lang === 'he' ? 'שם המוצר' : 'Product name'}
                   className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                   autoFocus
@@ -2084,7 +2084,7 @@ export function ResultsView() {
               </div>
               <div>
                 <p className="text-sm font-semibold">{lang === 'he' ? 'האם הזיהוי נכון?' : 'Is this identification correct?'}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'בחר את המוצר הנכון לקבלת מחיר מדויק' : 'Confirm for accurate pricing'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'בחרו את המוצר הנכון' : 'Choose the right item'}</p>
               </div>
             </div>
 
@@ -2112,12 +2112,12 @@ export function ResultsView() {
 
             {!showCorrection ? (
               <button onClick={() => setShowCorrection(true)} className="text-xs transition-colors" style={{ color: '#6FEEE1' }}>
-                {lang === 'he' ? 'זה משהו אחר — הקלד ידנית' : 'Something else — type it manually'}
+                {lang === 'he' ? 'משהו אחר? הקלידו את השם' : 'Something else? Type the name'}
               </button>
             ) : (
               <div className="flex gap-2">
                 <input type="text" value={correctionInput} onChange={(e) => setCorrectionInput(e.target.value)}
-                  placeholder={lang === 'he' ? 'הקלד שם המוצר...' : 'Type product name...'}
+                  placeholder={lang === 'he' ? 'שם המוצר' : 'Product name'}
                   className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-base focus:border-[#6FEEE1]/50 transition-all"
                   onKeyDown={(e) => { if (e.key === 'Enter') handleSubmitCorrection(); }}
                   autoFocus
@@ -2200,7 +2200,7 @@ export function ResultsView() {
                   {result.candidate_payload?.category ? ` · ${result.candidate_payload.category}` : ''}
                 </p>
                 <p className="text-[11px] mt-1" style={{ color: STITCH.onSurfaceVariant, opacity: 0.6 }}>
-                  {lang === 'he' ? 'אשר כדי לשפר זיהויים עתידיים.' : 'Help improve recognition.'}
+                  {lang === 'he' ? 'האישור שלכם עוזר לנו לשפר את הזיהוי.' : 'Your confirmation helps us improve identification.'}
                 </p>
               </div>
             </div>
@@ -2285,7 +2285,7 @@ export function ResultsView() {
               }}
             >
               <Check className="w-4 h-4" strokeWidth={2.5} />
-              <span>{lang === 'he' ? 'אשר ורשום' : 'Confirm & List'}</span>
+              <span>{lang === 'he' ? 'אישור ופרסום' : 'Confirm and list'}</span>
             </button>
             <button
               onClick={startListing}

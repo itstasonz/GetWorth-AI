@@ -130,8 +130,8 @@ export default function HomeView() {
               }}
             >
               {lang === 'he'
-                ? 'סרוק, הערך ומכור תוך שניות'
-                : 'Scan, value, and sell instantly'}
+                ? 'מצלמים מוצר ורואים כמה הוא שווה ביד שנייה'
+                : 'Take a photo and see what it sells for second-hand'}
             </p>
           </div>
 
@@ -156,7 +156,7 @@ export default function HomeView() {
                 background: STITCH.GRADIENT_PRIMARY,
                 boxShadow: '0 20px 40px rgba(111, 238, 225, 0.25)',
               }}
-              aria-label={lang === 'he' ? 'סרוק פריט' : 'Scan Item'}
+              aria-label={lang === 'he' ? 'סריקת מוצר' : 'Scan an item'}
             >
               {/* Inner icon circle */}
               <div
@@ -184,7 +184,7 @@ export default function HomeView() {
                   color: STITCH.onPrimary,
                 }}
               >
-                {lang === 'he' ? 'סרוק פריט' : 'Scan Item'}
+                {lang === 'he' ? 'סריקת מוצר' : 'Scan an item'}
               </span>
             </button>
           </div>
@@ -210,7 +210,7 @@ export default function HomeView() {
                 color: STITCH.primary,
               }}
             >
-              {lang === 'he' ? 'העלה מהגלריה' : 'Upload from Gallery'}
+              {lang === 'he' ? 'העלאה מהגלריה' : 'Upload from gallery'}
             </span>
           </button>
 

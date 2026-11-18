@@ -288,7 +288,7 @@ const VOLUME = /\d+(?:\.\d+)?\s?(ml|מ"ל|מ״ל|מל|oz|fl\.? ?oz)(?![\p{L}\p{N
 const ASK = {
   [INCOMPLETE.BRAND_ONLY]: { en: 'Take a clear photo of the model name or the label, so the exact product can be identified.', he: 'צלמו בבירור את שם הדגם או את התווית, כדי שאפשר יהיה לזהות את המוצר המדויק.' },
   [INCOMPLETE.FRAGRANCE_NAME_OR_SIZE]: { en: 'Take a clear photo of the label or the sticker on the bottom of the bottle, so the fragrance name and size can be read.', he: 'צלמו בבירור את התווית או את המדבקה בתחתית הבקבוק, כדי שאפשר יהיה לקרוא את שם הבושם ואת הנפח.' },
-  [INCOMPLETE.MODEL_UNREAD]: { en: 'Take a clear photo of the model label (usually on the underside or the back), so the exact model can be identified.', he: 'צלמו בבירור את תווית הדגם (בדרך כלל בתחתית או מאחור), כדי שאפשר יהיה לזהות את הדגם המדויק.' },
+  [INCOMPLETE.MODEL_UNREAD]: { en: 'Take a clear photo of the model label. It is usually on the underside or the back.', he: 'צלמו את תווית הדגם. היא נמצאת בדרך כלל בתחתית או בגב המוצר.' },
 };
 const REMAINING = {
   en: { question: 'How much perfume is left in the bottle?', options: ['Full or sealed', 'About 75%', 'About half', 'Under 25%'] },
@@ -298,7 +298,7 @@ const REMAINING_ANSWERED = /(%|full|sealed|half|quarter|מלא|סגור|חצי|�
 // THE SERVER'S OWN STORAGE QUESTION (the Huawei P30 Pro, 2026-10-11): a device whose storage is open (openVariant) with no question proposed.
 const STORAGE = {
   en: { question: 'How much storage does it have?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
-  he: { question: 'מה נפח האחסון שלו?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
+  he: { question: 'מה נפח האחסון?', options: ['64 GB', '128 GB', '256 GB', '512 GB'] },
 };
 const STORAGE_NAME = /^storage( capacity| size)?$/;
 
@@ -309,8 +309,8 @@ const STORAGE_NAME = /^storage( capacity| size)?$/;
 // named candidates, the question becomes a choice among them — one tap, "not sure" added by the app — and the photograph
 // is asked for only when nothing was narrowed. The answer is the OWNER's word (confirmed.js): nothing is guessed.
 const MODEL_CHOICE = {
-  en: 'Which model is it? (It is shown in the device settings or on its label)',
-  he: 'איזה דגם זה? (מופיע בהגדרות המכשיר או על התווית)',
+  en: 'Which model is it? You can check the device settings or its label.',
+  he: 'איזה דגם זה? אפשר לבדוק בהגדרות המכשיר או על התווית.',
 };
 const IDENTITY_ATTRIBUTE = /^(model|generation|version|model number|series|edition|identity|exact model|model name)$/;
 /** The candidate models the photograph narrowed the item to, most likely first, or [] when fewer than two. */

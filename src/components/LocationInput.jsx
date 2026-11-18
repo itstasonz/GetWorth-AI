@@ -28,7 +28,7 @@ const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
           const locationName = city || area || (rtl ? 'מיקום נמצא' : 'Location found');
           onChange({ target: { value: locationName } });
         } catch (e) {
-          setError(rtl ? 'שגיאה בזיהוי מיקום' : 'Failed to get location');
+          setError(rtl ? 'לא הצלחנו לזהות את המיקום' : 'Could not get your location');
         }
         setLoading(false);
       },
@@ -45,7 +45,7 @@ const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
             setError(rtl ? 'הזמן הקצוב פג' : 'Request timeout');
             break;
           default:
-            setError(rtl ? 'שגיאה בזיהוי מיקום' : 'Failed to get location');
+            setError(rtl ? 'לא הצלחנו לזהות את המיקום' : 'Could not get your location');
         }
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }

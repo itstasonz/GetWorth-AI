@@ -105,16 +105,16 @@ export function completedPriceLine({ listingPrice, buyer = null, seller = null, 
     return {
       kind: 'agreed', amount: Number(buyer),
       label: he ? 'מחיר סופי מוסכם' : 'Final agreed price',
-      note: he ? 'כפי שדיווחו הקונה והמוכר. התשלום נעשה ישירות ביניהם — GetWorth לא מעבדת תשלומים.'
-        : 'As reported by both buyer and seller. Payment was made directly between them — GetWorth does not process payments.',
+      note: he ? 'כפי שדיווחו הקונה והמוכר. התשלום נעשה ישירות ביניהם. GetWorth לא מעבדת תשלומים.'
+        : 'As reported by both buyer and seller. Payment was made directly between them. GetWorth does not process payments.',
     };
   }
   return {
     kind: 'listing', amount: Number(listingPrice) || 0,
     label: he ? 'מחיר המודעה' : 'Listing price',
     note: role === 'seller'
-      ? (he ? 'המחיר שפרסמת. התשלום נעשה ישירות מול הקונה — GetWorth לא מעבדת תשלומים.' : 'The price you listed. Payment is made directly with the buyer — GetWorth does not process payments.')
-      : (he ? 'המחיר שפרסם המוכר. התשלום נעשה ישירות מול המוכר — GetWorth לא מעבדת תשלומים.' : 'The price the seller listed. Payment is made directly with the seller — GetWorth does not process payments.'),
+      ? (he ? 'המחיר שפרסמתם. התשלום נעשה ישירות מול הקונה. GetWorth לא מעבדת תשלומים.' : 'The price you listed. Payment is made directly with the buyer. GetWorth does not process payments.')
+      : (he ? 'המחיר שפרסם המוכר. התשלום נעשה ישירות מול המוכר. GetWorth לא מעבדת תשלומים.' : 'The price the seller listed. Payment is made directly with the seller. GetWorth does not process payments.'),
   };
 }
 

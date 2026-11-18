@@ -153,7 +153,7 @@ function CheckoutForm({ listing }) {
               { n: '1', en: 'Request sent to seller',                he: 'הבקשה נשלחת למוכר' },
               { n: '2', en: 'Seller accepts and arranges a meetup',  he: 'המוכר מאשר ומתאם מסירה' },
               { n: '3', en: 'Meet, inspect and pay in person',       he: 'פגישה, בדיקה, תשלום (מזומן / ביט)' },
-              { n: '4', en: 'Confirm receipt in the app to complete ✓', he: 'אשר קבלה באפליקציה לסיום ✓' },
+              { n: '4', en: 'Confirm receipt in the app to complete the deal', he: 'מאשרים קבלה באפליקציה והעסקה מסתיימת' },
             ].map(s => (
               <div key={s.n} className="flex items-start gap-3 px-4 py-2.5 border-t border-white/5">
                 <span className="w-5 h-5 rounded-full bg-white/10 text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5 text-slate-300">{s.n}</span>
@@ -172,7 +172,7 @@ function CheckoutForm({ listing }) {
           <div className="flex gap-3">
             <button onClick={() => setShowCheckout(false)} className="flex-1 py-3.5 rounded-xl bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 transition-all">{lang === 'he' ? 'ביטול' : 'Cancel'}</button>
             <Btn primary className="flex-1 py-3.5" onClick={() => { haptic(12); handleSubmit(); }} disabled={submitting || (deliveryMethod === 'shipping' && !shippingAddress.trim())}>
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</> : <><ShoppingBag className="w-4 h-4" />{lang === 'he' ? 'שלח בקשה לקנייה' : 'Request to Buy'}</>}
+              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</> : <><ShoppingBag className="w-4 h-4" />{lang === 'he' ? 'שליחת בקשת קנייה' : 'Request to buy'}</>}
             </Btn>
           </div>
         </div>
@@ -241,7 +241,7 @@ export function OrdersView() {
           {order.buyer_note && <div className="bg-white/5 rounded-xl p-3"><p className="text-xs text-slate-400"><CornerDownRight className="w-3 h-3 inline mr-1" />{order.buyer_note}</p></div>}
           <div className="flex gap-3">
             <button onClick={() => viewOrder(order)} className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm font-medium hover:bg-white/10 transition-all">{lang === 'he' ? 'פרטים' : 'Details'}</button>
-            <Btn primary className="flex-1 py-2.5" onClick={() => viewOrder(order)}><Check className="w-4 h-4" />{lang === 'he' ? 'בדוק ואשר' : 'Review & Accept'}</Btn>
+            <Btn primary className="flex-1 py-2.5" onClick={() => viewOrder(order)}><Check className="w-4 h-4" />{lang === 'he' ? 'לבדיקה ואישור' : 'Review and accept'}</Btn>
           </div>
         </Card>
       </FadeIn>
@@ -502,13 +502,13 @@ export function OrderDetailView() {
         <FadeIn delay={120}>
           <Card className="p-4" gradient="linear-gradient(135deg, rgba(59,130,246,0.08), rgba(59,130,246,0.02))">
             <p className="text-sm text-slate-300 text-center">
-              {order.status === 'pending' && isBuyer && (lang === 'he' ? 'ממתין לאישור המוכר...' : 'Waiting for seller to accept...')}
-              {order.status === 'pending' && isSeller && (lang === 'he' ? 'יש לך בקשת קנייה חדשה! אשר או דחה למטה.' : 'New purchase request! Accept or decline below.')}
-              {order.status === 'accepted' && isBuyer && (lang === 'he' ? 'המוכר אישר! ממתין שיסמן מוכן.' : 'Seller accepted! Waiting for them to mark ready.')}
-              {order.status === 'accepted' && isSeller && (lang === 'he' ? 'סמן מוכן כשהפריט מוכן לאיסוף/משלוח.' : 'Mark ready when item is prepared.')}
-              {(order.status === 'ready_pickup' || order.status === 'shipped') && isBuyer && (lang === 'he' ? 'המוצר מוכן! אשר קבלה אחרי שתקבל.' : 'Item ready! Confirm receipt after you get it.')}
-              {(order.status === 'ready_pickup' || order.status === 'shipped') && isSeller && (lang === 'he' ? 'ממתין שהקונה יאשר קבלה.' : 'Waiting for buyer to confirm receipt.')}
-              {order.status === 'delivered' && (lang === 'he' ? 'הקונה קיבל! השלם את העסקה.' : 'Buyer received! Complete the transaction.')}
+              {order.status === 'pending' && isBuyer && (lang === 'he' ? 'מחכים לאישור המוכר' : 'Waiting for the seller to accept')}
+              {order.status === 'pending' && isSeller && (lang === 'he' ? 'יש לכם בקשת קנייה חדשה. אפשר לאשר או לדחות למטה.' : 'New purchase request. Accept or decline below.')}
+              {order.status === 'accepted' && isBuyer && (lang === 'he' ? 'המוכר אישר. מחכים שיסמן שהמוצר מוכן.' : 'The seller accepted. Waiting for them to mark it ready.')}
+              {order.status === 'accepted' && isSeller && (lang === 'he' ? 'כשהמוצר מוכן לאיסוף או למשלוח, סמנו אותו כמוכן.' : 'Mark it ready when the item is prepared.')}
+              {(order.status === 'ready_pickup' || order.status === 'shipped') && isBuyer && (lang === 'he' ? 'המוצר מוכן. אחרי שתקבלו אותו, אשרו את הקבלה.' : 'The item is ready. Confirm receipt after you get it.')}
+              {(order.status === 'ready_pickup' || order.status === 'shipped') && isSeller && (lang === 'he' ? 'מחכים שהקונה יאשר את הקבלה' : 'Waiting for the buyer to confirm receipt')}
+              {order.status === 'delivered' && (lang === 'he' ? 'הקונה קיבל את המוצר. אפשר להשלים את העסקה.' : 'The buyer received the item. You can complete the deal.')}
             </p>
           </Card>
         </FadeIn>
@@ -596,7 +596,7 @@ export function OrderDetailView() {
               <>
                 <Btn primary className="w-full py-4" onClick={() => handleAction('accepted')} disabled={updating}>
                   {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-5 h-5" />}
-                  {lang === 'he' ? 'אשר הזמנה' : 'Accept Order'}
+                  {lang === 'he' ? 'אישור ההזמנה' : 'Accept order'}
                 </Btn>
                 <button onClick={() => setShowDeclineConfirm(true)} disabled={updating}
                   className="w-full py-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-sm font-semibold text-red-300 flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all disabled:opacity-40">
@@ -625,7 +625,7 @@ export function OrderDetailView() {
             {order.status === 'delivered' && isBuyer && (
               <Btn primary className="w-full py-4" onClick={() => setShowCompleteConfirm(true)} disabled={updating}>
                 {updating ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
-                {lang === 'he' ? 'אשר והשלם עסקה' : 'Complete Transaction'}
+                {lang === 'he' ? 'השלמת העסקה' : 'Complete the deal'}
               </Btn>
             )}
 
@@ -647,8 +647,8 @@ export function OrderDetailView() {
         <FadeIn delay={250}>
           <Card className="p-6 text-center space-y-2" gradient="linear-gradient(135deg, rgba(16,185,129,0.18), rgba(16,185,129,0.06))">
             <div className="text-4xl mb-1">🎉</div>
-            <h3 className="text-xl font-bold text-emerald-300">{lang === 'he' ? 'עסקה הושלמה בהצלחה!' : 'Deal Complete!'}</h3>
-            <p className="text-sm text-slate-400">{lang === 'he' ? 'תודה שהשתמשת ב-GetWorth!' : 'Thanks for using GetWorth!'}</p>
+            <h3 className="text-xl font-bold text-emerald-300">{lang === 'he' ? 'העסקה הושלמה' : 'Deal completed'}</h3>
+            <p className="text-sm text-slate-400">{lang === 'he' ? 'תודה שהשתמשתם ב־GetWorth' : 'Thanks for using GetWorth'}</p>
             <SalePriceConfirm orderId={order.id} userId={user?.id} listingPrice={order.price} lang={lang} />
           </Card>
         </FadeIn>
@@ -695,7 +695,7 @@ export function OrderDetailView() {
             {reviewRating > 0 && (
               <p className="text-center text-sm font-semibold text-yellow-300">
                 {lang === 'he'
-                  ? [,'גרוע','לא טוב','בסדר','טוב','מעולה!'][reviewRating]
+                  ? [,'גרוע','לא טוב','בסדר','טוב','מעולה'][reviewRating]
                   : ['','Poor','Fair','Good','Great','Excellent!'][reviewRating]}
               </p>
             )}
@@ -713,14 +713,14 @@ export function OrderDetailView() {
                   setReviewSubmitting(false);
                 }
               }}>
-              {reviewSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Submitting...'}</> : <><Star className="w-4 h-4" />{lang === 'he' ? 'שלח ביקורת' : 'Submit Review'}</>}
+              {reviewSubmitting ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'שולח...' : 'Submitting...'}</> : <><Star className="w-4 h-4" />{lang === 'he' ? 'שליחת ביקורת' : 'Send review'}</>}
             </Btn>
           </Card>
         </FadeIn>
       )}
       {order.status === 'completed' && reviewDone === true && (
         <FadeIn><Card className="p-4 text-center" gradient="linear-gradient(135deg, rgba(251,191,36,0.1), rgba(251,191,36,0.03))">
-          <div className="flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5 text-yellow-400" /><span className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'תודה! הביקורת נשלחה' : 'Thank you! Review submitted'}</span></div>
+          <div className="flex items-center justify-center gap-2"><CheckCircle className="w-5 h-5 text-yellow-400" /><span className="text-sm font-semibold text-yellow-300">{lang === 'he' ? 'הביקורת נשלחה. תודה.' : 'Review sent. Thank you.'}</span></div>
         </Card></FadeIn>
       )}
 
@@ -756,13 +756,13 @@ export function OrderDetailView() {
               <div className="text-center space-y-2">
                 <CheckCircle className="w-10 h-10 text-emerald-400 mx-auto" />
                 <h3 className="text-lg font-bold">{lang === 'he' ? 'לאשר סיום עסקה?' : 'Complete this transaction?'}</h3>
-                <p className="text-sm text-slate-400">{lang === 'he' ? 'פעולה זו סופית ואינה ניתנת לביטול. אשר רק לאחר שקיבלת את הפריט ובדקת אותו.' : 'This is final and cannot be undone. Only confirm after you have received and inspected the item.'}</p>
+                <p className="text-sm text-slate-400">{lang === 'he' ? 'אי אפשר לבטל את הפעולה הזו. אשרו רק אחרי שקיבלתם את המוצר ובדקתם אותו.' : 'This is final and cannot be undone. Only confirm after you have received and inspected the item.'}</p>
               </div>
               <FinalPriceField orderId={order.id} askingPrice={order.price} value={finalPriceInput} onChange={setFinalPriceInput} lang={lang} />
               <div className="flex gap-3">
                 <button onClick={() => setShowCompleteConfirm(false)} className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sm font-medium">{lang === 'he' ? 'חזור' : 'Go Back'}</button>
                 <Btn primary className="flex-1 py-3" onClick={() => { setShowCompleteConfirm(false); handleAction('completed', completionMeta(finalPriceInput)); }} disabled={updating || !!parseFinalPrice(finalPriceInput).error}>
-                  {lang === 'he' ? 'אשר וסיים' : 'Confirm & Complete'}
+                  {lang === 'he' ? 'אישור וסיום' : 'Confirm and complete'}
                 </Btn>
               </div>
             </div>
@@ -834,7 +834,7 @@ export function NotificationsView() {
         <FadeIn>
           <div className="text-center py-16 space-y-3">
             <p className="text-sm text-slate-300">{lang === 'he' ? 'לא ניתן לטעון התראות' : "Couldn't load notifications"}</p>
-            <button onClick={loadNotifications} className="px-4 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-colors">{lang === 'he' ? 'נסה שוב' : 'Retry'}</button>
+            <button onClick={loadNotifications} className="px-4 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-colors">{lang === 'he' ? 'לנסות שוב' : 'Try again'}</button>
           </div>
         </FadeIn>
       ) : orderNotifications.length === 0 ? (

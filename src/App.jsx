@@ -184,7 +184,7 @@ function UpdateBanner({ hasUpdate, updating, onUpdate, onDismiss, lang }) {
           </p>
           <p className="text-[11px] text-slate-400 mt-0.5">
             {/* Honest contract: nothing happens until the user chooses; approving reloads the app. */}
-            {lang === 'he' ? 'יופעל רק באישורך — האפליקציה תיטען מחדש' : 'Applies only when you choose — the app will reload'}
+            {lang === 'he' ? 'האפליקציה תיטען מחדש אחרי העדכון' : 'The app reloads after the update'}
           </p>
         </div>
         <button
@@ -252,7 +252,7 @@ function MessageNotificationBanner() {
             }
           </p>
           <p className="text-[10px] text-blue-300 mt-1">
-            {lang === 'he' ? 'לחץ לפתוח שיחה' : 'Tap to open chat'} →
+            {lang === 'he' ? 'לפתיחת השיחה' : 'Open chat'}
           </p>
         </div>
 
@@ -462,7 +462,7 @@ function AppShell() {
                   style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
                 >
                   <Upload className="w-4 h-4" />
-                  {lang === 'he' ? 'העלה תמונה' : 'Upload photo'}
+                  {lang === 'he' ? 'העלאת תמונה' : 'Upload photo'}
                 </button>
               </div>
             </div>
@@ -502,7 +502,7 @@ function AppShell() {
               <div className="space-y-3">
                 <button onClick={() => { setShowContact(false); startConversation(selected); }}
                   className="w-full py-4 rounded-2xl text-center font-semibold flex items-center justify-center gap-3 active:scale-[0.98] transition-transform" style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733', boxShadow: '0 8px 24px rgba(111,238,225,0.3)' }}>
-                  <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'שלח הודעה באפליקציה' : 'Message in App'}
+                  <MessageCircle className="w-5 h-5" />{lang === 'he' ? 'הודעה באפליקציה' : 'Message in the app'}
                 </button>
 
                 {/* UX-1: WhatsApp renders ONLY with a confidently-normalized

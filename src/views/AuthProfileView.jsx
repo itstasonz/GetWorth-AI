@@ -41,7 +41,7 @@ export function AuthView() {
       <div className="space-y-6 pt-4">
         <FadeIn className="text-center space-y-2">
           <h2 className="text-3xl font-bold">{lang === 'he' ? 'הגדר סיסמה חדשה' : 'Set New Password'}</h2>
-          <p className="text-slate-400">{lang === 'he' ? 'בחר סיסמה חדשה לחשבונך' : 'Choose a new password for your account'}</p>
+          <p className="text-slate-400">{lang === 'he' ? 'בחרו סיסמה חדשה לחשבון' : 'Choose a new password for your account'}</p>
         </FadeIn>
 
         {(authError || localError) && (
@@ -114,7 +114,7 @@ export function AuthView() {
             <Btn primary className="w-full py-4" disabled={authLoading || !resetEmail.trim()}>
               {authLoading
                 ? <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'שולח...' : 'Sending...'}</>
-                : (lang === 'he' ? 'שלח קישור לאיפוס' : 'Send Reset Link')
+                : (lang === 'he' ? 'שליחת קישור לאיפוס' : 'Send reset link')
               }
             </Btn>
           </form>
@@ -384,7 +384,7 @@ export function ProfileView() {
               {verificationUploading ? (
                 <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'מעלה...' : 'Uploading...'}</>
               ) : (
-                <><Upload className="w-4 h-4" />{lang === 'he' ? 'העלה סלפי לאימות' : 'Upload selfie to verify'}</>
+                <><Upload className="w-4 h-4" />{lang === 'he' ? 'העלאת סלפי לאימות' : 'Upload a selfie to verify'}</>
               )}
             </button>
             <input ref={verifyInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handleVerifyPick} />
@@ -427,7 +427,7 @@ export function ProfileView() {
               </div>
               <div className="flex-1">
                 <p className="text-sm font-semibold text-red-200">{lang === 'he' ? 'הבקשה נדחתה' : 'Verification rejected'}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'נסה שוב עם תמונת סלפי ברורה' : 'Try again with a clear selfie photo'}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{lang === 'he' ? 'נסו שוב עם סלפי ברור יותר' : 'Try again with a clear selfie photo'}</p>
               </div>
             </div>
             <button
@@ -438,7 +438,7 @@ export function ProfileView() {
               {verificationUploading ? (
                 <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'he' ? 'מעלה...' : 'Uploading...'}</>
               ) : (
-                <><Upload className="w-4 h-4" />{lang === 'he' ? 'נסה שוב' : 'Try again'}</>
+                <><Upload className="w-4 h-4" />{lang === 'he' ? 'לנסות שוב' : 'Try again'}</>
               )}
             </button>
             <input ref={verifyInputRef} type="file" accept="image/*" capture="user" className="hidden" onChange={handleVerifyPick} />
@@ -618,14 +618,14 @@ export function ProfileView() {
                 ) : myReviewsError && myReviews.length === 0 ? (
                   <div className="text-center py-6 space-y-2">
                     <p className="text-sm" style={{ color: STITCH.onSurfaceVariant }}>
-                      {lang === 'he' ? 'שגיאה בטעינת הביקורות' : 'Failed to load reviews'}
+                      {lang === 'he' ? 'הביקורות לא נטענו' : 'Reviews did not load'}
                     </p>
                     <button
                       onClick={loadMyReviews}
                       className="px-4 py-1.5 rounded-xl text-xs font-semibold"
                       style={{ background: 'rgba(111,238,225,0.12)', color: STITCH.primary }}
                     >
-                      {lang === 'he' ? 'נסה שוב' : 'Retry'}
+                      {lang === 'he' ? 'לנסות שוב' : 'Try again'}
                     </button>
                   </div>
                 ) : myReviews.length === 0 ? (
@@ -774,7 +774,7 @@ export function ProfileView() {
                       className="flex items-center gap-1.5 text-[11px] text-red-400/70 hover:text-red-400 transition-colors"
                     >
                       <Trash2 className="w-3 h-3" />
-                      {lang === 'he' ? 'מחק הכל' : 'Clear All'}
+                      {lang === 'he' ? 'מחיקת הכל' : 'Clear all'}
                     </button>
                   ) : (
                     <div className="flex items-center gap-2">
@@ -783,7 +783,7 @@ export function ProfileView() {
                         onClick={() => { clearAllValuations(); setConfirmClearAll(false); setScansExpanded(false); }}
                         className="px-2.5 py-1 rounded-lg bg-red-500/20 text-[11px] text-red-300 font-semibold hover:bg-red-500/30 transition-colors"
                       >
-                        {lang === 'he' ? 'כן, מחק' : 'Yes, delete'}
+                        {lang === 'he' ? 'כן, למחוק' : 'Yes, delete'}
                       </button>
                       <button
                         onClick={() => setConfirmClearAll(false)}

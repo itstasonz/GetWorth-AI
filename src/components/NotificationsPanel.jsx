@@ -94,7 +94,7 @@ export default function NotificationsPanel() {
             {!user ? (
               <div className="text-center py-10 space-y-3">
                 <LogIn className="w-10 h-10 text-slate-600 mx-auto" />
-                <p className="text-sm text-slate-400">{lang === 'he' ? 'התחבר כדי לראות התראות' : 'Sign in to see your notifications'}</p>
+                <p className="text-sm text-slate-400">{lang === 'he' ? 'התחברו כדי לראות התראות' : 'Sign in to see your notifications'}</p>
                 <button
                   onClick={() => { close(); goTab('profile'); }}
                   className="px-5 py-2 rounded-xl text-sm font-bold"
@@ -116,7 +116,7 @@ export default function NotificationsPanel() {
                   onClick={loadNotifications}
                   className="px-4 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-colors"
                 >
-                  {lang === 'he' ? 'נסה שוב' : 'Retry'}
+                  {lang === 'he' ? 'לנסות שוב' : 'Try again'}
                 </button>
               </div>
             ) : orderNotifications.length === 0 ? (

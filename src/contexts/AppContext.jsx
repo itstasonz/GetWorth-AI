@@ -1510,7 +1510,7 @@ export function AppProvider({ children }) {
     }
     const sellerId = item.seller_id || item.seller?.id;
     if (sellerId === user.id) {
-      showToastMsg(lang === 'he' ? 'זה הפריט שלך!' : "That's your own listing!"); return;
+      showToastMsg(lang === 'he' ? 'זו המודעה שלכם' : 'This is your own listing'); return;
     }
     const ownerId = user.id; // FRONTEND-004b: no post-logout chat navigation
     const { data: existingList } = await supabase.from('conversations').select('*')
@@ -1524,7 +1524,7 @@ export function AppProvider({ children }) {
       setActiveChat({ ...existing, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
       setNavDirection('push'); loadMessages(existing.id); setView('chat'); return;
     }
-    if (!sellerId) { setError(lang === 'he' ? 'לא ניתן ליצור שיחה' : 'Cannot start conversation'); return; }
+    if (!sellerId) { setError(lang === 'he' ? 'אי אפשר לפתוח שיחה כרגע' : 'Cannot start a conversation right now'); return; }
     const payload = { listing_id: item.id, buyer_id: user.id, seller_id: sellerId };
     // Use .select() WITHOUT .single() — same pattern as messages.
     // If RETURNING is filtered to 0 rows by the conversations SELECT RLS policy,
@@ -1547,7 +1547,7 @@ export function AppProvider({ children }) {
         setActiveChat({ ...retry, listing: item, seller: item.seller, otherUser: otherProfile || item.seller });
         setNavDirection('push'); loadMessages(retry.id); setView('chat'); return;
       }
-      setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation'); return;
+      setError(lang === 'he' ? 'לא הצלחנו לפתוח שיחה. נסו שוב.' : 'Could not start the conversation. Try again.'); return;
     }
     const newConv = rows?.[0] ?? null;
     if (newConv) {
@@ -1566,7 +1566,7 @@ export function AppProvider({ children }) {
         setNavDirection('push'); setMessages([]); setView('chat'); loadConversations(true);
       } else {
         console.error('[Chat] Could not fetch conversation after INSERT');
-        setError(lang === 'he' ? 'שגיאה ביצירת שיחה' : 'Failed to start conversation');
+        setError(lang === 'he' ? 'לא הצלחנו לפתוח שיחה. נסו שוב.' : 'Could not start the conversation. Try again.');
       }
     }
   };
@@ -1620,7 +1620,7 @@ export function AppProvider({ children }) {
       console.error('[Chat] payload:', payload);
       setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
       setNewMessage(text);
-      setError(lang === 'he' ? 'שליחת ההודעה נכשלה' : 'Failed to send message');
+      setError(lang === 'he' ? 'ההודעה לא נשלחה. נסו שוב.' : 'Message not sent. Try again.');
     }
     setSendingMessage(false);
   };
@@ -1673,21 +1673,21 @@ export function AppProvider({ children }) {
         const { data, error: err } = await supabase.auth.signInWithPassword({ email: authForm.email.trim(), password: authForm.password });
         if (err) {
           if (err.message === 'Invalid login credentials') setAuthError(lang === 'he' ? 'אימייל או סיסמה שגויים' : 'Invalid email or password');
-          else if (err.message.includes('Email not confirmed')) setAuthError(lang === 'he' ? 'יש לאשר את האימייל קודם' : 'Please confirm your email first');
+          else if (err.message.includes('Email not confirmed')) setAuthError(lang === 'he' ? 'צריך לאשר את האימייל לפני הכניסה' : 'Confirm your email before signing in');
           else setAuthError(err.message);
         } else if (data?.user) {
           setView('profile'); setTab('profile'); setAuthForm({ name: '', email: '', password: '' });
-          showToastMsg(lang === 'he' ? 'התחברת בהצלחה!' : 'Signed in!');
+          showToastMsg(lang === 'he' ? 'התחברתם' : 'Signed in');
         }
       } else {
         const { data, error: err } = await supabase.auth.signUp({ email: authForm.email.trim(), password: authForm.password, options: { data: { full_name: authForm.name } } });
         if (err) setAuthError(err.message);
-        else if (data?.user?.identities?.length === 0) setAuthError(lang === 'he' ? 'חשבון כבר קיים עם אימייל זה' : 'An account already exists with this email');
-        else { setAuthError(null); showToastMsg(lang === 'he' ? 'נרשמת! בדוק את האימייל שלך' : 'Signed up! Check your email'); }
+        else if (data?.user?.identities?.length === 0) setAuthError(lang === 'he' ? 'כבר יש חשבון עם האימייל הזה' : 'An account already exists with this email');
+        else { setAuthError(null); showToastMsg(lang === 'he' ? 'נרשמתם. בדקו את האימייל כדי לאשר את החשבון.' : 'Account created. Check your email to confirm it.'); }
       }
     } catch (err) {
       console.error('Auth error:', err);
-      setAuthError(lang === 'he' ? 'שגיאת חיבור' : 'Connection error');
+      setAuthError(lang === 'he' ? 'אין חיבור. נסו שוב.' : 'Connection problem. Try again.');
     }
     setAuthLoading(false);
   };
@@ -1713,7 +1713,7 @@ export function AppProvider({ children }) {
     // when the auth event lands; this call just wins the race for the eye.
     clearUserState({ navigate: true, outgoingUserId });
     setToasts([]); // drop any previous-account toasts before confirming
-    showToastMsg(lang === 'he' ? 'התנתקת' : 'Signed out');
+    showToastMsg(lang === 'he' ? 'התנתקתם' : 'Signed out');
   };
 
   const sendPasswordReset = async (email) => {
@@ -1724,10 +1724,10 @@ export function AppProvider({ children }) {
         redirectTo: window.location.origin,
       });
       if (err) throw err;
-      showToastMsg(lang === 'he' ? 'קישור לאיפוס נשלח לאימייל!' : 'Reset link sent! Check your email');
+      showToastMsg(lang === 'he' ? 'שלחנו לאימייל קישור לאיפוס הסיסמה' : 'We sent a password reset link to your email');
       setAuthMode('login');
     } catch (err) {
-      setAuthError(lang === 'he' ? 'שליחה נכשלה. בדוק את כתובת האימייל.' : 'Failed to send. Check the email address.');
+      setAuthError(lang === 'he' ? 'השליחה לא הצליחה. בדקו את כתובת האימייל.' : 'Failed to send. Check the email address.');
     }
     setAuthLoading(false);
   };
@@ -1748,7 +1748,7 @@ export function AppProvider({ children }) {
       setTab('profile');
       showToastMsg(lang === 'he' ? 'הסיסמה עודכנה' : 'Password updated');
     } catch {
-      setAuthError(lang === 'he' ? 'עדכון נכשל. נסה שוב.' : 'Update failed. Please try again.');
+      setAuthError(lang === 'he' ? 'העדכון לא הצליח. נסו שוב.' : 'Update failed. Try again.');
     }
     setAuthLoading(false);
   };
@@ -1781,11 +1781,11 @@ export function AppProvider({ children }) {
   const uploadAvatar = useCallback(async (file) => {
     if (!user || !file) return;
     if (!file.type.startsWith('image/')) {
-      showToastMsg(lang === 'he' ? 'קובץ לא תקין' : 'Invalid file type');
+      showToastMsg(lang === 'he' ? 'הקובץ הזה לא נתמך' : 'This file type is not supported');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי (עד 10MB)' : 'File too large (max 10MB)');
+      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי. אפשר להעלות עד 10MB.' : 'File too large (max 10MB)');
       return;
     }
 
@@ -1834,13 +1834,13 @@ export function AppProvider({ children }) {
 
       // Update local state
       setProfile(prev => ({ ...prev, avatar_url: publicUrl }));
-      showToastMsg(lang === 'he' ? 'התמונה עודכנה!' : 'Photo updated!');
+      showToastMsg(lang === 'he' ? 'התמונה עודכנה' : 'Photo updated');
       if (DEV) console.log('[Avatar] Uploaded:', publicUrl);
 
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) { setAvatarUploading(false); return; }
       console.error('[Avatar] Upload failed:', e);
-      showToastMsg(lang === 'he' ? 'שגיאה בהעלאת התמונה' : 'Failed to upload photo');
+      showToastMsg(lang === 'he' ? 'התמונה לא הועלתה. נסו שוב.' : 'Photo not uploaded. Try again.');
     }
     setAvatarUploading(false);
   }, [user, lang, showToastMsg]);
@@ -1856,11 +1856,11 @@ export function AppProvider({ children }) {
     const typeByExt  = /\.(jpe?g|png|webp|heic|heif|gif|avif)$/i.test(file.name ?? '');
     const isImage    = typeByMime || typeByExt || !file.type;
     if (!isImage) {
-      showToastMsg(lang === 'he' ? 'קובץ לא תקין. בחר תמונה' : 'Invalid file. Please choose an image.', 'error');
+      showToastMsg(lang === 'he' ? 'הקובץ לא נתמך. בחרו תמונה.' : 'Invalid file. Please choose an image.', 'error');
       return;
     }
     if (file.size > 10 * 1024 * 1024) {
-      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי (מקסימום 10MB)' : 'File too large (max 10 MB)', 'error');
+      showToastMsg(lang === 'he' ? 'הקובץ גדול מדי. אפשר להעלות עד 10MB.' : 'File too large (max 10 MB)', 'error');
       return;
     }
 
@@ -1879,13 +1879,13 @@ export function AppProvider({ children }) {
 
       // ── 3. Require active session ─────────────────────────────────────────
       if (!user.id) {
-        showToastMsg(lang === 'he' ? 'יש להתחבר מחדש לפני האימות' : 'Please sign in again before verifying.', 'error');
+        showToastMsg(lang === 'he' ? 'צריך להתחבר שוב לפני האימות' : 'Please sign in again before verifying.', 'error');
         setVerificationUploading(false);
         return;
       }
       const { data: { session: liveSession } } = await supabase.auth.getSession();
       if (!liveSession || liveSession.user.id !== user.id) {
-        showToastMsg(lang === 'he' ? 'יש להתחבר מחדש לפני האימות' : 'Please sign in again before verifying.', 'error');
+        showToastMsg(lang === 'he' ? 'צריך להתחבר שוב לפני האימות' : 'Please sign in again before verifying.', 'error');
         setVerificationUploading(false);
         return;
       }
@@ -1904,7 +1904,7 @@ export function AppProvider({ children }) {
       if (currentUserIdRef.current !== ownerId) { setVerificationUploading(false); return; } // FRONTEND-004b
       if (fnErr || !fnData?.ok) {
         const errMsg = fnData?.error ?? fnErr?.message
-          ?? (lang === 'he' ? 'שגיאה בשליחת הסלפי' : 'Failed to submit selfie. Please try again.');
+          ?? (lang === 'he' ? 'הסלפי לא נשלח. נסו שוב.' : 'Failed to submit selfie. Please try again.');
         console.error('[requestVerification] edge fn error:', fnErr, fnData);
         showToastMsg(errMsg, 'error');
         setVerificationUploading(false);
@@ -1928,12 +1928,12 @@ export function AppProvider({ children }) {
         profileLastLoadRef.current = Date.now();
       }
 
-      showToastMsg(lang === 'he' ? 'הבקשה נשלחה! נבדוק בהקדם' : 'Request submitted! We\'ll review soon');
+      showToastMsg(lang === 'he' ? 'הבקשה נשלחה. נבדוק אותה בהקדם.' : 'Request sent. We will review it soon.');
 
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) { setVerificationUploading(false); return; } // FRONTEND-004b
       console.error('[requestVerification] unexpected error:', e);
-      showToastMsg(lang === 'he' ? 'שגיאה בשליחת הסלפי' : 'Failed to submit selfie. Please try again.', 'error');
+      showToastMsg(lang === 'he' ? 'הסלפי לא נשלח. נסו שוב.' : 'Failed to submit selfie. Please try again.', 'error');
     }
     setVerificationUploading(false);
   }, [user, lang, showToastMsg]);
@@ -1954,7 +1954,7 @@ export function AppProvider({ children }) {
       if (currentUserIdRef.current !== ownerId) return;
       if (error) {
         console.error('[Saved] Remove failed:', error.message);
-        showToastMsg(lang === 'he' ? 'שגיאה בהסרה — נסה שוב' : 'Remove failed — try again', 'error');
+        showToastMsg(lang === 'he' ? 'ההסרה לא הצליחה. נסו שוב.' : 'Could not remove. Try again.', 'error');
         return;
       }
       setSavedIds((prev) => { const n = new Set(prev); n.delete(item.id); return n; });
@@ -1965,7 +1965,7 @@ export function AppProvider({ children }) {
       if (currentUserIdRef.current !== ownerId) return;
       if (error) {
         console.error('[Saved] Save failed:', error.message);
-        showToastMsg(lang === 'he' ? 'שגיאה בשמירה — נסה שוב' : 'Save failed — try again', 'error');
+        showToastMsg(lang === 'he' ? 'השמירה לא הצליחה. נסו שוב.' : 'Could not save. Try again.', 'error');
         return;
       }
       setSavedIds((prev) => new Set(prev).add(item.id));
@@ -2000,7 +2000,7 @@ export function AppProvider({ children }) {
       if (currentUserIdRef.current !== ownerId) return false;
       if (delErr || !updatedRows?.length) {
         if (DEV) console.warn('[Delete] listing update failed:', delErr?.message || '0 rows');
-        showToastMsg(lang === 'he' ? 'שגיאה במחיקת המודעה' : 'Failed to delete listing', 'error');
+        showToastMsg(lang === 'he' ? 'המודעה לא נמחקה. נסו שוב.' : 'Failed to delete listing', 'error');
         return false; // listing and images untouched
       }
 
@@ -2049,7 +2049,7 @@ export function AppProvider({ children }) {
     if (currentUserIdRef.current !== user.id) return false; // FRONTEND-004b ownership
     if (error || !data?.length) {
       if (DEV) console.warn('[EditListing] update failed:', error?.message);
-      showToastMsg(lang === 'he' ? 'שגיאה בעדכון המודעה' : 'Failed to update listing');
+      showToastMsg(lang === 'he' ? 'המודעה לא עודכנה. נסו שוב.' : 'Failed to update listing');
       return false;
     }
     const updated = data[0];
@@ -2215,7 +2215,7 @@ export function AppProvider({ children }) {
         if (!_accessToken) {
           // Booleans only — never the token, never the user id.
           console.warn('[Analyze] blocked: no access token at request time (session absent or refresh failed)');
-          const authErr = new Error(lang === 'he' ? 'יש להתחבר כדי לסרוק' : 'Sign in required to scan');
+          const authErr = new Error(lang === 'he' ? 'התחברו כדי לסרוק' : 'Sign in required to scan');
           authErr.authRequired = true;
           throw authErr;
         }
@@ -2247,8 +2247,8 @@ export function AppProvider({ children }) {
               || parseInt(res.headers.get('Retry-After') || '0', 10)
               || 30;
             const msg = errBody.message || (errBody.limitType === 'user_daily'
-              ? (lang === 'he' ? 'הגעת למכסת הסריקות היומית. נסה שוב מחר.' : 'Daily scan limit reached. Try again tomorrow.')
-              : (lang === 'he' ? 'יותר מדי סריקות. המתן רגע ונסה שוב.' : 'Too many scans. Please wait a moment and try again.'));
+              ? (lang === 'he' ? 'הגעתם למכסת הסריקות להיום. אפשר לסרוק שוב מחר.' : 'Daily scan limit reached. Try again tomorrow.')
+              : (lang === 'he' ? 'יותר מדי סריקות ברצף. חכו רגע ונסו שוב.' : 'Too many scans in a row. Wait a moment and try again.'));
             const rlErr = new Error(msg);
             rlErr.rateLimited = true;
             rlErr.retryAfter = secs;
@@ -2259,8 +2259,8 @@ export function AppProvider({ children }) {
             let errBody = {};
             try { errBody = await res.json(); } catch {}
             const msg = errBody.code === 'SESSION_EXPIRED'
-              ? (lang === 'he' ? 'פג תוקף החיבור — התחבר מחדש' : 'Session expired — please sign in again')
-              : (lang === 'he' ? 'יש להתחבר כדי לסרוק' : 'Sign in required to scan');
+              ? (lang === 'he' ? 'פג תוקף ההתחברות. התחברו שוב.' : 'Your session expired. Sign in again.')
+              : (lang === 'he' ? 'התחברו כדי לסרוק' : 'Sign in required to scan');
             // AUTH-001: tagged so runPipeline can leave the scanning state AND
             // offer sign-in, rather than showing a dead-end error. A 401 the
             // client could not predict (token accepted locally, rejected by the
@@ -2277,7 +2277,7 @@ export function AppProvider({ children }) {
             // Stage 1 timeout — explicit retry message, not a generic "server error"
             if (errBody.code === 'STAGE1_TIMEOUT' || errBody.retryable) {
               const msg = errBody.error
-                || (lang === 'he' ? 'הזיהוי נכשל — אנא נסה שוב' : 'Recognition timed out — please try again');
+                || (lang === 'he' ? 'הזיהוי לא הצליח. נסו שוב.' : 'Identification took too long. Try again.');
               const retryErr = new Error(msg);
               retryErr.retryable = true;
               retryErr.code = errBody.code || 'SERVER_ERROR';
@@ -2300,10 +2300,10 @@ export function AppProvider({ children }) {
             return parsed;
           } catch (parseErr) {
             if (DEV) console.error('[Analyze] JSON parse error:', parseErr, data.content[0].text);
-            throw new Error(lang === 'he' ? 'תגובה לא תקינה מהשרת' : 'Invalid response from server');
+            throw new Error(lang === 'he' ? 'משהו השתבש. נסו שוב.' : 'Something went wrong. Try again.');
           }
         }
-        throw new Error(lang === 'he' ? 'תגובה לא תקינה מהשרת' : 'Invalid response from server');
+        throw new Error(lang === 'he' ? 'משהו השתבש. נסו שוב.' : 'Something went wrong. Try again.');
       } catch (e) {
         clearTimeout(timeoutId);
         pipelineSignal.removeEventListener('abort', onPipelineAbort);
@@ -2315,7 +2315,7 @@ export function AppProvider({ children }) {
         // Timeout — retryable
         if (e.name === 'AbortError') {
           if (attempt === maxRetries) {
-            throw new Error(lang === 'he' ? 'הזמן הקצוב פג, נסה שוב' : 'Request timed out, please try again');
+            throw new Error(lang === 'he' ? 'זה לקח יותר מדי זמן. נסו שוב.' : 'This took too long. Try again.');
           }
           continue;
         }
@@ -2430,7 +2430,7 @@ export function AppProvider({ children }) {
       showToastMsg(lang === 'he' ? 'הסריקה נמחקה' : 'Scan deleted');
     } catch (e) {
       if (DEV) console.warn('[Valuation] Delete error:', e.message);
-      showToastMsg(lang === 'he' ? 'שגיאה במחיקה' : 'Delete failed');
+      showToastMsg(lang === 'he' ? 'המחיקה לא הצליחה' : 'Delete failed');
     }
   }, [user, lang, showToastMsg]);
 
@@ -2444,7 +2444,7 @@ export function AppProvider({ children }) {
       showToastMsg(lang === 'he' ? 'כל הסריקות נמחקו' : 'All scans cleared');
     } catch (e) {
       if (DEV) console.warn('[Valuations] Clear error:', e.message);
-      showToastMsg(lang === 'he' ? 'שגיאה במחיקה' : 'Clear failed');
+      showToastMsg(lang === 'he' ? 'המחיקה לא הצליחה' : 'Clear failed');
     }
   }, [user, lang, showToastMsg]);
 
@@ -2698,7 +2698,7 @@ export function AppProvider({ children }) {
     if (Date.now() < scanCooldownUntilRef.current) {
       const secs = Math.ceil((scanCooldownUntilRef.current - Date.now()) / 1000);
       setPipelineState('analysis_error');
-      setPipelineError(lang === 'he' ? `המתן ${secs} שניות לפני סריקה נוספת` : `Please wait ${secs}s before scanning again`);
+      setPipelineError(lang === 'he' ? `אפשר לסרוק שוב בעוד ${secs} שניות` : `You can scan again in ${secs}s`);
       return;
     }
 
@@ -2866,7 +2866,7 @@ export function AppProvider({ children }) {
         });
         setPipelineState('analysis_error');
         setPipelineError(lang === 'he'
-          ? 'צילום התמונה נכשל. אנא צלם שוב.'
+          ? 'הצילום לא הצליח. צלמו שוב.'
           : 'Photo capture failed. Please retake the photo.');
         playSound('error');
         setImages([]);          // never leave a dead frame on screen as the scan
@@ -3011,7 +3011,7 @@ export function AppProvider({ children }) {
       console.error('[Pipeline] Failed:', e);
       const failedAtCompress = !imagesRef.current.length || pipelineState === 'compressing';
       setPipelineState(failedAtCompress ? 'compress_error' : 'analysis_error');
-      setPipelineError(e.message || (lang === 'he' ? 'שגיאה' : 'An error occurred'));
+      setPipelineError(e.message || (lang === 'he' ? 'משהו השתבש. נסו שוב.' : 'Something went wrong. Try again.'));
       playSound('error');
     } finally {
       // Always release the in-flight guard so legitimate retries can proceed.
@@ -3117,7 +3117,7 @@ export function AppProvider({ children }) {
       console.warn('[Camera] added photo produced no image:', addPixels.reason, addPixels);
       setShowFlash(false);
       showToastMsg(lang === 'he'
-        ? 'צילום התמונה נכשל. אנא צלם שוב.'
+        ? 'הצילום לא הצליח. צלמו שוב.'
         : 'Photo capture failed. Please retake the photo.');
       return;
     }
@@ -3133,11 +3133,11 @@ export function AppProvider({ children }) {
         }, 50);
       } else {
         setShowFlash(false);
-        showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture failed');
+        showToastMsg(lang === 'he' ? 'הצילום לא הצליח' : 'Capture failed');
       }
     } catch (e) {
       setShowFlash(false);
-      showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture error');
+      showToastMsg(lang === 'he' ? 'הצילום לא הצליח' : 'Capture error');
     }
   }, [runPipeline, playSound, releaseCamera, lang, showToastMsg]);
 
@@ -3153,7 +3153,7 @@ export function AppProvider({ children }) {
     };
     reader.onerror = () => {
       setPipelineState('compress_error');
-      setPipelineError(lang === 'he' ? 'שגיאה בקריאת הקובץ' : 'Failed to read file');
+      setPipelineError(lang === 'he' ? 'לא הצלחנו לקרוא את הקובץ' : 'Failed to read file');
     };
     reader.readAsDataURL(file);
   }, [runPipeline, playSound, lang]);
@@ -3255,7 +3255,7 @@ export function AppProvider({ children }) {
       console.error('[Refine] Failed:', e);
       // Fall back to existing result instead of showing error
       setView('results');
-      showToastMsg(lang === 'he' ? 'שגיאה בעדכון, מחירים מקוריים נשמרו' : 'Update failed, original prices kept');
+      showToastMsg(lang === 'he' ? 'העדכון לא הצליח. המחירים הקודמים נשמרו.' : 'Update failed, original prices kept');
     }
   }, [images, result, analyzeWithRetry, backupValuation, storeCorrection, playSound, lang, showToastMsg, confirmIdentityRemote]);
 
@@ -3348,8 +3348,8 @@ export function AppProvider({ children }) {
       if (res.ok) {
         showToastMsg(
           lang === 'he'
-            ? 'תודה — זה עוזר לשפר סריקות עתידיות!'
-            : 'Thanks — this helps improve future scans!',
+            ? 'תודה, זה עוזר לנו לשפר את הזיהוי.'
+            : 'Thanks, this helps us improve identification.',
           'success'
         );
       }
@@ -3394,7 +3394,7 @@ export function AppProvider({ children }) {
     };
     reader.onerror = () => {
       setPipelineState('compress_error');
-      setPipelineError(lang === 'he' ? 'שגיאה בקריאת הקובץ' : 'Failed to read file');
+      setPipelineError(lang === 'he' ? 'לא הצלחנו לקרוא את הקובץ' : 'Failed to read file');
     };
     reader.readAsDataURL(file);
   }, [runPipeline, playSound, lang, addPhotoMode]);
@@ -3529,7 +3529,7 @@ export function AppProvider({ children }) {
           ? (lang === 'he'
             ? 'המצלמה דורשת חיבור מאובטח (HTTPS). השתמש בכפתור ההעלאה כדי לצלם.'
             : 'The camera needs a secure (HTTPS) connection. Use the upload button to take a photo.')
-          : (lang === 'he' ? 'המצלמה אינה נתמכת בדפדפן זה' : 'Camera is not supported in this browser'));
+          : (lang === 'he' ? 'הדפדפן הזה לא תומך במצלמה' : 'Camera is not supported in this browser'));
         cameraStartingRef.current = false;
         return;
       }
@@ -3599,7 +3599,7 @@ export function AppProvider({ children }) {
         cameraPermissionGranted.current = false;
         setCameraBlocked(true);
       } else {
-        setError(lang === 'he' ? 'שגיאה בפתיחת המצלמה' : 'Failed to open camera');
+        setError(lang === 'he' ? 'המצלמה לא נפתחה' : 'Failed to open camera');
       }
     }
     cameraStartingRef.current = false;
@@ -3626,7 +3626,7 @@ export function AppProvider({ children }) {
     // Check video is actually producing frames
     if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
       if (DEV) console.warn('[Camera] Capture aborted: video not ready', video.readyState, video.videoWidth);
-      showToastMsg(lang === 'he' ? 'המצלמה עדיין נטענת, נסה שוב' : 'Camera still loading, try again');
+      showToastMsg(lang === 'he' ? 'המצלמה עדיין נטענת. נסו שוב בעוד רגע.' : 'Camera still loading, try again');
       return;
     }
 
@@ -3660,7 +3660,7 @@ export function AppProvider({ children }) {
       console.warn('[Camera] capture produced no image:', capturedPixels.reason, capturedPixels);
       setShowFlash(false);
       showToastMsg(lang === 'he'
-        ? 'צילום התמונה נכשל. אנא צלם שוב.'
+        ? 'הצילום לא הצליח. צלמו שוב.'
         : 'Photo capture failed. Please retake the photo.');
       return;
     }
@@ -3670,7 +3670,7 @@ export function AppProvider({ children }) {
       if (!rawImg) {
         if (DEV) console.warn('[Camera] Capture produced empty image');
         setShowFlash(false);
-        showToastMsg(lang === 'he' ? 'שגיאה בצילום, נסה שוב' : 'Capture failed, try again');
+        showToastMsg(lang === 'he' ? 'הצילום לא הצליח. נסו שוב.' : 'Capture failed, try again');
         return;
       }
       capturedImageRef.current = rawImg;
@@ -3705,7 +3705,7 @@ export function AppProvider({ children }) {
     } catch (e) {
       console.error('[Camera] Canvas toDataURL failed:', e);
       setShowFlash(false);
-      showToastMsg(lang === 'he' ? 'שגיאה בצילום' : 'Capture error');
+      showToastMsg(lang === 'he' ? 'הצילום לא הצליח' : 'Capture error');
     }
   }, [runPipeline, playSound, releaseCamera, lang, showToastMsg, addPhotoMode]);
 
@@ -3792,8 +3792,8 @@ export function AppProvider({ children }) {
     if (imageFiles.length > available) {
       showToastMsg(
         available > 0
-          ? (lang === 'he' ? `ניתן להוסיף עוד ${available} תמונות בלבד (מקסימום 6)` : `Only ${available} photo${available !== 1 ? 's' : ''} left (max 6)`)
-          : (lang === 'he' ? 'הגעת למגבלת 6 תמונות' : 'Photo limit reached (max 6)'),
+          ? (lang === 'he' ? `${available === 1 ? 'אפשר להוסיף עוד תמונה אחת' : `אפשר להוסיף עוד ${available} תמונות`}. עד 6 בסך הכל.` : `Only ${available} photo${available !== 1 ? 's' : ''} left (max 6)`)
+          : (lang === 'he' ? 'אפשר להוסיף עד 6 תמונות' : 'You can add up to 6 photos'),
         'error',
       );
       if (available <= 0) return;
@@ -3841,9 +3841,9 @@ export function AppProvider({ children }) {
 
   const publishListing = async () => {
     if (publishLockRef.current) return; // second tap: no upload, no insert, no toast
-    if (!user) { setError(lang === 'he' ? 'יש להתחבר תחילה' : 'Please sign in first'); return; }
+    if (!user) { setError(lang === 'he' ? 'צריך להתחבר קודם' : 'Please sign in first'); return; }
     if (!listingData.title || !listingData.price || !listingData.phone || !listingData.location) {
-      setError(lang === 'he' ? 'נא למלא את כל השדות' : 'Please fill all fields'); return;
+      setError(lang === 'he' ? 'מלאו את כל השדות' : 'Please fill all fields'); return;
     }
     publishLockRef.current = true;
     setPublishing(true);
@@ -3919,8 +3919,8 @@ export function AppProvider({ children }) {
       // and tapping Publish again retries the uploads from a known state.
       if (imageUrls.length === 0) {
         throw new Error(images.length === 0
-          ? (lang === 'he' ? 'נדרשת תמונה אחת לפחות' : 'At least one image is required')
-          : (lang === 'he' ? 'העלאת התמונות נכשלה. בדוק את החיבור ונסה שוב.' : 'Image upload failed. Check your connection and try again.'));
+          ? (lang === 'he' ? 'צריך לפחות תמונה אחת' : 'At least one image is required')
+          : (lang === 'he' ? 'התמונות לא הועלו. בדקו את החיבור ונסו שוב.' : 'Image upload failed. Check your connection and try again.'));
       }
       const rawCategory = (result?.category || 'Other').trim();
       const normalizedCategory = VALID_CATEGORIES.includes(rawCategory) ? rawCategory : 'Other';
@@ -4016,8 +4016,8 @@ export function AppProvider({ children }) {
       if (dropped > 0) {
         showToastMsg(
           lang === 'he'
-            ? `${dropped} ${dropped === 1 ? 'תמונה לא הועלתה' : 'תמונות לא הועלו'} — המודעה פורסמה עם ${imageUrls.length}`
-            : `${dropped} photo${dropped !== 1 ? 's' : ''} failed to upload — published with ${imageUrls.length}`,
+            ? `${dropped === 1 ? 'תמונה אחת לא הועלתה' : `${dropped} תמונות לא הועלו`}. המודעה פורסמה עם ${imageUrls.length === 1 ? 'תמונה אחת' : `${imageUrls.length} תמונות`}.`
+            : `${dropped} photo${dropped !== 1 ? 's' : ''} did not upload. The listing was published with ${imageUrls.length}.`,
           'error',
         );
       }
@@ -4025,7 +4025,7 @@ export function AppProvider({ children }) {
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) return; // FRONTEND-004b — no error banner post-logout
       console.error('Publish error:', e);
-      setError(e.message || (lang === 'he' ? 'שגיאה בפרסום, נסה שוב' : 'Failed to publish. Please try again.'));
+      setError(e.message || (lang === 'he' ? 'המודעה לא פורסמה. נסו שוב.' : 'Failed to publish. Please try again.'));
       playSound('error');
     } finally {
       publishLockRef.current = false;
@@ -4044,12 +4044,12 @@ export function AppProvider({ children }) {
       });
       if (currentUserIdRef.current !== ownerId) return false;
       if (rptError) throw rptError;
-      showToastMsg(lang === 'he' ? 'הדיווח נשלח, תודה!' : 'Report submitted, thank you!');
+      showToastMsg(lang === 'he' ? 'הדיווח נשלח. תודה.' : 'Report sent. Thank you.');
       return true;
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) return false;
       console.error('Report error:', e);
-      setError(lang === 'he' ? 'שגיאה בדיווח' : 'Failed to submit report');
+      setError(lang === 'he' ? 'הדיווח לא נשלח. נסו שוב.' : 'Failed to submit report');
       return false;
     }
   };
@@ -4122,7 +4122,7 @@ export function AppProvider({ children }) {
   const createOrder = useCallback(async ({ listingId, sellerId, price, deliveryMethod, shippingAddress, buyerNote }) => {
     if (!user) { setSignInAction('buy'); setShowSignInModal(true); return null; }
     if (user.id === sellerId) {
-      showToastMsg(lang === 'he' ? 'אי אפשר לקנות מעצמך' : "You can't buy your own listing");
+      showToastMsg(lang === 'he' ? 'אי אפשר לקנות מודעה שלכם' : "You can't buy your own listing");
       return null;
     }
     const ownerId = user.id; // FRONTEND-004b: no post-logout navigation to orderDetail
@@ -4139,7 +4139,7 @@ export function AppProvider({ children }) {
       if (err) throw err;
       if (currentUserIdRef.current !== ownerId) return null; // FRONTEND-004b
 
-      showToastMsg(lang === 'he' ? 'ההזמנה נשלחה למוכר!' : 'Order sent to seller!');
+      showToastMsg(lang === 'he' ? 'ההזמנה נשלחה למוכר' : 'Order sent to the seller');
       playSound('coin');
       setShowCheckout(false);
 
@@ -4165,7 +4165,7 @@ export function AppProvider({ children }) {
     } catch (e) {
       if (currentUserIdRef.current !== ownerId) return null; // FRONTEND-004b
       console.error('[Orders] Create error:', e);
-      const msg = e?.message || (lang === 'he' ? 'שגיאה ביצירת הזמנה' : 'Failed to create order');
+      const msg = e?.message || (lang === 'he' ? 'ההזמנה לא נשלחה. נסו שוב.' : 'Failed to create order');
       showToastMsg(lang === 'he' ? `שגיאה: ${msg}` : `Error: ${msg}`);
       return null;
     }
@@ -4196,12 +4196,12 @@ export function AppProvider({ children }) {
     setActiveOrder(prev => prev?.id === orderId ? { ...prev, status: newStatus, updated_at: now, ...timestamps } : prev);
 
     const statusLabels = {
-      accepted: lang === 'he' ? 'ההזמנה אושרה!' : 'Order accepted!',
+      accepted: lang === 'he' ? 'ההזמנה אושרה' : 'Order accepted',
       declined: lang === 'he' ? 'ההזמנה נדחתה' : 'Order declined',
-      shipped: lang === 'he' ? 'המוצר נשלח!' : 'Item shipped!',
-      ready_pickup: lang === 'he' ? 'המוצר מוכן לאיסוף!' : 'Ready for pickup!',
-      delivered: lang === 'he' ? 'המוצר התקבל!' : 'Item received!',
-      completed: lang === 'he' ? 'העסקה הושלמה!' : 'Transaction complete!',
+      shipped: lang === 'he' ? 'המוצר נשלח' : 'Item shipped',
+      ready_pickup: lang === 'he' ? 'המוצר מוכן לאיסוף' : 'Ready for pickup',
+      delivered: lang === 'he' ? 'המוצר התקבל' : 'Item received',
+      completed: lang === 'he' ? 'העסקה הושלמה' : 'Order completed',
       cancelled: lang === 'he' ? 'ההזמנה בוטלה' : 'Order cancelled',
     };
 
@@ -4307,11 +4307,11 @@ export function AppProvider({ children }) {
         .single();
       if (currentUserIdRef.current !== ownerId) return false; // FRONTEND-004b
       if (orderErr || !orderData) {
-        showToastMsg(lang === 'he' ? 'שגיאה: ההזמנה לא נמצאה' : 'Error: Order not found');
+        showToastMsg(lang === 'he' ? 'ההזמנה לא נמצאה' : 'Error: Order not found');
         return false;
       }
       if (orderData.status !== 'completed') {
-        showToastMsg(lang === 'he' ? 'ניתן לדרג רק עסקאות שהושלמו' : 'Reviews require a completed order');
+        showToastMsg(lang === 'he' ? 'אפשר לדרג רק עסקה שהושלמה' : 'Reviews require a completed order');
         return false;
       }
       // Buyer reviews the seller; seller reviews the buyer
@@ -4326,7 +4326,7 @@ export function AppProvider({ children }) {
         .eq('reviewer_role', reviewerRole)
         .limit(1);
       if (existing?.length > 0) {
-        showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת' : 'You already reviewed this order');
+        showToastMsg(lang === 'he' ? 'כבר כתבתם ביקורת' : 'You already reviewed this order');
         return false;
       }
 
@@ -4351,7 +4351,7 @@ export function AppProvider({ children }) {
         reviewer_role: reviewerRole,
       });
 
-      showToastMsg(lang === 'he' ? 'הביקורת נשלחה! תודה' : 'Review submitted! Thank you');
+      showToastMsg(lang === 'he' ? 'הביקורת נשלחה. תודה.' : 'Review sent. Thank you.');
       playSound('coin');
       return true;
     } catch (e) {
@@ -4362,11 +4362,11 @@ export function AppProvider({ children }) {
         || e.message?.includes('one_review_per_order_role')
         || e.code === '23505'; // Postgres unique violation
       if (isDuplicate) {
-        showToastMsg(lang === 'he' ? 'כבר הוספת ביקורת להזמנה זו' : 'You already reviewed this order');
+        showToastMsg(lang === 'he' ? 'כבר כתבתם ביקורת על ההזמנה הזו' : 'You already reviewed this order');
       } else {
         // Show real error in toast (readable on mobile) instead of persistent banner
-        const detail = e?.message || (lang === 'he' ? 'שגיאה לא ידועה' : 'Unknown error');
-        showToastMsg(lang === 'he' ? `שגיאה בשליחת הביקורת: ${detail}` : `Review failed: ${detail}`, 'error');
+        const detail = e?.message || (lang === 'he' ? 'משהו השתבש' : 'Unknown error');
+        showToastMsg(lang === 'he' ? `הביקורת לא נשלחה: ${detail}` : `Review failed: ${detail}`, 'error');
       }
       return false;
     }
@@ -4450,11 +4450,11 @@ export function AppProvider({ children }) {
       return;
     }
     if (listing.seller_id === user.id) {
-      showToastMsg(lang === 'he' ? 'אי אפשר לקנות מעצמך' : "You can't buy your own listing");
+      showToastMsg(lang === 'he' ? 'אי אפשר לקנות מודעה שלכם' : "You can't buy your own listing");
       return;
     }
     if (listing.status && listing.status !== 'active') {
-      showToastMsg(lang === 'he' ? 'הפריט כבר לא זמין' : 'This listing is no longer available');
+      showToastMsg(lang === 'he' ? 'המודעה כבר לא זמינה' : 'This listing is no longer available');
       return;
     }
     setShowCheckout(true);
@@ -4652,7 +4652,7 @@ export function AppProvider({ children }) {
         serialLoadingRef.current = false; setSerialLoading(false); return;
       }
       if (DEV) console.error('[Serial] OCR failed:', e);
-      showToastMsg(lang === 'he' ? 'שגיאה בקריאת המספר הסידורי' : 'Failed to read serial number');
+      showToastMsg(lang === 'he' ? 'לא הצלחנו לקרוא את המספר הסידורי' : 'Failed to read serial number');
     }
     serialLoadingRef.current = false;
     setSerialLoading(false);
@@ -4672,7 +4672,7 @@ export function AppProvider({ children }) {
       verified: isImei || serial.length >= 8,
       type: isImei ? 'imei' : 'serial',
     });
-    showToastMsg(lang === 'he' ? 'מספר סידורי נוסף ✓' : 'Serial number added ✓');
+    showToastMsg(lang === 'he' ? 'המספר הסידורי נוסף' : 'Serial number added');
   }, [lang, showToastMsg]);
 
   // ─── URL SYNC (Phase 3A) ─────────────────────────────────────────────────

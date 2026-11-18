@@ -228,7 +228,7 @@ export function BrowseView() {
             </div>
             <p className="text-slate-300 font-semibold mb-2">{t.noResults}</p>
             <p className="text-slate-500 text-sm mb-5 max-w-[220px] mx-auto leading-relaxed">
-              {lang === 'he' ? 'נסה לשנות את הפילטרים או לחפש משהו אחר' : 'Try adjusting your filters or search for something else'}
+              {lang === 'he' ? 'נסו לשנות את הסינון או לחפש משהו אחר' : 'Try adjusting your filters or search for something else'}
             </p>
             <Btn onClick={() => { setSearch(''); setCategory('all'); setFilterCondition('all'); setPriceRange({ min: '', max: '' }); }} className="mx-auto text-sm">
               {lang === 'he' ? 'נקה פילטרים' : 'Clear Filters'}
@@ -474,7 +474,7 @@ export function DetailView() {
                 </div>
                 <ChevronRight className="w-5 h-5 text-slate-500" />
               </div>
-              <p className="text-[10px] text-slate-500 mt-2 text-center">{lang === 'he' ? 'לחץ לצפיית הפרופיל המלא' : 'Tap for full profile & all listings'}</p>
+              <p className="text-[10px] text-slate-500 mt-2 text-center">{lang === 'he' ? 'לפרופיל המלא ולכל המודעות' : 'Full profile and all listings'}</p>
             </Card>
           </FadeIn>
         )}
@@ -529,7 +529,7 @@ export function DetailView() {
           {/* Buy Now — only show if not own listing AND no active order */}
           {user && selected.seller_id !== user?.id && !selected.id?.toString().startsWith('s') && !existingOrder && (
             <Btn primary className="w-full py-4" onClick={() => openCheckout(selected)}>
-              <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
+              <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'לקנייה ב־' : 'Buy for '}<bdi dir="ltr">{formatPrice(selected.price)}</bdi>
             </Btn>
           )}
 
@@ -537,7 +537,7 @@ export function DetailView() {
               checkout form never opens (and never collects data) signed out */}
           {!user && !selected.id?.toString().startsWith('s') && (
             <Btn primary className="w-full py-4" onClick={() => openCheckout(selected)}>
-              <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'קנה עכשיו' : 'Buy Now'} — {formatPrice(selected.price)}
+              <ShoppingBag className="w-5 h-5" />{lang === 'he' ? 'לקנייה ב־' : 'Buy for '}<bdi dir="ltr">{formatPrice(selected.price)}</bdi>
             </Btn>
           )}
           <div className="flex gap-3">
@@ -578,7 +578,7 @@ export function DetailView() {
                 {lang === 'he' ? 'דווח על מודעה' : 'Report Listing'}
               </h3>
               <p className="text-sm text-slate-400 text-center">
-                {lang === 'he' ? 'בחר סיבה לדיווח:' : 'Select a reason:'}
+                {lang === 'he' ? 'מה הבעיה במודעה?' : 'What is wrong with this listing?'}
               </p>
 
               <div className="space-y-2">
@@ -613,7 +613,7 @@ export function DetailView() {
                     ? <Loader2 className="w-4 h-4 animate-spin" />
                     : <Flag className="w-4 h-4" />
                   }
-                  {lang === 'he' ? 'שלח דיווח' : 'Submit'}
+                  {lang === 'he' ? 'שליחת הדיווח' : 'Send report'}
                 </button>
               </div>
             </div>
@@ -731,7 +731,7 @@ export function SellerProfileView() {
               onClick={() => loadSellerReviews(sellerProfile.id)}
               className="mt-2 px-4 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 transition-colors"
             >
-              {lang === 'he' ? 'נסה שוב' : 'Retry'}
+              {lang === 'he' ? 'לנסות שוב' : 'Try again'}
             </button>
           </Card>
         </FadeIn>
