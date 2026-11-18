@@ -98,6 +98,8 @@ const MARKER = '(?:₪|ש"ח|ש״ח|שח|ils|nis|\\$|usd|€|eur|£|gbp)';
 const SIGN_BEFORE = new RegExp(`${MARKER}\\s{0,2}$`);
 const SIGN_AFTER = new RegExp(`^\\s{0,2}${MARKER}`);
 const UNIT_WORD = /^(gb|tb|mb|ml|mm|cm|kg|mah|inch|pack|pcs|יח)$/;
+// A confirmed generation written as a word, from the second on (bindPrice generations).
+const ORDINALS = { second: '2', third: '3', fourth: '4', fifth: '5', sixth: '6', שני: '2', שנייה: '2', שלישי: '3', שלישית: '3', רביעי: '4', רביעית: '4', חמישי: '5', חמישית: '5', שישי: '6' };
 const CODE = /^([a-z]+)(\d+)([a-z]*)$/;                    // g703, tb301, a7iii
 const SIZE = /(\d+(?:\.\d+)?)\s?(gb|tb|mb|ml|mm|cm|kg|mah|inch|אינץ|ליטר|גיגה|ג'יגה|ג׳יגה|ג"יגה|טרה|מ"ל|מ״ל|מל|"|״)(?![\p{L}\p{N}])/giu;
 const HEBREW_UNITS = { אינץ: 'inch', '"': 'inch', '״': 'inch', גיגה: 'gb', "ג'יגה": 'gb', 'ג׳יגה': 'gb', 'ג"יגה': 'gb', טרה: 'tb', 'מ"ל': 'ml', 'מ״ל': 'ml', מל: 'ml' };
@@ -313,11 +315,15 @@ export function bindPrice(claim, page, identity, answer = null) {
   // from one ₪600 Edge ad the research had called a close comparable, beside a ₪257–292 new price). It is shown, as another
   // model, and never priced from — unless the identity itself says the item may be that model (could_also_be).
   // The words of the models the item may be — "2nd generation" also as "2", the way an ad writes it.
-  const possible = new Set((identity?.alternatives ?? []).flatMap((a) => tokens(a?.name)).flatMap((t) => (/^\d+(st|nd|rd|th)$/.test(t) ? [t, t.replace(/\D+$/, '')] : [t])));
+  // Once the owner CONFIRMED the generation, the alternatives no longer stand: "AirPods Pro 2" is another model for an owner who
+  // answered "first generation" (E2E 2026-11-18: a 1st-gen valuation took an "AirPods Pro 2 MagSafe" ad, ₪400, as comparable).
+  const generationConfirmed = (identity?.confirmed ?? []).some((c) => !c.unsure && /^(generation|series|gen)$/i.test(String(c.attribute ?? '').trim()));
+  const possible = generationConfirmed ? new Set() : new Set((identity?.alternatives ?? []).flatMap((a) => tokens(a?.name)).flatMap((t) => (/^\d+(st|nd|rd|th)$/.test(t) ? [t, t.replace(/\D+$/, '')] : [t])));
   const isPriceWord = (w) => priced.some((p) => w.at >= p.start && w.at < p.end);
   const otherModel = (who) => {
     if (!who?.next) return false;
-    const generation = /^[2-9]$/.test(who.next.t) && !isPriceWord(who.next) && !(who.then && UNIT_WORD.test(who.then.t));
+    // The owner's own confirmed generation after the name is the item itself ("AirPods Pro 2" for "דור שני"), not another model.
+    const generation = /^[2-9]$/.test(who.next.t) && !isPriceWord(who.next) && !(who.then && UNIT_WORD.test(who.then.t)) && !generations.includes(who.next.t);
     return ((VARIANT_WORDS.has(who.next.t) && !SOFT_VARIANTS.has(who.next.t)) || generation) && !possible.has(who.next.t);
   };
   // A DECADE IS A MODEL: a "Classic Vibe '50s" is not a "Classic Vibe 60s" (live eval 2026-11-13). A row naming another
@@ -330,7 +336,9 @@ export function bindPrice(claim, page, identity, answer = null) {
   // to the product: it may be any generation. "S4", "4th" and "סדרה 4" state it; "40mm" does not.
   const generations = (identity?.confirmed ?? [])
     .filter((c) => !c.unsure && /^(generation|series|gen|model year|year)$/i.test(String(c.attribute ?? '').trim()))
-    .flatMap((c) => String(c.value ?? '').match(/\d+/g) ?? []);
+    // An ordinal in words is its number ("דור שני" is generation 2). The FIRST is left unwritten: a first-generation ad is
+    // rarely written with a "1", so requiring it would refuse every one of them.
+    .flatMap((c) => String(c.value ?? '').match(/\d+/g) ?? tokens(c.value).map((t) => ORDINALS[t]).filter(Boolean));
   const statesGeneration = (row) => generations.every((d) => row.some((w) => w.t === d || new RegExp(`^[a-z֐-׿]{0,8}${d}(st|nd|rd|th)?$`).test(w.t)));
   const verdict = (row, who, stretch) => {
     if (generations.length && !statesGeneration(row)) return { refused: BIND_REASON.GENERATION_ABSENT };

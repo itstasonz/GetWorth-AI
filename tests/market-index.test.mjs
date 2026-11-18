@@ -340,6 +340,28 @@ describe('MI-16 the same product in other words reuses its research', () => {
   });
 });
 
+describe('MI-19 a generation confirmed in words (AirPods Pro, E2E 2026-11-18)', () => {
+  const pods = (gen) => ({
+    ...normalizeIdentity({ ...RAW_IDENTITY, category: 'Electronics', item_type: 'earbuds', brand: 'Apple', product_family: 'AirPods', model: 'AirPods Pro', model_number: null, canonical_name: 'apple airpods pro', display_name: 'Apple AirPods Pro', exact_model_established: false, alternatives: [{ name: 'AirPods Pro (2nd generation)' }], search: { hebrew_name: 'איירפודס פרו', aliases: [], model_numbers: [] } }),
+    confirmed: [{ attribute: 'generation', value: gen }],
+  });
+  const page = (t, price) => ({ type: 'search_or_category', title: 'לוח יד שניה', text: `${t} ${price} ש"ח` });
+  test('MI-19a first generation confirmed: an "AirPods Pro 2" row is another model even though the alternatives named it', async () => {
+    const { bindPrice, isBound } = await import('../api/_lib/scan/binding.js');
+    const r = bindPrice({ price: 400, currency: 'ILS', title: 'AirPods Pro 2 MagSafe', match: 'close_comparable' }, page('AirPods Pro 2 MagSafe', 400), pods('דור ראשון'));
+    assert.equal(r.match, 'sibling_model');
+    assert.equal(isBound({ binding: bindPrice({ price: 150, currency: 'ILS', title: 'Airpods Pro 1', match: 'close_comparable' }, page('Airpods Pro 1', 150), pods('דור ראשון')).level }), true, 'a 1st-gen ad still counts');
+    assert.equal(isBound({ binding: bindPrice({ price: 450, currency: 'ILS', title: 'AirPods Pro', match: 'close_comparable' }, page('AirPods Pro', 450), pods('דור ראשון')).level }), true, 'an unnumbered ad is not refused for gen 1');
+  });
+  test('MI-19b second generation confirmed ("דור שני"): its own "AirPods Pro 2" row binds; an unnumbered row does not', async () => {
+    const { bindPrice, isBound } = await import('../api/_lib/scan/binding.js');
+    const own = bindPrice({ price: 300, currency: 'ILS', title: 'AirPods Pro 2', match: 'close_comparable' }, page('AirPods Pro 2', 300), pods('דור שני'));
+    assert.equal(isBound({ binding: own.level }), true);
+    assert.notEqual(own.match, 'sibling_model');
+    assert.equal(bindPrice({ price: 500, currency: 'ILS', title: 'AirPods Pro', match: 'close_comparable' }, page('AirPods Pro', 500), pods('דור שני')).reason, 'row_does_not_state_the_confirmed_generation');
+  });
+});
+
 describe('MI-17 a confirmed generation must be in the row (Apple Watch Series 4, 2026-11-13)', () => {
   const watch = () => normalizeIdentity({ ...RAW_IDENTITY, category: 'Electronics', item_type: 'smartwatch', brand: 'Apple', product_family: 'Apple Watch', model: null, canonical_name: 'apple watch', display_name: 'Apple Watch', exact_model_established: false, search: { hebrew_name: 'שעון אפל ווטש', aliases: [], model_numbers: [] } });
   const confirmed = () => ({ ...watch(), confirmed: [{ attribute: 'generation', value: 'Series 4' }] });
