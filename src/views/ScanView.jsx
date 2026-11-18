@@ -360,7 +360,7 @@ export default function ScanView() {
         {/* The product is not named well enough to search for, or one answer is needed first: no market request yet. */}
         {needsDetail && (
           <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
-            <p className="text-body text-text-primary"><Bidi>{copy.needsDetail(identity.display_name)}</Bidi></p>
+            <p className="text-body text-text-primary"><Bidi>{copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")))}</Bidi></p>
             {!question && <p className="text-body-sm text-text-secondary">{copy.needsDetailHint}</p>}
           </div>
         )}

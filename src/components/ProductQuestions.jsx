@@ -5,6 +5,19 @@ import { Bidi } from './ScanSheets';
 // PRODUCT QUESTIONS (2026-11-18): one short question at a time, large answers, every one skippable. An answer that bears
 // on condition changes the price on screen at once (coreScan.js answerProductQuestion → the valuation's own per-condition
 // prices); the others go into the listing. When the questions are done, the answers stay visible and can be changed.
+const TOPIC = {
+  battery: { he: 'סוללה', en: 'Battery' },
+  box: { he: 'קופסה', en: 'Box' },
+  warranty: { he: 'אחריות', en: 'Warranty' },
+  missing: { he: 'חלקים', en: 'Parts' },
+  structure: { he: 'נזק במבנה', en: 'Structural damage' },
+  certificate: { he: 'תעודה', en: 'Certificate' },
+  box_papers: { he: 'קופסה ותעודות', en: 'Box and papers' },
+  service: { he: 'טיפול', en: 'Service' },
+  material: { he: 'חומר', en: 'Material' },
+  purity: { he: 'טוהר', en: 'Purity' },
+};
+
 export default function ProductQuestions({ identity, answers = {}, skipped = [], onAnswer, onSkip, copy, lang }) {
   const [figure, setFigure] = useState('');
   const l = lang === 'en' ? 'en' : 'he';
@@ -12,7 +25,15 @@ export default function ProductQuestions({ identity, answers = {}, skipped = [],
   if (list.length === 0) return null;
   const current = list.find((q) => answers[q.id] === undefined && !skipped.includes(q.id)) ?? null;
   const answered = list.filter((q) => answers[q.id] !== undefined);
-  const labelOf = (q) => (q.kind === 'number' ? `${answers[q.id]} ${q.unit === 'cm' ? (l === 'he' ? 'ס״מ' : 'cm') : (l === 'he' ? 'גרם' : 'g')}` : q.options.find((x) => x.id === answers[q.id])?.[l] ?? '');
+  // A chip says what it answers (Production E2E 2026-11-18: a bare "כן" for the box question): the fact when the answer has
+  // one, else "topic: answer".
+  const labelOf = (q) => {
+    if (q.kind === 'number') return `${answers[q.id]} ${q.unit === 'cm' ? (l === 'he' ? 'ס״מ' : 'cm') : (l === 'he' ? 'גרם' : 'g')}`;
+    const option = q.options.find((x) => x.id === answers[q.id]);
+    if (!option) return '';
+    if (option.fact?.[l]) return option.fact[l];
+    return TOPIC[q.id] ? `${TOPIC[q.id][l]}: ${option[l]}` : option[l];
+  };
   const skip = (q) => onSkip(q.id);
   const n = Number(figure);
 

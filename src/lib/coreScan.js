@@ -507,7 +507,11 @@ export const marketBandOf = (valuation) => (valuation?.status === 'priced' ? val
 
 /** The listing's title: the item's own name, as specific as the photograph allowed. */
 function fallbackTitle(identity) {
-  return identity?.display_name || [identity?.brand, identity?.model ?? identity?.product_family ?? identity?.item_type].filter(Boolean).join(' ') || '';
+  const name = identity?.display_name || [identity?.brand, identity?.model ?? identity?.product_family ?? identity?.item_type].filter(Boolean).join(' ') || '';
+  // A CONFIRMED CAPACITY STAYS IN THE TITLE (Production E2E 2026-11-18: "Apple iPhone 12" after the owner chose 128 GB).
+  const size = String(identity?.size_or_capacity ?? '').trim();
+  const squash = (v) => v.toLowerCase().replace(/\s+/g, '');
+  return name && size && size.length <= 20 && !squash(name).includes(squash(size)) ? `${name} ${size}` : name;
 }
 
 /**

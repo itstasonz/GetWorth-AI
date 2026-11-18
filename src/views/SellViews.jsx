@@ -197,7 +197,8 @@ export function MyListingsView() {
           {tabListings.map((item, i) => {
             const pill  = getStatusPill(item);
             const title = lang === 'he' && item.title_hebrew ? item.title_hebrew : item.title;
-            const meta  = `${timeAgo(item.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })} • ${item.category || ''}`;
+            // The category in the screen's language ("Electronics" on a Hebrew screen, Production E2E 2026-11-18).
+            const meta  = `${timeAgo(item.created_at, { ago: lang === 'he' ? 'לפני' : 'ago' })} • ${t?.[String(item.category || '').toLowerCase()] || item.category || ''}`;
 
             // UI-002A — copy-quality feedback lives HERE, and only here.
             //

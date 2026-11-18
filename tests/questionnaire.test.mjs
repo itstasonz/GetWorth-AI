@@ -123,3 +123,21 @@ describe('PQ-5 the listing draft carries the answers and the condition', () => {
     assert.match(app, /if \(!condition\) \{ setError\(/);
   });
 });
+
+describe('PQ-6 Production E2E fixes (2026-11-18)', () => {
+  test('PQ-6a a confirmed capacity stays in the listing title, once', async () => {
+    const { buildListingDraft } = await import('../src/lib/coreScan.js');
+    const t = (identity) => buildListingDraft({ identity, condition: 'good', productAnswers: {}, valuation: null }).title;
+    assert.equal(t(id({ display_name: 'Apple iPhone 12', size_or_capacity: '128 GB' })), 'Apple iPhone 12 128 GB');
+    assert.equal(t(id({ display_name: 'Apple iPhone 12 128GB', size_or_capacity: '128 GB' })), 'Apple iPhone 12 128GB');
+    assert.equal(t(id({ display_name: 'Sony DualSense Edge', size_or_capacity: null })), 'Sony DualSense Edge');
+  });
+  test('PQ-6b once the model is confirmed, the screen asks for "one more detail", not the model', async () => {
+    const { readFileSync } = await import('node:fs');
+    const copy = readFileSync(new URL('../src/lib/scanCopy.js', import.meta.url), 'utf8');
+    assert.ok(copy.includes('needsDetail: (name, modelKnown = false) => (modelKnown ? `זוהה ${name}. כדי לחפש מחיר צריך לדעת עוד פרט אחד.`'));
+    assert.ok(copy.includes(`device: 'מסך סדוק או משהו שלא עובד? בחרו "תקול".'`), 'a weak battery is fair, not faulty');
+    const view = readFileSync(new URL('../src/views/ScanView.jsx', import.meta.url), 'utf8');
+    assert.ok(view.includes('copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")))'), 'only when storage is the missing detail');
+  });
+});
