@@ -21,6 +21,7 @@
 
 import { lineReader } from './scanStream.js';
 import { calculatedFor } from './calculatedEstimate.js';
+import { conditionFromAnswers, factsFromAnswers, questionsFor } from './questionnaire.js';
 export const STAGE = Object.freeze({
   IDLE: 'idle',
   PREPARING: 'preparing',       // the photograph is being readied
@@ -60,6 +61,10 @@ const initial = () => ({
   identity: null,
   token: null,
   condition: null,
+  // The owner's answers to the product questions (questionnaire.js), by question id. They set the condition and add
+  // facts to the listing; they never call the server.
+  productAnswers: {},
+  productSkipped: [],      // product questions the owner skipped: not asked again in this scan
   valuation: null,
   valuationId: null,
   // The price was answered from a product's older research while the server renews it (service.js stale-while-revalidate).
@@ -439,7 +444,8 @@ export function correctItem(text, lang) {
   const correction = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_CORRECTION_CHARS);
   if (!state.active || !state.token || !correction || !deps) return Promise.resolve();
   deps.lang = lang;
-  set({ correction });
+  // Another product may need other questions: answers about the old one are not carried over.
+  set({ correction, productAnswers: {}, productSkipped: [] });
   return guarded('identify', () => identify({ correction }));
 }
 
@@ -455,6 +461,33 @@ export function retryScan(lang) {
 
 export function setScanCondition(condition) {
   if (state.active && CONDITIONS.includes(condition)) set({ condition });
+}
+
+/**
+ * The owner answers a product question (questionnaire.js). The answer is kept; when the answers bear on condition the
+ * condition follows them, so the price on screen changes at once, from the valuation already in hand: no request, no
+ * new research. `null` takes an answer back. The latest action wins: choosing a condition by hand afterwards stands.
+ */
+export function answerProductQuestion(id, value) {
+  if (!state.active || !state.identity || typeof id !== 'string') return;
+  const productAnswers = { ...state.productAnswers };
+  if (value === null || value === undefined || value === '') delete productAnswers[id]; else productAnswers[id] = value;
+  const derived = conditionFromAnswers(state.identity, productAnswers);
+  // Taking an answer back (to change it) asks that question again.
+  const productSkipped = state.productSkipped.filter((q) => q !== id);
+  set({ productAnswers, productSkipped, ...(derived ? { condition: derived.condition } : {}) });
+}
+
+/** The owner skips a product question: it is not asked again in this scan. */
+export function skipProductQuestion(id) {
+  if (!state.active || typeof id !== 'string' || state.productSkipped.includes(id)) return;
+  set({ productSkipped: [...state.productSkipped, id] });
+}
+
+/** The product question to ask now, or null when they are done (questionnaire.js). */
+export function pendingProductQuestion(s = state) {
+  if (!s.identity) return null;
+  return questionsFor(s.identity, s.productAnswers ?? {}).find((q) => s.productAnswers?.[q.id] === undefined && !(s.productSkipped ?? []).includes(q.id)) ?? null;
 }
 
 // ── WHAT THE SCREEN AND THE LISTING READ ────────────────────────────────────
@@ -515,7 +548,8 @@ export function buildListingDraft(s = state) {
   const i = s.identity ?? {};
   return {
     title: fallbackTitle(i),
-    desc: i.listing_description || '',
+    // The facts the owner gave (box, warranty, battery, purity…) join the description; the owner can edit all of it.
+    desc: [i.listing_description || '', ...factsFromAnswers(i, s.productAnswers ?? {}, deps?.lang === 'en' ? 'en' : 'he').map((f) => `${f}.`)].filter(Boolean).join('\n'),
     price: band ? band.list : '',
     // No condition chosen on the scan: the listing asks for one — it is never assumed "used".
     condition: s.condition ? (LISTING_CONDITION[s.condition] ?? null) : null,

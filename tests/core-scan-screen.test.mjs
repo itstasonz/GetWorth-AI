@@ -167,7 +167,9 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
   test('CV-1b2 a condition with no ads of its own shows no number for it, and Sell offers the owner\'s own price', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, prices: { ...VALUATION.prices, poor: null } })] }));
     await click(button('Faulty'));
-    assert.match(text(), /No listings in Israel were found for a unit in Faulty condition, and we do not guess a discount/);
+    // 2026-11-18: a faulty unit with no ads for faulty units gets no number at all, not a working unit's price greyed out.
+    assert.match(text(), /We have no reliable price for an item that does not work\. You can list it at your own price\./);
+    assert.equal(container.querySelector('[data-testid="scan-worth"]').textContent.includes('₪'), false);
     assert.ok(button('List at my price'));
   });
   test('CV-1c Sell hands the scan to the listing', async () => {

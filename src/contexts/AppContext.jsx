@@ -4557,7 +4557,8 @@ export function AppProvider({ children }) {
   const sellFromScan = () => {
     if (!user) { setSignInAction('list'); setShowSignInModal(true); return; }
     const scan = scanStore.getSnapshot();
-    if (!scan.active || !scan.identity) return;
+    // Never a button that silently does nothing (2026-11-18): say why, and what to do instead.
+    if (!scan.active || !scan.identity) { showToastMsg(lang === 'he' ? 'אי אפשר להמשיך למודעה מהסריקה הזו. אפשר לסרוק שוב או לפרסם מודעה מהעמוד הראשי.' : 'This scan cannot continue to a listing. Scan again, or create a listing from the home screen.', 'error'); return; }
     awaitingScanPriceRef.current = scan.stage === SCAN_STAGE.PRICING ? scan.scanUuid : null;
     const draft = buildListingDraft(scan);
     setResult(draft.result);

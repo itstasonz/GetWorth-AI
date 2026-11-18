@@ -65,7 +65,7 @@ const SELF = (FIXTURE && process.env.DESIGN_LINT_SELF) || fileURLToPath(new URL(
 const BUDGET = {
   'raw-hex': 273,
   'tiny-type': 180,
-  'emoji-in-jsx': 44,
+  'emoji-in-jsx': 43,
   'off-ladder-alpha': 17,
   'legacy-token-object': 0,
   'promotional-copy': 0,

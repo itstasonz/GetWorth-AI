@@ -9,7 +9,7 @@
 //
 // Never for: a thing sold by description, a family or an open variant (the new price may be another model's), a market
 // where condition and rarity dominate (collectibles, vintage and handmade, watches and jewellery, vehicles, fragrance,
-// furniture, fashion), a unit that looks fair, poor or broken, a new price that is not this exact model's, not tied to it
+// furniture, fashion), a unit that looks faulty or broken, a new price that is not this exact model's, not tied to it
 // by the shop's own text, or only seen out of stock. The deduction is configurable (CORE_SCAN_RETAIL_DEDUCTION, 0.10–0.20)
 // and is not a measured depreciation rate.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -22,9 +22,24 @@ export const DEDUCTION_MIN = 0.10;
 export const DEDUCTION_MAX = 0.20;
 /** Markets where a used unit's price follows its new price closely enough for a stated deduction to be a fair first guess. */
 export const ELIGIBLE_MARKETS = Object.freeze(new Set(['consumer_electronics', 'household', 'tools']));
-/** The conditions an estimate is made for; a like-new unit takes the smallest deduction of the range. */
-export const ESTIMATE_CONDITIONS = Object.freeze(['new_sealed', 'like_new', 'good']);
+/**
+ * The conditions an estimate is made for; a like-new unit takes the smallest deduction of the range. A FAIR unit (visible
+ * wear, a weak battery, a missing part: questionnaire.js) takes a larger, per-market deduction (2026-11-18). These are
+ * ASSUMPTIONS, configurable, and shown as such; a FAULTY unit is never priced from a new price.
+ */
+export const ESTIMATE_CONDITIONS = Object.freeze(['new_sealed', 'like_new', 'good', 'fair']);
+export const FAIR_DEDUCTION_ENV = 'CORE_SCAN_RETAIL_FAIR_DEDUCTION';
+export const FAIR_DEDUCTION_DEFAULT = Object.freeze({ consumer_electronics: 0.35, household: 0.30, tools: 0.30 });
+export const FAIR_DEDUCTION_MIN = 0.25;
+export const FAIR_DEDUCTION_MAX = 0.50;
 export const METHOD = 'retail_anchored';
+
+/** The fair-condition deduction for a market: the configured one within 25–50%, else the market's default. */
+export function resolveFairDeduction(marketClass, env = process.env) {
+  const v = Number(String(env?.[FAIR_DEDUCTION_ENV] ?? '').trim());
+  if (Number.isFinite(v) && v >= FAIR_DEDUCTION_MIN && v <= FAIR_DEDUCTION_MAX) return v;
+  return FAIR_DEDUCTION_DEFAULT[marketClass] ?? FAIR_DEDUCTION_MAX;
+}
 
 /** The good-condition deduction in force: the configured one within 10–20%, else 15%. */
 export function resolveDeduction(env = process.env) {
@@ -42,7 +57,7 @@ export function ineligibility(identity, valuation) {
   if (valuation.approximate || valuation.family_level) return 'variant_open';
   if (i.incomplete || i.exact_model_established !== true || (i.identity_precision && i.identity_precision !== 'exact_model')) return 'exact_model_unknown';
   if (!ELIGIBLE_MARKETS.has(i.market_class)) return 'category_excluded';
-  if (i.visible_condition === 'fair' || i.visible_condition === 'poor') return 'condition_excluded';
+  if (i.visible_condition === 'poor') return 'condition_excluded';
   if (i.configuration && !['complete_item', 'base_only'].includes(i.configuration)) return 'configuration_excluded';
   return null;
 }
@@ -56,7 +71,7 @@ function exactRetail(valuation) {
  * The estimate, or null. `estimates` holds the calculated figure for each eligible condition so the screen follows the
  * condition the owner picks; `condition` is the one assessed from the photograph ('unknown' when it could not be).
  */
-export function retailEstimate(valuation, identity, { deduction = resolveDeduction() } = {}) {
+export function retailEstimate(valuation, identity, { deduction = resolveDeduction(), fairDeduction = resolveFairDeduction(identity?.market_class) } = {}) {
   if (ineligibility(identity, valuation)) return null;
   const retail = Number(valuation.retail_new_ils);
   if (!(retail > 0) || valuation.retail_new_in_stock === false) return null;
@@ -67,7 +82,8 @@ export function retailEstimate(valuation, identity, { deduction = resolveDeducti
   const high = Math.max(...shops.map((e) => e.price_ils));
   if (retail < low * 0.95 || retail > high * 1.05) return null;
   const d = Math.min(DEDUCTION_MAX, Math.max(DEDUCTION_MIN, deduction));
-  const deductions = { new_sealed: DEDUCTION_MIN, like_new: DEDUCTION_MIN, good: d };
+  const fair = Math.min(FAIR_DEDUCTION_MAX, Math.max(FAIR_DEDUCTION_MIN, fairDeduction));
+  const deductions = { new_sealed: DEDUCTION_MIN, like_new: DEDUCTION_MIN, good: d, fair };
   const estimates = Object.fromEntries(ESTIMATE_CONDITIONS.map((c) => [c, roundNice(retail * (1 - deductions[c]))]));
   const nearest = [...shops].sort((a, b) => Math.abs(a.price_ils - retail) - Math.abs(b.price_ils - retail));
   return {

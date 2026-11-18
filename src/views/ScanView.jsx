@@ -25,7 +25,8 @@ import { useApp } from '../contexts/AppContext';
 import { Btn, Chip, InputField } from '../components/ui';
 import { formatPrice } from '../lib/utils';
 import {
-  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, marketBandOf, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition, unitModification } from '../lib/coreScan';
+  scanStore, STAGE, CONDITIONS, MAX_ANSWER_CHARS, bandFor, marketBandOf, openQuestion, answerQuestion, dismissQuestion, correctItem, retryScan, setScanCondition, unitModification, answerProductQuestion, skipProductQuestion } from '../lib/coreScan';
+import ProductQuestions from '../components/ProductQuestions';
 import { scanCopy, localColor } from '../lib/scanCopy';
 import { WrongItemSheet, WhyPriceSheet, Bidi } from '../components/ScanSheets';
 import ComparativeRange from '../components/ComparativeRange';
@@ -243,6 +244,12 @@ export default function ScanView() {
   // The item's own photograph leads; a label photographed for the scan is supporting evidence and is said to be.
   const photo = s.images[0] ?? (s.active ? null : images?.[0]);
   const supporting = Math.max(0, s.images.length - 1);
+  // The owner said it does not work, and no ads for faulty units stand behind a number (questionnaire.js "works").
+  const faulty = s.condition === 'poor' && !conditionBand;
+  // The product questions, while no server question is open: during the price research too, so the wait is used.
+  // ONE QUESTION AT A TIME. The server's question (which product it is: storage, edition, a label photograph) comes first:
+  // its answer changes the search. The product questions follow once it is answered or put away.
+  const askProduct = (settled || s.stage === STAGE.PRICING) && !!identity && !question;
 
   return (
     <div className="fixed inset-0 z-sheet overflow-y-auto bg-canvas" dir={rtl ? 'rtl' : 'ltr'}>
@@ -266,6 +273,7 @@ export default function ScanView() {
 
         {s.stage === STAGE.PRICING && <Working>{copy.pricing}</Working>}
         {/* The listing can start now; the price joins the form when the research brings one (AppContext sellFromScan). */}
+        {s.stage === STAGE.PRICING && askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
         {s.stage === STAGE.PRICING && <Btn fullWidth size="lg" onClick={sellFromScan} data-testid="scan-start-listing">{copy.startListingNow}</Btn>}
 
         {s.stage === STAGE.PRICED && band && (
@@ -276,10 +284,16 @@ export default function ScanView() {
               <div className="text-center space-y-1" data-testid="scan-worth">
                 {/* NO PRICE FOR THE CHOSEN CONDITION (2026-11-13, Production E2E: "faulty" kept ₪950 as the dominant worth): the
                     market price stays visible as context, labelled as NOT this unit's, and never as its estimated worth. */}
+                {/* A FAULTY UNIT with no ads for faulty units gets no number at all (2026-11-18): a working unit's price beside
+                    "does not work" reads as its value, even greyed out. */}
+                {faulty ? (
+                  <p className="text-body text-text-primary" data-testid="scan-faulty-no-price">{copy.faultyNoPrice}</p>
+                ) : (<>
                 <p className="text-label text-text-muted" data-testid="scan-worth-label">{modified ? copy.marketStandardUnit(modified.value) : noConditionBand ? copy.marketOtherCondition(copy.conditions[s.condition]) : rough ? copy.worthApprox : copy.worth}</p>
                 {band.worth && <p className={noConditionBand ? 'text-title text-text-muted' : 'text-display text-text-primary'}><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.worth)}</bdi></p>}
+                </>)}
                 {/* An approximate result names its range as approximate, and never as the expected one. */}
-                {rough ? (
+                {faulty ? null : rough ? (
                   <><p className="text-body-sm text-text-muted">{copy.approxLabel}</p><p className="text-body text-text-primary">{copy.range(band)}</p></>
                 ) : (
                   <p className="text-body-sm text-text-secondary">{copy.expected}: <span className="text-text-primary">{copy.range(band)}</span></p>
@@ -309,8 +323,9 @@ export default function ScanView() {
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-refreshing">{copy.refreshingPrices}</p>}
             </div>
             <RetailReference valuation={s.valuation} copy={copy} />
+            {askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
             {/* The price for the chosen condition comes from ads for units in that condition, or the screen says there are none (valuation.js conditionPrices). */}
-            <ConditionPicker condition={s.condition} identity={identity} copy={copy} note={conditionNote} />
+            <ConditionPicker condition={s.condition} identity={identity} copy={copy} note={faulty ? null : conditionNote} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{noConditionBand ? copy.sellOwnPrice : (rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list)))}</Btn>
           </div>
         )}
@@ -333,10 +348,14 @@ export default function ScanView() {
               {s.valuation?.no_price_reason && <p className="text-body-sm text-text-muted">{retailReferenceOf(s.valuation) ? copy.gapNext : copy.gapNextNoRetail}</p>}
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-looking-closer">{copy.lookingCloser}</p>}
             </div>
+            {askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{copy.sellOwnPrice}</Btn>
           </div>
         )}
+
+        {/* PRICED with no band to show (a valuation from before the three prices): the way to sell is still there. */}
+        {s.stage === STAGE.PRICED && !band && <Btn primary fullWidth size="lg" onClick={sellFromScan} data-testid="scan-sell-fallback">{copy.sellOwnPrice}</Btn>}
 
         {/* The product is not named well enough to search for, or one answer is needed first: no market request yet. */}
         {needsDetail && (
@@ -377,6 +396,9 @@ export default function ScanView() {
               <AlertTriangle className="w-5 h-5 shrink-0 text-danger" aria-hidden="true" />{s.error?.message}
             </p>
             {s.error?.retryable && <Btn primary fullWidth onClick={() => retryScan(lang)}>{copy.retry}</Btn>}
+            {/* THE PRICE STEP FAILED, THE PRODUCT IS KNOWN (2026-11-18: an OpenAI outage left owners with only "try again"):
+                the owner can still list it at their own price. */}
+            {named && identity?.is_sellable_item !== false && <Btn fullWidth onClick={sellFromScan} data-testid="scan-error-sell">{copy.sellOwnPrice}</Btn>}
           </div>
         )}
 

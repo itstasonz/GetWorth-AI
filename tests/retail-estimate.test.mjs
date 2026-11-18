@@ -44,9 +44,10 @@ describe('RE-1 when an estimate is made', () => {
       assert.equal(retailEstimate(v, { ...identity, market_class: m }), null, m);
     }
   });
-  test('RE-1d never for a unit that looks fair or poor, or one sold as a part or an accessory', () => {
+  test('RE-1d never for a unit that looks faulty, or one sold as a part or an accessory; a fair unit takes the fair deduction', () => {
     const v = val([shop(ZAP, 1000)]);
-    assert.equal(retailEstimate(v, { ...identity, visible_condition: 'fair' }), null);
+    // 2026-11-18: a fair unit is estimated with its own, larger, stated deduction (questionnaire.js); a faulty one never.
+    assert.equal(retailEstimate(v, { ...identity, visible_condition: 'fair' }).condition, 'fair');
     assert.equal(retailEstimate(v, { ...identity, visible_condition: 'poor' }), null);
     assert.equal(retailEstimate(v, { ...identity, configuration: 'part_only' }), null);
   });

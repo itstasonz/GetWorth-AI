@@ -209,8 +209,52 @@ describe('SB-C METHOD C: a calculated estimate from the verified new price, labe
     assert.match(ref.textContent, /מחיר מוצר חדש אחרון שפורסם\. כרגע לא זמין לקנייה\./);
     assert.doesNotMatch(ref.textContent, /^מחיר מוצר חדש, לא שווי יד שנייה/);
   });
-  test('SB-Cd a unit that looks fair: the new price only, no estimate', async () => {
+  test('SB-Cf product questions on the screen change the price at once, with no request; "does not work" removes it', async () => {
+    const r = await scanWith({ identity: ELEC, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } }, { lang: 'he' });
+    const requestsBefore = r.provider.calls?.length ?? null;
+    const card = () => container.querySelector('[data-testid="scan-product-question"]');
+    const tap = async (label) => {
+      const b = [...card().querySelectorAll('button')].find((x) => x.textContent.trim() === label);
+      assert.ok(b, `answer "${label}" is offered`);
+      await act(async () => { b.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((res) => setTimeout(res, 10)); });
+    };
+    const shown = () => calc()?.querySelector('[data-testid="scan-calculated-price"]')?.textContent ?? null;
+    assert.equal(shown(), '≈ ₪510', 'from the photograph: good');
+    // The server's own question (a photo of the model label) comes first; "not sure" puts it away.
+    const notSure = [...container.querySelectorAll('button')].find((b) => b.textContent.trim() === 'לא בטוח/ה');
+    if (notSure && !card()) await act(async () => { notSure.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((res) => setTimeout(res, 10)); });
+    assert.equal(card().getAttribute('data-question'), 'works');
+    assert.match(card().textContent, /1 מתוך 4/);
+    await tap('כן, הכול עובד');
+    assert.equal(card().getAttribute('data-question'), 'looks');
+    await tap('כמו חדש');
+    assert.equal(shown(), '≈ ₪540', 'like new: −10%');
+    await tap('דילוג');
+    await tap('דילוג');
+    const summary = container.querySelector('[data-testid="scan-answers"]');
+    assert.ok(summary, 'the answers stay visible');
+    assert.match(summary.textContent, /המצב חושב לפי התשובות שלכם: כמו חדש/);
+    // Change the appearance to visible wear: fair, −35%.
+    const change = [...summary.querySelectorAll('button')].find((b) => b.textContent.trim() === 'כמו חדש');
+    await act(async () => { change.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((res) => setTimeout(res, 10)); });
+    await tap('סימני שימוש בולטים');
+    assert.equal(container.querySelector('[data-testid="scan-product-question"]'), null, 'questions skipped once are not asked again');
+    assert.equal(shown(), '≈ ₪390', 'fair: −35%');
+    // "Does not work": the estimate is withdrawn, with the reason, and the new price stands alone.
+    const works = [...container.querySelector('[data-testid="scan-answers"]').querySelectorAll('button')].find((b) => b.textContent.trim() === 'כן, הכול עובד');
+    await act(async () => { works.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((res) => setTimeout(res, 10)); });
+    await tap('יש תקלה');
+    assert.equal(shown(), null);
+    assert.match(calc().textContent, /אין אומדן למוצר במצב תקול/);
+    if (requestsBefore !== null) assert.equal(r.provider.calls.length, requestsBefore, 'no request was made for any answer');
+  });
+  test('SB-Cd a unit that looks fair: the fair estimate from the new price', async () => {
     await scanWith({ identity: { ...ELEC, visible_condition: 'fair' }, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
+    assert.equal(calc().querySelector('[data-testid="scan-calculated-price"]').textContent, '≈ ₪390', '−35%, a stated assumption');
+    assert.match(calc().textContent, /less 35%/);
+  });
+  test('SB-Cg a unit that looks faulty: no estimate, the new price alone', async () => {
+    await scanWith({ identity: { ...ELEC, visible_condition: 'poor' }, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
     assert.equal(calc(), null);
     assert.ok(container.querySelector('[data-testid="scan-retail-reference"]'));
   });
