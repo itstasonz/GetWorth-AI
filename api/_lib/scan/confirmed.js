@@ -118,8 +118,12 @@ export function applyConfirmed(identity) {
       const base = String(identity.model ?? identity.product_family ?? identity.item_type ?? '').trim();
       const product = brand && base && !base.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${base}` : (base || brand);
       if (product && !product.toLowerCase().includes(String(c.value).toLowerCase())) {
-        identity.display_name = `${product} ${c.value}`;
-        if (identity.listing_description && base) identity.listing_description = withModelNamed(identity.listing_description, `${base} ${c.value}`);
+        // An answer that already names the product ("AirPods Pro דור שני") is the name, with the brand once (Production
+        // E2E 2026-11-18: "Apple AirPods Pro AirPods Pro דור שני").
+        const v = String(c.value).trim();
+        const namesBase = base && v.toLowerCase().includes(base.toLowerCase());
+        identity.display_name = namesBase ? (brand && !v.toLowerCase().includes(brand.toLowerCase()) ? `${brand} ${v}` : v) : `${product} ${c.value}`;
+        if (identity.listing_description && base) identity.listing_description = withModelNamed(identity.listing_description, namesBase ? v : `${base} ${c.value}`);
       }
     }
     if (identity.uncertainty_note && settledBy(identity.uncertainty_note, c, identity)) identity.uncertainty_note = null;

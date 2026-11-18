@@ -141,3 +141,36 @@ describe('PQ-6 Production E2E fixes (2026-11-18)', () => {
     assert.ok(view.includes('copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")))'), 'only when storage is the missing detail');
   });
 });
+
+describe('PQ-7 a generation answer that names the product', () => {
+  test('PQ-7a "AirPods Pro דור שני" names the product once, with the brand once', async () => {
+    const { applyConfirmed } = await import('../api/_lib/scan/confirmed.js');
+    const i = { brand: 'Apple', model: 'AirPods Pro', display_name: 'אוזניות Apple AirPods Pro', listing_description: 'אוזניות Apple AirPods Pro עם קייס טעינה.', alternatives: [], attributes: [], confirmed: [{ attribute: 'generation', value: 'AirPods Pro דור שני' }] };
+    applyConfirmed(i);
+    assert.equal(i.display_name, 'Apple AirPods Pro דור שני');
+    assert.equal(i.listing_description, 'אוזניות Apple AirPods Pro דור שני עם קייס טעינה.');
+    const w = { brand: 'Apple', product_family: 'Apple Watch', display_name: 'Apple Watch', listing_description: null, alternatives: [], attributes: [], confirmed: [{ attribute: 'generation', value: 'Series 4' }] };
+    applyConfirmed(w);
+    assert.equal(w.display_name, 'Apple Watch Series 4');
+  });
+});
+
+describe('PQ-8 the condition moves a market price inside the range the ads show', () => {
+  const market = { list: 500, low: 330, high: 500, worth: 360, quick: 330, basis: 'market', references: 6 };
+  const v = { status: 'priced', prices: { good: market, like_new: { ...market, references: 0 }, fair: { ...market, references: 0 }, new_sealed: null, poor: null } };
+  test('PQ-8a like new: upper half; fair: lower half; good: the market; sealed and faulty: nothing without their own ads', async () => {
+    const { bandFor } = await import('../src/lib/coreScan.js');
+    const ln = bandFor(v, 'like_new'); const fr = bandFor(v, 'fair'); const gd = bandFor(v, 'good');
+    assert.equal(gd.worth, 360);
+    assert.equal(ln.basis, 'range_position'); assert.equal(ln.worth, 430); assert.ok(ln.low >= 330 && ln.high <= 500);
+    assert.equal(fr.basis, 'range_position'); assert.equal(fr.worth, 350); assert.ok(fr.low >= 330 && fr.high <= 500);
+    assert.ok(fr.worth <= gd.worth && gd.worth <= ln.worth, 'a better unit never costs less');
+    assert.equal(bandFor(v, 'new_sealed'), null);
+    assert.equal(bandFor(v, 'poor'), null);
+  });
+  test('PQ-8b ads that state the condition win over a placement', async () => {
+    const { bandFor } = await import('../src/lib/coreScan.js');
+    const own = { list: 520, low: 450, high: 520, worth: 480, quick: 450, basis: 'listings', references: 3 };
+    assert.equal(bandFor({ ...v, prices: { ...v.prices, like_new: own } }, 'like_new'), own);
+  });
+});

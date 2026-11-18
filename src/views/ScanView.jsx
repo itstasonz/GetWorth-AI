@@ -229,7 +229,8 @@ export default function ScanView() {
   const conditionNote = !market ? null : !s.condition ? copy.conditionUnset
     : noConditionBand ? copy.conditionNone(copy.conditions[s.condition])
       : s.condition === 'good' ? null
-        : conditionBand.basis === 'listings' ? copy.conditionListings(conditionBand.references) : copy.conditionMarket;
+        : conditionBand.basis === 'listings' ? copy.conditionListings(conditionBand.references)
+          : conditionBand.basis === 'range_position' ? copy.conditionPositioned(s.condition === 'like_new') : copy.conditionMarket;
   const settled = s.stage === STAGE.PRICED || s.stage === STAGE.INSUFFICIENT;
   const needsDetail = s.stage === STAGE.NEEDS_DETAIL;
   const question = openQuestion(s);
@@ -289,7 +290,7 @@ export default function ScanView() {
                 {faulty ? (
                   <p className="text-body text-text-primary" data-testid="scan-faulty-no-price">{copy.faultyNoPrice}</p>
                 ) : (<>
-                <p className="text-label text-text-muted" data-testid="scan-worth-label">{modified ? copy.marketStandardUnit(modified.value) : noConditionBand ? copy.marketOtherCondition(copy.conditions[s.condition]) : rough ? copy.worthApprox : copy.worth}</p>
+                <p className="text-label text-text-muted" data-testid="scan-worth-label">{modified ? copy.marketStandardUnit(modified.value) : noConditionBand ? copy.marketOtherCondition(copy.conditions[s.condition]) : conditionBand?.basis === 'range_position' ? copy.worthPositioned(copy.conditions[s.condition]) : rough ? copy.worthApprox : copy.worth}</p>
                 {band.worth && <p className={noConditionBand ? 'text-title text-text-muted' : 'text-display text-text-primary'}><bdi dir="ltr">{rough ? '≈ ' : ''}{formatPrice(band.worth)}</bdi></p>}
                 </>)}
                 {/* An approximate result names its range as approximate, and never as the expected one. */}

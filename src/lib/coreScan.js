@@ -500,7 +500,26 @@ export function bandFor(valuation, condition) {
   const prices = valuation?.status === 'priced' ? valuation.prices : null;
   if (!prices) return null;
   if (!condition) return prices.good ?? null;
-  return prices[condition] ?? null;
+  const band = prices[condition] ?? null;
+  return band?.basis === 'market' && POSITIONED.has(condition) ? positioned(band, condition) : band;
+}
+
+/**
+ * THE CONDITION MOVES THE PRICE INSIDE THE RANGE THE ADS SHOW (founder, 2026-11-18: "condition changes must actually affect
+ * prices"). With no ads that state a like-new or a fair unit, the used market's own range still spans the conditions it
+ * was asked in: a like-new unit is placed in its upper half, a fair one in its lower half. Every figure is one of the
+ * range's own (its ends and its centre); none is a percentage of anything, none leaves the range, and the screen says it
+ * is a placement, not a separate market price. A sealed or a faulty unit still needs ads of its own.
+ */
+const POSITIONED = new Set(['like_new', 'fair']);
+const nice = (v) => Math.round(v / 10) * 10;
+function positioned(band, condition) {
+  const { low, high } = band;
+  const worth = band.worth ?? Math.round((low + high) / 2);
+  if (!(low > 0) || !(high >= low) || !(worth >= low && worth <= high)) return band;
+  return condition === 'like_new'
+    ? { ...band, basis: 'range_position', low: worth, worth: nice((worth + high) / 2), high, quick: worth, list: band.list }
+    : { ...band, basis: 'range_position', low, worth: nice((low + worth) / 2), high: worth, quick: low, list: Math.max(worth, nice((low + worth) / 2)) };
 }
 /** The used-market band, whatever condition is chosen. */
 export const marketBandOf = (valuation) => (valuation?.status === 'priced' ? valuation.prices?.good ?? null : null);
@@ -528,7 +547,8 @@ function fallbackTitle(identity) {
 const LISTING_BAND = Object.freeze({ newSealed: 'new_sealed', likeNew: 'like_new', used: 'good', poor: 'poor' });
 export function listingPricesOf(valuation) {
   if (valuation?.status !== 'priced' || !valuation.prices) return null;
-  return Object.fromEntries(Object.entries(LISTING_BAND).map(([k, c]) => [k, valuation.prices[c]?.list ?? null]));
+  // The same band the scan screen shows for that condition (bandFor: a placement in the range when no ads state it).
+  return Object.fromEntries(Object.entries(LISTING_BAND).map(([k, c]) => [k, bandFor(valuation, c)?.list ?? null]));
 }
 /** The listing form's suggested price for a condition: the engine's, for a core scan; '' when it gave none. */
 export function listingPriceFor(result, listingCondition) {

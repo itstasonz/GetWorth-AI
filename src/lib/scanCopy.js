@@ -58,6 +58,8 @@ export const SCAN_COPY = {
     // Condition, without invented discounts (2026-11-12): what the price for the chosen condition rests on, said plainly.
     conditionUnset: 'This is the general second-hand price in Israel. Choose the condition to see an adjusted price.',
     conditionMarket: 'No listings were found for units in this condition, so this is the general second-hand price, not adjusted for condition.',
+    conditionPositioned: (top) => `No listings state this condition, so the price is placed in the ${top ? 'upper' : 'lower'} half of the range of listings found. This is an estimate, not a separate market price.`,
+    worthPositioned: (c) => `Estimate for ${c} condition`,
     conditionListings: (n) => (n === 1 ? 'Based on one listing for a unit in this condition.' : `Based on ${n} listings for units in this condition.`),
     conditionNone: (c) => `No listings in Israel were found for a unit in ${c} condition, and we do not guess a discount. Set your own price or use the second-hand price above.`,
     conditionHint: { controller: 'Stick drift or a button that does not work? Choose "Faulty".', appliance: 'Does not work properly? Choose "Faulty".', device: 'Cracked screen or something that does not work? Choose "Faulty".', furniture: 'Structural damage or missing parts? Choose "Faulty".' },
@@ -270,6 +272,8 @@ export const SCAN_COPY = {
     dispersed: 'המחירים שנמצאו רחוקים זה מזה, לכן הטווח רחב.',
     conditionUnset: 'זה מחיר יד שנייה כללי בישראל. בחרו את מצב המוצר כדי לראות מחיר מותאם.',
     conditionMarket: 'לא נמצאו מודעות למוצרים במצב הזה, לכן מוצג מחיר יד שנייה כללי שלא הותאם למצב.',
+    conditionPositioned: (top) => `אין מודעות שמציינות את המצב הזה, לכן המחיר ממוקם ב${top ? 'חצי העליון' : 'חצי התחתון'} של טווח המודעות שנמצאו. זו הערכה, לא מחיר שוק נפרד.`,
+    worthPositioned: (c) => `הערכה למצב ${c}`,
     conditionListings: (n) => (n === 1 ? 'לפי מודעה אחת למוצר במצב הזה.' : `לפי ${n} מודעות למוצרים במצב הזה.`),
     conditionNone: (c) => `לא נמצאו בישראל מודעות למוצר במצב ${c}, ואנחנו לא מנחשים הנחה. אפשר לקבוע מחיר בעצמכם או להיעזר במחיר היד השנייה שלמעלה.`,
     conditionHint: { controller: 'סטיק שזז לבד או כפתור שלא עובד? בחרו "תקול".', appliance: 'לא עובד כמו שצריך? בחרו "תקול".', device: 'מסך סדוק או משהו שלא עובד? בחרו "תקול".', furniture: 'נזק במבנה או חלקים חסרים? בחרו "תקול".' },

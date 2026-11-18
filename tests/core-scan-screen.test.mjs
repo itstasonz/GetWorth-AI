@@ -158,8 +158,10 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
     assert.match(text(), /Based on 2 listings for units in this condition\./);
     assert.ok(button('Sell for ₪340'));
     await click(button('Fair'));
-    assert.match(text(), /not adjusted for condition/, 'no fair ads: the market price, and it says so');
-    assert.match(text(), /Recommended listing price₪290/);
+    // No fair ads (2026-11-18): placed in the lower half of the market's own range, labelled as a placement, never below it.
+    assert.match(text(), /Estimate for Fair condition₪250/);
+    assert.match(text(), /placed in the lower half of the range of listings found\. This is an estimate, not a separate market price\./);
+    assert.match(text(), /Expected selling range: ⁦₪240–260⁩/, 'inside the market range: its low end to its centre');
     await click(button('Faulty'));
     assert.match(text(), /Expected selling range: ⁦₪100–130⁩/);
     assert.equal(requests.length, before, 'a condition is a recalculation, never another search');
