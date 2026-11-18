@@ -198,7 +198,7 @@ export function BrowseView() {
         <p className="text-sm text-slate-400">{sortedListings.length} {t.results}</p>
         <button onClick={() => loadListings(true)} className="text-xs flex items-center gap-1 transition-opacity hover:opacity-70" style={{ color: '#6FEEE1' }}>
           <RefreshCw className={`w-3 h-3 ${refreshingUI ? 'animate-spin' : ''}`} />
-          {lang === 'he' ? 'רענן' : 'Refresh'}
+          {lang === 'he' ? 'רענון' : 'Refresh'}
         </button>
       </div>
 

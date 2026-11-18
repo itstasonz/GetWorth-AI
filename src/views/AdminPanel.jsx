@@ -373,7 +373,7 @@ export default function AdminPanel() {
             })}
           </div>
           <button onClick={loadStats} className="w-full py-2.5 text-xs text-slate-400 flex items-center justify-center gap-1.5 hover:text-white transition-colors mt-2">
-            <RefreshCw className="w-3.5 h-3.5" />{t('Refresh', 'רענן')}
+            <RefreshCw className="w-3.5 h-3.5" />{t('Refresh', 'רענון')}
           </button>
         </FadeIn>
       )}
