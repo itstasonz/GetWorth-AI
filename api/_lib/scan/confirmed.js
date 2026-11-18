@@ -57,6 +57,25 @@ function settledBy(note, c, identity) {
 }
 
 /**
+ * Does an answer to an identity question name the MODEL itself? The question is about which model, generation, series,
+ * edition or version; the answer is written in Latin letters (a model's name, not "רגיל" or "דור שני"); and it carries every
+ * word of the product family the photograph named, beyond the brand ("MX Master 3S" for family "MX Master"). "Series 4"
+ * does not carry "Apple Watch", so it stays a generation.
+ */
+export function namesTheModel(c, identity) {
+  if (!/(model|generation|series|edition|version|\bgen\b)/i.test(String(c?.attribute ?? '')) || !c?.value) return false;
+  const value = String(c.value);
+  if (/[֐-׿]/.test(value) || !/[a-z]/i.test(value)) return false;
+  const brand = new Set(tokens(identity?.brand));
+  const family = tokens(identity?.product_family ?? identity?.model).filter((t) => !brand.has(t));
+  const words = [...new Set(tokens(value))];
+  // A family word may lead a model word: "S" in "S22" ("Galaxy S22 Ultra" for family "Galaxy S", fresh photo 2026-11-18).
+  const carried = (t) => words.some((w) => w === t || (w.startsWith(t) && /^\d/.test(w.slice(t.length))));
+  // …and says more than the family: another word, or a number the family lacks ("Galaxy S22 Ultra" for "Galaxy S Ultra").
+  return family.length > 0 && family.every(carried) && (words.length > family.length || words.some((w) => /\d/.test(w) && !family.includes(w)));
+}
+
+/**
  * The owner's confirmed facts, written over the model's guesses: a confirmed attribute is never silently replaced, is
  * marked as the OWNER's word (basis "confirmed", never "observed"), and a note the model wrote about not knowing it is
  * taken down: what the owner has answered is no longer uncertain. What the owner has NOT answered stays uncertain.
@@ -69,7 +88,10 @@ export function applyConfirmed(identity) {
     const have = (identity.attributes ?? []).find((a) => sameAttribute(a.name, c.attribute));
     if (have) { have.value = c.value; have.basis = 'confirmed'; have.matters = have.matters === 'low' ? 'medium' : have.matters; }
     else if ((identity.attributes?.length ?? 0) < MAX_ATTRIBUTES && !ASKED_ATTRIBUTE.test(c.attribute)) identity.attributes.push({ name: c.attribute, value: c.value, basis: 'confirmed', matters: 'high' });
-    const field = fieldOf(c.attribute);
+    // AN ANSWER THAT IS A MODEL'S FULL NAME IS THE MODEL, whatever the question was called (E2E 2026-11-18: "MX Master 3S"
+    // answered to "generation", "EOS 5D Mark III" to "camera model", "Kindle Paperwhite" to "model and generation" left
+    // the model empty, so the search read "Logitech MX Master MX Master 3S" and a shop's exact page could not bind).
+    const field = fieldOf(c.attribute) ?? (namesTheModel(c, identity) ? 'model' : null);
     if (field && c.value) identity[field] = c.value;
     // THE OWNER NAMED THE MODEL (identify.js asModelChoice, or their own words): the product is established by the owner's
     // word — the search names it, the research is kept under its own name (strategy.js marketKey reads canonical_name),

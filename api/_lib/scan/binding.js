@@ -338,7 +338,8 @@ export function bindPrice(claim, page, identity, answer = null) {
     .filter((c) => !c.unsure && /^(generation|series|gen|model year|year)$/i.test(String(c.attribute ?? '').trim()))
     // An ordinal in words is its number ("דור שני" is generation 2). The FIRST is left unwritten: a first-generation ad is
     // rarely written with a "1", so requiring it would refuse every one of them.
-    .flatMap((c) => String(c.value ?? '').match(/\d+/g) ?? tokens(c.value).map((t) => ORDINALS[t]).filter(Boolean));
+    // Each word that carries a number, whole: "3S" is not "3" (MX Master 3S is not MX Master 3); "2nd" is "2".
+    .flatMap((c) => { const w = tokens(c.value).filter((t) => /\d/.test(t)).map((t) => t.replace(/^(\d+)(st|nd|rd|th)$/, '$1')); return w.length ? w : tokens(c.value).map((t) => ORDINALS[t]).filter(Boolean); });
   const statesGeneration = (row) => generations.every((d) => row.some((w) => w.t === d || new RegExp(`^[a-z֐-׿]{0,8}${d}(st|nd|rd|th)?$`).test(w.t)));
   const verdict = (row, who, stretch) => {
     if (generations.length && !statesGeneration(row)) return { refused: BIND_REASON.GENERATION_ABSENT };

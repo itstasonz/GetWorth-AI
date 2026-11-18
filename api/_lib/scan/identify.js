@@ -238,7 +238,17 @@ function clarification(c) {
   };
 }
 /** A clarification as the question the client shows. */
-const questionOf = (c, required = false) => (c ? { kind: c.kind, affects: c.affects, question: c.question, options: [...c.options], unit: c.unit ?? null, attribute: c.attribute, ...(required ? { required: true } : {}) } : { ...NO_QUESTION });
+/**
+ * One product, one option (fresh photo 2026-11-18: "Vertuo Pop" and "Nespresso Vertuo Pop" offered side by side): an option
+ * that is another option with ONE more word in front (a brand) is the same product and is dropped. "iPhone 13 Pro Max"
+ * is not "iPhone 13 Pro": its extra word is at the end, and it stays.
+ */
+export function distinctOptions(options) {
+  const list = Array.isArray(options) ? options : [];
+  const low = list.map((o) => String(o ?? '').trim().toLowerCase().replace(/\s+/g, ' '));
+  return list.filter((o, k) => !low.some((other, j) => j !== k && other && low[k].endsWith(` ${other}`) && low[k].split(' ').length === other.split(' ').length + 1));
+}
+const questionOf = (c, required = false) => (c ? { kind: c.kind, affects: c.affects, question: c.question, options: distinctOptions(c.options), unit: c.unit ?? null, attribute: c.attribute, ...(required ? { required: true } : {}) } : { ...NO_QUESTION });
 
 // The market class a category implies when the model names none, and the precision a market class implies.
 const CLASS_BY_CATEGORY = { Electronics: 'consumer_electronics', Vehicles: 'vehicle', Furniture: 'furniture', Watches: 'luxury_watch_jewelry', Jewelry: 'luxury_watch_jewelry', Clothing: 'fashion', Bags: 'fashion', Beauty: 'fragrance_cosmetics', Tools: 'tools', Home: 'household', Toys: 'collectible', Books: 'collectible', Sports: 'other' };

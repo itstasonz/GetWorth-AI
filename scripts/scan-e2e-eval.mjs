@@ -32,6 +32,17 @@ export const TRUTH = [
   { id: 'mxmaster-a', truth: 'Logitech MX Master 3S', category: 'small electronics' },
   { id: 'kitchenaid-a', truth: 'KitchenAid Artisan stand mixer', category: 'household' },
   { id: 'switchlite-a', truth: 'Nintendo Switch Lite (grey)', category: 'gaming' },
+  // FRESH photographs (2026-11-18, round 2): never scanned before this run.
+  { id: 'iphone13pro-f', truth: 'Apple iPhone 13 Pro', category: 'smartphone' },
+  { id: 'galaxys22-f', truth: 'Samsung Galaxy S22', category: 'smartphone' },
+  { id: 's22ultra-f', truth: 'Samsung Galaxy S22 Ultra', category: 'smartphone' },
+  { id: 'ps4-f', truth: 'Sony PlayStation 4 (original) with DualShock 4', category: 'gaming' },
+  { id: 'xboxs-f', truth: 'Microsoft Xbox Series S', category: 'gaming' },
+  { id: 'aw7-f', truth: 'Apple Watch Series 7 45mm', category: 'small electronics' },
+  { id: 'dysonv8-f', truth: 'Dyson V8 cordless vacuum', category: 'household' },
+  { id: 'vertuopop-f', truth: 'Nespresso Vertuo Pop', category: 'household' },
+  { id: 'mxkeys-f', truth: 'Logitech MX Keys', category: 'small electronics' },
+  { id: 'kindle-f', truth: 'Amazon Kindle Paperwhite', category: 'small electronics' },
 ];
 const stageOf = (init) => {
   const b = String(init?.body ?? '');
@@ -49,12 +60,15 @@ export const OWNER_ANSWERS = {
   's21-a': ['Galaxy S21'], 's21-b': ['Galaxy S21'], '5d3-a': ['EOS 5D Mark III'], '5d3-b': ['EOS 5D Mark III'],
   'aw4-a': ['Series 4'], 'aw4-b': ['Series 4'], 'dualsense-a': ['DualSense רגיל'], 'dualsense-b': ['DualSense רגיל'],
   'kindle-a': ['Kindle Paperwhite'], 'mxmaster-a': ['MX Master 3S'], 'switchlite-a': ['Nintendo Switch Lite'],
+  // Fresh photographs: every way an option may name the true product, written from the truth before the run.
+  'iphone13pro-f': ['iPhone 13 Pro'], 'galaxys22-f': ['Galaxy S22', 'Samsung Galaxy S22'], 's22ultra-f': ['Galaxy S22 Ultra', 'Samsung Galaxy S22 Ultra'],
+  'ps4-f': ['PlayStation 4', 'PS4', 'PlayStation 4 (original)', 'PS4 original', 'מקורי'], 'xboxs-f': ['Xbox Series S'],
+  'aw7-f': ['Series 7', 'Apple Watch Series 7', '45mm', '45 mm'], 'dysonv8-f': ['V8', 'Dyson V8'], 'vertuopop-f': ['Vertuo Pop', 'Nespresso Vertuo Pop'],
+  'mxkeys-f': ['MX Keys', 'Logitech MX Keys'], 'kindle-f': ['Kindle Paperwhite'],
 };
-// A STORAGE THE PHOTO CANNOT SHOW: the model's base storage, ASSUMED (an owner knows theirs) and reported as assumed.
-export const ASSUMED_ANSWERS = {
-  'iphone12-a': ['64 GB'], 'iphone12-b': ['64 GB'], 'iphone11pro-a': ['64 GB'], 'iphone11pro-b': ['64 GB'],
-  'iphonex-a': ['64 GB'], 'iphonex-b': ['64 GB'], 's21-a': ['128 GB'], 's21-b': ['128 GB'],
-};
+// NOTHING IS ASSUMED (founder, 2026-11-18): a storage or other price-moving detail the photograph cannot show and the truth
+// does not record is answered "not sure", as an owner who does not know would. Kept empty on purpose.
+export const ASSUMED_ANSWERS = {};
 const sameText = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase();
 /**
  * The owner answers a REQUIRED choice through the server's own recordAnswer (as api/scan.js does): the one offered option
@@ -68,10 +82,11 @@ export function ownerAnswer(identity, id, { followupsLeft = 1 } = {}) {
   const known = pick(OWNER_ANSWERS[id]);
   const assumed = known.length ? [] : pick(ASSUMED_ANSWERS[id]);
   const hits = known.length ? known : assumed;
-  const raw = hits.length === 1 ? hits[0].i : 'unsure';
+  // Every hit is one of the true product's own names (OWNER_ANSWERS lists only those), so the first is a true answer.
+  const raw = hits.length >= 1 ? hits[0].i : 'unsure';
   const r = recordAnswer(identity, raw, { lang: 'he', followupsLeft });
   if (r.error) return { identity, answer: null, picked: null, assumed: false };
-  return { identity: r.identity, answer: r.answer, picked: hits.length === 1 ? hits[0].o : 'unsure', assumed: hits.length === 1 && !known.length };
+  return { identity: r.identity, answer: r.answer, picked: hits.length >= 1 ? hits[0].o : 'unsure', assumed: hits.length >= 1 && !known.length };
 }
 const notSure = (identity) => (identity?.followup?.required ? { question: identity.followup.question ?? '', text: 'not sure', unsure: true, attribute: identity.followup.attribute ?? null } : null);
 

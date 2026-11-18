@@ -154,30 +154,46 @@ const clean = (v, max = 80) => promptSafe(v, max);
  * could be. Each is a short, neutralised string; nothing a page or a person
  * wrote can add an instruction to a query.
  */
+// A generation written as a word, from the second on (searchNames).
+const ORDINAL_NUMBER = { second: '2', third: '3', fourth: '4', fifth: '5', שני: '2', שנייה: '2', שלישי: '3', שלישית: '3', רביעי: '4', רביעית: '4', חמישי: '5', חמישית: '5' };
 export function searchNames(identity, answer = null) {
   const i = identity ?? {};
-  const product = clean([i.brand, i.model ?? i.product_family, i.variant].filter(Boolean).join(' ')) || clean(i.canonical_name ?? i.display_name);
+  // The brand once: "Apple Watch" is not searched as "Apple Apple Watch" (2026-11-18).
+  const base = i.model ?? i.product_family;
+  const branded = i.brand && base && String(base).toLowerCase().startsWith(String(i.brand).toLowerCase());
+  const product = clean([branded ? null : i.brand, base, i.variant].filter(Boolean).join(' ')) || clean(i.canonical_name ?? i.display_name);
+  // Every word of `v` already in the product's name: then it is not said twice ("Logitech MX Master 3S MX Master 3S", 2026-11-18).
+  const within = (v) => { const p = product.toLowerCase(); return String(v ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean).every((t) => p.includes(t)); };
   const codes = [...new Set([i.model_number, ...(i.search?.model_numbers ?? [])].map((c) => clean(c, 30)).filter(Boolean))].slice(0, 2);
   const aliases = (i.search?.aliases ?? []).map((a) => clean(a)).filter((a) => a && a.toLowerCase() !== product.toLowerCase()).slice(0, 2);
-  const alternatives = i.exact_model_established ? [] : (i.alternatives ?? []).map((a) => clean(a?.name)).filter(Boolean).slice(0, 2);
+  // A generation or series the owner confirmed ends the search for the other candidates (Apple Watch "Series 4" was still
+  // searched as "Series 5", 2026-11-18), and is written into the Hebrew name when that name lacks it.
+  const generation = (i.confirmed ?? []).find((c) => !c.unsure && /^(generation|series|gen)$/i.test(String(c.attribute ?? '').trim()) && c.value)?.value ?? null;
+  const alternatives = i.exact_model_established || generation ? [] : (i.alternatives ?? []).map((a) => clean(a?.name)).filter(Boolean).slice(0, 2);
   // The configuration that moves the price belongs in the exact name: the capacity read off the item, and the owner's
   // answer when it names one ("256 GB", "2nd generation") — not when it describes the unit ("About half", "not sure").
   const size = clean(i.size_or_capacity, 30);
   const configuration = (v) => v && /\d/.test(v) && !/%/.test(v);
-  const detail = answer?.text && answer.unsure !== true && configuration(answer.text) ? clean(answer.text, 40) : null;
+  const detail = answer?.text && answer.unsure !== true && configuration(answer.text) && !within(answer.text) ? clean(answer.text, 40) : null;
   // What the owner confirmed joins the exact name when it names WHAT the item is (a car's year, a phone's storage, a
   // trim) — not when it describes the unit (mileage, width, how much is left): listings are not written by those.
-  const confirmed = (i.confirmed ?? []).filter((c) => !c.unsure && SEARCHABLE.test(c.attribute) && configuration(c.value) && c.value !== answer?.text && c.value !== size).map((c) => clean(c.value, 40)).slice(0, 2);
-  const name = [...new Set([product, size, detail, ...confirmed].filter(Boolean))].join(' ');
+  const confirmed = (i.confirmed ?? []).filter((c) => !c.unsure && SEARCHABLE.test(c.attribute) && configuration(c.value) && c.value !== answer?.text && c.value !== size && !within(c.value)).map((c) => clean(c.value, 40)).slice(0, 2);
+  // A generation confirmed in words, from the second on, is searched by its number, as sellers write it: "דור שני" → "AirPods
+  // Pro 2" (2026-11-18: the search for a confirmed 2nd generation never said "2"). The first is left unwritten, as ads do.
+  const ordinal = !/\d/.test(String(generation ?? '')) ? String(generation ?? '').toLowerCase().split(/[^\p{L}]+/u).map((t) => ORDINAL_NUMBER[t]).find(Boolean) : null;
+  const name = [...new Set([product, size, detail, ...confirmed, ordinal && !product.split(/\s+/).includes(ordinal) ? ordinal : null].filter(Boolean))].join(' ');
   // The Hebrew name names THIS product only when it carries the model — written in either alphabet ("קורולה" is
   // "Corolla"): "בושם BDK" alone is the house, so the model joins it.
   const hebrew = clean(i.search?.hebrew_name);
   const model = clean(i.model ?? i.product_family, 60);
-  const carries = (h) => {
-    const words = h.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-    return !model || model.toLowerCase().split(/\s+/).every((t) => h.toLowerCase().includes(t) || words.some((w) => transliterates(w, t, { minLength: 3 })));
-  };
-  const hebrewName = hebrew && hebrew.toLowerCase() !== name.toLowerCase() ? (carries(hebrew) || hebrewNamesProduct(i) ? hebrew : `${hebrew} ${model}`) : null;
+  // A short model word ("pro", "air") is read across alphabets at two consonants: "פרו" is "pro".
+  const has = (h, t) => { const words = h.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean); return h.toLowerCase().includes(t) || words.some((w) => transliterates(w, t, { minLength: t.length <= 4 ? 2 : 3 })); };
+  const carries = (h) => !model || model.toLowerCase().split(/\s+/).every((t) => has(h, t));
+  // Only the model's words the Hebrew name lacks join it ("עכבר לוגיטק MX Master" + "3S", not + "MX Master 3S").
+  const missing = (h) => model.split(/\s+/).filter((t) => !has(h, t.toLowerCase())).join(' ');
+  const hebrewBase = hebrew && hebrew.toLowerCase() !== name.toLowerCase() ? (carries(hebrew) || hebrewNamesProduct(i) ? hebrew : `${hebrew} ${missing(hebrew)}`) : null;
+  const genNumber = String(generation ?? '').match(/\d+/)?.[0] ?? ordinal;
+  const hebrewName = hebrewBase && genNumber && !hebrewBase.includes(genNumber) ? `${hebrewBase} ${ordinal ?? clean(generation, 30)}` : hebrewBase;
   return { name, codes, aliases, hebrew: hebrewName, alternatives };
 }
 

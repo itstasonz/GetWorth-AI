@@ -90,9 +90,15 @@ export function pageTypeOf(url, claimed) {
     let path = m[2] || '/';
     try { path = decodeURIComponent(path); } catch { /* keep as is */ }
     for (const [h, p, type] of PAGE_SHAPES) if (h.test(host) && p.test(path)) return type;
+    // AN ADDRESS THAT SAYS IT LISTS MANY THINGS is a list page, whatever the model called it (2026-11-18: Ivory's Switch Lite
+    // "category" page, act=cat, holds the new unit at ₪749 and a refurbished one at ₪650, and was bound as one product's
+    // page). Its prices then count only row by row, where the page's own text ties one price to the product.
+    if (LIST_ADDRESS.test(String(url).replace(/^https?:\/\/[^/?#]+/i, ''))) return 'search_or_category';
   }
   return EVIDENCE_PAGES.includes(claimed) ? claimed : 'other';
 }
+// Address shapes of category, search, brand and paged list pages on shop sites.
+const LIST_ADDRESS = /([?&](act|action)=(cat|category|search|list)\b|[?&](q|s|search|query|keyword|keywords)=|[?&](page|pageindex|pagenumber|p)=\d|\/(category|categories|cat|catalogsearch|search|collections(?!\/[^/?#]+\/products\/))(\/|$|\?))/i;
 
 // ── WHAT KIND OF PRICE ──────────────────────────────────────────────────────
 // Classified boards: whoever lists here sells second-hand, sealed or not. A

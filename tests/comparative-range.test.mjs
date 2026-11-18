@@ -111,7 +111,7 @@ describe('CR-4 the screens', () => {
   test('CR-4b no-price screen: State B and State C side by side, apart; the listing shows the range for reference and never prefills it', () => {
     const view = read('src/views/ScanView.jsx');
     // State B, then Method C (a calculated estimate, 2026-11-18), then the new-price reference: each apart, in that order.
-    assert.match(view, /<ComparativeRange comparative=\{s\.valuation\?\.comparative\} copy=\{copy\} \/>\n[^\n]*\n\s*<CalculatedEstimate calculated=\{s\.valuation\?\.calculated\} condition=\{s\.condition\} copy=\{copy\} \/>\n\s*<RetailReference/);
+    assert.match(view, /<ComparativeRange comparative=\{s\.valuation\?\.comparative\} copy=\{copy\} \/>\n[^\n]*\n\s*<CalculatedEstimate calculated=\{s\.valuation\?\.calculated\} condition=\{s\.condition\} copy=\{copy\} \/>\n[^\n]*\n\s*\{!calculatedFor\(s\.valuation\?\.calculated, s\.condition\)\?\.value && <RetailReference/);
     const scan = read('src/lib/coreScan.js');
     assert.match(scan, /comparative: s\.valuation\?\.status === 'priced' \? null : \(s\.valuation\?\.comparative \?\? null\),/);
     const sell = read('src/views/SellViews.jsx');

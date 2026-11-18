@@ -187,6 +187,7 @@ describe('SB-C METHOD C: a calculated estimate from the verified new price, labe
     assert.equal(calc().querySelector('[data-testid="scan-calculated-source"]').getAttribute('href'), SHOP);
     assert.doesNotMatch(r.text, /Recommended listing price|Quick sale/);
     assert.equal(r.rows[0].price_mid, null, 'never stored as a market price');
+    assert.equal(container.querySelector('[data-testid="scan-retail-reference"]'), null, 'the new price is on the estimate card, not repeated');
   });
   test('SB-Cb in Hebrew: the founder label, right to left, the price whole', async () => {
     await scanWith({ identity: ELEC, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } }, { lang: 'he' });
