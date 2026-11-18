@@ -417,7 +417,9 @@ describe('CV-3 honest when it cannot price', () => {
     };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(live)] }));
     assert.doesNotMatch(text(), /Recommended listing price|Sell for|₪430|₪389|₪190/, 'no used price, invented or borrowed, and no "Sell for ₪X"');
-    assert.match(text(), /New price in Israel — not second-hand worth\s*₪400/);
+    // The cheapest shop's price, seen only out of stock, is never called today's new price (2026-11-18).
+    assert.match(text(), /Last listed new price — not available to buy now\s*₪400/);
+    assert.doesNotMatch(text(), /New price in Israel — not second-hand worth\s*₪400/);
     assert.match(text(), /out of stock there/);
     assert.ok(button('Sell at your own price'));
     await click(button('What I found'));

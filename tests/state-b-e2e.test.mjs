@@ -200,6 +200,15 @@ describe('SB-C METHOD C: a calculated estimate from the verified new price, labe
     assert.ok(container.querySelector('[data-testid="scan-comparative"]'));
     assert.equal(calc(), null);
   });
+  test('SB-Ce a new price seen only OUT OF STOCK: never the current new price, no estimate', async () => {
+    await scanWith({ identity: ELEC, market: { evidence: [{ ...newShop, stock: 'out_of_stock' }] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } }, { lang: 'he' });
+    assert.equal(calc(), null);
+    const ref = container.querySelector('[data-testid="scan-retail-reference"]');
+    assert.ok(ref);
+    assert.equal(ref.getAttribute('data-in-stock'), 'false');
+    assert.match(ref.textContent, /מחיר חדש אחרון שפורסם — המוצר לא זמין לקנייה כעת/);
+    assert.doesNotMatch(ref.textContent, /^מחיר חדש בישראל/);
+  });
   test('SB-Cd a unit that looks fair: the new price only, no estimate', async () => {
     await scanWith({ identity: { ...ELEC, visible_condition: 'fair' }, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
     assert.equal(calc(), null);

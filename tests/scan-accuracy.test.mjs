@@ -59,6 +59,16 @@ describe('SA-4 one product, one option; a model number carried by a family word'
   });
 });
 
+describe('SA-5 a shop seen out of stock is not "unknown" (Apple Watch Series 4, Ivory, 2026-11-18)', () => {
+  test('SA-5a merged sightings: out_of_stock beats unknown; in_stock beats both', async () => {
+    const { mergeEvidence } = await import('../api/_lib/scan/evidence.js');
+    const e = (stock) => ({ url: 'https://www.ivory.co.il/catalog.php?id=27338', price: 1699, currency: 'ILS', kind: 'new_retail', match: 'exact', condition: 'new_sealed', binding: 'strong', binding_reason: 'x', stock });
+    assert.equal(mergeEvidence([e('unknown')], [e('out_of_stock')])[0].stock, 'out_of_stock');
+    assert.equal(mergeEvidence([e('out_of_stock')], [e('unknown')])[0].stock, 'out_of_stock');
+    assert.equal(mergeEvidence([e('out_of_stock')], [e('in_stock')])[0].stock, 'in_stock');
+  });
+});
+
 describe('SA-2 "3S" is not "3"', () => {
   const page = (t, price) => ({ type: 'search_or_category', title: 'list', text: `${t} ${price} ש"ח` });
   test('SA-2a a confirmed "MX Master 3S": a "3S" row binds, a "3" row does not', () => {

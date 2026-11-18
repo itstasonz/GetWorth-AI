@@ -397,7 +397,7 @@ export function requalify(e) {
 const LESS_USABLE = ['exact', 'close_comparable', 'sibling_model', 'bundle', 'accessory', 'part', 'box_only', 'irrelevant'];
 const BIND_ORDER = ['strong', 'verified_row', 'weak', 'unbound'];
 const MAX_SIGHTINGS = 6;
-const sightingOf = (e) => ({ match: e.match, kind: e.kind, condition: e.condition, binding: e.binding, binding_reason: e.binding_reason ?? null });
+const sightingOf = (e) => ({ match: e.match, kind: e.kind, condition: e.condition, binding: e.binding, binding_reason: e.binding_reason ?? null, ...(e.stock ? { stock: e.stock } : {}) });
 function majority(values, order = null) {
   const count = new Map();
   for (const v of values) count.set(v, (count.get(v) ?? 0) + 1);
@@ -413,7 +413,12 @@ function combine(newer, older) {
   const kind = majority(sightings.map((x) => x.kind)) ?? newer.kind;
   const condition = majority(sightings.map((x) => x.condition)) ?? newer.condition;
   const proof = [...sightings].sort((a, b) => BIND_ORDER.indexOf(a.binding) - BIND_ORDER.indexOf(b.binding))[0];
-  return { ...newer, match, kind, condition, binding: proof.binding, binding_reason: proof.binding_reason, sightings };
+  // STOCK: a sighting that saw the shop in stock wins; else one that saw it OUT of stock wins over "unknown" (2026-11-18:
+  // Ivory's Apple Watch Series 4, "מוצר זה לא זמין", seen out of stock by one stage and unknown by the next, was shown as
+  // the current new price). Sightings kept before stock was recorded say nothing either way.
+  const stocks = [newer.stock, older.stock, ...sightings.map((x) => x.stock)].filter(Boolean);
+  const stock = stocks.includes('in_stock') ? 'in_stock' : (stocks.includes('out_of_stock') ? 'out_of_stock' : (newer.stock ?? 'unknown'));
+  return { ...newer, match, kind, condition, stock, binding: proof.binding, binding_reason: proof.binding_reason, sightings };
 }
 
 export function mergeEvidence(fresh, earlier, max = 20) {

@@ -99,6 +99,7 @@ export const SCAN_COPY = {
     insufficient: (name) => `I identified this as ${name}, but I don't have enough reliable current second-hand evidence to give you a confident Israeli market price.`,
     retailContext: (price) => `New, it currently sells for about ${price} in Israel.`,
     retailLabel: 'New price in Israel — not second-hand worth',
+    retailLabelUnavailable: 'Last listed new price — not available to buy now',
     // METHOD C — a figure calculated from the verified new price (retail-estimate.js). Never called a market value.
     calculatedTitle: 'Estimated resale value',
     calculatedLabel: 'Calculated from the new price — not a verified market valuation',
@@ -299,6 +300,7 @@ export const SCAN_COPY = {
     insufficient: (name) => `זיהיתי את הפריט כ־${name}, אבל אין לי מספיק ראיות אמינות ועדכניות ממכירות יד שנייה כדי לתת מחיר שוק בטוח בישראל.`,
     retailContext: (price) => `חדש, הוא נמכר היום בישראל בכ־${ltr(price)}.`,
     retailLabel: 'מחיר חדש בישראל — לא שווי יד שנייה',
+    retailLabelUnavailable: 'מחיר חדש אחרון שפורסם — המוצר לא זמין לקנייה כעת',
     calculatedTitle: 'אומדן שווי ביד שנייה',
     calculatedLabel: 'אומדן מחושב לפי מחיר מוצר חדש — לא הערכת שוק מאומתת',
     calculatedBasis: (retail, pct, condition, chosen) => `מחיר חדש בישראל ${ltr(retail)}, פחות ${pct}% לפריט משומש במצב ${condition} (${chosen ? 'לפי הבחירה שלך' : 'לפי התמונה'}). הנחה, לא מחיר שוק שנמדד.`,

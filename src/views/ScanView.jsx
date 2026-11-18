@@ -186,9 +186,10 @@ function RetailReference({ valuation, copy }) {
   const r = retailReferenceOf(valuation);
   if (!r) return null;
   return (
-    <div className="rounded-container border border-subtle bg-surface p-3 space-y-1" data-testid="scan-retail-reference">
-      <p className="text-meta text-text-muted">{copy.retailLabel}</p>
-      <p className="text-body font-semibold text-text-primary"><bdi dir="ltr">{formatPrice(r.price)}</bdi></p>
+    <div className="rounded-container border border-subtle bg-surface p-3 space-y-1" data-testid="scan-retail-reference" data-in-stock={r.inStock ? 'true' : 'false'}>
+      {/* NOT FOR SALE NOW (2026-11-18, Apple Watch Series 4 at Ivory: "מוצר זה לא זמין"): never called today's new price. */}
+      <p className="text-meta text-text-muted">{r.inStock ? copy.retailLabel : copy.retailLabelUnavailable}</p>
+      <p className={r.inStock ? 'text-body font-semibold text-text-primary' : 'text-body text-text-muted line-through'}><bdi dir="ltr">{formatPrice(r.price)}</bdi></p>
       <p className="text-meta text-text-muted">{copy.retailSource(r.domain, r.seen, r.inStock)}</p>
     </div>
   );
