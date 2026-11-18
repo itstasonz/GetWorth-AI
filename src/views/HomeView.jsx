@@ -239,13 +239,13 @@ export default function HomeView() {
                 className="font-bold text-xl"
                 style={{ fontFamily: STITCH.FONT_HEADLINE, color: STITCH.onSurface }}
               >
-                {lang === 'he' ? 'פריטים חמים' : 'Hot Items'}
+                {lang === 'he' ? 'מודעות חדשות' : 'New listings'}
               </h3>
               <p
                 className="text-[10px] uppercase tracking-widest font-bold mt-0.5"
                 style={{ color: STITCH.onSurfaceVariant }}
               >
-                {lang === 'he' ? 'פעילות שוק חיה' : 'Live Marketplace activity'}
+                {lang === 'he' ? 'ממוכרים ב־GetWorth' : 'From sellers on GetWorth'}
               </p>
             </div>
             <button
@@ -253,7 +253,7 @@ export default function HomeView() {
               className="text-sm font-semibold flex items-center gap-1 group/viewall min-h-[44px] px-2"
               style={{ color: STITCH.primary }}
             >
-              {lang === 'he' ? 'הצג הכל' : 'View All'}
+              {lang === 'he' ? 'לכל המודעות' : 'See all'}
               {rtl
                 ? <ArrowLeft className="w-4 h-4 group-hover/viewall:-translate-x-1 transition-transform" />
                 : <ArrowRight className="w-4 h-4 group-hover/viewall:translate-x-1 transition-transform" />

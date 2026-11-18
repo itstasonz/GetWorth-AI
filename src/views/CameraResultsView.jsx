@@ -944,7 +944,7 @@ function HelpIdentifyModal() {
               <button onClick={handleSubmit} disabled={!brandInput.trim()}
                 className="px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all active:scale-95 hover:opacity-80"
                 style={{ background: '#6FEEE1', color: '#003733' }}>
-                {lang === 'he' ? 'עדכן' : 'Update'}
+                {lang === 'he' ? 'עדכון' : 'Update'}
               </button>
             </div>
           </div>
@@ -1978,7 +1978,7 @@ export function ResultsView() {
               />
               <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
                 className="px-4 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all" style={{ background: '#6FEEE1', color: '#003733' }}>
-                {lang === 'he' ? 'עדכן' : 'Update'}
+                {lang === 'he' ? 'עדכון' : 'Update'}
               </button>
             </div>
 
@@ -2066,7 +2066,7 @@ export function ResultsView() {
                 />
                 <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
                   className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all" style={{ background: '#6FEEE1', color: '#003733' }}>
-                  {lang === 'he' ? 'עדכן' : 'Update'}
+                  {lang === 'he' ? 'עדכון' : 'Update'}
                 </button>
               </div>
             )}
@@ -2124,7 +2124,7 @@ export function ResultsView() {
                 />
                 <button onClick={handleSubmitCorrection} disabled={!correctionInput.trim()}
                   className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-30 transition-all" style={{ background: '#6FEEE1', color: '#003733' }}>
-                  {lang === 'he' ? 'עדכן' : 'Update'}
+                  {lang === 'he' ? 'עדכון' : 'Update'}
                 </button>
               </div>
             )}
@@ -2245,7 +2245,7 @@ export function ResultsView() {
                     className="px-3 py-1.5 rounded-xl text-xs font-semibold disabled:opacity-30 transition-all"
                     style={{ background: STITCH.primary, color: STITCH.onPrimary }}
                   >
-                    {lang === 'he' ? 'עדכן' : 'Update'}
+                    {lang === 'he' ? 'עדכון' : 'Update'}
                   </button>
                 </div>
               )}

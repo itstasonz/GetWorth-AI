@@ -75,7 +75,7 @@ export function AuthView() {
             <Btn primary className="w-full py-4" disabled={authLoading || !newPassword || !confirmPassword}>
               {authLoading
                 ? <><Loader2 className="w-5 h-5 animate-spin" />{lang === 'he' ? 'מעדכן...' : 'Updating...'}</>
-                : (lang === 'he' ? 'עדכן סיסמה' : 'Update Password')
+                : (lang === 'he' ? 'עדכון הסיסמה' : 'Update password')
               }
             </Btn>
           </form>
@@ -845,7 +845,7 @@ export function ProfileView() {
                     onClick={() => setScansVisible(5)}
                     className="w-full py-2 text-xs text-slate-500 hover:text-slate-300 transition-colors"
                   >
-                    {lang === 'he' ? 'הצג פחות' : 'Show less'}
+                    {lang === 'he' ? 'הצגת פחות' : 'Show less'}
                   </button>
                 )}
               </div>

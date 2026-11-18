@@ -193,7 +193,7 @@ function UpdateBanner({ hasUpdate, updating, onUpdate, onDismiss, lang }) {
           className="px-3 min-h-[44px] rounded-xl text-xs font-bold flex-shrink-0 active:scale-95 transition-transform disabled:opacity-60"
           style={{ background: 'linear-gradient(135deg, #6FEEE1 0%, #4FD1C5 100%)', color: '#003733' }}
         >
-          {updating ? (lang === 'he' ? 'מעדכן…' : 'Updating…') : (lang === 'he' ? 'עדכן' : 'Update')}
+          {updating ? (lang === 'he' ? 'מעדכן...' : 'Updating...') : (lang === 'he' ? 'עדכון' : 'Update')}
         </button>
         <button
           onClick={onDismiss}
@@ -328,7 +328,7 @@ function AppShell() {
   const tabItems = [
     { id: 'home', icon: Home, label: lang === 'he' ? 'בית' : 'Home' },
     { id: 'browse', icon: Search, label: lang === 'he' ? 'עיון' : 'Browse' },
-    { id: 'sell', icon: PlusCircle, label: lang === 'he' ? 'מכור' : 'Sell' },
+    { id: 'sell', icon: PlusCircle, label: lang === 'he' ? 'מכירה' : 'Sell' },
     { id: 'messages', icon: MessageCircle, label: lang === 'he' ? 'צ\'אט' : 'Chat' },
     { id: 'profile', icon: User, label: lang === 'he' ? 'פרופיל' : 'Profile' },
   ];
@@ -524,7 +524,7 @@ function AppShell() {
                       {selected.contact_phone && (
                         <a href={`tel:${selected.contact_phone}`}
                           className="py-4 rounded-2xl bg-white/10 text-center font-semibold flex items-center justify-center gap-2 hover:bg-white/20 transition-all active:scale-95">
-                          <Phone className="w-5 h-5" />{lang === 'he' ? 'התקשר' : 'Call'}
+                          <Phone className="w-5 h-5" />{lang === 'he' ? 'התקשרות' : 'Call'}
                         </a>
                       )}
                     </div>

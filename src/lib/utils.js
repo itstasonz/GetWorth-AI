@@ -112,11 +112,15 @@ export const normalizeIsraeliPhone = (raw) => {
   return `972${national}`;
 };
 
+// How long ago, in the screen's language. Callers pass either the translation table or { ago: 'לפני' | 'ago' }; a Hebrew
+// screen never shows "136d ago" (live home screen, 2026-11-18), and Hebrew says "לפני 136 ימים", not "136 ימים".
 export const timeAgo = (d, t) => {
   if (!d) return '';
-  const days = Math.floor((Date.now() - new Date(d)) / 86400000);
+  const days = Math.max(0, Math.floor((Date.now() - new Date(d)) / 86400000));
   if (!t) return `${days}d`;
-  return days === 0 ? (t.today || 'today') : days === 1 ? (t.yesterday || 'yesterday') : `${days}${t.daysAgo || 'd ago'}`;
+  const he = t.ago === 'לפני' || /[֐-׿]/.test(`${t.today ?? ''}${t.daysAgo ?? ''}`);
+  if (he) return days === 0 ? 'היום' : days === 1 ? 'אתמול' : days === 2 ? 'לפני יומיים' : `לפני ${days} ימים`;
+  return days === 0 ? 'today' : days === 1 ? 'yesterday' : `${days}d ago`;
 };
 
 // ═══════════════════════════════════════════════════════

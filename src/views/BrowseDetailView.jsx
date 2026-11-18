@@ -231,7 +231,7 @@ export function BrowseView() {
               {lang === 'he' ? 'נסו לשנות את הסינון או לחפש משהו אחר' : 'Try adjusting your filters or search for something else'}
             </p>
             <Btn onClick={() => { setSearch(''); setCategory('all'); setFilterCondition('all'); setPriceRange({ min: '', max: '' }); }} className="mx-auto text-sm">
-              {lang === 'he' ? 'נקה פילטרים' : 'Clear Filters'}
+              {lang === 'he' ? 'ניקוי הסינון' : 'Clear filters'}
             </Btn>
           </FadeIn>
         ) : (
