@@ -306,6 +306,16 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
     const condition = conditionOf(claimedCondition, page, pageText.get(key));
     const shipping = finite(e?.shipping);
     const bound = bindPrice({ price, currency, title: e?.title, match: claimed, shipping }, { type: page, title: pageTitle.get(key), text: pageText.get(key) }, item?.identity, item?.answer);
+    // A SHOP'S NEW PRICE, NAMED BY ITS PAGE TITLE (2026-11-18). OpenAI's search returns a page's TITLE and no text, so a shop
+    // page for exactly this product ("טלפון סלולרי Samsung Galaxy S23 SM-S911B/DS 128GB", zap.co.il/model.aspx …) could never
+    // show its price beside the name, and 9 of 30 products had no new price at all (replay 2026-11-18). For a NEW-RETAIL
+    // claim on a one-product shop page, the search's own title is checked as the product's name — same model, same size,
+    // nothing sold FOR it — with every binding rule. The price stays the search's reading of the page: it is marked
+    // `title_bound`, may be a new-price reference only (valuation.js), and the screen links the shop.
+    const titled = bound.level === 'weak' && claimedKind === 'new_retail' && claimed === 'exact' && (page === 'shop_product' || e?.page === 'shop_product') && pageTitle.has(key)
+      ? bindPrice({ price, currency, title: pageTitle.get(key), match: 'exact', shipping: null }, { type: 'shop_product', title: pageTitle.get(key), text: `${pageTitle.get(key)}\n${price} ${currency === 'ILS' ? '₪' : currency}` }, item?.identity, item?.answer)
+      : null;
+    const titleBound = titled?.level === 'strong' && (titled.match ?? 'exact') === 'exact';
     evidence.push({
       url,
       domain,
@@ -326,6 +336,7 @@ export function verifyEvidence(rawEvidence, provenance, fx = null, seen = null, 
       page,
       binding: bound.level,
       binding_reason: bound.reason,
+      ...(titleBound ? { title_bound: true } : {}),
       // Another size than the item's: 'larger' (its price bounds the item's from above) or 'other'.
       ...(bound.size ? { size_relation: bound.size } : {}),
       // A shop's stock, and a listing's shipping, as the page states them. Kept with the price they qualify.

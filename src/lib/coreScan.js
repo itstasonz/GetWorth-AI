@@ -20,6 +20,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 
 import { lineReader } from './scanStream.js';
+import { calculatedFor } from './calculatedEstimate.js';
 export const STAGE = Object.freeze({
   IDLE: 'idle',
   PREPARING: 'preparing',       // the photograph is being readied
@@ -529,6 +530,8 @@ export function buildListingDraft(s = state) {
       listingPrices: listingPricesOf(s.valuation),
       // State B: the observed Israeli ads, shown in the listing form for reference only — never a prefilled price.
       comparative: s.valuation?.status === 'priced' ? null : (s.valuation?.comparative ?? null),
+      // Method C: the calculated figure for the condition in force, for reference only — never the listing's price.
+      calculatedEstimate: s.valuation?.status === 'priced' ? null : (calculatedFor(s.valuation?.calculated, s.condition)?.value ?? null),
       valuation_id: s.valuationId ?? undefined,
       coreScan: true,
     },

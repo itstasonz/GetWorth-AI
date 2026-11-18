@@ -66,7 +66,7 @@ export async function saveMarketResearch(key, record, scanUuid, { supa = getServ
 
 /** How many references a valuation row keeps: market.js asks each stage for at most 12, two stages, merged with a pool. */
 export const MAX_STORED_EVIDENCE = 40;
-const STORED_FIELDS = ['url', 'domain', 'title', 'price', 'currency', 'price_ils', 'shipping', 'kind', 'match', 'market', 'condition', 'page', 'listed', 'archived', 'binding', 'binding_reason', 'stock', 'seen', 'source', 'verification', 'sightings'];
+const STORED_FIELDS = ['url', 'domain', 'title', 'price', 'currency', 'price_ils', 'shipping', 'kind', 'match', 'market', 'condition', 'page', 'listed', 'archived', 'binding', 'binding_reason', 'title_bound', 'stock', 'seen', 'source', 'verification', 'sightings'];
 /** One reference as the calculation read it: its own fields, none of the outputs (used, weight, set_aside, freshness). */
 function storedReference(e) {
   const out = {};
@@ -106,6 +106,8 @@ export function buildValuationRow({ id, userId, scanUuid, identity, valuation, l
         estimate_basis: valuation.estimate_basis ?? null, evidence_gap: valuation.evidence_gap ?? null,
         // The observed Israeli ads shown with no valuation (valuation.js comparativeOf); the listing trigger reads it (20261115160000).
         comparative: valuation.comparative ?? null,
+        // A figure CALCULATED from the new price (retail-estimate.js): kept as what it is, never as price_low/mid/high.
+        calculated: valuation.calculated ?? null,
         retail_new_ils: valuation.retail_new_ils, retail_new_in_stock: valuation.retail_new_in_stock, intl_scale: valuation.intl_scale, searched: valuation.searched,
         // THE CALCULATION, REPRODUCIBLE: every reference as it was weighed, and the inputs beside it (reproduceValuation).
         inputs: valuation.inputs ?? null,

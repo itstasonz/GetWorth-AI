@@ -171,6 +171,41 @@ describe('SB-1 one or more genuine Israeli ads, no valuation: the API carries th
   });
 });
 
+describe('SB-C METHOD C: a calculated estimate from the verified new price, labelled, with its source', () => {
+  const SHOP = 'https://www.ksp.co.il/web/item/123';
+  const newShop = { url: SHOP, title: 'Logitech G Pro X Superlight', price: 600, currency: 'ILS', kind: 'new_retail', match: 'exact', market: 'IL', condition: 'new_sealed', page: 'shop_product', listed: null, stock: 'in_stock', shipping: null };
+  const ELEC = { ...MOUSE, market_class: 'consumer_electronics', identity_precision: 'exact_model', exact_model_established: true, visible_condition: 'good' };
+  const calc = () => container.querySelector('[data-testid="scan-calculated"]');
+  test('SB-Ca no ads, a verified new price ₪600: one figure ≈ ₪510 (−15%, good from the photo), labelled, shop linked, no worth', async () => {
+    const r = await scanWith({ identity: ELEC, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
+    assert.equal(r.priced.status, 'insufficient_evidence');
+    assert.equal(r.priced.valuation.calculated.estimates.good, 510);
+    assert.ok(calc(), 'the Method C card is on screen');
+    assert.equal(calc().querySelector('[data-testid="scan-calculated-price"]').textContent, '≈ ₪510');
+    assert.match(calc().textContent, /Calculated from the new price — not a verified market valuation/);
+    assert.match(calc().textContent, /less 15%/);
+    assert.equal(calc().querySelector('[data-testid="scan-calculated-source"]').getAttribute('href'), SHOP);
+    assert.doesNotMatch(r.text, /Recommended listing price|Quick sale/);
+    assert.equal(r.rows[0].price_mid, null, 'never stored as a market price');
+  });
+  test('SB-Cb in Hebrew: the founder label, right to left, the price whole', async () => {
+    await scanWith({ identity: ELEC, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } }, { lang: 'he' });
+    assert.equal(container.firstChild.getAttribute('dir'), 'rtl');
+    assert.match(calc().textContent, /אומדן מחושב לפי מחיר מוצר חדש — לא הערכת שוק מאומתת/);
+    assert.equal(calc().querySelector('[data-testid="scan-calculated-price"]').textContent, '≈ ₪510');
+  });
+  test('SB-Cc a genuine Israeli ad found: State B shows, no calculated figure', async () => {
+    await scanWith({ identity: ELEC, market: { evidence: [newShop, ad(1, 450, { title: 'Logitech G Pro X Superlight' })] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
+    assert.ok(container.querySelector('[data-testid="scan-comparative"]'));
+    assert.equal(calc(), null);
+  });
+  test('SB-Cd a unit that looks fair: the new price only, no estimate', async () => {
+    await scanWith({ identity: { ...ELEC, visible_condition: 'fair' }, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
+    assert.equal(calc(), null);
+    assert.ok(container.querySelector('[data-testid="scan-retail-reference"]'));
+  });
+});
+
 describe('SB-2 what never reaches the card', () => {
   test('SB-2a another model or generation, a bundle, a sealed unit and an archived ad: no card, their prices nowhere on it', async () => {
     const r = await scanWith({ identity: POANG, market: { evidence: [

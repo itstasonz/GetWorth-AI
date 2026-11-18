@@ -243,7 +243,8 @@ const localWeight = (points) => points.filter(leads).reduce((sum, p) => sum + p.
 const resaleLike = (e, basis) => RESALE_KINDS.has(e.kind) && MATCHES[basis].has(e.match);
 const anchorLike = (e, market) => e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && e.market === market && !!e.price_ils;
 const isResale = (e, basis) => resaleLike(e, basis) && isBound(e);
-const isNewPrice = (e, market) => anchorLike(e, market) && isBound(e);
+// A shop's own page for this exact product, named by the search's title (evidence.js title_bound): a new price in Israel.
+const isNewPrice = (e, market) => anchorLike(e, market) && (isBound(e) || (e.title_bound === true && market === 'IL' && e.match === 'exact'));
 /**
  * The new price in a market: the exact item's when the search found one, else
  * the close comparable's. A shop that has it today says more about today's new
@@ -505,7 +506,7 @@ export function buildValuation({ evidence: pool, searchPerformed = true, unverif
   // A shop's price for a SIMILAR item: shown as context, never an anchor, never counted as this item's new price.
   const similarRetail = (e) => similar && e.kind === 'new_retail' && ANCHOR_MATCHES.has(e.match) && !!e.price_ils;
   // Found, and of the right kind, but not tied to the product by the page's own text: counted, never priced from.
-  const loose = new Set(evidence.filter((e) => !isBound(e) && e.price_ils && (resaleLike(e, basis) || (!similar && (anchorLike(e, 'IL') || anchorLike(e, 'INTL'))))));
+  const loose = new Set(evidence.filter((e) => !isBound(e) && !isNewPrice(e, 'IL') && e.price_ils && (resaleLike(e, basis) || (!similar && (anchorLike(e, 'IL') || anchorLike(e, 'INTL'))))));
   // THE GATE. An Israeli second-hand price rests on at least one Israeli PRIVATE reference that is current (not known
   // to be old) and for a USED unit, tied to this product. Listings abroad, a shop's refurbished units, new prices and
   // old or sealed Israeli ads are context: with none standing they price nothing, each marked with why; once one

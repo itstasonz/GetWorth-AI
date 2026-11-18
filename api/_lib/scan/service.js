@@ -35,6 +35,7 @@ import { researchMarket, marketDate, buildSearchQueries, IL_SEARCH_DOMAINS } fro
 import { researchPerplexity, resolvePerplexity } from './perplexity.js';
 import { researchPerplexitySearch, resolvePerplexitySearch, searchApiKeep } from './perplexity-search.js';
 import { isBound } from './binding.js';
+import { retailEstimate } from './retail-estimate.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH, INDEPENDENT_MIN } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
@@ -235,6 +236,9 @@ export async function runPrice({
       today: marketDate(t0),
       independentMin,
     });
+    // METHOD C (retail-estimate.js): with no valuation and no observed ads, a labelled estimate from the verified new price.
+    const calculated = valuation.status === 'priced' ? null : retailEstimate(valuation, identity);
+    if (calculated) valuation.calculated = calculated;
     return {
       status: valuation.status === 'priced' ? SCAN_STATUS.PRICED : SCAN_STATUS.INSUFFICIENT,
       valuation, market_key: key, fx_date: record.fx_date ?? null, ...extra,

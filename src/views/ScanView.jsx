@@ -29,6 +29,7 @@ import {
 import { scanCopy, localColor } from '../lib/scanCopy';
 import { WrongItemSheet, WhyPriceSheet, Bidi } from '../components/ScanSheets';
 import ComparativeRange from '../components/ComparativeRange';
+import CalculatedEstimate from '../components/CalculatedEstimate';
 
 /** A line that says what is happening right now. */
 function Working({ children }) {
@@ -314,6 +315,8 @@ export default function ScanView() {
           <div className="space-y-4">
             {/* State B (observed Israeli ads, no valuation) first; State C (a new shop price) beside it, always apart. */}
             <ComparativeRange comparative={s.valuation?.comparative} copy={copy} />
+            {/* Method C: a figure calculated from the new price, labelled as such, for the condition picked or seen. */}
+            <CalculatedEstimate calculated={s.valuation?.calculated} condition={s.condition} copy={copy} />
             <RetailReference valuation={s.valuation} copy={copy} />
             <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
               <p className="text-body text-text-primary"><Bidi>{(s.valuation?.no_price_reason && copy.insufficientBy?.[s.valuation.no_price_reason]) ? copy.insufficientBy[s.valuation.no_price_reason](identity.display_name) : copy.insufficient(identity.display_name)}</Bidi></p>

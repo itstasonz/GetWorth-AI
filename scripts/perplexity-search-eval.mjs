@@ -17,6 +17,7 @@
 // ══════════════════════════════════════════════════════════════════════════════
 import fs from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { ITEMS as SET20 } from './il-coverage-eval.mjs';
 import { runPrice, resetMarketCache } from '../api/_lib/scan/service.js';
 import { normalizeIdentity } from '../api/_lib/scan/identify.js';
@@ -162,7 +163,9 @@ async function compare(pDir, outFile, oDirs) {
   console.log('added ads', out.reduce((n, o) => n + o.added.length, 0), 'items with added ads', out.filter((o) => o.added.length).length);
 }
 
-const [step, ...args] = process.argv.slice(2);
-if (step === 'record') await record(args[0], args[1] === 'web' ? 'web' : 'fast');
-else if (step === 'compare') await compare(args[0], args[1], args.slice(2));
-else { console.error('usage: record <dir> <web|fast> | compare <pplxDir> <out.json> <openaiDir...>'); process.exit(1); }
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const [step, ...args] = process.argv.slice(2);
+  if (step === 'record') await record(args[0], args[1] === 'web' ? 'web' : 'fast');
+  else if (step === 'compare') await compare(args[0], args[1], args.slice(2));
+  else { console.error('usage: record <dir> <web|fast> | compare <pplxDir> <out.json> <openaiDir...>'); process.exit(1); }
+}

@@ -216,6 +216,8 @@ export function createScanHandler({
           status: result.status, withdrawn: result.valuation?.withdrawn ?? null, price_confidence: result.valuation?.price_confidence ?? null,
           // STATE B on this scan: how many genuine Israeli ads were shown at their own prices, and how many of this exact model.
           comparative: result.valuation?.comparative ? { count: result.valuation.comparative.count, exact: result.valuation.comparative.exact_count } : null,
+          // METHOD C on this scan: the new price it was calculated from and the photo's condition (retail-estimate.js).
+          calculated: result.valuation?.calculated ? { retail_ils: result.valuation.calculated.retail_ils, condition: result.valuation.calculated.condition } : null,
           identity_confidence: identity.identity_confidence, category: identity.category, counts: result.valuation?.counts ?? null,
           identify_ms: prior.identify_ms ?? null, market_ms: result.call?.ms ?? null, first_search_ms: result.call?.first_search_ms ?? null,
           tool_calls: result.call?.tool_calls ?? null, stages: result.call?.stages ?? null, usage: result.call?.usage ?? null, model: result.call?.model ?? null,
@@ -238,7 +240,7 @@ export function createScanHandler({
         stale: result.stale === true, refreshing: result.refreshing === true,
         item: String(identity.display_name ?? '').slice(0, 120) || null, category: identity.category ?? null,
         priced: result.status === 'priced', withdrawn: v?.withdrawn ?? null, price_confidence: v?.price_confidence ?? null,
-        comparative_count: v?.comparative?.count ?? 0, retail_reference: Number(v?.retail_new_ils) > 0,
+        comparative_count: v?.comparative?.count ?? 0, retail_reference: Number(v?.retail_new_ils) > 0, calculated: !!v?.calculated,
         approximate: v?.approximate === true, basis: v?.basis ?? null, reused: result.reused === true,
         searches: Array.isArray(v?.searched?.queries) ? v.searched.queries.length : null, evidence: Array.isArray(v?.evidence) ? v.evidence.length : 0,
         evidence_used: Array.isArray(v?.evidence) ? v.evidence.filter((e) => e.used).length : 0, resale_refs: v?.counts?.resale ?? null,

@@ -1856,6 +1856,12 @@ export function ListingFlowView() {
                   )}
                 </p>
               )}
+              {/* Method C: the calculated estimate, for reference only — never a prefilled price. */}
+              {!result?.comparative?.count && result?.calculatedEstimate > 0 && (
+                <p className="mt-2 text-xs text-slate-400" data-testid="listing-calculated" dir="auto">
+                  {scanCopy(lang).calculatedListing(formatPrice(result.calculatedEstimate))}
+                </p>
+              )}
             </Card>
           </FadeIn>
           <FadeIn delay={200}><InputField label={t.phone} icon={Phone} rtl={rtl} placeholder="050-000-0000" value={listingData.phone} onChange={(e) => setListingData({ ...listingData, phone: e.target.value })} /></FadeIn>
