@@ -462,6 +462,10 @@ describe('CV-3 honest when it cannot price', () => {
     await settle(await open({ identify: [identified()], price: [{ payload: { status: 'failed', failure: 'timeout' } }, pricedAnswer()] }));
     assert.match(text(), /Logitech G Pro X Superlight/);
     assert.match(container.querySelector('[role="alert"]').textContent, /Something went wrong/);
+    // The product is known: it can still be listed at the owner's price (2026-11-18), and the tap reaches the listing.
+    const before = app.calls.length;
+    await click(button('List at my price'));
+    assert.deepEqual(app.calls.slice(before).map((c) => c[0]), ['sellFromScan']);
     await click(button('Try again'));
     assert.deepEqual(requests.map((r) => r.action), ['identify', 'price', 'price']);
     assert.match(text(), /Recommended listing price₪290/);

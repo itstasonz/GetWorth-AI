@@ -18,7 +18,7 @@ const MARKETING = /\b(unlock the power|your journey|endless possibilities|we'?ve
 const FIRST_PERSON = /(^|[^\p{L}])(זיהיתי|מצאתי|אני מציג|אין לי)([^\p{L}]|$)|\bI (identified|found|show|can see)\b/u;
 const INTERNAL = /\b(after_reference|market_state|price_origin|retail_new_ils|binding_reason|set_aside|generation:)\b/;
 // Masculine-singular commands; the product speaks in the neutral plural (נסו, בחרו) or uses a noun/infinitive on buttons.
-const MASC_COMMAND = /(^|[^\p{L}])(נסה|בדוק|בחר|לחץ|הזן|צלם|סרוק|התחבר|הוסף|שמור|המתן|פרסם|העלה|גרור|הקלד|כתוב|שלח|ערוך|מחק|הירשם|עדכן|נקה|קנה|מכור|שתף|הצג|התקשר|סנן)([^\p{L}]|$)/u;
+const MASC_COMMAND = /(^|[^\p{L}])(נסה|בדוק|בחר|לחץ|הזן|צלם|סרוק|התחבר|הוסף|שמור|המתן|פרסם|העלה|גרור|הקלד|כתוב|שלח|ערוך|מחק|הירשם|עדכן|נקה|קנה|מכור|שתף|הצג|התקשר|סנן|השתמש)([^\p{L}]|$)/u;
 
 function* values(obj, path = []) {
   for (const [k, v] of Object.entries(obj)) {

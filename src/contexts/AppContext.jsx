@@ -3527,7 +3527,7 @@ export function AppProvider({ children }) {
         camLog(`no mediaDevices — isSecureContext=${!insecure} origin=${window.location?.origin}`);
         setError(insecure
           ? (lang === 'he'
-            ? 'המצלמה דורשת חיבור מאובטח (HTTPS). השתמש בכפתור ההעלאה כדי לצלם.'
+            ? 'המצלמה דורשת חיבור מאובטח (HTTPS). אפשר להשתמש בכפתור ההעלאה כדי לצלם.'
             : 'The camera needs a secure (HTTPS) connection. Use the upload button to take a photo.')
           : (lang === 'he' ? 'הדפדפן הזה לא תומך במצלמה' : 'Camera is not supported in this browser'));
         cameraStartingRef.current = false;

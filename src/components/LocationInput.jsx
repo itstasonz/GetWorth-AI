@@ -69,7 +69,7 @@ const LocationInput = ({ label, value, onChange, rtl, placeholder }) => {
           onClick={getLocation}
           disabled={loading}
           className={`absolute top-1/2 -translate-y-1/2 ${rtl ? 'left-3' : 'right-3'} w-9 h-9 rounded-xl flex items-center justify-center transition-all active:scale-95 disabled:opacity-50`} style={{ background: 'rgba(111,238,225,0.12)' }}
-          title={rtl ? 'השתמש במיקום נוכחי' : 'Use current location'}
+          title={rtl ? 'שימוש במיקום הנוכחי' : 'Use current location'}
         >
           {loading ? (
             <Loader2 className="w-4 h-4 animate-spin" style={{ color: '#6FEEE1' }} />

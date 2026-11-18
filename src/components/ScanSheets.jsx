@@ -20,7 +20,8 @@ import { MAX_CORRECTION_CHARS } from '../lib/coreScan';
 
 // A run of Latin text: a brand, a model name, a size, a marketplace tag like "[H]". Kept whole, in its own order.
 // Every Latin letter, accented ones too: "POÄNG" was split at its Ä on a Hebrew screen (2026-11-15 QA: "NGÄIKEA PO").
-const LATIN_RUN = /[\p{Script=Latin}0-9\[(][\p{Script=Latin}0-9 .,:#'’"+&/()\[\]\-]*[\p{Script=Latin}0-9)\]]|[\p{Script=Latin}0-9]/gu;
+// A run may end in "+" or "″": "Galaxy S22+" was shown as "+Galaxy S22" on a Hebrew screen (Production E2E 2026-11-18).
+const LATIN_RUN = /[\p{Script=Latin}0-9\[(][\p{Script=Latin}0-9 .,:#'’"+&/()\[\]\-]*[\p{Script=Latin}0-9)\]]\+*|[\p{Script=Latin}0-9]\+*/gu;
 // Hebrew or Arabic: a title with any of it is a right-to-left title; a title without it is a left-to-right one.
 const RTL_CHAR = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]/;
 

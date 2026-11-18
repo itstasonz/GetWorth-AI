@@ -185,6 +185,6 @@ export function factsFromAnswers(identity, answers = {}, lang = 'he') {
 
 /** Whether the answers changed anything the price rests on, or only what the listing says. */
 export const NEUTRAL_NOTE = {
-  he: 'קופסה, אחריות ומסמכים נכנסים למודעה. אין לנו נתונים שמראים כמה הם מוסיפים למחיר, לכן הם לא משנים אותו.',
-  en: 'Box, warranty and documents go into the listing. We have no data on how much they add, so they do not change the price.',
+  he: 'פרטים כמו קופסה, אחריות, מידות או הרכבה נכנסים למודעה. אין לנו נתונים שמראים כמה הם משנים את המחיר, לכן הם לא משנים אותו.',
+  en: 'Details like the box, warranty, size or assembly go into the listing. We have no data on how much they change the price, so they do not change it.',
 };
