@@ -109,7 +109,9 @@ describe('RE-3 on the screen', () => {
   });
   test('RE-3b the label is the founder\'s words in Hebrew, and says it is not a market valuation in English', () => {
     const copy = readFileSync(new URL('../src/lib/scanCopy.js', import.meta.url), 'utf8');
-    assert.ok(copy.includes("calculatedLabel: 'אומדן מחושב לפי מחיר מוצר חדש — לא הערכת שוק מאומתת'"));
-    assert.ok(copy.includes("calculatedLabel: 'Calculated from the new price — not a verified market valuation'"));
+    // The founder's disclosure, kept in meaning and written without the dash (copy pass 2026-11-18).
+    assert.ok(copy.includes("calculatedTitle: 'אומדן לפי מחיר מוצר חדש'"));
+    assert.ok(copy.includes("calculatedLabel: 'חישוב לפי מחיר מוצר חדש. זו לא הערכת שוק מאומתת.'"));
+    assert.ok(copy.includes("calculatedLabel: 'Calculated from the new price. Not a verified market valuation.'"));
   });
 });

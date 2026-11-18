@@ -132,7 +132,7 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
     const opened = await open({ identify: [identified()], price: [{ ...pricedAnswer(), hold }] });
     assert.match(text(), /Logitech G Pro X Superlight/);
     assert.match(text(), /Identity confidence: High/);
-    assert.match(text(), /Checking today's market prices/);
+    assert.match(text(), /Searching prices in Israel/);
     assert.doesNotMatch(text(), /₪/);
     assert.equal(button('Sell for ₪290'), undefined);
     release();
@@ -140,16 +140,16 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
     assert.match(text(), /Recommended listing price₪290/);
     assert.match(text(), /Expected selling range: ⁦₪240–270⁩/);
     assert.match(text(), /Price confidence: Medium/);
-    assert.doesNotMatch(text(), /Checking today's market prices/);
+    assert.doesNotMatch(text(), /Searching prices in Israel/);
   });
   test('CV-1b the condition is five choices, none assumed; choosing one re-prices from ads for that condition, without a request (2026-11-12)', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
     const chips = ['New', 'Like new', 'Good', 'Fair', 'Faulty'].map(button);
     assert.ok(chips.every(Boolean));
-    assert.deepEqual(chips.map((b) => b.getAttribute('aria-label')), ['New / Sealed', 'Like new', 'Good', 'Fair', 'Faulty / poor'], 'the short label is for the eye; the full name is the control\'s name');
+    assert.deepEqual(chips.map((b) => b.getAttribute('aria-label')), ['New in box', 'Like new', 'Good', 'Fair', 'Faulty'], 'the short label is for the eye; the full name is the control\'s name');
     assert.ok(chips.every((b) => b.getAttribute('aria-pressed') === 'false'), 'no condition is chosen for the owner');
     assert.match(text(), /Visible condition appears Good\./, 'the photograph\'s impression is a hint, not a choice');
-    assert.match(text(), /Condition not chosen: this is the Israeli used market as advertised\./);
+    assert.match(text(), /This is the general second-hand price in Israel\. Choose the condition to see an adjusted price\./);
     assert.match(text(), /Recommended listing price₪290/);
     assert.doesNotMatch(text(), /adjusted for the condition you chose/, 'no ladder is applied anywhere');
     const before = requests.length;
@@ -158,7 +158,7 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
     assert.match(text(), /Based on 2 listings for units in this condition\./);
     assert.ok(button('Sell for ₪340'));
     await click(button('Fair'));
-    assert.match(text(), /not adjusted for the condition/, 'no fair ads: the market price, and it says so');
+    assert.match(text(), /not adjusted for condition/, 'no fair ads: the market price, and it says so');
     assert.match(text(), /Recommended listing price₪290/);
     await click(button('Faulty'));
     assert.match(text(), /Expected selling range: ⁦₪100–130⁩/);
@@ -167,8 +167,8 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
   test('CV-1b2 a condition with no ads of its own shows no number for it, and Sell offers the owner\'s own price', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, prices: { ...VALUATION.prices, poor: null } })] }));
     await click(button('Faulty'));
-    assert.match(text(), /No Israeli listings for a unit in "Faulty \/ poor" condition were found\. GetWorth does not guess a discount/);
-    assert.ok(button('Sell at your own price'));
+    assert.match(text(), /No listings in Israel were found for a unit in Faulty condition, and we do not guess a discount/);
+    assert.ok(button('List at my price'));
   });
   test('CV-1c Sell hands the scan to the listing', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
@@ -178,9 +178,9 @@ describe('CV-1 the answer arrives in the order a person needs it', () => {
   test('CV-1d in Hebrew the screen is right-to-left and says it in Hebrew', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }, { lang: 'he' }));
     assert.equal(container.firstChild.getAttribute('dir'), 'rtl');
-    assert.match(text(), /מחיר מומלץ לפרסום/);
+    assert.match(text(), /מחיר פרסום מומלץ/);
     assert.match(text(), /ביטחון בזיהוי: גבוה/);
-    assert.ok(button('למכור ב־⁦₪290⁩'));
+    assert.ok(button('פרסום ב־⁦₪290⁩'));
   });
   test('CV-1e the five conditions are ONE row of five equal columns, in both languages: none wraps onto a line of its own', async () => {
     for (const lang of ['he', 'en']) {
@@ -228,10 +228,10 @@ describe('CV-6 a Hebrew screen with an English name in it', () => {
   test('CV-6d "למה המחיר הזה?" reads as Hebrew, with every source\'s name, kind, place and age in their own order', async () => {
     const he = { ...VALUATION, evidence: VALUATION.evidence.map((e, k) => (k === 0 ? { ...e, title: 'Logitech G Pro X Superlight יד שנייה' } : e)) };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(he)] }, { lang: 'he' }));
-    await click(button('למה המחיר הזה?'));
+    await click(button('איך חושב המחיר'));
     const dialog = container.querySelector('[role="dialog"]');
     const said = dialog.textContent;
-    assert.match(said, /3 מודעות יד שנייה נמצאו/);
+    assert.match(said, /נמצאו 3 מודעות יד שנייה/);
     assert.match(said, /ישראל: 2 · חו״ל: 1/);
     assert.match(said, /טווח המחירים במודעות: ⁦₪245–260⁩/);
     assert.match(said, /מחיר חדש בישראל: ₪550/);
@@ -252,25 +252,25 @@ describe('CV-9 the founder\'s scans: the item stays the photograph, a fact says 
     assert.doesNotMatch(text(), /supporting photo/);
     await act(async () => { await scan.addScanPhoto({ dataUrl: `${IMG}AAAA`, lang: 'en' }); });
     assert.equal(container.querySelector('img').getAttribute('src'), IMG, 'still the item, not the label');
-    assert.match(text(), /\+ 1 supporting photo, used to identify the item/);
+    assert.match(text(), /Plus one photo that helps identify it/);
     assert.deepEqual(requests.map((r) => [r.action, r.images?.length]), [['identify', 1], ['identify', 2], ['price', undefined]]);
   });
   test('CV-9b a confirmed measurement says what it measures, as the owner\'s word', async () => {
     const sofa = { display_name: 'Grey corner sofa', brand: null, model: null, category: 'Furniture', item_type: 'corner sofa', identity_confidence: 'medium' };
     const server = { confirmed: [{ attribute: 'width', value: '200 cm', question: 'Approximately how wide is it?' }], market_class: 'furniture', identity_precision: 'descriptive' };
     await settle(await open({ identify: [identified(sofa, server)], price: [pricedAnswer({ ...UNPRICED, no_price_reason: 'too_few_comparable_items', withdrawn: 'too_few_comparable_items', retail_new_ils: null })] }));
-    assert.match(text(), /You confirmed: width: 200 cm\./);
-    assert.match(text(), /Only one similar item was verified in Israel/);
-    assert.doesNotMatch(text(), /New, it/);
+    assert.match(text(), /You confirmed: width: 200 cm/);
+    assert.match(text(), /was found in Israel\. A range needs at least two\./);
+    assert.doesNotMatch(text(), /New, it sells/);
   });
   test('CV-9c a car: no new-car price on the result, and the words say what was found is context', async () => {
     const car = { display_name: 'Toyota Yaris Cross', brand: 'Toyota', model: 'Yaris Cross', category: 'Vehicles', item_type: 'car', identity_confidence: 'medium' };
     const v = { ...UNPRICED, no_price_reason: 'no_calibrated_valuation_method_for_this_market', withdrawn: 'no_calibrated_valuation_method_for_this_market', retail_new_ils: null, retail_new_in_stock: null, strategy: 'specialised_market', evidence: [{ ...UNPRICED.evidence[0], price: 161000, price_ils: 161000, set_aside: 'specialised_market_context' }] };
     await settle(await open({ identify: [identified(car, { market_class: 'vehicle' })], price: [pricedAnswer(v)] }));
-    assert.doesNotMatch(text(), /New, it currently sells|₪161,000/);
-    assert.match(text(), /which I cannot price reliably yet/);
-    assert.ok(button('Sell at your own price') && button('What I found'));
-    await click(button('What I found'));
+    assert.doesNotMatch(text(), /New, it sells|₪161,000/);
+    assert.match(text(), /we cannot price them reliably yet/);
+    assert.ok(button('List at my price') && button('What was found'));
+    await click(button('What was found'));
     assert.match(text(), /Context only, not used for the price · 1/);
     assert.doesNotMatch(text(), /New in Israel/);
   });
@@ -281,8 +281,8 @@ describe('CV-9 the founder\'s scans: the item stays the photograph, a fact says 
     await settle(await open({ identify: [identified(blender)], price: [answer] }));
     assert.match(text(), /For a more exact price/);
     assert.match(text(), /Take a clear photo of the model label/);
-    assert.ok(button('Take the photo') && button('Upload a photo') && button('Not sure') && button('Sell at your own price'));
-    await click(button('Take the photo'));
+    assert.ok(button('Take a photo') && button('Upload a photo') && button('Not sure') && button('List at my price'));
+    await click(button('Take a photo'));
     assert.deepEqual(app.calls.at(-1), ['addPhoto', 'camera']);
     await click(button('Not sure'));
     assert.doesNotMatch(text(), /Take a clear photo of the model label/);
@@ -333,24 +333,24 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     assert.match(text(), /Identity confidence: Medium/);
     assert.match(text(), /Recommended listing price₪290/);
     assert.ok(button('Upload a photo'));
-    await click(button('Take the photo'));
+    await click(button('Take a photo'));
     assert.deepEqual(app.calls.at(-1), ['addPhoto', 'camera']);
   });
   test('CV-2d the one exception: a photograph the SERVER requires comes before the price, with no "not sure", no price, no "What I found" — and the owner can still sell or correct', async () => {
     const LABEL = { kind: 'photo', affects: 'identity', question: 'Take a clear photo of the label or the sticker on the bottom of the bottle, so the fragrance name and size can be read.', options: [], required: true };
     await settle(await open({ identify: [identified({ display_name: 'BDK Parfums perfume', brand: 'BDK Parfums', model: null, product_family: null, item_type: 'perfume', category: 'Beauty', identity_confidence: 'medium' }, { followup: LABEL, incomplete: 'fragrance_name_or_size' })] }));
     assert.deepEqual(requests.map((r) => r.action), ['identify']);
-    assert.match(text(), /I can see this is BDK Parfums perfume, but not the exact product\. A market price needs that first, so the market was not searched yet\./);
-    assert.match(text(), /One thing before the price/);
+    assert.match(text(), /This looks like BDK Parfums perfume, but the exact model is not clear\. We need the model to search for a price\./);
+    assert.match(text(), /One more detail/);
     assert.match(text(), /label or the sticker on the bottom of the bottle/);
-    assert.doesNotMatch(text(), /₪|Recommended|Checking today's market prices|For a more exact price|Not sure/);
-    assert.ok(button('Take the photo') && button('Upload a photo') && button('Sell at your own price') && button('Wrong item?') && button('Scan another item'));
-    assert.equal(button('What I found'), undefined);
+    assert.doesNotMatch(text(), /₪|Recommended|Searching prices in Israel|For a more exact price|Not sure/);
+    assert.ok(button('Take a photo') && button('Upload a photo') && button('List at my price') && button('Not this item?') && button('Scan another item'));
+    assert.equal(button('What was found'), undefined);
   });
   test('CV-2e a choice the server requires (how much perfume is left) is asked before the price; "Not sure" sends the search off with that', async () => {
     const LEFT = { kind: 'choice', affects: 'price', question: 'How much perfume is left in the bottle?', options: ['Full or sealed', 'About 75%', 'About half', 'Under 25%'], required: true };
     await settle(await open({ identify: [identified({}, { followup: LEFT })], price: [pricedAnswer({ ...VALUATION, approximate: true, price_confidence: 'low' })] }));
-    assert.match(text(), /One thing before the price/);
+    assert.match(text(), /One more detail/);
     assert.match(text(), /How much perfume is left in the bottle\?/);
     assert.doesNotMatch(text(), /₪/);
     assert.ok(button('About half') && button('Not sure'));
@@ -363,7 +363,7 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     const car = { display_name: 'Toyota Corolla', brand: 'Toyota', model: 'Corolla', category: 'Vehicles', item_type: 'car', identity_confidence: 'medium' };
     const server = { followup: KM, confirmed: [{ attribute: 'year', value: '2019', question: 'What year is the car?' }], eligibility_notes: ['Ownership, registration and accident history cannot be verified from a photograph.'], market_class: 'vehicle' };
     await settle(await open({ identify: [identified(car, server)], price: [pricedAnswer({ ...UNPRICED, no_price_reason: 'no_calibrated_valuation_method_for_this_market', withdrawn: 'no_calibrated_valuation_method_for_this_market', retail_new_ils: null })] }));
-    assert.match(text(), /You confirmed: year: 2019\./, 'the fact with what it is');
+    assert.match(text(), /You confirmed: year: 2019/, 'the fact with what it is');
     assert.match(text(), /Ownership, registration and accident history cannot be verified from a photograph\./);
     assert.match(text(), /How many kilometres has it travelled\?/);
     const box = container.querySelector('input[type="number"]');
@@ -378,17 +378,17 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     await act(async () => { container.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true })); await new Promise((r) => setTimeout(r, 30)); });
     assert.deepEqual(requests.map((r) => [r.action, r.answer]), [['identify', undefined], ['price', 85000]]);
     // A car is verified and shown, never priced by this engine: the result says so in words, with no number.
-    assert.match(text(), /Items like this are valued by year, mileage, reference, authentication or grading, which I cannot price reliably yet/);
+    assert.match(text(), /are priced by year, mileage, authentication or grading, and we cannot price them reliably yet/);
     assert.doesNotMatch(text(), /₪|Recommended/);
-    assert.ok(button('Sell at your own price'));
+    assert.ok(button('List at my price'));
   });
   test('CV-2f the same, in Hebrew', async () => {
     const LABEL = { kind: 'photo', affects: 'identity', question: 'צלמו בבירור את התווית או את המדבקה בתחתית הבקבוק, כדי שאפשר יהיה לקרוא את שם הבושם ואת הנפח.', options: [], required: true };
     await settle(await open({ identify: [identified({ display_name: 'בושם BDK Parfums' }, { followup: LABEL, incomplete: 'fragrance_name_or_size' })] }, { lang: 'he' }));
-    assert.match(text(), /זיהיתי שזה בושם BDK Parfums, אבל לא את המוצר המדויק\./);
-    assert.match(text(), /דבר אחד לפני המחיר/);
+    assert.match(text(), /זוהה בושם BDK Parfums, אבל לא הדגם המדויק\./);
+    assert.match(text(), /עוד פרט אחד/);
     assert.match(text(), /שם הבושם ואת הנפח/);
-    assert.ok(button('לצלם') && button('למכור במחיר שלי') && button('פריט שגוי?'));
+    assert.ok(button('צילום') && button('פרסום במחיר שלי') && button('זה לא המוצר?'));
     assert.equal(button('לא בטוח/ה'), undefined);
   });
 });
@@ -396,11 +396,11 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
 describe('CV-3 honest when it cannot price', () => {
   test('CV-3a identified but unpriced says so, shows the new price as context only, and still lets the owner sell', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer(UNPRICED)] }));
-    assert.match(text(), /I identified this as Logitech G Pro X Superlight, but I don't have enough reliable current second-hand evidence/);
-    assert.match(text(), /New price in Israel — not second-hand worth\s*₪550/, 'the new price is its own card, never a used price');
+    assert.match(text(), /Not enough data for a reliable price for Logitech G Pro X Superlight\./);
+    assert.match(text(), /New price, not second-hand worth\s*₪550/, 'the new price is its own card, never a used price');
     assert.doesNotMatch(text(), /Recommended listing price/);
-    assert.ok(button('Sell at your own price'));
-    assert.ok(button('What I found'));
+    assert.ok(button('List at my price'));
+    assert.ok(button('What was found'));
   });
   test('CV-3d the live shape of 2026-10-11: a sealed ad above the new price and a shop\'s refurbished unit alone — "What I found" says why each was not used, and no used price is shown', async () => {
     const live = {
@@ -418,14 +418,14 @@ describe('CV-3 honest when it cannot price', () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer(live)] }));
     assert.doesNotMatch(text(), /Recommended listing price|Sell for|₪430|₪389|₪190/, 'no used price, invented or borrowed, and no "Sell for ₪X"');
     // The cheapest shop's price, seen only out of stock, is never called today's new price (2026-11-18).
-    assert.match(text(), /Last listed new price — not available to buy now\s*₪400/);
-    assert.doesNotMatch(text(), /New price in Israel — not second-hand worth\s*₪400/);
+    assert.match(text(), /Last listed new price\. Not available to buy now\.\s*₪400/);
+    assert.doesNotMatch(text(), /New price, not second-hand worth\s*₪400/);
     assert.match(text(), /out of stock there/);
-    assert.ok(button('Sell at your own price'));
-    await click(button('What I found'));
+    assert.ok(button('List at my price'));
+    await click(button('What was found'));
     const said = container.querySelector('[role="dialog"]').textContent;
     assert.match(said, /No second-hand listings were found/);
-    assert.match(said, /No current second-hand listing for a used unit of this item was verified in Israel\./);
+    assert.match(said, /No current second-hand listing for this model was found in Israel\./);
     assert.match(said, /New in Israel: ₪400 \(out of stock\)/);
     assert.match(said, /Shops disagree on the new price: from ₪400 to ₪660\./);
     assert.match(said, /1 price was higher than the item's new price, so it is not a second-hand price and was not used\./);
@@ -441,7 +441,7 @@ describe('CV-3 honest when it cannot price', () => {
     assert.match(said, /Not this product, or not usable · 1/);
     const links = [...dialog.querySelectorAll('a')];
     assert.deepEqual(links.map((a) => a.getAttribute('href')), [live.evidence[1], live.evidence[2], live.evidence[3], live.evidence[4], live.evidence[0]].map((e) => e.url));
-    assert.match(links[0].textContent, /Shop \(used\/refurbished\) · exact · Israel/);
+    assert.match(links[0].textContent, /Used or refurbished from a shop · exact · Israel/);
     assert.match(links[0].textContent, /a shop's used or refurbished unit, no private listing beside it/, 'each unused source says in one line why');
     assert.match(links[1].textContent, /Used · exact · abroad/);
     assert.match(links[1].textContent, /62 USD/);
@@ -464,7 +464,7 @@ describe('CV-3 honest when it cannot price', () => {
   });
   test('CV-3c nothing to sell in the photograph', async () => {
     await settle(await open({ identify: [{ payload: { status: 'no_item', identity: normalizeIdentity({ ...RAW_IDENTITY, is_sellable_item: false }), token: 't' } }] }));
-    assert.match(text(), /couldn't find an item to sell/);
+    assert.match(text(), /could not find an item to sell/);
     assert.doesNotMatch(text(), /Identity confidence/);
   });
 });
@@ -475,18 +475,18 @@ describe('CV-5 a price never claims more than its evidence', () => {
     const thin = { ...VALUATION, price_confidence: 'low', counts: { ...VALUATION.counts, resale: 1, il_used_exact: 0, il_used_close: 0, intl_used_exact: 1 } };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(thin)] }));
     assert.match(text(), /Price confidence: Low/);
-    assert.match(text(), /Rough estimate: based on one second-hand listing\./);
-    assert.match(text(), /No Israeli second-hand prices were found; this rests on prices abroad\./);
+    assert.match(text(), /First estimate, based on one second-hand listing\./);
+    assert.match(text(), /No second-hand prices were found in Israel\. This estimate is based on prices abroad\./);
   });
   test('CV-5b three references from Israel carry neither warning', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
-    assert.doesNotMatch(text(), /Rough estimate|prices abroad/);
+    assert.doesNotMatch(text(), /First estimate|prices abroad/);
   });
   test('CV-5c while the exact model is an open question, the screen shows a range for the family, not one confident price', async () => {
     const approx = { ...VALUATION, approximate: true, price_confidence: 'low' };
     await settle(await open({ identify: [identified({ followup: GENERATION, display_name: 'Apple AirPods Pro', uncertainty_note: 'Generation not established', identity_confidence: 'medium' })], price: [pricedAnswer(approx), pricedAnswer()] }));
     assert.match(text(), /Approximate selling range\u2066₪240–270\u2069/);
-    assert.match(text(), /The exact model is not confirmed\. This range is based on comparable models of the same family, not on the exact product\./);
+    assert.match(text(), /The exact model is not confirmed, so this range is based on similar models from the same line\./);
     assert.doesNotMatch(text(), /Recommended listing price/);
     assert.ok(button('Sell for about ₪290'));
     assert.equal(button('Sell for ₪290'), undefined);
@@ -500,18 +500,18 @@ describe('CV-5 a price never claims more than its evidence', () => {
     const quiet = { display_name: 'Apple AirPods Pro', model: null, exact_model_established: false, alternatives: [{ name: 'Apple AirPods Pro (1st generation)', distinguishing: null }, { name: 'Apple AirPods Pro (2nd generation)', distinguishing: null }], identity_confidence: 'medium' };
     await settle(await open({ identify: [identified(quiet)], price: [pricedAnswer(family)] }));
     assert.match(text(), /Approximate selling range⁦₪240–270⁩/);
-    assert.match(text(), /based on comparable models of the same family, not on the exact product/);
+    assert.match(text(), /based on similar models from the same line/);
     assert.match(text(), /Price confidence: Low/);
     assert.doesNotMatch(text(), /Recommended listing price|Expected selling range/);
     assert.ok(button('Sell for about ₪290') && !button('Sell for ₪290'));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     assert.match(container.querySelector('[role="dialog"]').textContent, /listings are for comparable models of the same family, not for the exact product/);
     await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
     await act(async () => { scan.scanStore.reset(); });
     await settle(await open({ identify: [identified(quiet)], price: [pricedAnswer(family)] }, { lang: 'he' }));
     assert.match(text(), /טווח מכירה משוער/);
-    assert.match(text(), /הטווח מבוסס על דגמים דומים מאותה משפחה, ולא על המוצר המדויק\./);
-    assert.doesNotMatch(text(), /מחיר מומלץ לפרסום/);
+    assert.match(text(), /הדגם המדויק לא אושר, לכן הטווח מבוסס על דגמים דומים מאותה סדרה\./);
+    assert.doesNotMatch(text(), /מחיר פרסום מומלץ/);
   });
   test('CV-5d "Not sure" keeps the approximate range honest: it stays approximate', async () => {
     const approx = { ...VALUATION, approximate: true, price_confidence: 'low' };
@@ -552,7 +552,7 @@ const SCAN_16666E44 = {
 describe('CV-11 the evidence sheet on an iPhone (scan 16666e44, 2026-11-10)', () => {
   const sheetOf = async (lang) => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer(SCAN_16666E44)] }, { lang }));
-    await click(button(lang === 'he' ? 'מה מצאתי' : 'What I found'));
+    await click(button(lang === 'he' ? 'מה נמצא' : 'What was found'));
     return container.querySelector('[role="dialog"]');
   };
   const titleOf = (a) => a.querySelector('span > span');
@@ -601,7 +601,7 @@ describe('CV-11 the evidence sheet on an iPhone (scan 16666e44, 2026-11-10)', ()
 describe('CV-4 the two sheets', () => {
   test('CV-4a "Wrong item?" takes one line of the owner\'s words and the scan looks again', async () => {
     await settle(await open({ identify: [identified(), identified({ display_name: 'Logitech G Pro Wireless' })], price: [pricedAnswer(), pricedAnswer()] }));
-    await click(button('Wrong item?'));
+    await click(button('Not this item?'));
     const dialog = container.querySelector('[role="dialog"]');
     assert.ok(dialog);
     const field = dialog.querySelector('textarea');
@@ -616,7 +616,7 @@ describe('CV-4 the two sheets', () => {
   });
   test('CV-4b "Why this price?" says how the price was calculated and shows what it rests on, as links; what was set aside is counted and kept behind one tap', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     const dialog = container.querySelector('[role="dialog"]');
     const said = dialog.textContent;
     assert.match(said, /calculated from these listings, not chosen/);
@@ -659,22 +659,22 @@ describe('CV-4 the two sheets', () => {
       evidence: [...VALUATION.evidence, { url: 'https://www.ivory.co.il/catalog.php?id=121262', domain: 'ivory.co.il', title: 'refurbished', price: 389, currency: 'ILS', price_ils: 389, kind: 'refurbished', match: 'exact', market: 'IL', page: 'shop_product', stock: 'out_of_stock', freshness: 'unknown', used: true, weight: 0.22, set_aside: null }],
     };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(v)] }));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     const said = container.querySelector('[role="dialog"]').textContent;
     assert.match(said, /3 second-hand listings found/);
     assert.match(said, /Israel: 2 · Abroad: 1/);
     assert.match(said, /Also used, with a smaller weight: 1 used or refurbished offer from a shop, as supporting evidence\./);
-    assert.match([...container.querySelectorAll('[role="dialog"] a')].find((a) => a.getAttribute('href').includes('ivory')).textContent, /Shop \(used\/refurbished\) · exact · Israel/);
+    assert.match([...container.querySelectorAll('[role="dialog"] a')].find((a) => a.getAttribute('href').includes('ivory')).textContent, /Used or refurbished from a shop · exact · Israel/);
   });
   test('CV-4c when foreign prices were scaled to Israeli price level, the sheet says by how much', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, intl_adjusted: true, intl_scale: 1.22 })] }));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     assert.match(container.querySelector('[role="dialog"]').textContent, /scaled to Israeli price level \(×1\.22\)/);
   });
   test('CV-4d when Israeli listings were enough, prices from abroad are said to be unused, not rejected', async () => {
     const local = { ...VALUATION, intl_adjusted: null, counts: { ...VALUATION.counts, resale: 2, intl_used_exact: 0, abroad_unused: 1, set_aside: 0, not_comparable: 0 } };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(local)] }));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     const said = container.querySelector('[role="dialog"]').textContent;
     assert.match(said, /Israel: 2 · Abroad: 0/);
     assert.match(said, /The Israeli listings were enough to price this, so 1 price from abroad was not used\./);
@@ -686,7 +686,7 @@ describe('CV-4 the two sheets', () => {
       evidence: VALUATION.evidence.map((e, k) => (k === 1 ? { ...e, shipping: 26, shipping_ils: 91 } : e)),
     };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(v)] }));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     const dialog = container.querySelector('[role="dialog"]');
     const said = dialog.textContent;
     assert.match(said, /2 prices were found on pages where they could not be tied to this item for certain, so they were not used\./);
@@ -700,14 +700,14 @@ describe('CV-4 the two sheets', () => {
   test('CV-4f the same in Hebrew, and nothing of it when there is nothing to say', async () => {
     const v = { ...VALUATION, retail_new_in_stock: false, counts: { ...VALUATION.counts, unbound: 1 } };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(v)] }, { lang: 'he' }));
-    await click(button('למה המחיר הזה?'));
+    await click(button('איך חושב המחיר'));
     const said = container.querySelector('[role="dialog"]').textContent;
     assert.match(said, /נמצא מחיר אחד שלא ניתן היה לשייך בוודאות לפריט הזה, ולכן לא נכלל\./);
     assert.match(said, /מחיר חדש בישראל: ₪550 \(אזל מהמלאי\)/);
     await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
     await act(async () => { scan.scanStore.reset(); });
     await settle(await open({ identify: [identified()], price: [pricedAnswer()] }));
-    await click(button('Why this price?'));
+    await click(button('How the price was set'));
     assert.doesNotMatch(container.querySelector('[role="dialog"]').textContent, /could not be tied|out of stock|\+ .* shipping/);
   });
 });
@@ -718,7 +718,7 @@ describe('CV-10 the approved result: one worth, then what to ask and a quick sal
     const worth = container.querySelector('[data-testid="scan-worth"]');
     assert.match(worth.textContent, /^Estimated worth₪260Expected selling range: ⁦₪240–270⁩$/);
     const secondary = container.querySelector('[data-testid="scan-secondary-prices"]').textContent;
-    assert.equal(secondary, 'Recommended listing price₪290Quick sale₪240');
+    assert.equal(secondary, 'Recommended listing price₪290Quick-sale price₪240');
     // Worth sits between the quick sale and the listing price: the order a person reads them in is the order they are in.
     assert.ok(text().indexOf('Estimated worth') < text().indexOf('Recommended listing price'));
   });
@@ -728,7 +728,7 @@ describe('CV-10 the approved result: one worth, then what to ask and a quick sal
     const worth = container.querySelector('[data-testid="scan-worth"]');
     assert.match(worth.textContent, /שווי משוער₪260/);
     assert.equal(worth.querySelector('bdi').getAttribute('dir'), 'ltr');
-    assert.equal(container.querySelector('[data-testid="scan-secondary-prices"]').textContent, 'מחיר מומלץ לפרסום₪290מכירה מהירה₪240');
+    assert.equal(container.querySelector('[data-testid="scan-secondary-prices"]').textContent, 'מחיר פרסום מומלץ₪290מחיר למכירה מהירה₪240');
   });
   test('CV-10a2 a LOW-confidence price is never shown as a precise one: "≈", "about", and its range named approximate (2026-11-12)', async () => {
     await settle(await open({ identify: [identified()], price: [pricedAnswer({ ...VALUATION, price_confidence: 'low' })] }));
@@ -745,8 +745,8 @@ describe('CV-10 the approved result: one worth, then what to ask and a quick sal
     const gap = { ...UNPRICED, no_price_reason: 'no_verified_israeli_second_hand_reference', withdrawn: 'no_verified_israeli_second_hand_reference', retail_new_ils: 390,
       evidence_gap: { israeli_private_found: 0, abroad_found: 1, price_level_measured: true, new_price_il: 390 } };
     await settle(await open({ identify: [identified()], price: [pricedAnswer(gap)] }));
-    assert.equal(container.querySelector('[data-testid="scan-evidence-gap"]').textContent, 'In Israel: no second-hand listing of this item was found. 1 used listing of this model abroad is shown as context only: prices abroad do not say what it sells for here.');
-    assert.match(text(), /You can list it at your own price; the new price in Israel is the ceiling buyers compare with/);
+    assert.equal(container.querySelector('[data-testid="scan-evidence-gap"]').textContent, 'No second-hand listing for this item was found in Israel. One listing abroad is shown for comparison only. Prices abroad do not set the price here.');
+    assert.match(text(), /You can list it at your own price\. The new price in Israel is the ceiling buyers compare with/);
     assert.equal(container.querySelector('[data-testid="scan-worth"]'), null);
     assert.doesNotMatch(text(), /Quick sale|Estimated worth/);
   });

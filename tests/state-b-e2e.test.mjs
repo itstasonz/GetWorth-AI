@@ -124,9 +124,9 @@ describe('SB-1 one or more genuine Israeli ads, no valuation: the API carries th
     assert.deepEqual([r.priced.valuation.comparative.count, r.priced.valuation.comparative.low], [1, null]);
     assert.ok(r.card, 'the State B card is on screen');
     assert.equal(headline(r.card), '₪450');
-    assert.match(r.card.textContent, /One Israeli second-hand ad/);
-    assert.match(r.card.textContent, /not a sale price and not an estimated worth/);
-    assert.doesNotMatch(r.text, /Recommended listing price|Estimated worth|Quick sale/);
+    assert.match(r.card.textContent, /Price from a second-hand ad/);
+    assert.match(r.card.textContent, /not sale prices and not an estimated worth/);
+    assert.doesNotMatch(r.text, /Recommended listing price|Estimated worth|Quick-sale/);
     assert.equal(listed(r.card).length, 1);
     assert.match(listed(r.card)[0], /homeless\.co\.il.*same model · active ad, seen 2026-10-06/, 'no date on the page: the day it was seen live');
   });
@@ -139,8 +139,8 @@ describe('SB-1 one or more genuine Israeli ads, no valuation: the API carries th
     assert.equal(r.priced.status, 'insufficient_evidence');
     assert.equal(r.priced.valuation.withdrawn, 'references_disagree');
     assert.equal(headline(r.card), '₪200–₪520');
-    assert.match(r.card.textContent, /Comparative price range/);
-    assert.match(r.card.textContent, /2 ads in Israel · low confidence/);
+    assert.match(r.card.textContent, /Prices from second-hand ads/);
+    assert.match(r.card.textContent, /2 ads in Israel\. Low confidence\./);
     assert.equal(listed(r.card).length, 2);
     assert.doesNotMatch(r.text, /Recommended listing price/);
   });
@@ -158,15 +158,15 @@ describe('SB-1 one or more genuine Israeli ads, no valuation: the API carries th
     const c = r.priced.valuation.comparative;
     assert.ok(c, JSON.stringify([r.priced.status, r.priced.valuation.withdrawn]));
     assert.deepEqual([c.count, c.exact_count], [2, 1]);
-    assert.match(r.card.textContent, /2 ads in Israel · 1 of this exact model · low confidence/);
+    assert.match(r.card.textContent, /2 ads in Israel, 1 of this exact model\. Low confidence\./);
     assert.ok(listed(r.card).some((t) => /comparable model/.test(t)));
     assert.ok(listed(r.card).some((t) => /same model/.test(t)));
   });
   test('SB-1e in Hebrew the card says what it is, right to left, with the price kept whole', async () => {
     const r = await scanWith({ identity: POANG, market: { evidence: [ad(1, 450)] } }, { lang: 'he' });
     assert.equal(container.firstChild.getAttribute('dir'), 'rtl');
-    assert.match(r.card.textContent, /מודעת יד שנייה אחת בישראל/);
-    assert.match(r.card.textContent, /לא מחיר מכירה ולא שווי משוער/);
+    assert.match(r.card.textContent, /מחיר ממודעת יד שנייה/);
+    assert.match(r.card.textContent, /לא מחירי מכירה ולא שווי משוער/);
     assert.equal(headline(r.card), '₪450');
   });
 });
@@ -182,17 +182,17 @@ describe('SB-C METHOD C: a calculated estimate from the verified new price, labe
     assert.equal(r.priced.valuation.calculated.estimates.good, 510);
     assert.ok(calc(), 'the Method C card is on screen');
     assert.equal(calc().querySelector('[data-testid="scan-calculated-price"]').textContent, '≈ ₪510');
-    assert.match(calc().textContent, /Calculated from the new price — not a verified market valuation/);
+    assert.match(calc().textContent, /Calculated from the new price\. Not a verified market valuation\./);
     assert.match(calc().textContent, /less 15%/);
     assert.equal(calc().querySelector('[data-testid="scan-calculated-source"]').getAttribute('href'), SHOP);
-    assert.doesNotMatch(r.text, /Recommended listing price|Quick sale/);
+    assert.doesNotMatch(r.text, /Recommended listing price|Quick-sale/);
     assert.equal(r.rows[0].price_mid, null, 'never stored as a market price');
     assert.equal(container.querySelector('[data-testid="scan-retail-reference"]'), null, 'the new price is on the estimate card, not repeated');
   });
   test('SB-Cb in Hebrew: the founder label, right to left, the price whole', async () => {
     await scanWith({ identity: ELEC, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } }, { lang: 'he' });
     assert.equal(container.firstChild.getAttribute('dir'), 'rtl');
-    assert.match(calc().textContent, /אומדן מחושב לפי מחיר מוצר חדש — לא הערכת שוק מאומתת/);
+    assert.match(calc().textContent, /אומדן לפי מחיר מוצר חדש.*זו לא הערכת שוק מאומתת/);
     assert.equal(calc().querySelector('[data-testid="scan-calculated-price"]').textContent, '≈ ₪510');
   });
   test('SB-Cc a genuine Israeli ad found: State B shows, no calculated figure', async () => {
@@ -206,8 +206,8 @@ describe('SB-C METHOD C: a calculated estimate from the verified new price, labe
     const ref = container.querySelector('[data-testid="scan-retail-reference"]');
     assert.ok(ref);
     assert.equal(ref.getAttribute('data-in-stock'), 'false');
-    assert.match(ref.textContent, /מחיר חדש אחרון שפורסם — המוצר לא זמין לקנייה כעת/);
-    assert.doesNotMatch(ref.textContent, /^מחיר חדש בישראל/);
+    assert.match(ref.textContent, /מחיר מוצר חדש אחרון שפורסם\. כרגע לא זמין לקנייה\./);
+    assert.doesNotMatch(ref.textContent, /^מחיר מוצר חדש, לא שווי יד שנייה/);
   });
   test('SB-Cd a unit that looks fair: the new price only, no estimate', async () => {
     await scanWith({ identity: { ...ELEC, visible_condition: 'fair' }, market: { evidence: [newShop] }, pages: { [SHOP]: 'Logitech G Pro X Superlight ₪600' } });
@@ -234,14 +234,14 @@ describe('SB-2 what never reaches the card', () => {
     assert.equal(r.card, null);
     assert.equal(r.priced.valuation.retail_new_ils, 550, 'the verified new price, rounded as every new price is');
     assert.match(r.text, /₪550/, 'shown as a new price');
-    assert.match(r.text, /the new price in Israel is the ceiling/);
-    assert.doesNotMatch(r.text, /Comparative price range|One Israeli second-hand ad|Recommended listing price/);
+    assert.match(r.text, /The new price in Israel is the ceiling/);
+    assert.doesNotMatch(r.text, /Prices from second-hand ads|Price from a second-hand ad|Recommended listing price/);
   });
   test('SB-2b2 no new price on screen: the no-price sentence never points at one (2026-11-15)', async () => {
     const r = await scanWith({ identity: POANG, market: { evidence: [shop] } });
     assert.equal(r.priced.valuation.retail_new_ils ?? null, null, 'a similar item\'s shop price is not this item\'s new price');
     assert.doesNotMatch(r.text, /ceiling/);
-    assert.match(r.text, /You can list it at your own price\. New Israeli listings appear daily/);
+    assert.match(r.text, /You can list it at your own price\. New listings appear every day/);
   });
   test('SB-2c nothing usable: no card, no number', async () => {
     const r = await scanWith({ identity: POANG, market: { evidence: [] } });
@@ -353,11 +353,11 @@ describe('SB-5 one ad for an exact product is State B, not a worth (2026-11-15 a
       assert.equal(r.priced.valuation.withdrawn, 'single_israeli_listing');
       assert.equal(headline(r.card), '₪260');
       if (lang === 'en') {
-        assert.match(r.text, /one seller's asking price, not a market/);
+        assert.match(r.text, /One seller's asking price is not enough for an estimated worth/);
         assert.doesNotMatch(r.text, /Recommended listing price|Estimated worth/);
       } else {
-        assert.match(r.text, /מחיר מבוקש של מוכר אחד, לא שוק/);
-        assert.doesNotMatch(r.text, /מחיר מומלץ לפרסום/);
+        assert.match(r.text, /זה מחיר מבוקש של מוכר אחד, לכן הוא מוצג כמו שהוא, בלי שווי משוער/);
+        assert.doesNotMatch(r.text, /מחיר פרסום מומלץ/);
       }
       await act(async () => { root.unmount(); }); root = null; container.remove(); container = null;
       await act(async () => { scan.scanStore.reset(); });

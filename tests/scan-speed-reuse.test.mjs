@@ -112,7 +112,7 @@ describe('SR-3 where the phone\'s wait went', () => {
   test('SR-3c the delete sheet names the listing it is about to remove (2026-11-15 QA)', () => {
     const sell = read('src/views/SellViews.jsx');
     assert.match(sell, /const named = myListings\.find\(\(l\) => l\.id === deleteTarget\);/);
-    assert.match(sell, /return title \? `"\$\{title\}" — \$\{what\}` : what;/);
+    assert.match(sell, /return title \? `\$\{title\}\. \$\{what\}` : what;/);
   });
 });
 

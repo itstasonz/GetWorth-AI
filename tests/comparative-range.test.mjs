@@ -101,10 +101,10 @@ describe('CR-3 a listing priced after seeing real ads is market-informed, never 
 describe('CR-4 the screens', () => {
   test('CR-4a the card says what it is, in both languages; one ad is never a range', () => {
     const copy = read('src/lib/scanCopy.js');
-    assert.match(copy, /comparativeRange: 'Comparative price range'/);
-    assert.match(copy, /comparativeRange: 'טווח מחירים להשוואה'/);
-    assert.match(copy, /comparativeNote: 'Asking prices from ads — not a sale price and not an estimated worth\.'/);
-    assert.match(copy, /comparativeNote: 'מחירים מבוקשים במודעות — לא מחיר מכירה ולא שווי משוער\.'/);
+    assert.match(copy, /comparativeRange: 'Prices from second-hand ads'/);
+    assert.match(copy, /comparativeRange: 'מחירים ממודעות יד שנייה'/);
+    assert.match(copy, /comparativeNote: 'These are asking prices, not sale prices and not an estimated worth\.'/);
+    assert.match(copy, /comparativeNote: 'אלה מחירים מבוקשים, לא מחירי מכירה ולא שווי משוער\.'/);
     const card = read('src/components/ComparativeRange.jsx');
     assert.match(card, /const range = c\.count >= 2 && c\.low && c\.high;/);
   });
