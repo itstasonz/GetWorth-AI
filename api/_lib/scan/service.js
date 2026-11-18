@@ -33,6 +33,8 @@ import { classifyOpenAIFailure } from '../openai-recognition.js';
 import { identifyItem, completeIdentity, openVariant } from './identify.js';
 import { researchMarket, marketDate, buildSearchQueries, IL_SEARCH_DOMAINS } from './market.js';
 import { researchPerplexity, resolvePerplexity } from './perplexity.js';
+import { researchPerplexitySearch, resolvePerplexitySearch, searchApiKeep } from './perplexity-search.js';
+import { isBound } from './binding.js';
 import { buildValuation, incompleteValuation, strategyFor, STRATEGY, verifyEvidence, mergeEvidence, requalify, marketKey, localStrength, LOCAL_STRENGTH, INDEPENDENT_MIN } from './valuation.js';
 import { getFxTable } from './fx.js';
 import { loadMarketResearch, saveMarketResearch } from './persist.js';
@@ -211,6 +213,8 @@ export async function runPrice({
   deep = resolveMarketDeep(), deepWaitMs = MARKET_DEEP_WAIT_MS,
   // A second search provider alongside the OpenAI Israeli search (perplexity.js): { key, model } or null (off).
   perplexity = resolvePerplexity(),
+  // The Perplexity SEARCH API (perplexity-search.js, no model): { key, searchType } or null (off).
+  perplexitySearch = resolvePerplexitySearch(),
 } = {}) {
   const t0 = now();
   const key = researchKey(identity, answer);
@@ -329,6 +333,8 @@ export async function runPrice({
   let refusedSources = 0;
   /** What the second provider reported it charged (USD), for the call record. */
   let providerCost = 0;
+  /** The Search API stage's record: cost (published price of successful requests), latency, results, failures. */
+  let searchInfo = { cost_usd: 0, ms: null, results: 0, failed: [] };
   let usedModel = model;
   /** One stage's provider request. Throws what the provider threw. */
   const request = (stage, signal = null) => researchMarket({ identity, answer, stage, model, apiKey, safetyIdentifier, fetchImpl, now: t0, signal });
@@ -338,8 +344,12 @@ export async function runPrice({
     const checked = verifyEvidence(raw?.evidence, provenance, fx, today, { identity, answer });
     // SOURCE PERMISSIONS (../market/sources.js): a price from an operator that forbids collection is not used, even
     // when a search showed it.
-    const verified = { ...checked, evidence: checked.evidence.filter((e) => mayUseInScan(sourceOf(e.url))) };
-    refusedSources += checked.evidence.length - verified.evidence.length;
+    const permitted = checked.evidence.filter((e) => mayUseInScan(sourceOf(e.url)));
+    // THE SEARCH API'S CLAIMS are every price in every snippet (perplexity-search.js): only those the text tied to the
+    // product join the pool. An untied one never moves a price, and the pool is bounded (mergeEvidence max), so ~100 of
+    // them pushed OpenAI's tied ads out of it (replay 2026-11-18: 8 of 30 items fell from a worth to one ad).
+    const verified = { ...checked, evidence: stage === 'perplexity_search' ? searchApiKeep(permitted, isBound) : permitted };
+    refusedSources += checked.evidence.length - permitted.length;
     found = mergeEvidence(found, verified.evidence);
     unverified += verified.unverified;
     queries += provenance.queries?.length ?? 0;
@@ -351,7 +361,7 @@ export async function runPrice({
     searched = searched || provenance.search_performed;
     firstSearchMs ??= meta.timings?.first_search_ms ?? null;
     // OpenAI's model and tokens only: the second provider's cost is its own (providerCost), never priced as OpenAI tokens.
-    if (stage !== 'perplexity') {
+    if (stage !== 'perplexity' && stage !== 'perplexity_search') {
       usedModel = meta.model ?? usedModel;
       for (const k of Object.keys(usage)) usage[k] += meta.usage?.[k] ?? 0;
     }
@@ -364,6 +374,7 @@ export async function runPrice({
     // request was made and may have been billed.
     cancelled: [...cancelled],
     ...(perplexity ? { second_provider: { name: 'perplexity', model: perplexity.model, cost_usd: Math.round(providerCost * 1e5) / 1e5 } } : {}),
+    ...(perplexitySearch ? { search_provider: { name: 'perplexity_search', search_type: perplexitySearch.searchType, ...searchInfo } } : {}),
   });
 
   // LOOK FURTHER ONLY WHEN ISRAEL DID NOT ANSWER. Decided by the server, from the verified evidence in hand (this
@@ -389,6 +400,8 @@ export async function runPrice({
   const ilOnly = dual ? settle(researchMarket({ identity, answer, stage: 'local', model, apiKey, safetyIdentifier, fetchImpl, now: t0, localDomains: IL_SEARCH_DOMAINS })) : null;
 
   // THE SECOND PROVIDER, started WITH the Israeli search (perplexity.js); its evidence joins after it, checked the same way.
+  // THE SEARCH API (perplexity-search.js), also started WITH the Israeli search: two requests, one deadline.
+  const searchApi = perplexitySearch ? settle(researchPerplexitySearch({ identity, answer, key: perplexitySearch.key, searchType: perplexitySearch.searchType, fetchImpl, today })) : null;
   const second = perplexity ? settle(researchPerplexity({ identity, answer, key: perplexity.key, model: perplexity.model, fetchImpl, now: t0 })) : null;
 
   // ISRAEL FIRST.
@@ -406,6 +419,16 @@ export async function runPrice({
   if (second) {
     const { res, err } = await second;
     if (res) { await accept('perplexity', res); providerCost += res.meta.cost_usd ?? 0; } else console.warn(`[Scan] market failed stage=perplexity ${String(err?.message ?? err).slice(0, 160)}`);
+  }
+  if (searchApi) {
+    const { res, err } = await searchApi;
+    if (res) {
+      await accept('perplexity_search', res);
+      searchInfo = { cost_usd: res.meta.cost_usd, ms: res.meta.ms, results: res.provenance.sources.length, failed: res.meta.failed };
+    } else {
+      searchInfo = { ...searchInfo, failed: [String(err?.message ?? err).slice(0, 80)] };
+      console.warn(`[Scan] market failed stage=perplexity_search ${String(err?.message ?? err).slice(0, 160)}`);
+    }
   }
   if (widens(found)) {
     const wide = early ?? settle(request('expand'));

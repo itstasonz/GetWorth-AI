@@ -478,6 +478,9 @@ const INVENTORY = [
   // THE CORE SCAN'S SECOND SEARCH PROVIDER (2026-11-15) — reached only from /api/scan's price step, never from
   // /api/analyze; the core scan keeps its own quota and refund (api/scan.js), and XP-PHASEB proves the isolation.
   { file: 'api/_lib/scan/perplexity.js', fn: 'researchPerplexity', host: 'api.perplexity.ai', ledger: 'PHASE_B' },
+  // THE PERPLEXITY SEARCH API (2026-11-18) — the same class and the same isolation: reached only from the core scan's price
+  // step (service.js), off unless CORE_SCAN_PERPLEXITY_SEARCH is set; its cost is recorded per request (call.search_provider).
+  { file: 'api/_lib/scan/perplexity-search.js', fn: 'post', host: 'api.perplexity.ai', ledger: 'PHASE_B' },
 ];
 
 // Provider helpers deliberately kept with NO reachable caller. Empty, and that

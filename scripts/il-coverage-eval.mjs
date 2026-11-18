@@ -171,8 +171,11 @@ async function pooled(repo, outFile, dirs) {
   console.log(`pooled priced ${out.filter((o) => o.status === 'priced').length}/${out.length}`);
 }
 
-const [step, ...args] = process.argv.slice(2);
-if (step === 'pooled') { await pooled(args[0], args[1], args.slice(2)); process.exit(0); }
-if (step === 'record') await record(args[0], args.slice(1));
-else if (step === 'replay') await replay(args[0], args[1], args[2]);
-else { console.error('usage: record <dir> [ids...] | replay <dir> <repo> <out.json>'); process.exit(1); }
+// Run as a script only; imported (scripts/perplexity-search-eval.mjs) it lends its fixed item set.
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+  const [step, ...args] = process.argv.slice(2);
+  if (step === 'pooled') { await pooled(args[0], args[1], args.slice(2)); process.exit(0); }
+  if (step === 'record') await record(args[0], args.slice(1));
+  else if (step === 'replay') await replay(args[0], args[1], args[2]);
+  else { console.error('usage: record <dir> [ids...] | replay <dir> <repo> <out.json>'); process.exit(1); }
+}
