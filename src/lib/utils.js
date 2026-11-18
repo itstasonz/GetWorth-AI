@@ -288,7 +288,7 @@ export const formatMessageTime = (date, lang) => {
 export const getConditionLabel = (condition, lang) => {
   const t = T?.[lang] || T?.he || {};
   const labels = {
-    newSealed: { text: t?.newSealed || 'New', emoji: '✨' },
+    newSealed: { text: t?.newSealed || 'New', emoji: '' },
     likeNew: { text: t?.likeNew || 'Like New', emoji: '' },
     used: { text: t?.used || 'Used', emoji: '' },
     poor: { text: t?.poor || 'Poor', emoji: '' },
