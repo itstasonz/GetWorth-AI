@@ -174,3 +174,26 @@ describe('PQ-8 the condition moves a market price inside the range the ads show'
     assert.equal(bandFor({ ...v, prices: { ...v.prices, like_new: own } }, 'like_new'), own);
   });
 });
+
+describe('PQ-9 review findings (2026-11-18)', () => {
+  const PHONE_ID = { item_type: 'smartphone', model: 'iPhone 12', market_class: 'consumer_electronics', visible_condition: 'good', display_name: 'Apple iPhone 12' };
+  test('PQ-9b headphones, microphones, buds and cases are not phones; tools and lamps are not jewelry', () => {
+    const k = (o) => productKind({ market_class: 'consumer_electronics', ...o });
+    assert.equal(k({ item_type: 'earbuds', product_family: 'AirPods Pro', category: 'headphones' }), 'electronics');
+    assert.equal(k({ item_type: 'headphones', brand: 'Sony' }), 'electronics');
+    assert.equal(k({ item_type: 'USB microphone' }), 'electronics');
+    assert.equal(k({ item_type: 'earbuds', model: 'Pixel Buds Pro' }), 'electronics');
+    assert.equal(k({ item_type: 'phone case', model: 'iPhone 13' }), 'electronics');
+    assert.equal(k({ item_type: 'smartphone', model: 'Galaxy S22' }), 'phone');
+    assert.equal(productKind({ item_type: 'chainsaw', market_class: 'tools' }), 'appliance');
+    assert.equal(productKind({ item_type: 'string trimmer', market_class: 'tools' }), 'appliance');
+    assert.equal(productKind({ item_type: 'pendant lamp', market_class: 'furniture' }), 'furniture');
+    assert.equal(productKind({ item_type: 'gold ring', market_class: 'fashion' }), 'jewelry');
+  });
+  test('PQ-9c a cracked unit that works is fair, not faulty; a sealed unit stays sealed; no en dash in Hebrew options', () => {
+    assert.equal(conditionFromAnswers(PHONE_ID, { looks: 'broken' }).condition, 'fair');
+    assert.equal(conditionFromAnswers(PHONE_ID, { looks: 'broken', works: 'fault' }).condition, 'poor');
+    assert.equal(conditionFromAnswers(PHONE_ID, { looks: 'sealed' }).condition, 'new_sealed');
+    for (const q of questionsFor(PHONE_ID, {})) for (const o of q.options ?? []) assert.ok(!/[–—]/.test(o.he), `${q.id}.${o.id}`);
+  });
+});

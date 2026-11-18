@@ -19,8 +19,12 @@ const worse = (a, b) => (CONDITION_ORDER.indexOf(a) >= CONDITION_ORDER.indexOf(b
 const text = (s) => String(s ?? '').toLowerCase();
 const SMARTWATCH = /(smart ?watch|apple watch|galaxy watch|pixel watch|fitbit|garmin|amazfit|שעון חכם)/;
 const WATCH = /(watch|שעון)/;
-const JEWELRY = /(ring|necklace|bracelet|earring|pendant|chain|jewel|טבעת|שרשרת|צמיד|עגיל|תליון|תכשיט)/;
-const PHONE = /(smartphone|phone|iphone|galaxy s|galaxy a|pixel|טלפון|סמארטפון)/;
+// Whole words only (review 2026-11-18: "chainsaw", "string trimmer" and a "pendant lamp" were jewelry).
+const JEWELRY = /\b(rings?|necklaces?|bracelets?|earrings?|pendants?|chains?|jewel\w*)\b|טבעת|שרשרת|צמיד|עגיל|תליון|תכשיט/;
+const NOT_JEWELRY_MARKETS = new Set(['tools', 'household', 'consumer_electronics', 'furniture']);
+// Whole words (review 2026-11-18: headphones, a microphone, Pixel Buds and a phone case were phones).
+const PHONE = /\b(smart ?phones?|phones?|iphone)\b|\bgalaxy [sa]\d|\bpixel \d|טלפון|סמארטפון/;
+const NOT_PHONE = /\b(case|cover|headphones?|earphones?|earbuds?|buds|microphone|charger|cable|holder|mount)\b|כיסוי|מגן|אוזניות|מטען|כבל/;
 const TABLET = /(tablet|ipad|טאבלט)/;
 const LAPTOP = /(laptop|notebook|macbook|מחשב נייד)/;
 
@@ -31,9 +35,9 @@ export function productKind(identity) {
   const mc = i.market_class;
   if (SMARTWATCH.test(words)) return 'smartwatch';
   if (WATCH.test(words)) return mc === 'luxury_watch_jewelry' || mc === 'collectible' ? 'luxury_watch' : 'fashion_watch';
-  if (JEWELRY.test(words) || (mc === 'luxury_watch_jewelry')) return 'jewelry';
+  if (mc === 'luxury_watch_jewelry' || (JEWELRY.test(words) && !NOT_JEWELRY_MARKETS.has(mc))) return 'jewelry';
   if (mc === 'vehicle' || mc === 'collectible' || mc === 'handmade_vintage' || mc === 'fragrance_cosmetics') return null;
-  if (PHONE.test(words)) return 'phone';
+  if (PHONE.test(words) && !NOT_PHONE.test(words)) return 'phone';
   if (TABLET.test(words)) return 'tablet';
   if (LAPTOP.test(words)) return 'laptop';
   if (mc === 'furniture') return 'furniture';
@@ -54,10 +58,12 @@ const WORKS = {
 const LOOKS = {
   id: 'looks', he: 'איך המוצר נראה?', en: 'How does it look?',
   options: [
+    // A sealed unit stays sealed; a cracked one that works is fair, not faulty: only "does not work" is (review 2026-11-18).
+    o('sealed', 'חדש באריזה סגורה', 'Sealed, never opened', { condition: 'new_sealed' }),
     o('like_new', 'כמו חדש', 'Like new', { condition: 'like_new' }),
     o('light', 'שריטות קלות', 'Light scratches', { condition: 'good' }),
     o('worn', 'סימני שימוש בולטים', 'Visible wear', { condition: 'fair' }),
-    o('broken', 'סדוק או שבור', 'Cracked or broken', { condition: 'poor', fact: { he: 'יש נזק גלוי', en: 'Visible damage' } }),
+    o('broken', 'סדוק או שבור', 'Cracked or broken', { condition: 'fair', fact: { he: 'יש סדק או שבר גלוי', en: 'Visible crack or break' } }),
   ],
 };
 const BATTERY = {
@@ -65,7 +71,7 @@ const BATTERY = {
   note: { he: 'אפשר לבדוק בהגדרות, תחת סוללה.', en: 'You can check it in Settings, under Battery.' },
   options: [
     o('high', '90% ומעלה', '90% or more', { fact: { he: 'בריאות סוללה 90% ומעלה', en: 'Battery health 90% or more' } }),
-    o('mid', '80%–89%', '80%–89%', { cap: 'good', fact: { he: 'בריאות סוללה 80%–89%', en: 'Battery health 80%–89%' } }),
+    o('mid', '80% עד 89%', '80% to 89%', { cap: 'good', fact: { he: 'בריאות סוללה 80% עד 89%', en: 'Battery health 80% to 89%' } }),
     o('low', 'פחות מ־80%', 'Below 80%', { cap: 'fair', fact: { he: 'בריאות סוללה מתחת ל־80%', en: 'Battery health below 80%' } }),
     o('unknown', 'לא יודע/ת', 'Not sure'),
   ],

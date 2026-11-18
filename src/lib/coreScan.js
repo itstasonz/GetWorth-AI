@@ -65,6 +65,8 @@ const initial = () => ({
   // facts to the listing; they never call the server.
   productAnswers: {},
   productSkipped: [],      // product questions the owner skipped: not asked again in this scan
+  conditionBase: null,     // the condition before any answer set it (the scan's own): restored when the answers no longer decide it
+  conditionManual: false,  // the owner chose the condition by hand: answers no longer change it
   valuation: null,
   valuationId: null,
   // The price was answered from a product's older research while the server renews it (service.js stale-while-revalidate).
@@ -229,11 +231,16 @@ async function identify({ correction = null } = {}) {
   if (refused('identify', r)) return 'refused';
   const p = r.payload ?? {};
   if (p.status === 'failed') { const o = outageOf(p.failure); fail('identify', o?.key ?? 'other', { code: p.failure ?? 'failed', retryable: o ? o.retryable : true }); return 'failed'; }
+  // NOT SPECIFIED until the owner says (2026-11-12): a photograph does not show whether a unit works, and "good" is
+  // never assumed. The price then is the used market as advertised, and the screen says so.
+  const base = CONDITIONS.includes(p.default_condition) ? p.default_condition : null;
+  // A LOOK AGAIN (a label photo, a retry) KEEPS WHAT THE OWNER SAID (review 2026-11-18: the answers said "faulty" while the
+  // condition went back to the scan's own): the owner's own choice stands, else the answers decide, else the scan's.
+  const derived = p.identity && !state.conditionManual ? conditionFromAnswers(p.identity, state.productAnswers ?? {}) : null;
   set({
     identity: p.identity, token: p.token, valuation: null, valuationId: null, answered: null,
-    // NOT SPECIFIED until the owner says (2026-11-12): a photograph does not show whether a unit works, and "good" is
-    // never assumed. The price then is the used market as advertised, and the screen says so.
-    condition: CONDITIONS.includes(p.default_condition) ? p.default_condition : null,
+    conditionBase: base,
+    condition: state.conditionManual ? state.condition : (derived?.condition ?? base),
     timings: { ...state.timings, identity_shown_ms: state.timings.identity_shown_ms ?? elapsed() },
   });
   if (p.status === 'no_item') { set({ stage: STAGE.NO_ITEM }); deps.onIdentified?.(); return 'no_item'; }
@@ -445,7 +452,7 @@ export function correctItem(text, lang) {
   if (!state.active || !state.token || !correction || !deps) return Promise.resolve();
   deps.lang = lang;
   // Another product may need other questions: answers about the old one are not carried over.
-  set({ correction, productAnswers: {}, productSkipped: [] });
+  set({ correction, productAnswers: {}, productSkipped: [], conditionManual: false });
   return guarded('identify', () => identify({ correction }));
 }
 
@@ -460,22 +467,25 @@ export function retryScan(lang) {
 }
 
 export function setScanCondition(condition) {
-  if (state.active && CONDITIONS.includes(condition)) set({ condition });
+  if (state.active && CONDITIONS.includes(condition)) set({ condition, conditionManual: true });
 }
 
 /**
  * The owner answers a product question (questionnaire.js). The answer is kept; when the answers bear on condition the
  * condition follows them, so the price on screen changes at once, from the valuation already in hand: no request, no
- * new research. `null` takes an answer back. The latest action wins: choosing a condition by hand afterwards stands.
+ * new research. `null` takes an answer back. When the answers no longer decide the condition (a fault taken back), it
+ * returns to the scan's own (review 2026-11-18: it stayed "faulty" with no price). A condition the owner chose by hand
+ * stands: answers after it are kept for the listing and do not change it.
  */
 export function answerProductQuestion(id, value) {
   if (!state.active || !state.identity || typeof id !== 'string') return;
   const productAnswers = { ...state.productAnswers };
   if (value === null || value === undefined || value === '') delete productAnswers[id]; else productAnswers[id] = value;
-  const derived = conditionFromAnswers(state.identity, productAnswers);
   // Taking an answer back (to change it) asks that question again.
   const productSkipped = state.productSkipped.filter((q) => q !== id);
-  set({ productAnswers, productSkipped, ...(derived ? { condition: derived.condition } : {}) });
+  if (state.conditionManual) { set({ productAnswers, productSkipped }); return; }
+  const derived = conditionFromAnswers(state.identity, productAnswers);
+  set({ productAnswers, productSkipped, condition: derived ? derived.condition : state.conditionBase });
 }
 
 /** The owner skips a product question: it is not asked again in this scan. */

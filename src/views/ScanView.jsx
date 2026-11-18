@@ -274,7 +274,7 @@ export default function ScanView() {
 
         {s.stage === STAGE.PRICING && <Working>{copy.pricing}</Working>}
         {/* The listing can start now; the price joins the form when the research brings one (AppContext sellFromScan). */}
-        {s.stage === STAGE.PRICING && askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
+        {s.stage === STAGE.PRICING && askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} manual={s.conditionManual} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
         {s.stage === STAGE.PRICING && <Btn fullWidth size="lg" onClick={sellFromScan} data-testid="scan-start-listing">{copy.startListingNow}</Btn>}
 
         {s.stage === STAGE.PRICED && band && (
@@ -324,7 +324,7 @@ export default function ScanView() {
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-refreshing">{copy.refreshingPrices}</p>}
             </div>
             <RetailReference valuation={s.valuation} copy={copy} />
-            {askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
+            {askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} manual={s.conditionManual} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
             {/* The price for the chosen condition comes from ads for units in that condition, or the screen says there are none (valuation.js conditionPrices). */}
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} note={faulty ? null : conditionNote} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{noConditionBand ? copy.sellOwnPrice : (rough ? copy.sellAbout(formatPrice(band.list)) : copy.sellFor(formatPrice(band.list)))}</Btn>
@@ -349,7 +349,7 @@ export default function ScanView() {
               {s.valuation?.no_price_reason && <p className="text-body-sm text-text-muted">{retailReferenceOf(s.valuation) ? copy.gapNext : copy.gapNextNoRetail}</p>}
               {s.refreshing && <p className="text-body-sm text-text-muted" data-testid="scan-looking-closer">{copy.lookingCloser}</p>}
             </div>
-            {askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
+            {askProduct && <ProductQuestions identity={identity} answers={s.productAnswers} skipped={s.productSkipped} manual={s.conditionManual} onAnswer={answerProductQuestion} onSkip={skipProductQuestion} copy={copy} lang={lang} />}
             <ConditionPicker condition={s.condition} identity={identity} copy={copy} />
             <Btn primary fullWidth size="lg" onClick={sellFromScan}>{copy.sellOwnPrice}</Btn>
           </div>

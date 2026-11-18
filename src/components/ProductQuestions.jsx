@@ -18,7 +18,7 @@ const TOPIC = {
   purity: { he: 'טוהר', en: 'Purity' },
 };
 
-export default function ProductQuestions({ identity, answers = {}, skipped = [], onAnswer, onSkip, copy, lang }) {
+export default function ProductQuestions({ identity, answers = {}, skipped = [], manual = false, onAnswer, onSkip, copy, lang }) {
   const [figure, setFigure] = useState('');
   const l = lang === 'en' ? 'en' : 'he';
   const list = questionsFor(identity, answers);
@@ -55,7 +55,8 @@ export default function ProductQuestions({ identity, answers = {}, skipped = [],
             </li>
           ))}
         </ul>
-        {conditionFromAnswers(identity, answers) && (
+        {/* The owner chose the condition by hand: the answers did not set it, and the screen does not say they did. */}
+        {!manual && conditionFromAnswers(identity, answers) && (
           <p className="text-body-sm text-text-secondary" data-testid="scan-answers-condition">{copy.conditionFromAnswers(copy.conditions[conditionFromAnswers(identity, answers).condition])}</p>
         )}
         <p className="text-meta text-text-muted">{copy.changeHint}</p>

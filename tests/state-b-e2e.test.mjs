@@ -246,6 +246,19 @@ describe('SB-C METHOD C: a calculated estimate from the verified new price, labe
     await tap('יש תקלה');
     assert.equal(shown(), null);
     assert.match(calc().textContent, /אין אומדן למוצר במצב תקול/);
+    // Taking the fault back restores the figure (review 2026-11-18: it stayed "faulty" with no price).
+    const chip = (label) => [...container.querySelector('[data-testid="scan-answers"]').querySelectorAll('button')].find((b) => b.textContent.trim() === label);
+    const press = async (b) => act(async () => { b.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true })); await new Promise((res) => setTimeout(res, 10)); });
+    await press(chip('יש תקלה'));
+    await tap('כן, הכול עובד');
+    assert.equal(shown(), '≈ ₪390', 'fair again, from the appearance answer');
+    // A condition chosen by hand stands against a later answer.
+    await press([...container.querySelectorAll('[aria-labelledby="scan-condition-label"] button')].find((b) => b.getAttribute('aria-label') === 'כמו חדש'));
+    assert.equal(shown(), '≈ ₪540');
+    await press(chip('סימני שימוש בולטים'));
+    await tap('שריטות קלות');
+    assert.equal(shown(), '≈ ₪540', 'the owner\'s own choice stands');
+    assert.equal(container.querySelector('[data-testid="scan-answers-condition"]'), null, 'and the screen does not claim the answers set it');
     if (requestsBefore !== null) assert.equal(r.provider.calls.length, requestsBefore, 'no request was made for any answer');
   });
   test('SB-Cd a unit that looks fair: the fair estimate from the new price', async () => {
