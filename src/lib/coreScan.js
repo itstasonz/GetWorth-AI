@@ -552,13 +552,41 @@ function fallbackTitle(identity) {
  * THE LISTING KEEPS THE ENGINE'S PRICES. Each listing condition's suggested price is that condition's listing price from
  * the same valuation (valuation.js conditionPrices) — never the older listing flow's percentage ladder applied to a
  * scan's number (utils.js calcPrice), which gave a core-scan listing a price the engine never computed as soon as the
- * seller touched the condition. "used" is the engine's "good"; with no valuation there is no suggestion.
+ * seller touched the condition. "used" is the engine's "good" (its "fair" when the scan settled on fair: scanConditionOf);
+ * with no valuation there is no suggestion.
  */
 const LISTING_BAND = Object.freeze({ newSealed: 'new_sealed', likeNew: 'like_new', used: 'good', poor: 'poor' });
-export function listingPricesOf(valuation) {
-  if (valuation?.status !== 'priced' || !valuation.prices) return null;
-  // The same band the scan screen shows for that condition (bandFor: a placement in the range when no ads state it).
-  return Object.fromEntries(Object.entries(LISTING_BAND).map(([k, c]) => [k, bandFor(valuation, c)?.list ?? null]));
+/**
+ * The scan condition a listing condition stands for. The listing's "used" covers the scan's good AND fair: a scan that
+ * settled on fair keeps fair's prices there (2026-11-19: tapping the already-selected "used" moved a fair unit's price up
+ * to the good band's). No listing condition chosen yet: the scan's own.
+ */
+export function scanConditionOf(listingCondition, scanCondition = null) {
+  if (!listingCondition) return scanCondition ?? null;
+  if (listingCondition === 'used') return scanCondition === 'fair' ? 'fair' : 'good';
+  return LISTING_BAND[listingCondition] ?? null;
+}
+/**
+ * EVERY FIGURE THE LISTING SHOWS FOR A CONDITION, FROM ONE PLACE: the suggested price, the worth stored with the listing
+ * (marketValue), and Method C's reference line. The same band the scan screen shows for that condition (bandFor), so the
+ * scan and the listing never disagree, and a condition change moves all of them together. A unit confirmed as modified
+ * has no figure for any condition: the price found is a standard unit's.
+ */
+export function listingFiguresFor(result, listingCondition) {
+  const v = result?.coreValuation ?? null;
+  const c = scanConditionOf(listingCondition, result?.scanCondition ?? null);
+  const band = result?.modified ? null : bandFor(v, c);
+  return {
+    price: band?.list > 0 ? band.list : '',
+    // mid is the engine's own worth for this condition, not an average of the range's ends.
+    marketValue: band ? { low: band.low, mid: band.worth ?? Math.round((band.low + band.high) / 2), high: band.high, price_method: 'core_scan_web' } : null,
+    calculatedEstimate: v && v.status !== 'priced' && !result?.modified ? (calculatedFor(v.calculated, c)?.value ?? null) : null,
+  };
+}
+export function listingPricesOf(valuation, scanCondition = null, { modified = false } = {}) {
+  if (valuation?.status !== 'priced' || !valuation.prices || modified) return null;
+  const result = { coreValuation: valuation, scanCondition };
+  return Object.fromEntries(Object.keys(LISTING_BAND).map((k) => [k, listingFiguresFor(result, k).price || null]));
 }
 /** The listing form's suggested price for a condition: the engine's, for a core scan; '' when it gave none. */
 export function listingPriceFor(result, listingCondition) {
@@ -578,7 +606,10 @@ export function unitModification(identity) {
 
 export function buildListingDraft(s = state) {
   // A modified unit's draft starts with no price: the market price found is a standard unit's.
-  const band = unitModification(s.identity) ? null : bandFor(s.valuation, s.condition);
+  const modified = !!unitModification(s.identity);
+  // Only what the listing's figures are read from (listingFiguresFor): never the evidence.
+  const coreValuation = s.valuation ? { status: s.valuation.status, prices: s.valuation.prices ?? null, calculated: s.valuation.calculated ?? null } : null;
+  const figures = listingFiguresFor({ coreValuation, scanCondition: s.condition ?? null, modified }, null);
   const i = s.identity ?? {};
   const lang = deps?.lang === 'en' ? 'en' : 'he';
   const facts = factsFromAnswers(i, s.productAnswers ?? {}, lang);
@@ -590,7 +621,7 @@ export function buildListingDraft(s = state) {
     title: fallbackTitle(i),
     // The facts the owner gave (box, warranty, battery, purity…) join the description; the owner can edit all of it.
     desc: [i.listing_description || '', ...facts.map((f) => `${f}.`)].filter(Boolean).join('\n'),
-    price: band ? band.list : '',
+    price: figures.price,
     // No condition chosen on the scan: the listing asks for one — it is never assumed "used".
     condition: s.condition ? (LISTING_CONDITION[s.condition] ?? null) : null,
     // The shape the listing and its analytics already read off a scan result.
@@ -599,13 +630,14 @@ export function buildListingDraft(s = state) {
       nameHebrew: i.search?.hebrew_name || '',
       category: i.category || 'Other',
       confidence: { high: 0.9, medium: 0.7, low: 0.4 }[i.identity_confidence] ?? 0,
-      // mid is the engine's own worth for this condition, not an average of the range's ends.
-      marketValue: band ? { low: band.low, mid: band.worth ?? Math.round((band.low + band.high) / 2), high: band.high, price_method: 'core_scan_web' } : null,
-      listingPrices: listingPricesOf(s.valuation),
+      marketValue: figures.marketValue,
+      listingPrices: listingPricesOf(s.valuation, s.condition ?? null, { modified }),
+      // What a condition change in the listing re-reads its figures from (listingFiguresFor).
+      coreValuation, scanCondition: s.condition ?? null, modified,
       // State B: the observed Israeli ads, shown in the listing form for reference only — never a prefilled price.
       comparative: s.valuation?.status === 'priced' ? null : (s.valuation?.comparative ?? null),
       // Method C: the calculated figure for the condition in force, for reference only — never the listing's price.
-      calculatedEstimate: s.valuation?.status === 'priced' ? null : (calculatedFor(s.valuation?.calculated, s.condition)?.value ?? null),
+      calculatedEstimate: figures.calculatedEstimate,
       valuation_id: s.valuationId ?? undefined,
       coreScan: true,
     },

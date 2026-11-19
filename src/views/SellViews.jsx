@@ -17,6 +17,7 @@ import LocationInput from '../components/LocationInput';
 import { formatPrice, timeAgo, calcPrice, getQualityBadge } from '../lib/utils';
 // A core scan's listing keeps the engine's price for each condition; the percentage ladder is for the older scan only.
 import { listingPriceFor } from '../lib/coreScan';
+import { ownPrice } from '../lib/listingState';
 import { scanCopy } from '../lib/scanCopy';
 
 export function MyListingsView() {
@@ -1747,7 +1748,8 @@ export function ListingFlowView() {
           <FadeIn delay={200}>
             <Btn primary className="w-full py-4" onClick={() => {
               const suggested = (result?.coreScan ? (listingPriceFor(result, condition) || null) : calcPrice(result?.marketValue, condition, answers, itemCategory));
-              setListingData((prev) => ({
+              // A price the seller typed (Back from the review step) stays theirs.
+              setListingData((prev) => (ownPrice(prev) ? prev : {
                 ...prev,
                 // null → leave the field empty so the user enters a price,
                 // rather than prefilling a meaningless 0.

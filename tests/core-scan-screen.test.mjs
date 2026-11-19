@@ -778,6 +778,10 @@ describe('CV-13 the seller\'s own price stays theirs (2026-11-12)', () => {
   test('CV-13a choosing a listing condition never overwrites a price the seller typed', () => {
     const ctx = readFileSync(new URL('../src/contexts/AppContext.jsx', import.meta.url), 'utf8');
     const select = ctx.slice(ctx.indexOf('const selectCondition'), ctx.indexOf('const selectCondition') + 900);
-    assert.match(select, /if \(prev\.priceOrigin === 'seller' && prev\.price !== '' && prev\.price != null\) return prev;/);
+    // The rule moved to a tested pure transition (listingState.js, tests/listing-consistency.test.mjs LC-3).
+    assert.match(select, /setListingData\(\(prev\) => listingOnCondition\(prev, suggestPrice\(c\)\)\)/);
+    const state = readFileSync(new URL('../src/lib/listingState.js', import.meta.url), 'utf8');
+    assert.match(state, /export const ownPrice = \(d\) => !!d && d\.priceOrigin === 'seller' && d\.price !== '' && d\.price != null;/);
+    assert.match(state, /export function listingOnCondition\(prev, suggested\) \{\n\s+if \(ownPrice\(prev\)\) return prev;/);
   });
 });

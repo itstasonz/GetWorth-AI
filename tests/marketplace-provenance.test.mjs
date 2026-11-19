@@ -307,7 +307,8 @@ describe('MP-8 the client sends what the buyer typed, and nothing it did not', (
 test('MP-8c the listing form states its pricing intent, only once the database records it', () => {
   const ctx = read('src/contexts/AppContext.jsx');
   assert.match(ctx, /await listingProvenanceSupported\(supabase\) && \{ price_source: listingData\.priceOrigin === 'suggestion' \? 'getworth_valuation' : 'seller_entered' \}/);
-  assert.match(ctx, /priceOrigin: draft\.price === '' \? 'seller' : 'suggestion'/);
+  // Sell-from-scan's origin rule lives in listingState.js listingOnSell (tests/listing-consistency.test.mjs LC-3).
+  assert.match(read('src/lib/listingState.js'), /priceOrigin: keep \|\| draft\.price === '' \? 'seller' : 'suggestion'/);
   assert.match(read('src/views/SellViews.jsx'), /priceOrigin: 'seller' \}\);/);
 });
 

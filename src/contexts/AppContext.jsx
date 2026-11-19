@@ -8,7 +8,8 @@ import { useUrlSync, setNavDirection } from '../lib/urlSync';
 import { reportError } from '../lib/telemetry';
 import { recordObservation, OBS } from '../lib/observations';
 import { fetchReviewsFor } from '../lib/reviews';
-import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, warmScan, STAGE as SCAN_STAGE } from '../lib/coreScan';
+import { scanStore, scanActive, startScan, addScanPhoto, buildListingDraft, listingPriceFor, listingFiguresFor, warmScan, STAGE as SCAN_STAGE } from '../lib/coreScan';
+import { listingOnSell, listingOnCondition, listingOnScanPrice } from '../lib/listingState';
 import { HISTORY_COLUMNS } from '../lib/valuationHistory';
 import { listingProvenanceSupported, listingOriginSupported, listingPriceOrigin } from '../lib/marketplaceProvenance';
 import { LISTING_CARD_COLUMNS, SELLER_EMBED, LISTING_PREVIEW_COLUMNS, asCards, withCardListing, orderWithCardListing } from '../lib/listingImages';
@@ -4543,6 +4544,12 @@ export function AppProvider({ children }) {
   // going, and when its price comes the form takes it — only while the seller has not entered a price of their own.
   // A price the seller chose is never replaced; a scan that ends without a price leaves the form as it is.
   const awaitingScanPriceRef = useRef(null);
+  // The figures a result carries for a condition (the box's price is listingData's, not the result's).
+  const resultFiguresFor = (r, c) => { const { marketValue, calculatedEstimate } = listingFiguresFor(r, c); return { marketValue, calculatedEstimate }; };
+  // The listing's condition as it is now: the awaited price is that condition's, which the seller may have changed in the
+  // listing while the research ran (2026-11-19: it filled the scan's condition price beside another chosen condition).
+  const listingConditionRef = useRef(null);
+  listingConditionRef.current = condition;
   useEffect(() => scanStore.subscribe(() => {
     const scan = scanStore.getSnapshot();
     if (!awaitingScanPriceRef.current || scan.scanUuid !== awaitingScanPriceRef.current) return;
@@ -4550,10 +4557,12 @@ export function AppProvider({ children }) {
     awaitingScanPriceRef.current = null;
     if (scan.stage !== SCAN_STAGE.PRICED) return;
     const draft = buildListingDraft(scan);
-    setResult((prev) => (prev?.coreScan ? { ...prev, ...draft.result } : prev));
+    const merged = { ...draft.result, ...resultFiguresFor(draft.result, listingConditionRef.current) };
+    const price = listingConditionRef.current ? listingPriceFor(merged, listingConditionRef.current) : draft.price;
+    setResult((prev) => (prev?.coreScan ? { ...prev, ...merged } : prev));
     // The scan's price arriving is a price shown, whether or not it fills the box.
     const reference = Number(scan.valuation?.retail_new_ils) > 0 || !!scan.valuation?.comparative;
-    setListingData((prev) => (!prev ? prev : prev.price === '' && prev.priceOrigin === 'seller' && draft.price !== '' ? { ...prev, price: draft.price, priceOrigin: 'suggestion', suggestionSeen: true, referenceSeen: prev.referenceSeen || reference } : { ...prev, suggestionSeen: true, referenceSeen: prev.referenceSeen || reference }));
+    setListingData((prev) => listingOnScanPrice(prev, price, reference));
   }), []);
 
   const sellFromScan = () => {
@@ -4567,21 +4576,23 @@ export function AppProvider({ children }) {
     setImages(scan.images);
     // The seller's phone and area rarely change: start from their latest listing.
     const last = myListings?.[0];
-    setListingData({ title: draft.title, desc: draft.desc, price: draft.price, priceOrigin: draft.price === '' ? 'seller' : 'suggestion', suggestionSeen: draft.price !== '' || scan.stage === SCAN_STAGE.PRICED, referenceSeen: Number(scan.valuation?.retail_new_ils) > 0 || !!scan.valuation?.comparative, phone: last?.contact_phone || '', location: last?.location || '' });
+    const referenceSeen = Number(scan.valuation?.retail_new_ils) > 0 || !!scan.valuation?.comparative;
+    // BACK TO THE SCAN AND SELL AGAIN (2026-11-19): the same scan's listing keeps what the seller wrote — their own price,
+    // a title or description they edited, their phone and area. Only GetWorth's own suggestions are refreshed.
+    setListingData((prev) => listingOnSell(prev, draft, { scanUuid: scan.scanUuid, priced: scan.stage === SCAN_STAGE.PRICED, referenceSeen }, last));
     setCondition(draft.condition); setAnswers({}); setSerialData(null);
     setListingStep(2); setNavDirection('push'); setView('listing');
   };
 
   const selectCondition = (c, { stay = false } = {}) => {
     setCondition(c);
+    // A scan's listing moves every figure with the condition, not only the box: the worth stored with the listing and the
+    // calculated reference line are that condition's too (coreScan.js listingFiguresFor).
+    if (result?.coreScan) setResult((prev) => (prev?.coreScan ? { ...prev, ...resultFiguresFor(prev, c) } : prev));
     // THE SELLER'S OWN PRICE STAYS THEIRS (2026-11-12): choosing a condition never overwrites a price the seller typed.
     // GetWorth's suggestion fills an empty box, or replaces its own earlier suggestion — and a condition GetWorth has no
     // evidence for empties its own suggestion rather than leave a number that is not for this condition.
-    setListingData((prev) => {
-      if (prev.priceOrigin === 'seller' && prev.price !== '' && prev.price != null) return prev;
-      const p = suggestPrice(c);
-      return { ...prev, price: p, priceOrigin: p === '' ? prev.priceOrigin : 'suggestion', suggestionSeen: prev.suggestionSeen || p !== '' };
-    });
+    setListingData((prev) => listingOnCondition(prev, suggestPrice(c)));
     // Show category-specific questions for used/poor; skip for new/likeNew. A scan's listing chooses on the review step and
     // stays there (2026-11-18): its answers were already given on the scan.
     if (!stay) setListingStep((c === 'used' || c === 'poor') ? 1 : 2);
