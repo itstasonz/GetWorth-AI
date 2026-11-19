@@ -362,6 +362,13 @@ describe('CV-2 the one question sits beside the price, never in front of it', ()
     assert.deepEqual(requests.map((r) => [r.action, r.answer]), [['identify', undefined], ['price', 'unsure']]);
     assert.match(text(), /Approximate selling range/);
   });
+  test('CV-2i a confirmed model with storage still to ask says "one more detail", never "the exact model is not clear" (Production E2E 2026-11-19)', async () => {
+    const STORAGE = { kind: 'choice', affects: 'identity', question: 'How much storage does it have?', options: ['128 GB', '256 GB'], attribute: 'storage', required: true };
+    const s21 = { display_name: 'Samsung Galaxy S21', brand: 'Samsung', model: 'Galaxy S21', item_type: 'smartphone', identity_confidence: 'medium' };
+    await settle(await open({ identify: [identified(s21, { followup: STORAGE, confirmed: [{ attribute: 'model', value: 'Galaxy S21', question: 'Which model?' }] })] }));
+    assert.match(text(), /This is Samsung Galaxy S21\. One more detail is needed to search for a price\./);
+    assert.doesNotMatch(text(), /exact model is not clear/);
+  });
   test('CV-2g a number question is a number box with its unit and a Continue button, never a chat; what the owner confirmed and what a photograph cannot establish are said plainly', async () => {
     const KM = { kind: 'number', affects: 'price', question: 'How many kilometres has it travelled?', options: [], unit: 'km', attribute: 'mileage', required: true };
     const car = { display_name: 'Toyota Corolla', brand: 'Toyota', model: 'Corolla', category: 'Vehicles', item_type: 'car', identity_confidence: 'medium' };
@@ -769,7 +776,7 @@ describe('CV-12 the functional question, in the item\'s own words, beside the co
     assert.match(await hintFor({ item_type: 'wireless game controller' }), /Stick drift/);
   });
   test('CV-12b an appliance', async () => { assert.match(await hintFor({ item_type: 'refrigerator', category: 'Home' }), /Does not work properly/); });
-  test('CV-12c a phone', async () => { assert.match(await hintFor({ item_type: 'smartphone' }), /Cracked screen/); });
+  test('CV-12c a phone', async () => { assert.match(await hintFor({ item_type: 'smartphone' }), /A cracked screen that still works is "Fair"/); });
   test('CV-12d furniture', async () => { assert.match(await hintFor({ item_type: 'sofa', category: 'Furniture' }), /Structural damage/); });
   test('CV-12e a fragrance gets no functional hint (it has its own question: how much is left)', async () => { assert.equal(await hintFor({ item_type: 'eau de parfum', category: 'Beauty' }), null); });
 });

@@ -136,9 +136,10 @@ describe('PQ-6 Production E2E fixes (2026-11-18)', () => {
     const { readFileSync } = await import('node:fs');
     const copy = readFileSync(new URL('../src/lib/scanCopy.js', import.meta.url), 'utf8');
     assert.ok(copy.includes('needsDetail: (name, modelKnown = false) => (modelKnown ? `זוהה ${name}. כדי לחפש מחיר צריך לדעת עוד פרט אחד.`'));
-    assert.ok(copy.includes(`device: 'מסך סדוק או משהו שלא עובד? בחרו "תקול".'`), 'a weak battery is fair, not faulty');
+    // The hint agrees with the questions: only "does not work" is faulty; a cracked screen that works is fair (LOOKS.broken).
+    assert.ok(copy.includes(`device: 'משהו לא עובד? בחרו "תקול". מסך סדוק שעדיין עובד הוא "סביר".'`), 'a cracked screen that works is fair, not faulty');
     const view = readFileSync(new URL('../src/views/ScanView.jsx', import.meta.url), 'utf8');
-    assert.ok(view.includes('copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")))'), 'only when storage is the missing detail');
+    assert.ok(view.includes('copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")) || /storage|capacity/i.test(String(question?.attribute ?? "")) || (identity.confirmed ?? []).some((c) => !c.unsure))'), 'storage, or a model already confirmed, is "one more detail"');
   });
 });
 

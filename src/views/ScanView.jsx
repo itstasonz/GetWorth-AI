@@ -361,7 +361,10 @@ export default function ScanView() {
         {/* The product is not named well enough to search for, or one answer is needed first: no market request yet. */}
         {needsDetail && (
           <div className="rounded-container border border-subtle bg-surface p-4 space-y-2">
-            <p className="text-body text-text-primary"><Bidi>{copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")))}</Bidi></p>
+            {/* "One more detail", not "the model is not clear", whenever the missing detail is not the model: storage asked as
+                the gap or as the open question, or a model the owner already confirmed (Production E2E 2026-11-19: Galaxy S21
+                confirmed, storage asked, the screen said the model was unknown). */}
+            <p className="text-body text-text-primary"><Bidi>{copy.needsDetail(identity.display_name, /^(storage|capacity)$/i.test(String(identity.incomplete ?? "")) || /storage|capacity/i.test(String(question?.attribute ?? "")) || (identity.confirmed ?? []).some((c) => !c.unsure))}</Bidi></p>
             {!question && <p className="text-body-sm text-text-secondary">{copy.needsDetailHint}</p>}
           </div>
         )}
